@@ -39,6 +39,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    pieces. `--focus step` is a close-up meshed at its own finer cell,
    where the step is in the pose shown, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side.
+   On a program you did not write, `npx aixle explain model.aix` first: the
+   tree from the output down, each step with its source line, size,
+   material and anchors, so you know which step feeds which before you
+   render anything.
 5. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
    `--beauty` for the presentation picture.

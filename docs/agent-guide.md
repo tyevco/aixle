@@ -29,6 +29,7 @@ the inside is cut open.
 
 ```
 npx aixle check model.aix                  sizes and warnings, no pictures (--pose NAME: in that pose)
+npx aixle explain model.aix                the program as a tree from the output down: each step's source line, size, material, anchors; read this first on a program you did not write
 npx aixle render model.aix --quick         the sheet only, small grid, fast; --watch re-renders on save
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)

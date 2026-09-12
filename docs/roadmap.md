@@ -206,23 +206,15 @@ visible triangles, pushed apart so they do not overlap.
 **Must prototype.** Whether the labels are readable at 512 pixels on a
 fifty-step scene.
 
-## 10. `aixle explain`: an outline of an inherited program
+## 10. `aixle explain`: built
 
-**Why.** Round 4 asked agents to take over programs written by others.
-`check` prints steps and boxes; what a reader wants is the tree: which
-steps feed which, which are transforms of which, what the output is
-built from, with sizes and materials.
-
-**What.** `aixle explain model.aix` prints an indented tree from the
-output down (`model = body + lid + handles`, then each), each line with
-its size, material state and line number; `--json` for tools.
-
-**How.** The evaluation already records every step's dependencies and
-the shape tree; this is a printer over them. Round 4's `check` already
-prints profiles, numbers, lists, surface extents and posed placement;
-the tree is the part that is missing.
-
-**Must prototype.** Nothing.
+`aixle explain model.aix [--pose NAME]` prints the tree from the output
+down (each scene object as a root): every step with its line, its own
+source line, size, joint, copies, paint state and anchors, children in
+the order the line reads them, numbers after shapes, a step already
+printed as "(see above)", and the steps not in the output at the end.
+It is a printer over the dependencies the evaluation records. Not built:
+`--json`, which waits for a tool that wants it.
 
 ## Smaller, worth doing when passing
 

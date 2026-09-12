@@ -308,10 +308,18 @@ box on demand, so they cost nothing and every shape has them. `attach`
 is `move` by the difference of two anchors; the interpreter has no idea
 it is anything else.
 
+## Explain
+
+`aixle explain` is the first thing to run on a program someone else
+wrote: the evaluation records which steps each step read, so the tree
+from the output down is a printer over that record, each node with its
+own source line, size, paint state, joint and anchors. It reads the
+program's structure without rendering anything, which round 4's agents
+spent their first renders working out.
+
 ## What is not here yet
 
 Proposals for what comes next, each with what must be prototyped first,
 are in `roadmap.md`: a full PBR bake from the field, `use` for libraries
 of parts, a print report, smooth 2D profiles, `assert`, image textures,
-lights and cameras in the language, callouts on the views, and `aixle
-explain`.
+lights and cameras in the language, and callouts on the views.

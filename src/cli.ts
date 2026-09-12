@@ -8,11 +8,11 @@ import { anchorsOf, hasLooseBounds, placedBounds, surfaceBottom, surfaceExtent }
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, foldThinWarnings, paintWarnings, QUICK, run, thinWarnings } from "./pipeline.js";
+import { cellFor, check, diff, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { watch } from "node:fs";
-import { isEmpty, isEmpty2, type Bounds } from "./sdf/types.js";
+import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
-import { isShape2, isShape3 } from "./lang/values.js";
+import { isShape2, isShape3, typeName } from "./lang/values.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
 const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
@@ -27,6 +27,7 @@ function usage(): never {
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix> [--pose NAME]   parse and evaluate; print sizes and warnings, render nothing",
+      "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
     ].join("\n"),
@@ -133,6 +134,63 @@ function main(argv: string[]): number {
       return 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);
+      return 1;
+    }
+  }
+  if (cmd === "explain") {
+    // An outline for whoever inherits the program: from the output down through the steps each one reads, with the
+    // step's own line of source, so the tree says what each part is made of without a reader tracing names by hand
+    // (round 4: every agent taking over a program spent its first renders finding out which step fed which).
+    try {
+      const rest = check(source, file);
+      const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
+      const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
+      const ev = pose ? check(source, file, undefined, pose.angles) : rest;
+      const lines = source.split(/\r?\n/);
+      const byName = new Map(ev.steps.map((st) => [st.name, st]));
+      const memo = new Map<Shape3, PaintState>();
+      const printed = new Set<string>();
+      const describe = (name: string): string => {
+        const st = byName.get(name);
+        if (!st) return `${name}: not a step`;
+        const v = st.value;
+        let what: string;
+        if (typeof v === "number") what = `= ${short(v)}`;
+        else if (typeof v === "string") what = `= "${v}"`;
+        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : `a list of ${v.length}`;
+        else if (isShape3(v)) {
+          const b = v.bounds;
+          const paintNote = paintState(v, memo);
+          const anchors = Object.keys(anchorsOf(v));
+          what = `${isEmpty(b) ? "empty" : dimsLabel(b)}${v.joint ? `  joint "${v.joint.name}" at (${v.joint.pivot.map(short).join(", ")})` : ""}${v.instanced ? `  ${v.instanced.placements.length} copies` : ""}  ${paintNote === "all" ? "painted" : paintNote === "mixed" ? "partly painted" : "unpainted"}${anchors.length ? `  anchors: ${anchors.join(", ")}` : ""}`;
+        } else if (isShape2(v)) what = "a profile";
+        else what = typeName(v);
+        const src = (lines[st.line - 1] ?? "").replace(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*/, "").replace(/\s+#.*$/, "").trim();
+        return `${name} (line ${st.line})  ${what}\n    = ${src.length > 110 ? src.slice(0, 107) + "..." : src}`;
+      };
+      const walk = (name: string, depth: number) => {
+        const st = byName.get(name);
+        if (!st) return;
+        const pad = "  ".repeat(depth);
+        if (printed.has(name)) { console.log(`${pad}${name} (see above)`); return; }
+        printed.add(name);
+        for (const l of describe(name).split("\n")) console.log(pad + l);
+        // Children in the order the line reads them; numbers last, since the shapes are the structure.
+        const deps = [...st.deps].filter((d) => byName.has(d));
+        const shapes = deps.filter((d) => isShape3(byName.get(d)!.value) || isShape2(byName.get(d)!.value));
+        const rest = deps.filter((d) => !shapes.includes(d));
+        for (const d of [...shapes, ...rest]) walk(d, depth + 1);
+      };
+      const roots = ev.objects.length > 1 ? ev.objects.map((o) => o.name) : ev.outputName ? [ev.outputName] : [];
+      if (!roots.length) { console.log("no output: nothing to explain"); return 0; }
+      if (pose) console.log(`pose: ${pose.name} (sizes in this pose)`);
+      for (const r of roots) walk(r, 0);
+      const unused = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value))).map((st) => st.name);
+      if (unused.length) console.log(`\nnot in the output: ${unused.join(", ")}`);
+      if (ev.poses.length) console.log(`\nposes: ${ev.poses.map((p) => p.name).join(", ")}`);
+      return 0;
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e));
       return 1;
     }
   }

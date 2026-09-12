@@ -249,7 +249,7 @@ function stepsNear(evaluation: Evaluation, c: [number, number, number], tol: num
  * state, a union combines its parts. Used to catch `a + b | paint(m)`,
  * which paints only b because `|` binds tighter (measured: a beige lid).
  */
-type PaintState = "all" | "none" | "mixed";
+export type PaintState = "all" | "none" | "mixed";
 export function paintState(s: Shape3, memo = new Map<Shape3, PaintState>()): PaintState {
   const known = memo.get(s);
   if (known) return known;
