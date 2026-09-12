@@ -15,8 +15,9 @@ Layers, each pure and under test:
 | --- | --- |
 | `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, the stroke font, materials |
 | `src/lang/` | the `.aix` language: lexer, parser, interpreter, and the builtin registry that is also the reference |
-| `src/mesh/` | surface nets with dual contouring, mesh measures |
-| `src/export/` | the texture atlas baker, OBJ+MTL and GLB writers, the self-contained viewer page |
+| `src/mesh/` | surface nets with dual contouring, mesh measures, a mesh sampled to a field for imports |
+| `src/import/` | OBJ and GLB readers (positions and triangles only) |
+| `src/export/` | the texture atlas baker, the scene node tree (`hierarchy.ts`), OBJ+MTL and GLB writers with animations, the self-contained viewer page |
 | `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-marched beauty render |
 | `src/pipeline.ts`, `src/cli.ts` | one run from source to a folder; the command line over it |
 | `tools/examples.ts` | renders `examples/*.aix` into `examples/renders/` |

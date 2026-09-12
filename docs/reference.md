@@ -327,6 +327,17 @@ nx by nz copies on the ground plane, dx and dz apart.
 
     ring(shape, count, radius=0, axis="y") -> shape
 
+## Assembly
+
+### place
+
+Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optionally x, y, z, yaw, scale with `fields=5`. Rendered as a union; exported once with a node per copy.
+
+    place(shape, placements, fields=4) -> shape
+
+- `placements`: [x,y,z,yaw, x,y,z,yaw, ...]
+- `fields`: 4 for x,y,z,yaw or 5 to add a scale
+
 ## Materials
 
 ### paint
@@ -337,11 +348,12 @@ Give the whole shape a material: a preset name, a colour ("#rrggbb" or a name), 
 
 ### material
 
-A custom material. Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1.
+A custom material. Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass.
 
-    material(color, pattern="solid", color2="", scale=1, metal=0, rough=0.6, seed=0) -> material
+    material(color, pattern="solid", color2="", scale=1, metal=0, rough=0.6, seed=0, transmit=0) -> material
 
 - `color2`: second colour for two-tone patterns
+- `transmit`: 0 opaque .. 1 clear glass (beauty render only)
 
 ### rgb
 
@@ -471,6 +483,34 @@ A repeatable pseudo-random number in 0..1 for an integer seed (use the loop inde
 
     rand(seed) -> number
 
+## Files
+
+### import
+
+An existing mesh as a shape: `import("part.obj")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so.
+
+    import(path, size=?, resolution=96) -> shape
+
+## Poses and animation
+
+### joint
+
+Make a part turn about a pivot under poses: `joint(part, "elbow", x, y, z)` with the pivot in world units, declared once the part is in place; combine it with `+` and `paint` afterwards, not `move`. Nested joints turn with their parent. Exports get a node per joint and glTF animations from animation().
+
+    joint(part, name, x, y, z) -> shape
+
+### pose
+
+Name a set of joint angles: `pose("wave", shoulder=[0, 0, 70], elbow=[0, 0, 40])`, degrees about x, y, z per joint. Joints not named stay at rest. Every pose is drawn on `poses.png`; `set pose wave` makes the sheet and exports show it.
+
+    pose(name, joint=[x, y, z], ...) -> string
+
+### animation
+
+A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. A rest pose is any pose with no angles, or the name "rest". Each animation gets a frame strip `anim_<name>.png`.
+
+    animation(name, poses, seconds=1, loop=1) -> string
+
 ## Material presets
 
 Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a"`) also works.
@@ -527,7 +567,9 @@ Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a
 | dirt | noise | #6e4e32 / #4d341f |
 | sand | speckle | #e2cf9a / #c8b27a |
 | water | noise | #3a8ad8 / #6fb4ee |
-| glass | solid | #cfe6ef |
+| glass | solid | #dff0f6 |
+| amber | solid | #e0a030 |
+| emerald | solid | #40b070 |
 | leather | speckle | #6b3f24 / #4a2a16 |
 | rubber | solid | #2a2a2c |
 | plastic | solid | #e8e8e8 |

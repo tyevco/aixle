@@ -54,6 +54,9 @@ circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("ABC
 extrude(profile, h)  revolve(profile)  loft(a, b, h)                                     # 2D to 3D
 tube(r, [x,y,z, ...], smooth=6, taper=1)  sweep(profile, [x,y,z, ...], smooth=6, twist=0, taper=1)
 helix(r, h, turns)  arc(r, from, to)                                                     # path lists
+import("part.obj", size=2)                                                               # a mesh as a shape
+scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
+pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
 
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)
@@ -79,6 +82,11 @@ show mug
 
 `check` prints the five steps' sizes; the sheet shows the handle on the
 right (+x) and the slices show the wall thickness and the open top.
+
+For a rig: build each part in place, wrap it with `joint` at its pivot,
+nest the forearm's joint inside the upper arm's part, write poses, then
+read `poses.png` and `anim_<name>.png`: a part that swings about the
+wrong point has the wrong pivot.
 
 ## Mistakes the renders catch
 

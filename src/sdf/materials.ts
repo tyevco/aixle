@@ -49,6 +49,7 @@ function make(name: string, partial: Partial<Material> & { color: Vec3 }): Mater
     scale: partial.scale ?? 1,
     metal: partial.metal ?? 0,
     rough: partial.rough ?? 0.6,
+    transmit: partial.transmit ?? 0,
     seed: partial.seed ?? 0,
   };
 }
@@ -88,7 +89,9 @@ const PRESET_LIST: Material[] = [
   make("dirt", { color: hex("#6e4e32"), color2: hex("#4d341f"), pattern: "noise", scale: 0.2, rough: 0.95 }),
   make("sand", { color: hex("#e2cf9a"), color2: hex("#c8b27a"), pattern: "speckle", scale: 0.04, rough: 0.95 }),
   make("water", { color: hex("#3a8ad8"), color2: hex("#6fb4ee"), pattern: "noise", scale: 0.8, rough: 0.1 }),
-  make("glass", { color: hex("#cfe6ef"), rough: 0.05 }),
+  make("glass", { color: hex("#dff0f6"), rough: 0.05, transmit: 0.9 }),
+  make("amber", { color: hex("#e0a030"), rough: 0.1, transmit: 0.7 }),
+  make("emerald", { color: hex("#40b070"), rough: 0.08, transmit: 0.7 }),
   make("leather", { color: hex("#6b3f24"), color2: hex("#4a2a16"), pattern: "speckle", scale: 0.06, rough: 0.7 }),
   make("rubber", { color: hex("#2a2a2c"), rough: 0.95 }),
   make("plastic", { color: hex("#e8e8e8"), rough: 0.35 }),
@@ -119,6 +122,7 @@ export function customMaterial(opts: {
   scale?: number;
   metal?: number;
   rough?: number;
+  transmit?: number;
   seed?: number;
   name?: string;
 }): Material {
@@ -129,6 +133,7 @@ export function customMaterial(opts: {
     scale: opts.scale,
     metal: opts.metal,
     rough: opts.rough,
+    transmit: opts.transmit,
     seed: opts.seed,
   });
 }

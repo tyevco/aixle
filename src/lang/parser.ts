@@ -5,6 +5,7 @@
  *   statement := 'def' NAME '(' params ')' '=' expr
  *              | 'for' NAME 'in' expr '{' statement* '}'
  *              | 'show' expr (',' expr)*
+ *              | 'scene' expr (',' expr)*
  *              | 'set' NAME expr
  *              | NAME '=' expr
  *              | expr
@@ -21,7 +22,7 @@
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token } from "./lexer.js";
 
-const KEYWORDS = new Set(["def", "for", "in", "show", "set"]);
+const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set"]);
 
 class Parser {
   private pos = 0;
@@ -79,6 +80,12 @@ class Parser {
       const values = [this.expr()];
       while (this.atOp(",")) { this.next(); values.push(this.expr()); }
       return { type: "show", values, line: t.line };
+    }
+    if (t.type === "ident" && t.value === "scene") {
+      this.next();
+      const values = [this.expr()];
+      while (this.atOp(",")) { this.next(); values.push(this.expr()); }
+      return { type: "scene", values, line: t.line };
     }
     if (t.type === "ident" && t.value === "set") {
       this.next();

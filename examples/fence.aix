@@ -1,0 +1,20 @@
+# A fenced plot with a row of trees: place() puts copies of one shape at
+# x, y, z, yaw; the render is the union, the GLB is one mesh per kind with
+# a node per copy. The scene has three named objects, each its own node.
+set grid 160
+post = box(0.2, 1.2, 0.2) | move(0, 0.6, 0) | paint("walnut")
+rail = box(2.0, 0.16, 0.14) | paint("walnut")
+panel = post + (rail | move(1.0, 0.45, 0)) + (rail | move(1.0, 1.0, 0))
+spots = []
+for i in range(6) { spots = spots + [-5 + i * 2, 0, -4, 0] }
+for i in range(4) { spots = spots + [-5, 0, -4 + (i + 1) * 2, 90] }
+for i in range(6) { spots = spots + [-5 + i * 2, 0, 4, 0] }
+fence = place(panel, spots)
+
+trunk = cylinder(0.18, 1.6) | move(0, 0.8, 0) | paint("walnut")
+crown = union(sphere(0.9) | move(0, 2.2, 0), sphere(0.7) | move(0.5, 1.9, 0.3), sphere(0.7) | move(-0.4, 2.0, -0.4), k=0.4) | paint("grass")
+tree = trunk + crown
+trees = place(tree, [-2.5, 0, 0, 0, 0.5, 0, -1.5, 40, 2.8, 0, 1.5, 120, 4.2, 0, -2.0, 200], fields=4)
+
+ground_plot = box(11, 0.1, 9) | move(0, -0.05, 0) | paint("sand")
+scene ground_plot, fence, trees

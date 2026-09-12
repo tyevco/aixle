@@ -29,7 +29,7 @@ for (const file of files) {
   rmSync(tmp, { recursive: true, force: true });
   const t0 = performance.now();
   const result = run(readFileSync(join(EXAMPLES, file), "utf8"), `examples/${file}`, tmp, {
-    grid: 112,
+    defaultGrid: 112,
     size: 384,
     views: [],
     turntable: false,
@@ -42,6 +42,8 @@ for (const file of files) {
   copyFileSync(join(tmp, "slices.png"), join(OUT, `${name}_slices.png`));
   copyFileSync(join(tmp, "steps.png"), join(OUT, `${name}_steps.png`));
   copyFileSync(join(tmp, "beauty.png"), join(OUT, `${name}_beauty.png`));
+  for (const extra of readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_")))
+    copyFileSync(join(tmp, extra), join(OUT, `${name}_${extra}`));
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   console.log(`${name.padEnd(10)} ${secs}s  ${result.warnings.length ? result.warnings.join(" | ") : "ok"}`);
   rmSync(tmp, { recursive: true, force: true });

@@ -13,9 +13,9 @@
  */
 import { normalize, type Vec3 } from "../core/vec.js";
 import { albedo } from "../sdf/materials.js";
-import { boundsCenter, boundsDistance, boundsGrow, boundsSize, type Bounds, type Shape3 } from "../sdf/types.js";
+import { boundsCenter, boundsDistance, boundsGrow, boundsSize, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { perspective, type Camera } from "./camera.js";
+import { perspective, toView, type Camera } from "./camera.js";
 import { Canvas, rgbf } from "./canvas.js";
 import { drawText } from "./font.js";
 import { createTarget, renderMesh } from "./raster.js";
@@ -28,6 +28,10 @@ export interface BeautyOptions {
   azimuth?: number;
   elevation?: number;
   label?: string;
+  /** Apparent size of the key light: 0.5 is a small lamp with crisp shadows, 3 a window; default 1. */
+  lightSize?: number;
+  /** Depth of field: 0 off; 1 blurs a plane one model-size away by about 1% of the image. */
+  dof?: number;
 }
 
 const LIGHT: Vec3 = normalize([-0.55, 0.9, 0.65]);
@@ -70,6 +74,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     normalize([dist(x + eps, y, z) - dist(x - eps, y, z), dist(x, y + eps, z) - dist(x, y - eps, z), dist(x, y, z + eps) - dist(x, y, z - eps)]);
 
   /** 0 = fully shadowed, 1 = lit; skipped when the ray cannot reach the model's box. */
+  const softness = 6 / Math.max(0.1, opts.lightSize ?? 1);
   const shadow = (p: Vec3): number => {
     // Ray-box test against the shadow box.
     let tmin = 0, tmax = reach;
@@ -83,10 +88,21 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     if (tmax < tmin) return 1;
     let res = 1;
     let t = Math.max(tmin, cell * 1.5);
-    for (let i = 0; i < 48 && t < tmax; i++) {
-      const d = dist(p[0] + LIGHT[0] * t, p[1] + LIGHT[1] * t, p[2] + LIGHT[2] * t);
-      if (d < cell * 0.05) { res = 0; break; }
-      res = Math.min(res, (6 * d) / t);
+    let passes = 0;
+    for (let i = 0; i < 64 && t < tmax; i++) {
+      const x = p[0] + LIGHT[0] * t, y = p[1] + LIGHT[1] * t, z = p[2] + LIGHT[2] * t;
+      const d = dist(x, y, z);
+      if (d < cell * 0.05) {
+        // Glass lets light through, dimmed; step across it and carry on.
+        const tr = shape.hit(x, y, z).mat.transmit;
+        if (tr <= 0 || passes++ > 3) { res = 0; break; }
+        res *= 0.35 + 0.65 * tr * 0.6;
+        let inside = 0;
+        while (inside++ < 200 && t < tmax && dist(p[0] + LIGHT[0] * t, p[1] + LIGHT[1] * t, p[2] + LIGHT[2] * t) < cell * 0.05) t += cell * 2;
+        t += cell;
+        continue;
+      }
+      res = Math.min(res, (softness * d) / t);
       t += Math.max(d, cell * 0.5);
     }
     return Math.max(0, Math.min(1, res));
@@ -130,6 +146,117 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     ];
   };
 
+  /**
+   * March from `from` along `dir` until the field crosses zero (entering if
+   * `entering`), up to `maxT`. An inside march also averages the colour of
+   * the materials it passes through into `tintOut`, so a drink inside a
+   * glass wall tints the light the way it should.
+   */
+  const march = (from: Vec3, dir: Vec3, entering: boolean, maxT: number, tintOut?: Vec3): number => {
+    let t = cell * 0.5;
+    let samples = 0;
+    if (tintOut) { tintOut[0] = 0; tintOut[1] = 0; tintOut[2] = 0; }
+    // Inside a solid the nearest surface is often a wall running alongside
+    // the ray, so steps stay short; the inside march gets more of them and a
+    // larger minimum step.
+    const limit = entering ? 96 : 400;
+    const minStep = entering ? cell * 0.05 : cell * 0.5;
+    for (let i = 0; i < limit && t < maxT; i++) {
+      const x = from[0] + dir[0] * t, y = from[1] + dir[1] * t, z = from[2] + dir[2] * t;
+      let d = dist(x, y, z);
+      if (!entering) d = -d;
+      if (d < cell * 0.05) break;
+      if (tintOut && i % 4 === 0) {
+        const h = shape.hit(x, y, z);
+        const c = h.mat.transmit > 0 ? h.mat.color : [0.2, 0.2, 0.2];
+        tintOut[0] += c[0]; tintOut[1] += c[1]; tintOut[2] += c[2];
+        samples++;
+      }
+      t += Math.max(d * 0.9, minStep);
+    }
+    if (tintOut && samples > 0) { tintOut[0] /= samples; tintOut[1] /= samples; tintOut[2] /= samples; }
+    return t < maxT ? t : -1;
+  };
+  const backdrop = (dir: Vec3): Vec3 => {
+    if (dir[1] < -1e-6) {
+      const fade = 0.6;
+      return [FLOOR[0] * 0.95 + (GROUND[0] - FLOOR[0] * 0.95) * fade, FLOOR[1] * 0.95 + (GROUND[1] - FLOOR[1] * 0.95) * fade, FLOOR[2] * 0.95 + (GROUND[2] - FLOOR[2] * 0.95) * fade];
+    }
+    const k = Math.min(1, Math.max(0, dir[1] * 2.5));
+    return [GROUND[0] + (SKY[0] - GROUND[0]) * k, GROUND[1] + (SKY[1] - GROUND[1]) * k, GROUND[2] + (SKY[2] - GROUND[2]) * k];
+  };
+  const refract = (d: Vec3, n: Vec3, eta: number): Vec3 | undefined => {
+    const cosi = -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
+    const k = 1 - eta * eta * (1 - cosi * cosi);
+    if (k < 0) return undefined;
+    const a = eta * cosi - Math.sqrt(k);
+    return normalize([eta * d[0] + a * n[0], eta * d[1] + a * n[1], eta * d[2] + a * n[2]]);
+  };
+  const reflect = (d: Vec3, n: Vec3): Vec3 => {
+    const k = 2 * (d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
+    return [d[0] - k * n[0], d[1] - k * n[1], d[2] - k * n[2]];
+  };
+  /** What a ray sees after leaving a glass surface: another opaque surface (shaded, no further glass), the floor, or the sky. */
+  const seeThrough = (from: Vec3, dir: Vec3): Vec3 => {
+    const t = march(from, dir, true, reach * 2);
+    if (t > 0) {
+      const p: Vec3 = [from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t];
+      const n = gradient(p[0], p[1], p[2]);
+      const h = shape.hit(p[0], p[1], p[2]);
+      const base = albedo(h.mat, h.lx, h.ly, h.lz);
+      if (h.mat.transmit > 0) {
+        // Glass again (a second pane, or the same one at a grazing angle): the backdrop through it, tinted, no more bounces.
+        const bd = backdrop(dir);
+        const tr = h.mat.transmit;
+        return [bd[0] * (base[0] * tr + (1 - tr)), bd[1] * (base[1] * tr + (1 - tr)), bd[2] * (base[2] * tr + (1 - tr))];
+      }
+      return shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir);
+    }
+    if (dir[1] < -1e-6) {
+      const tf = (floorY - from[1]) / dir[1];
+      const p: Vec3 = [from[0] + dir[0] * tf, floorY, from[2] + dir[2] * tf];
+      const sh = shadow([p[0], p[1] + cell, p[2]]);
+      const light = 0.62 + 0.38 * sh * LIGHT[1];
+      return [FLOOR[0] * light, FLOOR[1] * light, FLOOR[2] * light];
+    }
+    return backdrop(dir);
+  };
+  const shadeGlass = (p: Vec3, n: Vec3, mat: Material, base: Vec3, dir: Vec3): Vec3 => {
+    const cos = Math.max(0, -(n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2]));
+    const fres = 0.04 + 0.96 * Math.pow(1 - cos, 5);
+    // Reflection: the backdrop and the key highlight.
+    const r = reflect(dir, n);
+    const refl = seeThrough([p[0] + n[0] * cell * 2, p[1] + n[1] * cell * 2, p[2] + n[2] * cell * 2], r);
+    const spec = shadePoint(p, n, [0, 0, 0], 0, mat.rough, dir);
+    // Refraction: into the glass, across it, and out.
+    let through: Vec3 = backdrop(dir);
+    const inDir = refract(dir, n, 1 / 1.5);
+    if (inDir) {
+      const entry: Vec3 = [p[0] - n[0] * cell, p[1] - n[1] * cell, p[2] - n[2] * cell];
+      const passed: Vec3 = [base[0], base[1], base[2]];
+      const tExit = march(entry, inDir, false, reach * 2, passed);
+      if (tExit > 0) {
+        const q: Vec3 = [entry[0] + inDir[0] * tExit, entry[1] + inDir[1] * tExit, entry[2] + inDir[2] * tExit];
+        const ng = gradient(q[0], q[1], q[2]);
+        const nOut: Vec3 = [-ng[0], -ng[1], -ng[2]];
+        const outDir = refract(inDir, nOut, 1.5);
+        // Total internal reflection would bounce around inside; settle for the backdrop in the ray's direction.
+        const seen = outDir ? seeThrough([q[0] + ng[0] * cell * 2, q[1] + ng[1] * cell * 2, q[2] + ng[2] * cell * 2], outDir) : backdrop(inDir);
+        // Absorption tints by thickness: the colour of what was passed through is what survives.
+        const k = tExit / Math.max(reach * 0.15, 1e-6);
+        const tint = (c: number) => Math.exp(-k * (1 - c) * 1.5);
+        through = [seen[0] * tint(passed[0]), seen[1] * tint(passed[1]), seen[2] * tint(passed[2])];
+      }
+    }
+    const tr = mat.transmit;
+    const opaque = shadePoint(p, n, base, 0, mat.rough, dir);
+    return [
+      Math.min(1, (through[0] * (1 - fres) + refl[0] * fres) * tr + opaque[0] * (1 - tr) + spec[0] * 0.5),
+      Math.min(1, (through[1] * (1 - fres) + refl[1] * fres) * tr + opaque[1] * (1 - tr) + spec[1] * 0.5),
+      Math.min(1, (through[2] * (1 - fres) + refl[2] * fres) * tr + opaque[2] * (1 - tr) + spec[2] * 0.5),
+    ];
+  };
+
   const sample = (px: number, py: number, primedDepth: number): Sample => {
     const dir = rayDir(px, py);
     const along = dir[0] * cam.forward[0] + dir[1] * cam.forward[1] + dir[2] * cam.forward[2];
@@ -150,7 +277,8 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const n = gradient(p[0], p[1], p[2]);
       const h = shape.hit(p[0], p[1], p[2]);
       const base = albedo(h.mat, h.lx, h.ly, h.lz);
-      return { color: shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir), depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat) };
+      const color = h.mat.transmit > 0 ? shadeGlass(p, n, h.mat, base, dir) : shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir);
+      return { color, depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat) };
     }
     // Floor or sky.
     if (dir[1] < -1e-6) {
@@ -202,8 +330,43 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       }
       canvas.set(px, py, rgbf(r / 4, g / 4, b / 4));
     }
+  if (opts.dof && opts.dof > 0) depthOfField(canvas, samples, size, opts.dof, boundsCenter(bounds), cam);
   if (opts.label) drawText(canvas, 8, size - 12, opts.label, INK.dim, 1);
   return canvas;
 }
 
-export { boundsCenter };
+/**
+ * Depth of field as a post-process: each pixel is blurred by a circle whose
+ * radius grows with its distance from the focus plane through the model's
+ * centre. A gather blur with three precomputed levels keeps it cheap.
+ */
+function depthOfField(canvas: Canvas, samples: Sample[], size: number, strength: number, centre: Vec3, cam: Camera): void {
+  const focus = -toView(cam, centre)[2];
+  const maxRadius = Math.max(1, Math.round(size * 0.012 * strength * 3));
+  const radiusAt = (d: number): number => {
+    if (!Number.isFinite(d)) return maxRadius;
+    return Math.min(maxRadius, (Math.abs(d - focus) / Math.max(focus, 1e-6)) * size * 0.012 * strength * 4);
+  };
+  const src = new Uint8Array(canvas.data);
+  const get = (x: number, y: number, k: number) => src[(y * size + x) * 4 + k];
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const r = radiusAt(samples[y * size + x].depth);
+      if (r < 0.75) continue;
+      const ir = Math.ceil(r);
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      const step = ir > 4 ? 2 : 1;
+      for (let dy = -ir; dy <= ir; dy += step)
+        for (let dx = -ir; dx <= ir; dx += step) {
+          if (dx * dx + dy * dy > r * r) continue;
+          const sx = x + dx, sy = y + dy;
+          if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
+          // A sharp foreground pixel should not bleed into a blurred one behind it much: weight by its own blur.
+          const w = 0.3 + 0.7 * Math.min(1, radiusAt(samples[sy * size + sx].depth) / Math.max(r, 1e-6));
+          sr += get(sx, sy, 0) * w; sg += get(sx, sy, 1) * w; sb += get(sx, sy, 2) * w; n += w;
+        }
+      if (n > 0) canvas.set(x, y, ((Math.round(sr / n) & 255) << 16) | ((Math.round(sg / n) & 255) << 8) | (Math.round(sb / n) & 255));
+    }
+}
+
+

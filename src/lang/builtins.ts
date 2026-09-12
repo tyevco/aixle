@@ -14,7 +14,7 @@ import * as P from "../sdf/primitives.js";
 import * as S from "../sdf/shapes2d.js";
 import * as W from "../sdf/sweeps.js";
 import { textProfile, textWidth } from "../sdf/font.js";
-import type { Material, PatternKind, Shape2, Shape3 } from "../sdf/types.js";
+import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
 const num = (name: string, doc?: string, def?: number): Param => (def === undefined ? { name, type: "number", doc } : { name, type: "number", default: def, doc });
@@ -57,7 +57,7 @@ function makeMaterial(args: Value[]): Material {
   const c2text = args[2] as string;
   const color2 = c2text === "" ? undefined : parseColor(c2text);
   if (c2text !== "" && !color2) throw new Error(`material(): "${c2text}" is not a colour`);
-  return customMaterial({ color, color2, pattern: pattern as PatternKind, scale: n(args[3]), metal: n(args[4]), rough: n(args[5]), seed: n(args[6]) });
+  return customMaterial({ color, color2, pattern: pattern as PatternKind, scale: n(args[3]), metal: n(args[4]), rough: n(args[5]), seed: n(args[6]), transmit: n(args[7]) });
 }
 
 function hexOf(r: number, g: number, b: number): string {
@@ -203,11 +203,27 @@ export const BUILTINS: Builtin[] = [
   def("ring", "Repetition", "`count` copies evenly around `axis` (default y), each first pushed out to `radius` along +x.",
     ov([shape(), num("count"), num("radius", "", 0), axis("axis", "", "y")], "shape", (a) => O.ring(s3(a[0]), n(a[1]), n(a[2]), a[3] as O.Axis))),
 
+  // --- assembly ---
+  def("place", "Assembly", "Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optionally x, y, z, yaw, scale with `fields=5`. Rendered as a union; exported once with a node per copy.",
+    ov([shape(), { name: "placements", type: "list", doc: "[x,y,z,yaw, x,y,z,yaw, ...]" }, num("fields", "4 for x,y,z,yaw or 5 to add a scale", 4)], "shape",
+      (a) => {
+        const list = (a[1] as Value[]).map((v) => {
+          if (typeof v !== "number") throw new Error("placements must be numbers");
+          return v;
+        });
+        const f = n(a[2]);
+        if (f !== 4 && f !== 5) throw new Error("fields must be 4 or 5");
+        if (list.length === 0 || list.length % f !== 0) throw new Error(`placements need groups of ${f} numbers, got ${list.length}`);
+        const placements: Placement[] = [];
+        for (let i = 0; i < list.length; i += f) placements.push({ x: list[i], y: list[i + 1], z: list[i + 2], yaw: list[i + 3], scale: f === 5 ? list[i + 4] : 1 });
+        return O.place(s3(a[0]), placements);
+      })),
+
   // --- materials ---
   def("paint", "Materials", "Give the whole shape a material: a preset name, a colour (\"#rrggbb\" or a name), or material(...). Paint parts before combining them to keep several materials.",
     ov([shape(), mat()], "shape", (a) => O.paint(s3(a[0]), a[1] as Material))),
-  def("material", "Materials", "A custom material. Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1.",
-    ov([str("color"), str("pattern", "", "solid"), str("color2", "second colour for two-tone patterns", ""), num("scale", "", 1), num("metal", "", 0), num("rough", "", 0.6), num("seed", "", 0)], "material", makeMaterial)),
+  def("material", "Materials", "A custom material. Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass.",
+    ov([str("color"), str("pattern", "", "solid"), str("color2", "second colour for two-tone patterns", ""), num("scale", "", 1), num("metal", "", 0), num("rough", "", 0.6), num("seed", "", 0), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", 0)], "material", makeMaterial)),
   def("rgb", "Materials", "A colour string from red, green, blue in 0..255.", ov([num("r"), num("g"), num("b")], "string", (a) => hexOf(n(a[0]), n(a[1]), n(a[2])))),
   def("hsl", "Materials", "A colour string from hue in degrees, saturation and lightness in 0..1.", ov([num("h"), num("s"), num("l")], "string", (a) => hslToHex(n(a[0]), n(a[1]), n(a[2])))),
 

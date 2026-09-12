@@ -51,6 +51,8 @@ export interface Material {
   metal: number;
   /** 0 = mirror, 1 = matte. */
   rough: number;
+  /** 0 = opaque, 1 = clear glass: the beauty render refracts and reflects; other outputs treat it as opaque. */
+  transmit: number;
   seed: number;
 }
 
@@ -74,6 +76,31 @@ export interface Shape3 {
   cost: number;
   /** For a hard union: its children, so a union of unions flattens into one culled list. */
   parts?: Shape3[];
+  /** For any wrapper (transform, modifier, paint, boolean): the shapes it was built from, so a tree can be walked. */
+  inner?: Shape3[];
+  /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
+  joint?: JointState;
+  /** For a placed shape: the base and where its copies go. */
+  instanced?: { base: Shape3; placements: Placement[] };
+}
+
+export interface JointState {
+  name: string;
+  pivot: Vec3;
+  child: Shape3;
+  /** The rotation this joint was built with, degrees about x, y, z (applied x, then y, then z). */
+  angles: Vec3;
+  /** When true the joint's whole subtree reads as empty, so a parent's own geometry can be meshed alone. */
+  hidden: boolean;
+}
+
+/** One copy of an instanced shape: position and a yaw about y in degrees, with a uniform scale. */
+export interface Placement {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  scale: number;
 }
 
 export type DistFn2 = (x: number, y: number) => number;

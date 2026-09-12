@@ -38,6 +38,9 @@ export type ViewName = "persp" | OrthoView;
 export interface ViewInfo {
   name: string;
   bounds: Bounds;
+  /** Perspective camera direction, degrees; defaults 35 and 25. */
+  azimuth?: number;
+  elevation?: number;
 }
 
 const fmt = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
@@ -95,15 +98,16 @@ function caption(canvas: Canvas, text: string, sub?: string): void {
 }
 
 /** Render one view of a mesh at `size` pixels square. */
-export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: number, opts: { flatColor?: Vec3; outline?: boolean; label?: boolean; azimuth?: number } = {}): Canvas {
+export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: number, opts: { flatColor?: Vec3; outline?: boolean; label?: boolean; azimuth?: number; elevation?: number } = {}): Canvas {
   const bounds = isEmpty(info.bounds) ? { min: [-1, -1, -1] as Vec3, max: [1, 1, 1] as Vec3 } : info.bounds;
   const label = opts.label ?? true;
   if (view === "persp") {
-    const cam = perspective(bounds, size, size, opts.azimuth ?? 35, 25);
+    const az = opts.azimuth ?? info.azimuth ?? 35, el = opts.elevation ?? info.elevation ?? 25;
+    const cam = perspective(bounds, size, size, az, el);
     const target = createTarget(size, size, INK.viewPersp);
     renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor });
     floorGrid(cam, target, bounds, label);
-    if (label) caption(target.canvas, "PERSPECTIVE", `from front-right, above  ${dimsLabel(info.bounds)}`);
+    if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.bounds)}`);
     return target.canvas;
   }
   const cam = orthographic(bounds, size, size, view);
@@ -301,7 +305,7 @@ export function renderTurntable(mesh: Mesh, info: ViewInfo, frame: number, frame
   out.fill(0, 0, out.width, bar, INK.bar);
   drawText(out, 10, 6, `${info.name.toUpperCase()}   TURNTABLE   ${360 / frames}° steps, from the front-right`, INK.barText, 2);
   for (let i = 0; i < frames; i++) {
-    const az = 35 + (360 / frames) * i;
+    const az = (info.azimuth ?? 35) + (360 / frames) * i;
     const c = renderView(mesh, info, "persp", frame, { azimuth: az, label: false });
     drawText(c, 6, 6, `${Math.round(az % 360)}°`, INK.dim, 1);
     out.blit(c, gutter + i * (frame + gutter), bar + gutter);
@@ -310,3 +314,85 @@ export function renderTurntable(mesh: Mesh, info: ViewInfo, frame: number, frame
 }
 
 export { mixColor };
+
+// --- poses and animations ------------------------------------------------------
+
+export interface PoseView {
+  name: string;
+  angles: Record<string, [number, number, number]>;
+}
+
+export type ShapeAt = (angles: Record<string, [number, number, number]>) => Shape3 | undefined;
+
+function poseThumb(shapeAt: ShapeAt, angles: Record<string, [number, number, number]>, framing: Bounds, thumb: number, cellSize: number, label: string, azimuth?: number, elevation?: number): Canvas {
+  const shape = shapeAt(angles);
+  if (!shape || isEmpty(shape.bounds)) {
+    const c = new Canvas(thumb, thumb, INK.viewPersp);
+    drawText(c, 6, 6, label, INK.text, 1);
+    return c;
+  }
+  const s = boundsSize(shape.bounds);
+  const resolution = Math.max(12, Math.min(64, Math.ceil(Math.max(s[0], s[1], s[2]) / cellSize)));
+  const mesh = surfaceNets(shape, { resolution }).mesh;
+  const c = renderView(mesh, { name: label, bounds: framing }, "persp", thumb, { label: false, azimuth, elevation });
+  drawText(c, 6, 6, label, INK.text, 1);
+  return c;
+}
+
+/** The union of the bounds over every pose, so all thumbnails share one framing. */
+function framingFor(shapeAt: ShapeAt, all: PoseView[]): Bounds {
+  let b: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (const p of all) {
+    const s = shapeAt(p.angles);
+    if (s && !isEmpty(s.bounds)) b = { min: [Math.min(b.min[0], s.bounds.min[0]), Math.min(b.min[1], s.bounds.min[1]), Math.min(b.min[2], s.bounds.min[2])], max: [Math.max(b.max[0], s.bounds.max[0]), Math.max(b.max[1], s.bounds.max[1]), Math.max(b.max[2], s.bounds.max[2])] };
+  }
+  return b;
+}
+
+/** One thumbnail per pose, the rest pose first, all framed alike. `shapeAt` rebuilds the model for a set of angles. */
+export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseView[], thumb: number, cellSize: number, azimuth?: number, elevation?: number): Canvas {
+  const all: PoseView[] = [{ name: "rest", angles: {} }, ...poses.filter((p) => p.name !== "rest")];
+  const cols = Math.min(5, all.length);
+  const rows = Math.ceil(all.length / cols);
+  const gutter = 6, bar = 30;
+  const out = new Canvas(cols * (thumb + gutter) + gutter, bar + rows * (thumb + gutter) + gutter, INK.page);
+  out.fill(0, 0, out.width, bar, INK.bar);
+  drawText(out, 10, 8, `POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${jointNames.join(", ")}`, INK.barText, 2);
+  const framing = framingFor(shapeAt, all);
+  all.forEach((p, i) => {
+    const c = poseThumb(shapeAt, p.angles, framing, thumb, cellSize, p.name, azimuth, elevation);
+    out.blit(c, gutter + (i % cols) * (thumb + gutter), bar + gutter + Math.floor(i / cols) * (thumb + gutter));
+  });
+  return out;
+}
+
+/** Angles at time t in [0, 1] along evenly spaced keyframe poses, interpolated per component. */
+export function interpolatePose(keys: PoseView[], jointNames: string[], t: number): Record<string, [number, number, number]> {
+  if (keys.length === 0) return {};
+  if (keys.length === 1) return keys[0].angles;
+  const f = Math.max(0, Math.min(1, t)) * (keys.length - 1);
+  const i = Math.min(keys.length - 2, Math.floor(f));
+  const u = f - i;
+  const out: Record<string, [number, number, number]> = {};
+  for (const j of jointNames) {
+    const a = keys[i].angles[j] ?? [0, 0, 0], b = keys[i + 1].angles[j] ?? [0, 0, 0];
+    out[j] = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+  }
+  return out;
+}
+
+/** A strip of frames through an animation's keyframes, with the time under each. */
+export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number): Canvas {
+  const gutter = 4, bar = 24, labelH = 12;
+  const out = new Canvas(frames * (frame + gutter) + gutter, frame + gutter * 2 + bar + labelH, INK.page);
+  out.fill(0, 0, out.width, bar, INK.bar);
+  drawText(out, 10, 6, `${name.toUpperCase()}   ${fmt(seconds)}s   keyframes: ${keys.map((k) => k.name).join(" → ")}`, INK.barText, 2);
+  const framing = framingFor(shapeAt, keys);
+  for (let i = 0; i < frames; i++) {
+    const t = frames === 1 ? 0 : i / (frames - 1);
+    const c = poseThumb(shapeAt, interpolatePose(keys, jointNames, t), framing, frame, cellSize, "", azimuth, elevation);
+    out.blit(c, gutter + i * (frame + gutter), bar + gutter);
+    drawText(out, gutter + i * (frame + gutter), bar + gutter + frame + 2, `${fmt(t * seconds)}s`, INK.dim, 1);
+  }
+  return out;
+}

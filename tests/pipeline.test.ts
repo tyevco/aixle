@@ -62,6 +62,16 @@ describe("pipeline", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("warns from bounds alone when a used part is thinner than two cells", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("plate = box(10, 0.05, 10)\nknob = sphere(1) | move(0, 1, 0)\nm = plate + knob", "thin.aix", dir, { grid: 20, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false });
+      expect(r.warnings.join()).toMatch(/'plate' \(line 1\) is only 0.05 units thin/);
+      expect(r.warnings.join()).toMatch(/set grid \d+/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("check evaluates without rendering", () => {
     const ev = check("a = box(2)\nset grid 40");
     expect(ev.outputName).toBe("a");

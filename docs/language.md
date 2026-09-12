@@ -139,6 +139,39 @@ lowercase folds up), laid out on the baseline. Extrude it for raised
 lettering, subtract an extrusion for engraving. `size` is the cap height,
 `weight` the stroke width; keep `weight` above two grid cells.
 
+**Import**: `import("part.obj")` or a `.glb`, relative to the program's
+folder, makes an existing mesh a shape: it is sampled into a distance
+field (`resolution=` cells on its longest side, default 96), so it can be
+cut, blended, hollowed and painted like anything else. `size=` scales its
+longest side to that many units. Closed meshes work; an open mesh has no
+inside, and `check` says so. The import's own detail is limited by its
+resolution, so a fine mesh wants `resolution=160` or so.
+
+## Scenes, joints and poses
+
+`scene a, b, c` outputs several named objects instead of one shape: the
+sheet shows them together, and the GLB has a node per object (the OBJ a
+group). `place(shape, [x,y,z,yaw, x,y,z,yaw, ...])` puts copies of a shape
+at each position and yaw (degrees about y; `fields=5` adds a scale per
+copy): the render is the union, the export is one mesh with a node per
+copy, so a forest costs one tree.
+
+`joint(part, "elbow", x, y, z)` makes a part turn about a pivot. Build the
+part in place, declare the joint at its world pivot, then combine it with
+`+` and `paint`; a joint nested inside another part's joint turns with it.
+`pose("reach", shoulder=[0, 0, 25], elbow=[0, 0, -40])` names a set of
+angles (degrees about x, then y, then z; unnamed joints rest);
+`animation("wave", ["rest", "reach", "rest"], seconds=2)` strings poses
+into evenly spaced keyframes. Every pose is drawn on `poses.png`, every
+animation on `anim_<name>.png`, and the GLB carries the joints as nodes
+with the animations as glTF channels, which the viewer page plays. `set
+pose reach` makes the sheet and the beauty render show that pose; exports
+are always at rest.
+
+A pose is applied by evaluating the program again with the angles, so
+anything computed from a joint's shape (its bounds, a `ground()`) follows
+the pose.
+
 ## Materials
 
 `paint(shape, m)` gives the whole shape one material; `m` is a preset name
@@ -161,7 +194,14 @@ with the part: paint, then `move`.
 
 ## Settings
 
-`set grid N` sets the extraction resolution (cells along the longest side,
+`set light_size 2.5` widens the key light in the beauty render (softer
+shadows; 0.5 is a lamp), `set dof 1` adds depth of field there, blurring
+away from the model's centre. A material with `transmit` (the `glass`,
+`amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
+refracted and reflected by the beauty render and drawn opaque everywhere
+else. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
+by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
+and `--elevation` override). `set grid N` sets the extraction resolution (cells along the longest side,
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
 of a view. `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
 cross-section plane. `set beauty 1` always writes the ray-marched

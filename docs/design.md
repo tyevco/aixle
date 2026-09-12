@@ -102,6 +102,41 @@ keeps a 384-pixel thumbnail readable.
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.
 
+## Imported meshes
+
+An imported mesh becomes a field by sampling: unsigned distance on a grid
+over the mesh (a bounding-volume hierarchy of point-triangle queries) and
+a sign from the parity of ray crossings along each grid line, read back by
+trilinear interpolation. Parity is right for closed meshes and is the best
+that can be done for open ones, which the report flags. Measured: with the
+grid lines starting exactly at the mesh's bounding-box minimum, rays ran
+through extreme vertices and edges and whole runs of samples flipped, so
+the grid origin is offset by an irrational fraction of a cell and only
+strict interior crossings count (a ray on a shared edge then counts zero
+for both triangles, which leaves the parity right). The imported detail is
+bounded by the sampling grid, and a sampled field is only approximately a
+distance, which extraction does not mind.
+
+## Scenes, joints and poses
+
+A scene is several named shapes; the export builds a node tree from them.
+An object's own geometry is the shape extracted with every joint inside it
+hidden (a joint node reads as empty while hidden), each top-level joint is
+a child node at its pivot with its child shape extracted the same way and
+made relative to the pivot, and a placed shape is a node per copy over one
+mesh. Every mesh is extracted at the same cell size and all of them share
+one atlas: they are merged for baking and split again with their UVs.
+
+A joint is a plain rotation of its part about the pivot, built with the
+angles a pose gives it, and a pose is applied by evaluating the program
+again with those angles: an evaluation takes milliseconds, every joint
+then has exact rotated bounds, and nested joints are turned by their own
+angles before the parent is built, so they follow it. The first design had
+a joint read live angles from a mutable state instead; its bounds then had
+to cover every rotation, which made a five-unit arm sixteen units across
+and wasted most of the extraction grid on air. Exports are at rest, with
+the poses as glTF rotation channels on the joint nodes.
+
 ## Twist, taper, text
 
 Twist and taper are functions of arc length applied inside each straight
@@ -112,6 +147,21 @@ polylines on a 4 by 6 grid, and the profile is everything within half the
 weight of them, a chain of 2D capsules, so the letters are exact and round
 themselves off at the weight. It was checked by rendering every glyph on
 one plate and reading it.
+
+## Glass, a light with a size, depth of field
+
+A transmitting material is shaded by continuing the ray: refract in at the
+surface, march the inside of the field (the sign flipped) to the far wall,
+refract out, and shade whatever that ray meets next, an opaque surface
+(shaded in full, no further glass), the floor with its shadow, or the
+backdrop; the colour survives in proportion to the thickness crossed. A
+reflection of the same environment is mixed in by Fresnel, and the key
+highlight sits on top. One bounce each way is enough for a tumbler and
+costs about as much as a shadow ray. The light's size is the softness of
+the shadow march; depth of field is a post-process gather blur whose
+radius grows with distance from the focus plane through the model's
+centre, weighted so a sharp foreground does not smear across a blurred
+background.
 
 ## Materials without UVs, and the atlas that bakes them anyway
 
@@ -179,5 +229,3 @@ once. It exists for people; an agent verifies from the PNGs.
 
 - Sweeps along true curves rather than fine polylines.
 - Lowercase and accented glyphs; a second, serif face.
-- Refraction for glass, area lights, depth of field in the beauty render.
-- Mesh import, so an existing model can be a primitive.

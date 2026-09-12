@@ -57,6 +57,7 @@ npm install
 npx aixle check  model.aix           # parse, evaluate, print sizes and warnings; no pictures
 npx aixle render model.aix           # everything, into out/model/
 npx aixle render model.aix --beauty         # plus beauty.png (a second or a few)
+npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle doc                        # the reference, to stdout
 ```
@@ -75,6 +76,7 @@ npx aixle doc                        # the reference, to stdout
 | `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
 | `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
+| `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
 | `report.md`, `report.json` | size, bounds, triangle count, volume, every step's size and whether it is used, warnings |
 
 ## The language in one screen
@@ -90,6 +92,10 @@ circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("H
 extrude(profile, h)  revolve(profile)  loft(a, b, h)                                     # to solids
 tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, taper=1)   # along a path
 helix(r, h, turns)  arc(r, from, to)                                                     # point lists
+import("part.obj", size=2)                                                               # a mesh as a shape
+scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
+pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
+set light_size 2   set dof 1   set azimuth 60   paint("glass")                           # beauty render
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
@@ -105,22 +111,26 @@ materials.
 
 ## Examples
 
-[`examples/`](examples/) has twelve models exercising the language, each
+[`examples/`](examples/) has sixteen models exercising the language, each
 with its sheet, slices, steps and beauty render under
 [`examples/renders/`](examples/renders/): a mug, a fluted vase from a
 revolved profile, a teapot with a tube spout and a swept handle, a desk
 lamp with a lofted shade, a reel of three-strand rope swept along a helix
-with a twist, a hanging sign with raised and engraved text, a table with
+with a twist, a hanging sign with raised and engraved text, a rock garden
+from an imported mesh, a robot arm with three joints and a waving
+animation, a fenced plot with placed panels and trees, a table with
 parametric chairs, a brick tower, a pair of gears from 2D profiles, a
-spiral staircase from a loop, a robot with per-part materials, and a tree
-with smooth blends and displacement.
+spiral staircase from a loop, a robot with per-part materials, a tree
+with smooth blends and displacement, and a glass tumbler for refraction
+and depth of field.
 
 | | | |
 | --- | --- | --- |
 | ![teapot](examples/renders/teapot_beauty.png) | ![rope](examples/renders/rope_beauty.png) | ![sign](examples/renders/sign_beauty.png) |
 | ![vase](examples/renders/vase_beauty.png) | ![lamp](examples/renders/lamp_beauty.png) | ![tower](examples/renders/tower_beauty.png) |
 | ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) | ![table](examples/renders/table_beauty.png) |
-| ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) | |
+| ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) | ![garden](examples/renders/garden_beauty.png) |
+| ![arm](examples/renders/arm_beauty.png) | ![fence](examples/renders/fence_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
 
 ## How it works
 
