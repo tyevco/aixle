@@ -1,0 +1,19 @@
+# A tree: a tapered, roughened trunk, three branches, and a canopy of
+# spheres blended together with a smooth union (k) so it reads as one mass.
+trunk = cone(0.5, 0.28, 3.2) | move(0, 1.6, 0)
+branch = cone(0.2, 0.08, 1.6) | move(0, 0.8, 0) | rotate(z=-50) | move(0.2, 2.6, 0)
+branches = ring(branch, 3)
+wood = (trunk + branches) | displace(0.06, 0.35, 3) | paint("walnut")
+blob = sphere(1.1)
+canopy = union(
+  blob | move(0, 4.4, 0),
+  blob | scale(1.25) | move(0.9, 3.9, 0.3),
+  blob | scale(1.15) | move(-0.9, 4.0, -0.4),
+  blob | scale(0.9) | move(0.2, 3.6, -1.1),
+  blob | scale(0.95) | move(-0.3, 3.7, 1.0),
+  blob | scale(0.8) | move(0, 5.3, 0),
+  k = 0.6
+)
+leaves = canopy | displace(0.12, 0.5, 7) | paint("grass")
+tree = wood + leaves
+show tree
