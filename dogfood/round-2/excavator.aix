@@ -1,0 +1,157 @@
+# A hydraulic excavator: tracked base, a slewing upper structure, a bent
+# boom, a stick and a bucket, with the hydraulic cylinders that drive them.
+# The arm works in the plane x = ax; front is +z, the cab sits beside the
+# boom on -x. Each cylinder is a barrel on the inner member and a rod on
+# the outer one, each on its own joint at its anchor; per pose the aim
+# angles are computed so barrel and rod stay collinear and telescope.
+
+yellow = material("#f0b429", rough=0.5)
+hazard = material("#f0b429", "stripes", "#1a1a1c", scale=0.18)
+
+# ---- the arm's geometry at rest: pivots (y, z) in the plane x = ax ----
+ax = 0.4
+b0y = 1.75
+b0z = 0.9
+la = 1.9
+ea = 55
+lb = 1.6
+eb = 25
+bay = b0y + la * sin(ea)
+baz = b0z + la * cos(ea)
+b1y = bay + lb * sin(eb)
+b1z = baz + lb * cos(eb)
+ls = 2.3
+es = -35
+s1y = b1y + ls * sin(es)
+s1z = b1z + ls * cos(es)
+ey = b1y - 0.55 * sin(es)
+ez = b1z - 0.55 * cos(es)
+a1y = 1.15
+a1z = 1.05
+c1y = b0y + 1.3 * sin(ea) - 0.3 * cos(ea)
+c1z = b0z + 1.3 * cos(ea) + 0.3 * sin(ea)
+a2y = b0y + 1.4 * sin(ea) + 0.3 * cos(ea)
+a2z = b0z + 1.4 * cos(ea) - 0.3 * sin(ea)
+a3y = b1y + 0.7 * sin(es) + 0.28 * cos(es)
+a3z = b1z + 0.7 * cos(es) - 0.28 * sin(es)
+fy = s1y + 0.4
+fz = s1z - 0.05
+
+# ---- helpers ----
+def dist(y0, z0, y1, z1) = sqrt((y1 - y0) ^ 2 + (z1 - z0) ^ 2)
+def elev(y0, z0, y1, z1) = atan(y1 - y0, z1 - z0)
+def roty(py, pz, y, z, t) = py + dist(py, pz, y, z) * sin(elev(py, pz, y, z) - t)
+def rotz(py, pz, y, z, t) = pz + dist(py, pz, y, z) * cos(elev(py, pz, y, z) - t)
+def beam(x, w, h, len, e, y, z) = box(w, h, len, round=0.06) | move(0, 0, len / 2) | rotate(x=-e) | move(x, y, z)
+def pin(x, r, w, y, z) = cylinder(r, w) | rotate(z=90) | move(x, y, z)
+def rod(x, r, len, e, y, z) = cylinder(r, len) | move(0, len / 2, 0) | rotate(x=90 - e) | move(x, y, z)
+
+# ---- base ----
+track_loop = extrude(rect(3.4, 0.7, round=0.34) - rect(2.5, 0.34, round=0.16), 0.6, "x")
+track = track_loop | rotate(x=90) | paint(material("rubber", "stripes", "#3a3a3e", scale=0.12)) | rotate(x=-90)
+frame = box(0.34, 0.2, 2.6, round=0.05) | paint(yellow)
+wheels = (cylinder(0.2, 0.5) | rotate(z=90) | move(0, 0, -1.05) | array(2, 0, 0, 2.1)) | paint("iron")
+crawler = (track + frame + wheels) | move(1.05, 0.35, 0)
+crawlers = mirror(crawler, "x")
+crossbeam = box(2.7, 0.4, 1.5, round=0.06) | move(0, 0.5, 0) | paint(yellow)
+slew = cylinder(0.9, 0.3) | move(0, 0.82, 0) | paint("charcoal")
+base = crawlers + crossbeam + slew
+
+# ---- upper structure ----
+house = box(2.2, 0.9, 2.5, round=0.08) | move(0, 1.42, -0.35) | paint(yellow)
+counterweight = box(2.24, 0.8, 0.55, round=0.08) | move(0, 1.42, -1.75) | paint(hazard)
+cab = box(0.95, 1.2, 1.3, round=0.08) | move(-0.6, 2.4, 0.3) | paint(yellow)
+windows = box(1.07, 0.75, 1.0) | move(-0.6, 2.5, 0.51) | paint("navy")
+hood = box(1.0, 0.4, 1.5, round=0.1) | move(0.55, 2.0, -0.7) | paint(yellow)
+exhaust = cylinder(0.09, 0.5) | move(0.85, 2.35, -1.1) | paint("iron")
+boom_brackets = mirror(box(0.12, 0.6, 0.5, round=0.03) | move(0.3, 1.85, 0.8), "x") | move(ax, 0, 0) | paint(yellow)
+cyl_bracket = box(0.9, 0.3, 0.35, round=0.04) | move(ax, 1.15, 0.95) | paint(yellow)
+
+# ---- boom cylinders (twin): barrel on the house, rod on the boom ----
+d1 = dist(a1y, a1z, c1y, c1z)
+e1 = elev(a1y, a1z, c1y, c1z)
+boom_barrels = (rod(ax - 0.3, 0.13, 0.6 * d1, e1, a1y, a1z) + rod(ax + 0.3, 0.13, 0.6 * d1, e1, a1y, a1z)) | paint("charcoal")
+boom_cyl_a = joint(boom_barrels, "boom_cyl_a", ax, a1y, a1z)
+boom_rods = (rod(ax - 0.3, 0.08, 0.85 * d1, e1 + 180, c1y, c1z) + rod(ax + 0.3, 0.08, 0.85 * d1, e1 + 180, c1y, c1z)) | paint("chrome")
+boom_cyl_b = joint(boom_rods, "boom_cyl_b", ax, c1y, c1z)
+
+# ---- stick cylinder: barrel on the boom, rod on the stick's rear ear ----
+d2 = dist(a2y, a2z, ey, ez)
+e2 = elev(a2y, a2z, ey, ez)
+stick_barrel = rod(ax, 0.15, 0.6 * d2, e2, a2y, a2z) | paint("charcoal")
+stick_cyl_a = joint(stick_barrel, "stick_cyl_a", ax, a2y, a2z)
+stick_rod = rod(ax, 0.09, 0.85 * d2, e2 + 180, ey, ez) | paint("chrome")
+stick_cyl_b = joint(stick_rod, "stick_cyl_b", ax, ey, ez)
+
+# ---- bucket cylinder: barrel on the stick, rod on the bucket ear ----
+d3 = dist(a3y, a3z, fy, fz)
+e3 = elev(a3y, a3z, fy, fz)
+bucket_barrel = rod(ax, 0.12, 0.6 * d3, e3, a3y, a3z) | paint("charcoal")
+bucket_cyl_a = joint(bucket_barrel, "bucket_cyl_a", ax, a3y, a3z)
+bucket_rod = rod(ax, 0.08, 0.85 * d3, e3 + 180, fy, fz) | paint("chrome")
+bucket_cyl_b = joint(bucket_rod, "bucket_cyl_b", ax, fy, fz)
+
+# ---- bucket: built with its pivot at the origin, then moved to the stick tip ----
+scoop = box(0.95, 0.75, 0.85, round=0.1) | move(0, -0.5, 0.15)
+mouth = box(0.79, 0.7, 0.8, round=0.06) | move(0, -0.37, 0.45)
+ear = box(0.32, 1.0, 0.3, round=0.04) | move(0, -0.1, -0.08)
+teeth = cone(0.07, 0.03, 0.28) | rotate(x=90) | move(-0.3, -0.8, 0.65) | array(4, 0.2, 0, 0)
+bucket_shell = ((scoop - mouth) + ear) | paint(yellow) + teeth | paint("iron")
+bucket_body = bucket_shell | move(ax, s1y, s1z)
+bucket_pin = pin(ax, 0.2, 0.5, s1y, s1z) | paint("steel")
+bucket_ear_pin = pin(ax, 0.1, 0.44, fy, fz) | paint("steel")
+bucket = joint(bucket_body + bucket_pin + bucket_ear_pin + bucket_cyl_b, "bucket", ax, s1y, s1z)
+
+# ---- stick: from its rear ear, past the boom tip, to the bucket pin ----
+stick_body = beam(ax, 0.3, 0.42, ls + 0.55, es, ey, ez) | paint(yellow)
+stick_ear_pin = pin(ax, 0.12, 0.42, ey, ez) | paint("steel")
+stick_cyl_boss = pin(ax, 0.13, 0.42, a3y, a3z) | paint("steel")
+stick = joint(stick_body + stick_ear_pin + stick_cyl_boss + bucket_cyl_a + stick_cyl_b + bucket, "stick", ax, b1y, b1z)
+
+# ---- boom: two segments meeting at a knee ----
+boom_a = beam(ax, 0.36, 0.5, la + 0.15, ea, b0y, b0z)
+boom_b = beam(ax, 0.34, 0.46, lb, eb, bay, baz)
+boom_knee = pin(ax, 0.28, 0.36, bay, baz)
+boom_yellow = (boom_a + boom_b + boom_knee) | paint(yellow)
+boom_foot = pin(ax, 0.3, 0.7, b0y, b0z) | paint("steel")
+boom_tip = pin(ax, 0.26, 0.5, b1y, b1z) | paint("steel")
+boom_cyl_boss = pin(ax, 0.12, 0.9, c1y, c1z) | paint("steel")
+boom_stick_boss = pin(ax, 0.14, 0.5, a2y, a2z) | paint("steel")
+boom = joint(boom_yellow + boom_foot + boom_tip + boom_cyl_boss + boom_stick_boss + stick_cyl_a + boom_cyl_b + stick, "boom", ax, b0y, b0z)
+
+upper = house + counterweight + cab + windows + hood + exhaust + boom_brackets + cyl_bracket + boom_cyl_a + boom
+swing = joint(upper, "swing", 0, 0.97, 0)
+excavator = base + swing
+
+# ---- poses: cylinder aim angles follow the members they connect ----
+def c1py(tb) = roty(b0y, b0z, c1y, c1z, tb)
+def c1pz(tb) = rotz(b0y, b0z, c1y, c1z, tb)
+def a2py(tb) = roty(b0y, b0z, a2y, a2z, tb)
+def a2pz(tb) = rotz(b0y, b0z, a2y, a2z, tb)
+def epy(tb, ts) = roty(b0y, b0z, roty(b1y, b1z, ey, ez, ts), rotz(b1y, b1z, ey, ez, ts), tb)
+def epz(tb, ts) = rotz(b0y, b0z, roty(b1y, b1z, ey, ez, ts), rotz(b1y, b1z, ey, ez, ts), tb)
+def a3py(tb, ts) = roty(b0y, b0z, roty(b1y, b1z, a3y, a3z, ts), rotz(b1y, b1z, a3y, a3z, ts), tb)
+def a3pz(tb, ts) = rotz(b0y, b0z, roty(b1y, b1z, a3y, a3z, ts), rotz(b1y, b1z, a3y, a3z, ts), tb)
+def fsy(ts, tk) = roty(b1y, b1z, roty(s1y, s1z, fy, fz, tk), rotz(s1y, s1z, fy, fz, tk), ts)
+def fsz(ts, tk) = rotz(b1y, b1z, roty(s1y, s1z, fy, fz, tk), rotz(s1y, s1z, fy, fz, tk), ts)
+def fpy(tb, ts, tk) = roty(b0y, b0z, fsy(ts, tk), fsz(ts, tk), tb)
+def fpz(tb, ts, tk) = rotz(b0y, b0z, fsy(ts, tk), fsz(ts, tk), tb)
+def cyl1(tb) = e1 - elev(a1y, a1z, c1py(tb), c1pz(tb))
+def cyl2(tb, ts) = e2 - elev(a2py(tb), a2pz(tb), epy(tb, ts), epz(tb, ts)) - tb
+def cyl3(tb, ts, tk) = e3 - elev(a3py(tb, ts), a3pz(tb, ts), fpy(tb, ts, tk), fpz(tb, ts, tk)) - tb - ts
+def stance(name, sw, tb, ts, tk) = pose(name, swing=[0, sw, 0], boom=[tb, 0, 0], stick=[ts, 0, 0], bucket=[tk, 0, 0],
+  boom_cyl_a=[cyl1(tb), 0, 0], boom_cyl_b=[cyl1(tb) - tb, 0, 0],
+  stick_cyl_a=[cyl2(tb, ts), 0, 0], stick_cyl_b=[cyl2(tb, ts) - ts, 0, 0],
+  bucket_cyl_a=[cyl3(tb, ts, tk), 0, 0], bucket_cyl_b=[cyl3(tb, ts, tk) - tk, 0, 0])
+
+pose("rest")
+stance("transport", 0, -15, 50, -50)
+stance("reach", 0, 20, -30, 15)
+stance("dig", 25, 18, 12, -55)
+animation("cycle", ["transport", "reach", "dig", "transport"], seconds=4)
+set grid 200
+set azimuth 60
+set elevation 20
+set light_size 1.8
+set slice_x 0.4
+show excavator

@@ -1,0 +1,15 @@
+# Material probe 2: metal x rough for a gold that reads as polished metal.
+set light_size 1.5
+set azimuth 22
+set elevation 18
+a = sphere(0.5) | paint(material("#f2c94c", metal=0.6, rough=0.25)) | move(-3, 0.5, 0)
+b = sphere(0.5) | paint(material("#f2c94c", metal=0.7, rough=0.15)) | move(-1.8, 0.5, 0)
+c = sphere(0.5) | paint(material("#f2c94c", metal=0.5, rough=0.15)) | move(-0.6, 0.5, 0)
+d = sphere(0.5) | paint(material("#f2c94c", metal=0.4, rough=0.1)) | move(0.6, 0.5, 0)
+e = sphere(0.5) | paint(material("#f7d76a", metal=0.8, rough=0.1)) | move(1.8, 0.5, 0)
+f = sphere(0.5) | paint(material("#f2c94c", metal=0.6, rough=0.4)) | move(3, 0.5, 0)
+g = sphere(0.5) | paint(material("#e6e9ee", metal=0.5, rough=0.3)) | move(-3, 0.5, 1.5)
+h = sphere(0.5) | paint(material("#eef0f4", metal=0.6, rough=0.15)) | move(-1.8, 0.5, 1.5)
+floor = box(8, 0.2, 4) | paint(material("marble", scale=0.4)) | move(0, -0.1, 0.75)
+probe = a + b + c + d + e + f + g + h + floor
+show probe

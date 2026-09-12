@@ -1,8 +1,9 @@
 name: CI
 
-# Typecheck, test, and prove the committed reference and example renders are
-# what the code generates: a change under examples/renders/ or in
-# docs/reference.md must come from a change in the code, committed together.
+# Typecheck, test, and prove the committed generated files (the reference,
+# the gallery, the example and dogfood renders) are what the code generates:
+# a change to any of them must come from a change in the code or a program,
+# committed together.
 
 on:
   push:
@@ -22,5 +23,7 @@ jobs:
       - run: npm test
       - run: npm run docs
       - run: npm run examples
+      - run: npm run dogfood
+      - run: npm run pages:gallery
       - name: generated files are up to date
-        run: git diff --exit-code --stat -- docs/reference.md examples/renders/
+        run: git diff --exit-code --stat -- docs/reference.md docs/gallery.md examples/renders/ dogfood/renders/

@@ -1,0 +1,6 @@
+# which axis do stripes stack along? three slabs, painted in different frames
+m = material("#f2ece0", "stripes", "#c8342a", scale=0.5)
+flat = box(3, 0.2, 2) | paint(m) | move(-4, 0, 0)
+wall = box(3, 2, 0.2) | paint(m) | move(0, 1, 0)
+turned = box(0.2, 3, 2) | paint(m) | rotate(z=90) | move(4, 0, 0)
+show flat + wall + turned

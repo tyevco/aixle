@@ -114,6 +114,9 @@ primitive is centred on the origin and stands along y. `a | f(x)` is
 `f(a, x)`. Paint parts before combining them if they should keep different
 materials.
 
+The docs, the gallery and the dogfooding record are published at
+[tyevco.github.io/aixle](https://tyevco.github.io/aixle/).
+
 ## Examples
 
 [`examples/`](examples/) has eighteen models exercising the language, each

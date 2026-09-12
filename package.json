@@ -4,7 +4,9 @@
   "private": true,
   "description": "A procedural 3D modelling language for language models: CSG on signed distance fields, with renders an agent can look at.",
   "type": "module",
-  "bin": { "aixle": "bin/aixle.mjs" },
+  "bin": {
+    "aixle": "bin/aixle.mjs"
+  },
   "scripts": {
     "aixle": "tsx src/cli.ts",
     "test": "vitest run",
@@ -12,12 +14,19 @@
     "build": "tsc -p tsconfig.build.json",
     "docs": "tsx src/cli.ts doc --write docs/reference.md",
     "examples": "tsx tools/examples.ts",
-    "check": "npm run typecheck && npm test && npm run docs && npm run examples"
+    "dogfood": "tsx tools/dogfood.ts",
+    "pages:gallery": "tsx tools/pages.ts",
+    "pages:viewers": "tsx tools/pages.ts --viewers",
+    "pages:dev": "vitepress dev",
+    "pages:build": "vitepress build",
+    "pages": "npm run pages:gallery && npm run pages:viewers && npm run pages:build",
+    "check": "npm run typecheck && npm test && npm run docs && npm run examples && npm run dogfood && npm run pages:gallery"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.2",
+    "vitepress": "^1.6.4",
     "vitest": "^3.0.8"
   }
 }

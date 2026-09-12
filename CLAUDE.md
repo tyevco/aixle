@@ -20,7 +20,9 @@ Layers, each pure and under test:
 | `src/export/` | the texture atlas baker, the scene node tree (`hierarchy.ts`), OBJ+MTL and GLB writers with animations, the self-contained viewer page |
 | `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-marched beauty render |
 | `src/pipeline.ts`, `src/cli.ts` | one run from source to a folder; the command line over it |
-| `tools/examples.ts` | renders `examples/*.aix` into `examples/renders/` |
+| `tools/examples.ts`, `tools/dogfood.ts` | render `examples/*.aix` and `dogfood/**/*.aix` into their `renders/` folders (shared code in `tools/render-set.ts`) |
+| `dogfood/` | the dogfooding record: each round's agent-written programs, probes and reports, unchanged; rendered by CI like the examples |
+| `tools/pages.ts`, `.vitepress/` | the documentation site: the repo's own Markdown plus a generated gallery and GLB viewer pages, published by `.github/workflows/pages.yml` |
 | `.claude/skills/aixle/` | the modelling loop as a Claude Code skill; keep it in step with `docs/agent-guide.md` |
 
 ## Hard rules
@@ -35,9 +37,13 @@ Layers, each pure and under test:
    generates `docs/reference.md` from it. Adding a function means adding it
    there, running `npm run docs`, and committing the reference with it; CI
    fails on a stale reference. Do not hand-edit `docs/reference.md`.
-4. **`examples/renders/` is generated, never hand-edited.** A changed PNG in
-   a diff must come from a change in `src/` or `examples/`, made with
-   `npm run examples` and committed together; CI regenerates and diffs.
+4. **`examples/renders/`, `dogfood/renders/` and `docs/gallery.md` are
+   generated, never hand-edited.** A changed PNG in a diff must come from a
+   change in `src/` or a program, made with `npm run examples` or
+   `npm run dogfood` and committed together; CI regenerates and diffs.
+   The dogfood programs themselves are the agents' own and are not edited
+   except to keep them running when the language changes; a change there
+   says so in the commit.
 5. **Degrees everywhere.** `rotate`, `twist`, `bend`, `sin`, `cos` all take
    degrees. One convention for a model writing code.
 6. **The distance function is the hot path.** `dist(x, y, z)` takes three
@@ -57,6 +63,8 @@ npm run typecheck     tsc, including tools/ and tests/
 npm run aixle -- render examples/mug.aix --beauty     the CLI from source (also: npx aixle ...)
 npm run docs          regenerate docs/reference.md
 npm run examples      regenerate examples/renders/ (pass names to do a few: npm run examples -- mug vase)
+npm run dogfood       regenerate dogfood/renders/ from the agents' programs
+npm run pages         build the site into .vitepress/dist (gallery, viewer pages, vitepress build); pages:dev to serve it
 npm run check         all of the above, what CI runs
 npm run build         compile to dist/ for the bin
 ```
@@ -75,7 +83,12 @@ npm run build         compile to dist/ for the bin
 - A view or sheet: `src/render/views.ts`, with the caption baked in, and a
   size assertion in `tests/render.test.ts`.
 - An example: `examples/<name>.aix`, then `npm run examples -- <name>`, then
-  read the three PNGs before committing them.
+  read the three PNGs before committing them; `npm run pages:gallery` adds
+  it to the gallery.
+- A dogfooding round: brief a few fresh agents as `dogfood/README.md`
+  describes, copy their programs, probes and reports unchanged into
+  `dogfood/round-N/`, answer every friction point in the tool or the docs
+  in the same change, add a row to the index, and `npm run dogfood`.
 
 ## Git
 
