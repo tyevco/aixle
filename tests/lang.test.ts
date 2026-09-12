@@ -52,6 +52,10 @@ describe("parser", () => {
     const p = parse("def f(a, b=2) = box(a, b)\nfor i in range(3) {\n  x = f(i)\n}\nshow x\nset grid 64");
     expect(p.body.map((s) => s.type)).toEqual(["def", "for", "show", "set"]);
   });
+  it("refuses a keyword as a name with a plain message", () => {
+    expect(() => parse("scene = box(1)")).toThrow(/line 1: 'scene' is a keyword and cannot be a name/);
+    expect(() => parse("show = 1")).toThrow(/'show' is a keyword/);
+  });
   it("names the line of a syntax error", () => {
     expect(() => parse("a = 1\nb = box(1,")).toThrow(/line 2/);
     expect(() => parse("for i in range(3) {\n x = 1")).toThrow(/never closed/);

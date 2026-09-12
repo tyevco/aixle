@@ -73,6 +73,8 @@ class Parser {
 
   private statement(): Stmt {
     const t = this.peek();
+    if (t.type === "ident" && KEYWORDS.has(t.value) && this.peek(1).type === "op" && this.peek(1).value === "=")
+      throw new SyntaxError(`'${t.value}' is a keyword and cannot be a name; call it ${t.value}_ or something else`, t.line);
     if (t.type === "ident" && t.value === "def") return this.def();
     if (t.type === "ident" && t.value === "for") return this.for();
     if (t.type === "ident" && t.value === "show") {

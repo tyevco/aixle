@@ -23,5 +23,5 @@ c3 = chair() | rotate(y=90) | move(-2.3, 0, 0)
 c4 = chair() | rotate(y=-90) | move(2.3, 0, 0)
 chairs = (c1 + c2 + c3 + c4) | paint("oak")
 
-scene = table + chairs
-show scene
+dining = table + chairs
+show dining
