@@ -315,6 +315,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     cost: s.cost,
     inner: [s],
     unwarp: warp,
+    warp: (x, y, z) => { const a = k * y, c = Math.cos(a), sn = Math.sin(a); return [c * x - sn * z, y, sn * x + c * z]; },
     loose: true,
     feature: s.feature,
     gap: s.gap,
@@ -363,6 +364,11 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     const a = Math.atan2(dx * sg, dy * sg);
     return [a * R, R - Math.hypot(dx, dy) * sg, z];
   };
+  // Forward: a point at (u, v) in the flat shape rides the arc at angle u / R, radius R - v from the centre.
+  const warp = (u: number, v: number, w: number): Vec3 => {
+    const a = u / R, rho = (R - v) * sg;
+    return [rho * Math.sin(a) * sg, R - rho * Math.cos(a) * sg, w];
+  };
   return {
     kind: "shape3",
     dist: (x, y, z) => { const p = unwarp(x, y, z); return d(p[0], p[1], p[2]); },
@@ -371,6 +377,7 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     cost: s.cost,
     inner: [s],
     unwarp,
+    warp,
     loose: true,
     feature: s.feature,
     gap: s.gap,
@@ -407,6 +414,7 @@ export function wrap(s: Shape3, r: number): Shape3 {
     }
   }
   const unwarp = (x: number, y: number, z: number): Vec3 => [Math.atan2(x, z) * r, y, Math.hypot(x, z) - r];
+  const warp = (u: number, v: number, w: number): Vec3 => [(r + w) * Math.sin(u / r), v, (r + w) * Math.cos(u / r)];
   return {
     kind: "shape3",
     dist: (x, y, z) => { const p = unwarp(x, y, z); return d(p[0], p[1], p[2]); },
@@ -415,6 +423,7 @@ export function wrap(s: Shape3, r: number): Shape3 {
     cost: s.cost,
     inner: [s],
     unwarp,
+    warp,
     loose: true,
     feature: s.feature,
     gap: s.gap,
@@ -674,6 +683,76 @@ export function surfacePoint(s: Shape3, x: number, y: number, z: number): Vec3 {
   }
   return [px, py, pz];
 }
+
+// --- anchors -----------------------------------------------------------------
+
+/**
+ * Name a point on a shape, in the shape's own frame. Every transform, warp
+ * and posed joint above it carries the point along (anchorsOf walks the
+ * tree with each node's forward map), so a part's anchors are where the
+ * part is, and at() reads them after any number of moves. What every
+ * dogfooding round did by hand: a hand at (0.5, 2.22, 0.38), a rod's end
+ * from sin and cos, a star 0.1 above its post.
+ */
+export function anchor(s: Shape3, name: string, x: number, y: number, z: number): Shape3 {
+  return {
+    kind: "shape3",
+    dist: s.dist,
+    hit: s.hit,
+    bounds: s.bounds,
+    cost: s.cost,
+    inner: [s],
+    anchors: { ...anchorsOf(s), [name]: [x, y, z] },
+    feature: s.feature,
+    gap: s.gap,
+  };
+}
+
+/**
+ * The named anchors of a shape in its own frame: its own, or its
+ * children's carried through the node's forward map. A union takes every
+ * part's (the first part wins a name), a cut keeps the first shape's, a
+ * placed set keeps none (there are many copies). A twist, bend or wrap
+ * carries anchors along the warp, so the tip of a bent bar is the bent
+ * tip. The result is cached on the node.
+ */
+export function anchorsOf(s: Shape3): Record<string, Vec3> {
+  if (s.anchors) return s.anchors;
+  let out: Record<string, Vec3> = {};
+  if (s.instanced) out = {};
+  else if (s.cut && s.inner?.length) out = { ...anchorsOf(s.inner[0]) };
+  else {
+    const kids = s.parts ?? s.inner ?? [];
+    for (const k of kids) for (const [name, p] of Object.entries(anchorsOf(k))) if (!(name in out)) out[name] = s.warp ? s.warp(p[0], p[1], p[2]) : p;
+  }
+  s.anchors = out;
+  return out;
+}
+
+/**
+ * The world point of an anchor: a named one, or one of the free ones every
+ * shape has from its box (centre, top, bottom, front, back, left, right,
+ * the box's face centres). Undefined for a name the shape does not have.
+ */
+export function anchorAt(s: Shape3, name: string): Vec3 | undefined {
+  const named = anchorsOf(s)[name];
+  if (named) return named;
+  if (isEmpty(s.bounds)) return undefined;
+  const c = boundsCenter(s.bounds), b = s.bounds;
+  switch (name) {
+    case "centre": case "center": return c;
+    case "top": return [c[0], b.max[1], c[2]];
+    case "bottom": return [c[0], b.min[1], c[2]];
+    case "front": return [c[0], c[1], b.max[2]];
+    case "back": return [c[0], c[1], b.min[2]];
+    case "right": return [b.max[0], c[1], c[2]];
+    case "left": return [b.min[0], c[1], c[2]];
+  }
+  return undefined;
+}
+
+/** The free anchor names every shape answers to, for messages. */
+export const FREE_ANCHORS = ["centre", "top", "bottom", "front", "back", "left", "right"];
 
 /** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
 export function hasLooseBounds(s: Shape3): boolean {

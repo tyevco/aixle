@@ -245,3 +245,39 @@ describe("round-4 findings in the language", () => {
     expect(p[1]).toBeCloseTo(2, 4);
   });
 });
+
+describe("anchors", () => {
+  it("carry through moves, rotations, warps and posed joints, and attach() places by them", () => {
+    const src = [
+      'post = cylinder(0.08, 1) | anchor("top", 0, 0.5, 0) | move(0, 0.5, 0)',
+      'arm = box(1, 0.2, 0.2) | anchor("root", -0.5, 0, 0) | anchor("tip", 0.5, 0, 0)',
+      'arm2 = arm | rotate(z=90) | attach("root", post, "top")',
+      'p = at(arm2, "tip")',
+      'lamp = sphere(0.15) | attach("bottom", arm2, "tip")',
+      'j = joint(arm2 + lamp, "swing", 0, 1, 0)',
+      'q = at(j, "tip")',
+      'bar = box(2, 0.1, 0.1) | anchor("end", 1, 0, 0) | bend(45)',
+      'e = at(bar, "end")',
+      'm = post + j',
+      'pose("up", swing=[0, 0, -90])',
+    ].join("\n");
+    const ev = run(src);
+    const p = ev.steps.find((s) => s.name === "p")!.value as number[];
+    expect(p[0]).toBeCloseTo(0, 6);
+    expect(p[1]).toBeCloseTo(2, 6);
+    const lamp = ev.steps.find((s) => s.name === "lamp")!.value as Shape3;
+    expect(lamp.bounds.min[1]).toBeCloseTo(2, 6);
+    // In the pose the joint turns the arm about (0, 1, 0), so the tip swings out to x = 1.
+    const posed = evaluate(parse(src), { jointAngles: { swing: [0, 0, -90] } });
+    const q = posed.steps.find((s) => s.name === "q")!.value as number[];
+    expect(q[0]).toBeCloseTo(1, 6);
+    expect(q[1]).toBeCloseTo(1, 6);
+    // A bent bar's end rides the arc: 45 degrees per unit over one unit, radius 57.3 / 45.
+    const e = ev.steps.find((s) => s.name === "e")!.value as number[];
+    const R = 1 / (Math.PI / 4);
+    expect(e[0]).toBeCloseTo(R * Math.sin(Math.PI / 4), 6);
+    expect(e[1]).toBeCloseTo(R - R * Math.cos(Math.PI / 4), 6);
+    // Free anchors come from the box; a missing name lists what there is.
+    expect(() => run('a = box(1)\np = at(a, "nose")')).toThrow(/no anchor "nose".*top, bottom/);
+  });
+});

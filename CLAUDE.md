@@ -15,7 +15,7 @@ Layers, each pure and under test:
 
 | Directory | What |
 | --- | --- |
-| `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, the stroke font, materials |
+| `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, anchors, the stroke font, materials |
 | `src/lang/` | the `.aix` language: lexer, parser, interpreter, and the builtin registry that is also the reference |
 | `src/mesh/` | surface nets with dual contouring, mesh measures, a mesh sampled to a field for imports |
 | `src/import/` | OBJ and GLB readers (positions and triangles only) |

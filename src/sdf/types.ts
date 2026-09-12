@@ -98,6 +98,8 @@ export interface Shape3 {
   unwarp?: (x: number, y: number, z: number) => Vec3;
   /** For a rigid transform or a joint: where a point of the child lands, so a step inside a posed joint can be framed where it is. */
   warp?: (x: number, y: number, z: number) => Vec3;
+  /** Named points on the shape, in its own frame, set by anchor(); anchorsOf() carries them through the tree. */
+  anchors?: Record<string, Vec3>;
   /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
   loose?: boolean;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */

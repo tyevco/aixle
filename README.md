@@ -98,6 +98,7 @@ tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, ta
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # point lists
 bezier(points)  curve(points)  tube(r, c)  sweep(profile, c)  text("Ab", 1, face="serif")  # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
+anchor(part, "tip", x, y, z)   at(part, "tip")   lamp | attach("bottom", arm, "tip")     # placement by name
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
 set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render

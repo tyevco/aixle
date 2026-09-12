@@ -117,6 +117,29 @@ mirror it), `flip("x")` (reflects only), `ground()`, `center()`.
 Transforms are about the origin, so the order matters: build a part at the
 origin, rotate it, then move it into place.
 
+**Anchors**: `anchor(shape, "name", x, y, z)` names a point on a part in
+the part's own frame, and every transform, warp and posed joint above it
+carries the point along, so the point is where the part is. `at(shape,
+"name")` is that point as `[x, y, z]`, and `attach(part, "a", target,
+"b")` moves `part` so its anchor `a` lands on the target's anchor `b`:
+a placement with no numbers. Every shape also answers to the free
+anchors `centre`, `top`, `bottom`, `front`, `back`, `left` and `right`
+(its box's face centres), so `lamp | attach("bottom", arm, "tip")` sets a
+lamp on the end of an arm. Rotate a part first, then attach it; the
+anchors turn with it. A union keeps every part's anchors (the first part
+wins a repeated name), a cut keeps the first shape's, and `check` prints
+a step's named anchors under its box. In a pose, `at()` on a joint's
+subtree is the posed point, which is how a member between two moving
+bodies finds its ends (see the cylinder under Scenes, joints and poses).
+
+```
+post = cylinder(0.08, 1) | anchor("top", 0, 0.5, 0) | move(0, 0.5, 0)
+arm = box(1, 0.2, 0.2) | anchor("root", -0.5, 0, 0) | anchor("tip", 0.5, 0, 0)
+arm2 = arm | rotate(z=30) | attach("root", post, "top")   # root lands on the post's top
+lamp = sphere(0.15) | attach("bottom", arm2, "tip")        # and the lamp on the arm's tip
+rod = tube(0.05, [at(post, "top"), at(arm2, "tip")])       # a list is a point
+```
+
 **Modifiers**: `round(r)` grows the surface outward and rounds edges;
 `offset(r)` the same, negative to shrink; `shell(t)` hollows leaving a wall
 `t` thick (then subtract something to make an opening); `twist(deg)` per
@@ -290,7 +313,11 @@ ram = sqrt((eye[0] - base[0]) ^ 2 + (eye[1] - base[1]) ^ 2)
 barrel = tube(0.11, [0.35, base[0], base[1], 0.35, base[0] + (eye[0] - base[0]) * 1.2 / ram, base[1] + (eye[1] - base[1]) * 1.2 / ram], cap="flat")
 ```
 
-The rod is the same tube from `eye` towards `base`, `ram - 1.2 + 0.3`
+With anchors the same cylinder needs no `turn`: anchor the barrel pin on
+the body and the rod pin on the boom (`boom | anchor("eye", 1.6, 2.4,
+0.35)`), and in each pose `at(boom_joint, "eye")` is the eye where the
+pose put it, so `barrel = tube(0.11, [at(body, "pin"), at(boom_joint,
+"eye")])` is the whole cylinder. The rod is the same tube from `eye` towards `base`, `ram - 1.2 + 0.3`
 long, built inside the boom's joint so it turns with it. The cost is
 that the GLB's animation moves only joints, so the exported cylinders do
 not telescope; the sheets and the beauty render do. Six small joints, one

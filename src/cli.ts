@@ -4,7 +4,7 @@
  *   aixle check  <file.aix>
  *   aixle doc    [--write FILE]
  */
-import { hasLooseBounds, placedBounds, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
+import { anchorsOf, hasLooseBounds, placedBounds, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
@@ -106,6 +106,9 @@ function main(argv: string[]): number {
           const tighter = [0, 1, 2].some((k) => (e.max[k] - e.min[k]) < (b.max[k] - b.min[k]) * 0.95);
           if (!isEmpty(e) && tighter) { own = e; console.log(`${"  surface".padEnd(18)} ${spanBox(e)}`); }
         }
+        // Named anchors, where they are in this step's frame.
+        const anchors = Object.entries(anchorsOf(st.value));
+        if (anchors.length) console.log(`${"  anchors".padEnd(18)} ${anchors.map(([k, p]) => `${k} (${p.map(short).join(", ")})`).join("  ")}`);
         // In a pose, where the step ends up once the joints above it have turned (its surface extent carried
         // through them, so still a box, but of the surface rather than of a box).
         if (pose && ev.output) {

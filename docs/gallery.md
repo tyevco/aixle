@@ -160,6 +160,14 @@ A fluted vase: a lathe profile revolved around y, sixteen flutes cut from
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/vase.aix) · <a href="/aixle/viewers/vase.html" target="_blank" rel="noopener">viewer</a>
 
+### windmill
+
+A windmill, placed with anchors instead of arithmetic: the cap sits on
+
+![windmill, beauty render](../examples/renders/windmill_beauty.png) ![windmill, contact sheet](../examples/renders/windmill.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/windmill.aix) · <a href="/aixle/viewers/windmill.html" target="_blank" rel="noopener">viewer</a>
+
 ## Dogfooding
 
 Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).

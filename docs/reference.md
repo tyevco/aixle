@@ -600,6 +600,29 @@ A repeatable pseudo-random number in 0..1 for an integer seed (use the loop inde
 
     rand(seed) -> number
 
+## Anchors
+
+### anchor
+
+Name a point on a shape, in the shape's own frame: anchor(post, "top", 0, 1, 0). Every move, rotate, scale, warp and posed joint above it carries the point along, so at() reads it wherever the part ends up, and a union keeps every part's anchors (the first part wins a repeated name).
+
+    anchor(shape, name, x, y, z) -> shape
+
+### at
+
+The world point of a shape's anchor as [x, y, z]: one named with anchor(), or a free one every shape has from its box: centre, top, bottom, front, back, left, right (the box's face centres). In a pose, a point inside a joint is where the pose put it.
+
+    at(shape, name) -> list
+
+### attach
+
+Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it.
+
+    attach(part, anchor, target, targetAnchor) -> shape
+
+- `anchor`: the part's anchor
+- `targetAnchor`: the target's anchor
+
 ## Files
 
 ### import

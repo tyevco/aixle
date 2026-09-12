@@ -7,40 +7,14 @@ first). They are ordered by how much they would change what an agent can
 make, judged from three rounds of dogfooding. Items move out of here into
 `design.md` when they are built.
 
-## 1. Anchors: name points on a part, and they move with it
+## 1. Anchors: built
 
-**Why.** Every dogfooding round spent most of its iterations on placement
-arithmetic: a hand computed at `(0.5, 2.22, 0.38)`, a cylinder rod's end
-worked out with `sin` and `cos`, a star floated 0.1 above its post. The
-program has the numbers but not the meaning, so an inherited program
-reads as a wall of coordinates.
-
-**What.** A shape can carry named points, and every transform carries
-them along:
-
-```
-post = cylinder(0.08, 1) | anchor("top", 0, 1, 0)
-arm = box(1, 0.2, 0.2) | anchor("root", -0.5, 0, 0) | anchor("tip", 0.5, 0, 0)
-arm2 = arm | rotate(z=30) | attach("root", post, "top")     # root lands on the post's top
-p = at(arm2, "tip")                                          # a world point, [x, y, z]
-rod = tube(0.05, [at(base, "pin"), at(arm2, "tip")])
-```
-
-`attach(part, anchor, target, targetAnchor)` is a `move`; `at()` returns
-a list. Primitives get free anchors (`top`, `bottom`, `centre`, the six
-face centres), so `box(...) | attach("bottom", table, "top")` needs no
-numbers at all. Joints keep their anchors, and `at()` in a pose returns
-the posed point, which makes a hydraulic cylinder one line with no
-trigonometry.
-
-**How.** `anchors?: Record<string, Vec3>` on `Shape3`, mapped by `move`,
-`rotateBy`, `scale`, `joint` (turned by the pose) and kept by wrappers;
-unions merge their parts' anchors (a duplicate name warns). `check`
-prints a step's anchors after its box.
-
-**Must prototype.** Whether an agent reaches for `attach` unprompted once
-the skill shows it (one dogfood round); how a union should resolve two
-parts that both define `top`.
+`anchor`, `at` and `attach` are in the language (see `language.md` and
+the anchors section of `design.md`); every transform, warp and joint
+carries them, unions merge them with the first part winning a name, and
+`check` prints them. What round 5 must measure: whether an agent reaches
+for `attach` unprompted once the skill shows it, and whether the
+first-part-wins rule for a repeated name ever surprises one.
 
 ## 2. PBR textures baked from the field
 
