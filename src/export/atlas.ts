@@ -19,7 +19,7 @@
  */
 import { albedo } from "../sdf/materials.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { Canvas, rgbf } from "../render/canvas.js";
+import { Canvas, rgbf, rgbDithered } from "../render/canvas.js";
 
 export interface AtlasResult {
   /** The mesh with vertices split per chart. */
@@ -199,7 +199,7 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
         const lz = newLoc[a * 3 + 2] * w0 + newLoc[b * 3 + 2] * w1 + newLoc[c * 3 + 2] * w2;
         const nearest = w0 >= w1 && w0 >= w2 ? a : w1 >= w2 ? b : c;
         const col = albedo(mats[newMat[nearest]], lx, ly, lz);
-        image.set(px, py, rgbf(col[0], col[1], col[2]));
+        image.set(px, py, rgbDithered(col[0], col[1], col[2], px, py));
         covered[py * size + px] = 1;
       }
     }

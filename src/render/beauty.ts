@@ -16,7 +16,7 @@ import { albedo } from "../sdf/materials.js";
 import { boundsCenter, boundsDistance, boundsGrow, boundsSize, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { perspective, toView, type Camera } from "./camera.js";
-import { Canvas, rgbf } from "./canvas.js";
+import { Canvas, rgbf, rgbDithered } from "./canvas.js";
 import { drawText } from "./font.js";
 import { createTarget, renderMesh } from "./raster.js";
 import { INK } from "./views.js";
@@ -336,7 +336,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     for (let px = 0; px < size; px++) {
       const s = sample(px + 0.5, py + 0.5, prime.depth[py * size + px]);
       samples[py * size + px] = s;
-      canvas.set(px, py, rgbf(s.color[0], s.color[1], s.color[2]));
+      canvas.set(px, py, rgbDithered(s.color[0], s.color[1], s.color[2], px, py));
     }
   // Edge pixels get four samples. The mesh depth primes them with the neighbour that has one.
   const isEdge = (i: number, j: number): boolean => {
@@ -361,7 +361,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
         const s = sample(px + ox, py + oy, d);
         r += s.color[0]; g += s.color[1]; b += s.color[2];
       }
-      canvas.set(px, py, rgbf(r / 4, g / 4, b / 4));
+      canvas.set(px, py, rgbDithered(r / 4, g / 4, b / 4, px, py));
     }
   if (opts.dof && opts.dof > 0) depthOfField(canvas, samples, size, opts.dof, boundsCenter(bounds), cam);
   if (opts.label) drawText(canvas, 8, size - 12, opts.label, INK.dim, 1);
