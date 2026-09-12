@@ -362,5 +362,6 @@ export function sweepCurve(profile: Shape2, curve: Curve, twist = 0, taper = 1):
     return cap > 0 ? (d2 > 0 ? Math.sqrt(d2 * d2 + cap * cap) : cap) : d2;
   }, boundsGrow(curve.bounds, reach), curve.segments * COST_PER_SEGMENT + profile.cost);
   out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
+  out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
   return out;
 }

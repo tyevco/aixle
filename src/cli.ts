@@ -8,13 +8,14 @@ import { surfaceBottom } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, foldThinWarnings, QUICK, run, thinWarnings } from "./pipeline.js";
+import { cellFor, check, diff, foldThinWarnings, paintWarnings, QUICK, run, thinWarnings } from "./pipeline.js";
 import { watch } from "node:fs";
 import { isEmpty } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
 import { isShape3 } from "./lang/values.js";
 
-const short = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
+// Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
+const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 function usage(): never {
   console.error(
@@ -23,7 +24,7 @@ function usage(): never {
       "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
       "                          [--beauty [--beauty-size N]] [--soft] [--texture N | --no-texture]",
-      "                          [--azimuth DEG] [--elevation DEG] [--focus NAME] [--pose NAME]",
+      "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix> [--pose NAME]   parse and evaluate; print sizes and warnings, render nothing",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
@@ -99,7 +100,7 @@ function main(argv: string[]): number {
         if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
       }
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : [])];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev)];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       return 0;
@@ -172,6 +173,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       sharp: opts.soft ? false : undefined,
       texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,
       azimuth: typeof opts.azimuth === "string" ? Number(opts.azimuth) : undefined,
+      zoom: typeof opts.zoom === "string" ? Number(opts.zoom) : undefined,
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
       focus: typeof opts.focus === "string" ? opts.focus : undefined,
       pose: typeof opts.pose === "string" ? opts.pose : undefined,

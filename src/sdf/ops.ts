@@ -78,6 +78,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       parts: live,
       inner: live,
       feature: minFeature(live),
+    gap: minGap(live),
     };
   }
   return {
@@ -104,7 +105,15 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     cost,
     inner: live,
     feature: minFeature(live),
+    gap: minGap(live),
   };
+}
+
+/** The narrowest known gap among shapes, or undefined when none carries one. */
+function minGap(shapes: Shape3[]): number | undefined {
+  let g: number | undefined;
+  for (const s of shapes) if (s.gap !== undefined && (g === undefined || s.gap < g)) g = s.gap;
+  return g;
 }
 
 /** The smallest known feature among shapes, or undefined when none carries one. */
@@ -128,7 +137,9 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     bounds: a.bounds,
     cost: a.cost + b.cost,
     inner: [a, b],
+    cut: true,
     feature: a.feature,
+    gap: a.gap,
   };
 }
 
@@ -145,7 +156,9 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     bounds: boundsIntersect(a.bounds, b.bounds),
     cost: a.cost + b.cost,
     inner: [a, b],
+    cut: true,
     feature: a.feature,
+    gap: a.gap,
   };
 }
 
@@ -161,7 +174,9 @@ export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {
     bounds: isEmpty(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy, b.min[2] + dz], max: [b.max[0] + dx, b.max[1] + dy, b.max[2] + dz] },
     cost: s.cost,
     inner: [s],
+    transform: true,
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -178,7 +193,9 @@ export function rotateBy(s: Shape3, m: Mat3): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    transform: true,
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -206,7 +223,9 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    transform: true,
     feature: s.feature === undefined ? undefined : s.feature * m,
+    gap: s.gap === undefined ? undefined : s.gap * m,
   };
 }
 
@@ -234,6 +253,7 @@ export function offset(s: Shape3, r: number): Shape3 {
     cost: s.cost,
     inner: [s],
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -248,6 +268,7 @@ export function shell(s: Shape3, t: number): Shape3 {
     cost: s.cost,
     inner: [s],
     feature: s.feature === undefined ? t : Math.min(s.feature, t),
+    gap: s.gap,
   };
 }
 
@@ -273,6 +294,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     cost: s.cost,
     inner: [s],
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -326,6 +348,7 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     cost: s.cost,
     inner: [s],
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -367,6 +390,7 @@ export function wrap(s: Shape3, r: number): Shape3 {
     cost: s.cost,
     inner: [s],
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -391,6 +415,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     cost: s.cost + 8,
     inner: [s],
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -424,48 +449,78 @@ export function ring(s: Shape3, count: number, radius = 0, axis: Axis = "y"): Sh
 
 // --- placement helpers -------------------------------------------------------
 
-/** Move so the lowest point sits on y = 0. */
 /**
- * The lowest y of the surface itself, found by rays marched upward from
- * under the bounds on a grid, the best one refined. Bounds are boxes: a
- * smooth union pads them by its blend and a difference keeps the box of
- * what it cut away, and ground() by bounds once lifted a frog whose shins
- * reached the pad by a tenth of a unit (measured). Returns the bounds'
- * bottom when no ray hits, which happens only for a shape thinner than the
- * ray spacing everywhere.
+ * The extent of the surface itself, as a box: rays marched inward from a
+ * grid on each face of the bounds, the nearest hit on each face refined
+ * within one ray spacing. Bounds are boxes: a smooth union pads them by its
+ * blend, a difference keeps the box of what it cut away, a turned joint has
+ * the box of a turned box, and ground() by bounds once lifted a frog whose
+ * shins reached the pad by a tenth of a unit (measured). Rays see anything
+ * at least a spacing thick in the two directions across them; a coarse
+ * extraction pass, which this replaced, missed a plate thinner than its
+ * cell that no sample plane fell inside (measured: a lily pad 0.12 thick
+ * under a 4.4-unit frog came back 1.8 wide instead of 2.2). A face no ray
+ * hits keeps the bounds' value.
  */
-export function surfaceBottom(s: Shape3, rays = 48): number {
+export function surfaceExtent(s: Shape3, rays = 48): Bounds {
   const b = s.bounds;
-  if (isEmpty(b)) return 0;
+  if (isEmpty(b)) return b;
   const size = boundsSize(b);
-  const eps = Math.max(1e-7, Math.max(size[0], size[1], size[2]) * 2e-5);
-  const start = b.min[1] - eps * 4, stop = b.max[1] + eps;
+  const longest = Math.max(size[0], size[1], size[2]);
+  const eps = Math.max(1e-7, longest * 2e-5);
   const d = s.dist;
-  const march = (x: number, z: number): number => {
-    let y = start;
-    for (let i = 0; i < 200 && y <= stop; i++) {
-      const v = d(x, y, z);
-      if (v < eps) return y;
-      y += v;
+  const out: Bounds = { min: [b.min[0], b.min[1], b.min[2]], max: [b.max[0], b.max[1], b.max[2]] };
+  // March from `start` along axis `a` in direction `dir` (+1 or -1) until the surface; Infinity when it runs out.
+  const march = (p: Vec3, a: number, dir: number, limit: number): number => {
+    let t = 0;
+    const q: Vec3 = [p[0], p[1], p[2]];
+    for (let i = 0; i < 200 && t <= limit; i++) {
+      const v = d(q[0], q[1], q[2]);
+      if (v < eps) return t;
+      t += v;
+      q[a] = p[a] + dir * t;
     }
     return Infinity;
   };
-  let best = Infinity, bi = 0, bj = 0;
-  for (let i = 0; i < rays; i++)
-    for (let j = 0; j < rays; j++) {
-      const y = march(b.min[0] + ((i + 0.5) / rays) * size[0], b.min[2] + ((j + 0.5) / rays) * size[2]);
-      if (y < best) { best = y; bi = i; bj = j; }
+  for (let a = 0; a < 3; a++) {
+    const u = (a + 1) % 3, v = (a + 2) % 3;
+    for (const dir of [1, -1]) {
+      const startA = (dir === 1 ? b.min[a] : b.max[a]) - dir * eps * 4;
+      const limit = size[a] + eps * 8;
+      let best = Infinity, bi = 0, bj = 0;
+      for (let i = 0; i < rays; i++)
+        for (let j = 0; j < rays; j++) {
+          const p: Vec3 = [0, 0, 0];
+          p[a] = startA;
+          p[u] = b.min[u] + ((i + 0.5) / rays) * size[u];
+          p[v] = b.min[v] + ((j + 0.5) / rays) * size[v];
+          const t = march(p, a, dir, limit);
+          if (t < best) { best = t; bi = i; bj = j; }
+        }
+      if (best === Infinity) continue;
+      // Refine within one ray spacing of the best ray.
+      const su = size[u] / rays, sv = size[v] / rays;
+      const cu = b.min[u] + (bi + 0.5) * su, cv = b.min[v] + (bj + 0.5) * sv;
+      for (let i = -6; i <= 6; i++)
+        for (let j = -6; j <= 6; j++) {
+          const p: Vec3 = [0, 0, 0];
+          p[a] = startA;
+          p[u] = cu + (i / 6) * su;
+          p[v] = cv + (j / 6) * sv;
+          const t = march(p, a, dir, limit);
+          if (t < best) best = t;
+        }
+      const hit = startA + dir * best;
+      if (dir === 1) out.min[a] = Math.max(b.min[a], Math.min(b.max[a], hit));
+      else out.max[a] = Math.min(b.max[a], Math.max(b.min[a], hit));
     }
-  if (best === Infinity) return b.min[1];
-  // Refine within one ray spacing of the best ray.
-  const sx = size[0] / rays, sz = size[2] / rays;
-  const cx = b.min[0] + (bi + 0.5) * sx, cz = b.min[2] + (bj + 0.5) * sz;
-  for (let i = -6; i <= 6; i++)
-    for (let j = -6; j <= 6; j++) {
-      const y = march(cx + (i / 6) * sx, cz + (j / 6) * sz);
-      if (y < best) best = y;
-    }
-  return best;
+  }
+  return out;
+}
+
+/** The lowest y of the surface itself (see surfaceExtent); the bounds' bottom when no ray from below hits. */
+export function surfaceBottom(s: Shape3, rays = 48): number {
+  return surfaceExtent(s, rays).min[1];
 }
 
 /** Move the shape so the lowest point of its surface rests on y = 0 (the surface, not the bounds: see surfaceBottom). */
@@ -494,6 +549,8 @@ export function paint(s: Shape3, m: Material): Shape3 {
     cost: s.cost,
     inner: [s],
     feature: s.feature,
+    gap: s.gap,
+    painted: true,
   };
 }
 
@@ -505,14 +562,22 @@ export function paint(s: Shape3, m: Material): Shape3 {
  */
 export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
   const d = s.dist, h = s.hit, rd = region.dist;
+  // Only a skin: deeper than a tenth of the region's smallest side the base material shows, so a cross-section
+  // does not draw the region as a solid inside the part (measured: a frog's belly decal read as an organ).
+  const rs = isEmpty(region.bounds) ? 1 : Math.max(1e-6, Math.min(...boundsSize(region.bounds)) * 0.1);
   return {
     kind: "shape3",
     dist: d,
-    hit: (x, y, z) => (rd(x, y, z) <= 0 ? { d: d(x, y, z), mat: m, lx: x, ly: y, lz: z } : h(x, y, z)),
+    hit: (x, y, z) => {
+      const v = d(x, y, z);
+      return v > -rs && rd(x, y, z) <= 0 ? { d: v, mat: m, lx: x, ly: y, lz: z } : h(x, y, z);
+    },
     bounds: s.bounds,
     cost: s.cost + region.cost,
-    inner: [s, region],
+    // The region is paint, not geometry: it stays out of the tree so nothing counts it as a part.
+    inner: [s],
     feature: s.feature,
+    gap: s.gap,
   };
 }
 
@@ -542,6 +607,7 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
     inner: [child],
     joint: state,
     feature: child.feature,
+    gap: child.gap,
   };
 }
 

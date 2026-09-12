@@ -6,7 +6,8 @@ disc = revolve(polygon(0,0, 1.5,0, 1.5,0.14, 1.32,0.2, 0,0.2)) | rotate(x=90) | 
 # The disc's face is at z = 0.2 after the rotate (check prints each step's
 # x, y, z spans), so the relief sits from 0.2 to 0.3.
 rim_text = extrude(text("AIXLE MODELS", size=0.32, weight=0.09, arc=1.1), 0.1, "z") | move(0, 0, 0.25) | paint("brass")
-under_text = extrude(text("for machines", size=0.24, weight=0.08, arc=-1.1), 0.1, "z") | move(0, 0, 0.25) | paint("brass")
+# Capitals: at this size a lowercase counter would be under the cell, and check says so.
+under_text = extrude(text("FOR MACHINES", size=0.22, weight=0.06, arc=-1.1), 0.1, "z") | move(0, 0, 0.25) | paint("brass")
 badge = extrude(star(5, 0.55, 0.24), 0.1, "z") | move(0, 0.05, 0.25) | paint("brass")
 # The loop: a half revolve sweeps in the ground plane from +z round to -z, so
 # it is stood up with rotate(x=-90) to arch over the rim, its feet in the disc.

@@ -36,9 +36,10 @@ export function renderSet(srcDir: string, outDir: string, label: string, opts: R
   mkdirSync(outDir, { recursive: true });
   const files = programs(srcDir)
     .filter((f) => !opts.skipSuffix || !f.endsWith(opts.skipSuffix))
-    .filter((f) => !opts.only?.length || opts.only.includes(f.replace(/^.*\//, "").replace(/\.aix$/, "")));
+    .filter((f) => !opts.only?.length || opts.only.includes(f.replace(/^.*\//, "").replace(/\.aix$/, "")) || opts.only.includes(f.replace(/\.aix$/, "").replace(/\//g, "_")));
   for (const file of files) {
-    const name = file.replace(/^.*\//, "").replace(/\.aix$/, "");
+    // A program in a subfolder keeps the folder in its render's name, so round-2/frog and round-3/frog do not collide.
+    const name = file.replace(/\.aix$/, "").replace(/\//g, "_");
     const tmp = join(tmpdir(), `aixle-${label}-${name}`);
     rmSync(tmp, { recursive: true, force: true });
     const t0 = performance.now();

@@ -31,7 +31,7 @@ npx aixle render model.aix                 sheet, views, slices, steps, turntabl
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
-npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds: the way to try materials
+npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
@@ -80,6 +80,10 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
 | the eyes, mouth or a label need geometry you do not want | a painted sphere bulges, a painted tube sticks out | `decal(shape, region, material)` paints the surface inside a region and adds nothing |
+| a fine pattern looks like blocks or camouflage on the sheet | the sheet colours per vertex and the pattern is near the cell size | judge it in the beauty render, or coarsen `scale=` |
+| lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
+| the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
+| the beauty render leaves the model small in the frame | the camera fits the bounding sphere | `set zoom 1.4` or `--zoom 1.4` |
 | a material boundary speckles in the views | two painted surfaces nearly coincide, so each vertex picks either | give them a clear angle, or one shape with a `decal`; the beauty render is unaffected |
 | a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |
 | "watertight: no" with edges you cannot find | two surfaces pass through one cell | the report says where the edges are and which steps hold them |
@@ -110,14 +114,18 @@ set pose reach
 show arm
 ```
 
-Angles are degrees about x, then y, then z, right-handed. Sizes printed
-by `check` and shown on the sheet are for the pose being shown; the
-exports are at rest and carry the joints and animations.
+Angles are degrees about x, then y, then z, right-handed, and a nested
+joint's angles are relative to its parent. `angle("elbow")` reads the
+current pose's angles, which is how a member between two moving parts (a
+hydraulic cylinder) finds its end points. Sizes printed by `check` and
+shown on the sheet are for the pose being shown; the exports are at rest
+and carry the joints and animations.
 
 ## Style that renders well
 
-- Overlap parts slightly (a peg 0.02 into its hole) rather than touching;
-  coincident faces are fine for the geometry but look like seams.
+- Overlap parts by at least a grid cell (a peg 0.05 into its hole) rather
+  than touching: coincident faces are exact for the booleans but leave a
+  few non-manifold edges in the mesh and look like seams.
 - `round=` on boxes and cylinders, or `union(..., k=)` for organic joins;
   chamfer nothing by hand.
 - `| ground()` when the lowest point should touch the floor. It reads the

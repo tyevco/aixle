@@ -67,7 +67,7 @@ export function isWatertight(m: Mesh): boolean {
  * triangle (a hole) or with more than two (two sheets of surface through
  * one cell, which is what a feature about a cell thin produces).
  */
-export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string; where?: Bounds } {
+export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string; where?: Bounds; clusters?: { centre: Vec3; count: number }[] } {
   const count = new Map<string, number>();
   const ix = m.indices;
   for (let i = 0; i < ix.length; i += 3)
@@ -80,21 +80,41 @@ export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonMani
   // Where the bad edges are, so the report can say which part to look at.
   const where: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   const p = m.positions;
+  const mids: Vec3[] = [];
   for (const [key, c] of count) {
     if (c === 2) continue;
     if (c === 1) holes++;
     else nonManifold++;
+    const mid: Vec3 = [0, 0, 0];
     for (const v of key.split(",")) {
       const o = Number(v) * 3;
       for (let k = 0; k < 3; k++) {
         where.min[k] = Math.min(where.min[k], p[o + k]);
         where.max[k] = Math.max(where.max[k], p[o + k]);
+        mid[k] += p[o + k] / 2;
       }
     }
+    mids.push(mid);
+  }
+  // Where the bad edges bunch: an 8-cell grid over their box, the fullest cells first (measured: one box over a
+  // whole trophy named only the final step).
+  const clusters: { centre: Vec3; count: number }[] = [];
+  if (mids.length) {
+    const size = [0, 1, 2].map((k) => Math.max(1e-9, where.max[k] - where.min[k]));
+    const buckets = new Map<string, { sum: Vec3; count: number }>();
+    for (const mid of mids) {
+      const key = [0, 1, 2].map((k) => Math.min(7, Math.floor(((mid[k] - where.min[k]) / size[k]) * 8))).join(",");
+      const b = buckets.get(key) ?? { sum: [0, 0, 0], count: 0 };
+      for (let k = 0; k < 3; k++) b.sum[k] += mid[k];
+      b.count++;
+      buckets.set(key, b);
+    }
+    for (const b of [...buckets.values()].sort((x, y) => y.count - x.count).slice(0, 3))
+      clusters.push({ centre: [b.sum[0] / b.count, b.sum[1] / b.count, b.sum[2] / b.count], count: b.count });
   }
   const ok = holes === 0 && nonManifold === 0;
   const note = ok
     ? "yes"
     : `no: ${nonManifold ? `${nonManifold} edge${nonManifold === 1 ? "" : "s"} shared by more than two triangles, where two surfaces pass through one grid cell (a feature about a cell thin; raise the grid or thicken it)` : ""}${nonManifold && holes ? "; " : ""}${holes ? `${holes} open edge${holes === 1 ? "" : "s"}` : ""}. Renders and most viewers are unaffected; a slicer or a boolean tool may complain.`;
-  return ok ? { ok, holes, nonManifold, note } : { ok, holes, nonManifold, note, where };
+  return ok ? { ok, holes, nonManifold, note } : { ok, holes, nonManifold, note, where, clusters };
 }

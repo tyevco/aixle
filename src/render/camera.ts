@@ -70,14 +70,16 @@ function basis(eye: Vec3, target: Vec3, upHint: Vec3): { right: Vec3; up: Vec3; 
 }
 
 /** A perspective camera looking at `bounds` from azimuth/elevation (degrees), framed to fit. */
-export function perspective(bounds: Bounds, width: number, height: number, azimuth = 35, elevation = 25, fov = 30): Camera {
+export function perspective(bounds: Bounds, width: number, height: number, azimuth = 35, elevation = 25, fov = 30, zoom = 1): Camera {
   const c = boundsCenter(bounds);
   const size = boundsSize(bounds);
   const radius = Math.max(0.5 * Math.hypot(size[0], size[1], size[2]), 1e-3);
   const aspect = width / height;
   const vfov = (fov * Math.PI) / 180;
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
-  const dist = (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.08;
+  // The bounding sphere fits the view at zoom 1; a box model fills less than half of it, so zoom lets a presentation
+  // picture come closer (measured: a frog filled 45% of its beauty render).
+  const dist = (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.08 / Math.max(0.2, zoom);
   const az = (azimuth * Math.PI) / 180, el = (elevation * Math.PI) / 180;
   const eye: Vec3 = [c[0] + dist * Math.cos(el) * Math.sin(az), c[1] + dist * Math.sin(el), c[2] + dist * Math.cos(el) * Math.cos(az)];
   return { eye, ...basis(eye, c, [0, 1, 0]), fov, width, height };

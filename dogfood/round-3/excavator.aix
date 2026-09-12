@@ -1,0 +1,149 @@
+# A hydraulic excavator on tracks. Front is +z; one unit is about a metre.
+# The house slews about y; boom, stick and bucket hinge about x. Every
+# hydraulic cylinder is two joints: a black barrel pinned to the parent
+# member and a chrome rod pinned to the child, each aimed along the line
+# between its pins by trigonometry in epose(), so they telescope in every
+# pose and never detach.
+set grid 200
+set light_azimuth 75
+set light_elevation 40
+
+# ---- rest layout in the side view (z forward, y up) ----
+xb = 0.35                        # the boom's centre plane
+P1y = 1.9
+P1z = 0.8                        # boom foot pin
+L1 = 3.0
+E1 = 50                          # boom length and rest elevation (degrees above +z)
+P2y = P1y + L1 * sin(E1)
+P2z = P1z + L1 * cos(E1)         # boom tip = stick pin
+L2 = 2.2
+E2 = -60
+P3y = P2y + L2 * sin(E2)
+P3z = P2z + L2 * cos(E2)         # stick tip = bucket pin
+E3 = -100                        # bucket rest elevation (pin to teeth)
+
+# a member-local point (n up, s along the member) in world y and z
+def wy(py, e, n, s) = py + s * sin(e) + n * cos(e)
+def wz(pz, e, n, s) = pz + s * cos(e) - n * sin(e)
+
+# cylinder pins: A on the parent (barrel base), B on the child (rod eye)
+A1y = 1.35
+A1z = 1.35
+B1y = wy(P1y, E1, -0.1, 1.6)
+B1z = wz(P1z, E1, -0.1, 1.6)
+A2y = wy(P1y, E1, 0.38, 1.5)
+A2z = wz(P1z, E1, 0.38, 1.5)
+B2y = wy(P2y, E2, 0.2, -0.55)
+B2z = wz(P2z, E2, 0.2, -0.55)
+A3y = wy(P2y, E2, 0.32, 0.4)
+A3z = wz(P2z, E2, 0.32, 0.4)
+B3y = wy(P3y, E3, 0.33, 0.15)
+B3z = wz(P3z, E3, 0.33, 0.15)
+
+# where the rod eye B goes when the child turns t degrees about x at pin P
+def rby(By, Bz, Py, Pz, t) = Py + (By - Py) * cos(t) - (Bz - Pz) * sin(t)
+def rbz(By, Bz, Py, Pz, t) = Pz + (By - Py) * sin(t) + (Bz - Pz) * cos(t)
+# how far the cylinder must turn about x at A to keep pointing at B, and its pin-to-pin length
+def swing(Ay, Az, Py, Pz, By, Bz, t) = atan(By - Ay, Bz - Az) - atan(rby(By, Bz, Py, Pz, t) - Ay, rbz(By, Bz, Py, Pz, t) - Az)
+def stroke(Ay, Az, Py, Pz, By, Bz, t) = sqrt((rby(By, Bz, Py, Pz, t) - Ay) ^ 2 + (rbz(By, Bz, Py, Pz, t) - Az) ^ 2)
+
+# ---- cylinder parts ----
+def dy(Ay, Az, By, Bz) = (By - Ay) / sqrt((By - Ay) ^ 2 + (Bz - Az) ^ 2)
+def dz(Ay, Az, By, Bz) = (Bz - Az) / sqrt((By - Ay) ^ 2 + (Bz - Az) ^ 2)
+def eye(x, y, z, r) = cylinder(r, 0.5) | rotate(z=90) | move(x, y, z)
+def barrel(x, Ay, Az, By, Bz, r, len) =
+  (tube(r, [x, Ay, Az, x, Ay + len * dy(Ay, Az, By, Bz), Az + len * dz(Ay, Az, By, Bz)], cap="flat") | paint("black"))
+  + (eye(x, Ay, Az, r * 1.3) | paint("iron"))
+def rod(x, Ay, Az, By, Bz, r, len) =
+  (tube(r, [x, By, Bz, x, By - len * dy(Ay, Az, By, Bz), Bz - len * dz(Ay, Az, By, Bz)], cap="flat") | paint("chrome"))
+  + (eye(x, By, Bz, r * 2) | paint("iron"))
+def boss(x, y, z, r, w) = cylinder(r, w) | rotate(z=90) | move(x, y, z)
+
+# ---- undercarriage ----
+track_mat = material("#2a2a2c", "stripes", "#4a4a4e", scale=0.14, axis="z")
+track = box(0.6, 0.72, 3.6, round=0.15) | move(1.0, 0.36, 0) | paint(track_mat)
+tracks = mirror(track, "x")
+frame = box(1.5, 0.55, 2.2, round=0.05) | move(0, 0.575, 0) | paint("charcoal")
+slew = cylinder(0.85, 0.36) | move(0, 0.97, 0) | paint("iron")
+
+# ---- house (slews about y at 0, 1.1, 0) ----
+hazard = material("#e8c53a", "stripes", "#1a1a1c", scale=0.22, axis="x")
+house_body = box(2.3, 1.1, 2.6, round=0.06) | move(0, 1.65, -0.2) | paint("yellow")
+plate = extrude(text("AIXLE", size=0.32, weight=0.08, face="serif", align="center"), 0.3, "x") | move(1.15, 1.5, -0.6)
+house_shell = decal(house_body, plate, "black")
+counterweight = box(2.3, 0.95, 0.75, round=0.1) | move(0, 1.6, -1.8) | paint(hazard)
+cab_shell = box(0.9, 1.35, 1.25, round=0.08) | move(-0.72, 2.35, 0.4) | paint("yellow")
+glazing = (box(0.7, 0.85, 0.3) | move(-0.72, 2.55, 1.02)) + (box(0.3, 0.85, 0.9) | move(-1.17, 2.55, 0.45))
+cab_box = decal(cab_shell, glazing, "#27384f")
+hood = box(1.0, 0.4, 1.4, round=0.08) | move(0.6, 2.35, -0.7) | paint("yellow")
+stack = cylinder(0.08, 0.55) | move(0.85, 2.7, -1.0) | paint("iron")
+pedestal = box(0.9, 1.0, 1.0, round=0.05) | move(xb, 1.6, 0.9) | paint("yellow")
+house_parts = house_shell + counterweight + cab_box + hood + stack + pedestal
+
+# ---- bucket (built at its pin, teeth along +z, then turned to E3) ----
+bucket_body = box(1.0, 0.8, 0.9, round=0.08) | move(0, -0.1, 0.55)
+bucket_hollow = box(0.84, 0.9, 0.74) | move(0, -0.25, 0.55)
+bucket_lug = box(0.36, 0.35, 0.35, round=0.03) | move(0, 0.35, 0.15)
+bucket_hinge = cylinder(0.2, 1.1) | rotate(z=90)
+bucket_shell = ((bucket_body - bucket_hollow) + bucket_lug + bucket_hinge) | paint("charcoal")
+teeth = box(0.1, 0.12, 0.3) | move(-0.36, -0.47, 1.05) | array(4, 0.24) | paint("iron")
+bucket_shape = (bucket_shell + teeth) | rotate(x = -E3) | move(xb, P3y, P3z)
+bucket_rod_j = joint(rod(xb, A3y, A3z, B3y, B3z, 0.06, 1.35), "bucket_rod", xb, B3y, B3z)
+bucket = joint(bucket_shape + bucket_rod_j, "bucket", xb, P3y, P3z)
+
+# ---- stick (from its pin, 0.6 behind it to 2.2 ahead) ----
+stick_beam = box(0.42, 0.5, 2.8) | move(0, 0, 0.8) | rotate(x = -E2) | move(xb, P2y, P2z) | paint("yellow")
+stick_bracket = box(0.6, 0.3, 0.5, round=0.03) | move(0, 0.25, 0.4) | rotate(x = -E2) | move(xb, P2y, P2z) | paint("yellow")
+stick_bosses = (boss(xb, P2y, P2z, 0.26, 0.5) + boss(xb, P3y, P3z, 0.28, 0.6)) | paint("yellow")
+bucket_cyl_j = joint(barrel(xb, A3y, A3z, B3y, B3z, 0.11, 1.35), "bucket_cyl", xb, A3y, A3z)
+stick_rod_j = joint(rod(xb, A2y, A2z, B2y, B2z, 0.07, 1.0), "stick_rod", xb, B2y, B2z)
+stick = joint(stick_beam + stick_bracket + stick_bosses + stick_rod_j + bucket_cyl_j + bucket, "stick", xb, P2y, P2z)
+
+# ---- boom (a bowed beam swept along a bezier from the foot pin to the tip pin) ----
+boom_path = bezier([xb, P1y, P1z,
+  xb, wy(P1y, E1 + 15, 0, 1.1), wz(P1z, E1 + 15, 0, 1.1),
+  xb, wy(P2y, E1 - 15, 0, -1.1), wz(P2z, E1 - 15, 0, -1.1),
+  xb, P2y, P2z])
+boom_beam = sweep(rect(0.5, 0.62), boom_path) | paint("yellow")
+boom_bosses = (boss(xb, P1y, P1z, 0.45, 0.8) + boss(xb, P2y, P2z, 0.4, 0.7) + boss(xb, A2y, A2z, 0.23, 0.62)) | paint("yellow")
+boom_lug = box(1.15, 0.3, 0.3, round=0.03) | rotate(x = -E1) | move(xb, B1y, B1z) | paint("yellow")
+boom_pin = cylinder(0.06, 1.4) | rotate(z=90) | move(xb, B1y, B1z) | paint("iron")
+stick_cyl_j = joint(barrel(xb, A2y, A2z, B2y, B2z, 0.13, 1.25), "stick_cyl", xb, A2y, A2z)
+boom_rod_j = joint(rod(xb - 0.5, A1y, A1z, B1y, B1z, 0.06, 1.1) + rod(xb + 0.5, A1y, A1z, B1y, B1z, 0.06, 1.1), "boom_rod", xb, B1y, B1z)
+boom = joint(boom_beam + boom_bosses + boom_lug + boom_pin + boom_rod_j + stick_cyl_j + stick, "boom", xb, P1y, P1z)
+boom_cyl_j = joint(barrel(xb - 0.5, A1y, A1z, B1y, B1z, 0.11, 1.1) + barrel(xb + 0.5, A1y, A1z, B1y, B1z, 0.11, 1.1), "boom_cyl", xb, A1y, A1z)
+house = joint(house_parts + boom_cyl_j + boom, "cab", 0, 1.1, 0)
+
+excavator = tracks + frame + slew + house
+
+# ---- poses: yaw about y; b, s, k turn boom, stick, bucket about x, positive lowers.
+# Each angle is relative to its parent: the stick's world elevation is E2 - b - s, the bucket's E3 - b - s - k. ----
+def epose(name, yaw, b, s, k) = pose(name,
+  cab=[0, yaw, 0], boom=[b, 0, 0], stick=[s, 0, 0], bucket=[k, 0, 0],
+  boom_cyl=[swing(A1y, A1z, P1y, P1z, B1y, B1z, b), 0, 0],
+  boom_rod=[swing(A1y, A1z, P1y, P1z, B1y, B1z, b) - b, 0, 0],
+  stick_cyl=[swing(A2y, A2z, P2y, P2z, B2y, B2z, s), 0, 0],
+  stick_rod=[swing(A2y, A2z, P2y, P2z, B2y, B2z, s) - s, 0, 0],
+  bucket_cyl=[swing(A3y, A3z, P3y, P3z, B3y, B3z, k), 0, 0],
+  bucket_rod=[swing(A3y, A3z, P3y, P3z, B3y, B3z, k) - k, 0, 0])
+pose("rest")
+epose("transport", 0, -10, 35, -5)      # boom 60, stick -85, bucket -120 in the world
+epose("reach", 0, 30, -65, -5)          # boom 20, stick -25, bucket -60
+epose("dig", 30, 25, -25, 10)           # boom 25, stick -60, bucket -115, slewed 30
+animation("cycle", ["rest", "transport", "reach", "dig", "rest"], seconds=6)
+
+# pin-to-pin lengths per pose, to check against barrel + rod (boom 1.1 + 1.1, stick 1.25 + 1.0, bucket 1.35 + 1.35)
+rest_boom_stroke = stroke(A1y, A1z, P1y, P1z, B1y, B1z, 0)
+rest_stick_stroke = stroke(A2y, A2z, P2y, P2z, B2y, B2z, 0)
+rest_bucket_stroke = stroke(A3y, A3z, P3y, P3z, B3y, B3z, 0)
+transport_boom_stroke = stroke(A1y, A1z, P1y, P1z, B1y, B1z, -10)
+transport_stick_stroke = stroke(A2y, A2z, P2y, P2z, B2y, B2z, 35)
+transport_bucket_stroke = stroke(A3y, A3z, P3y, P3z, B3y, B3z, -5)
+reach_boom_stroke = stroke(A1y, A1z, P1y, P1z, B1y, B1z, 30)
+reach_stick_stroke = stroke(A2y, A2z, P2y, P2z, B2y, B2z, -65)
+reach_bucket_stroke = stroke(A3y, A3z, P3y, P3z, B3y, B3z, -5)
+dig_boom_stroke = stroke(A1y, A1z, P1y, P1z, B1y, B1z, 25)
+dig_stick_stroke = stroke(A2y, A2z, P2y, P2z, B2y, B2z, -25)
+dig_bucket_stroke = stroke(A3y, A3z, P3y, P3z, B3y, B3z, 10)
+
+show excavator

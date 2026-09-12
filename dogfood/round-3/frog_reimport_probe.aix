@@ -1,0 +1,3 @@
+# Round-trip check: the frog's exported GLB brought back in as a shape.
+m = import("../out/frog/model.glb")
+show m

@@ -49,7 +49,7 @@ function dogfood(): Model[] {
     for (const f of readdirSync(join(dir, round)).filter((x) => x.endsWith(".aix") && !x.endsWith("_probe.aix")).sort()) {
       const name = f.replace(/\.aix$/, "");
       const report = `dogfood/${round}/${name}.report.md`;
-      out.push({ name, program: `dogfood/${round}/${f}`, renders: "dogfood/renders", caption: `${round.replace("-", " ")}: ${caption(join(dir, round, f))}`, report: existsSync(resolve(ROOT, report)) ? report : undefined });
+      out.push({ name: `${round}_${name}`, program: `dogfood/${round}/${f}`, renders: "dogfood/renders", caption: `${round.replace("-", " ")}: ${caption(join(dir, round, f))}`, report: existsSync(resolve(ROOT, report)) ? report : undefined });
     }
   }
   return out;

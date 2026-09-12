@@ -5,16 +5,18 @@
  * report says which steps ended up in the output.
  */
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
-import { BUILTIN_MAP, CONSTANTS, toMaterial } from "./builtins.js";
+import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, toMaterial } from "./builtins.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import type { Shape3 } from "../sdf/types.js";
+import { isEmpty, type Shape3 } from "../sdf/types.js";
 import { isCurve, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus"]);
+const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
+const dimsLabel = (b: { min: number[]; max: number[] }): string => [0, 1, 2].map((k) => fmt3(b.max[k] - b.min[k])).join(" × ");
 
 export class RuntimeError extends Error {
   constructor(message: string, readonly line: number) {
@@ -99,6 +101,9 @@ class Scope {
 }
 
 export function evaluate(program: Program, options: EvalOptions = {}): Evaluation {
+  // angle(name) reads the pose being evaluated.
+  CURRENT_ANGLES.clear();
+  for (const [name, v] of Object.entries(options.jointAngles ?? {})) CURRENT_ANGLES.set(name, v);
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
@@ -127,6 +132,15 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return e.value;
       case "list":
         return e.items.map((it) => evalExpr(it, scope));
+      case "index": {
+        const target = evalExpr(e.target, scope);
+        const i = evalExpr(e.index, scope);
+        if (!Array.isArray(target)) throw new RuntimeError(`[...] indexes a list, not a ${typeName(target)}`, e.line);
+        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number`, e.line);
+        const k = i < 0 ? target.length + i : i;
+        if (k < 0 || k >= target.length) throw new RuntimeError(`index ${i} is outside the list, which has ${target.length} item${target.length === 1 ? "" : "s"}`, e.line);
+        return target[k];
+      }
       case "ident": {
         const v = scope.get(e.name);
         if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
@@ -163,7 +177,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       switch (op) {
         case "+": return union([a, b]);
         case "-": return difference(a, b);
-        case "&": return intersect(a, b);
+        case "&": {
+          const r = intersect(a, b);
+          // An intersection that removes everything is usually a precedence slip (`a | move(...) & b | move(...)`),
+          // and nothing downstream will say so: the part is simply not there (measured on a crate of lemons).
+          if (isEmpty(r.bounds) && !isEmpty(a.bounds) && !isEmpty(b.bounds))
+            warnings.push(`line ${line}: '&' removed everything: the two shapes do not overlap (${dimsLabel(a.bounds)} at ${a.bounds.min.map(fmt3).join(", ")} and ${dimsLabel(b.bounds)} at ${b.bounds.min.map(fmt3).join(", ")}). '|' binds tighter than '&', so check the parentheses.`);
+          return r;
+        }
       }
     }
     if (isShape2(a) && isShape2(b)) {

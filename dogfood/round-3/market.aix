@@ -1,0 +1,115 @@
+# A market stall, facing +z. One unit is about half a metre; the stall is
+# about 12 units wide. Wooden posts carry a striped awning; a counter with
+# three crates of fruit, a chalkboard, paper bags; a serif sign and a glass
+# lantern hang from the front beam; cobbles underneath.
+
+set grid 200
+set light_azimuth -25
+set light_elevation 30
+set ambient 2.5
+set azimuth 22
+set elevation 12
+
+# --- materials -------------------------------------------------------------
+cobble = material("#7f7a75", "tiles", "#57534f", scale=0.45, rough=0.9)
+plank = material("#9a6b3f", "stripes", "#7a5030", scale=0.35, rough=0.8)
+canvas = material("#c8342a", "stripes", "#f0e6c8", scale=0.7, axis="x", rough=0.8)
+paper = material("#c9a97a", "noise", "#b8945f", scale=0.2, rough=0.9)
+slate = material("#2e3033", rough=0.9)
+chalk = material("#f4f0e2", rough=1)
+flame_m = material("#ffd070", glow=2)
+apple_m = material("#c8342a", "noise", "#e0603a", scale=0.15, rough=0.5)
+orange_m = material("#e8862a", "speckle", "#c86a1a", scale=0.04, rough=0.7)
+lemon_m = material("#e8d43a", "speckle", "#d0b820", scale=0.04, rough=0.6)
+
+# --- ground ---------------------------------------------------------------
+ground = box(13.6, 0.3, 7.4) | move(0, -0.15, 0.2) | paint(cobble)
+
+# --- stall frame and counter -----------------------------------------------
+back_posts = cylinder(0.14, 5.6) | move(-5.6, 2.8, -2.2) | array(2, 11.2, 0, 0)
+front_posts = cylinder(0.14, 4.8) | move(-5.6, 2.4, 2.4) | array(2, 11.2, 0, 0)
+posts = (back_posts + front_posts) | paint("wood")
+back_beam = box(12, 0.14, 0.14) | move(0, 5.5, -2.2)
+front_beam = box(12, 0.14, 0.14) | move(0, 4.7, 2.4)
+beams = (back_beam + front_beam) | paint("wood")
+counter_top = box(11.2, 0.16, 2.2, round=0.02) | move(0, 2.0, 1.0) | paint("oak")
+counter_front = box(11.2, 2.0, 0.12) | paint(plank) | move(0, 1.0, 2.05)
+counter_sides = box(0.12, 2.0, 2.2) | paint(plank) | move(-5.54, 1.0, 1.0) | array(2, 11.08, 0, 0)
+stall = posts + beams + counter_top + counter_front + counter_sides
+
+# --- awning: painted flat (stripes across x), then tilted and lifted -------
+canvas_sheet = box(12.6, 0.08, 5.2) | paint(canvas) | rotate(x=9.5) | move(0, 5.15, 0.2)
+scallop = cylinder(0.3, 0.3) | rotate(x=90) | move(-6, 4.3, 2.85) | array(21, 0.6, 0, 0)
+valance = (box(12.6, 0.6, 0.1) | paint(canvas) | move(0, 4.55, 2.85)) - scallop
+awning = canvas_sheet + valance
+
+# --- crates of fruit --------------------------------------------------------
+def crate(w, h, d) =
+  (box(w, h, d) | shell(0.09)) - (box(w - 0.18, h, d - 0.18) | move(0, h / 2, 0))
+
+crate_h = 0.7
+crate_y = 2.06 + crate_h / 2
+apple_crate = crate(1.6, crate_h, 1.2) | paint("pine") | move(-4.2, crate_y, 1.0)
+orange_crate = crate(1.6, crate_h, 1.2) | paint("pine") | move(-2.3, crate_y, 1.0)
+lemon_crate = crate(1.6, crate_h, 1.2) | paint("pine") | move(2.7, crate_y, 1.0)
+crates = apple_crate + orange_crate + lemon_crate
+
+apple = (sphere(0.21) + (cylinder(0.02, 0.12) | move(0, 0.22, 0) | paint("brown"))) | paint(apple_m)
+apples_low = apple | move(-4.62, 2.36, 0.58) | grid(3, 3, 0.42, 0.42)
+apples_high = apple | move(-4.41, 2.62, 0.79) | grid(2, 2, 0.42, 0.42)
+apples = apples_low + apples_high
+
+orange = sphere(0.22) | paint(orange_m)
+oranges = orange | place([
+  -2.7, 2.36, 0.6, 0,   -2.3, 2.36, 0.6, 0,   -1.9, 2.36, 0.6, 0,
+  -2.7, 2.36, 1.0, 0,   -2.3, 2.36, 1.0, 0,   -1.9, 2.36, 1.0, 0,
+  -2.7, 2.36, 1.4, 0,   -2.3, 2.36, 1.4, 0,   -1.9, 2.36, 1.4, 0,
+  -2.5, 2.68, 0.8, 0,   -2.1, 2.68, 0.8, 0,   -2.5, 2.68, 1.2, 0,   -2.1, 2.68, 1.2, 0,
+  -2.3, 2.98, 1.0, 0])
+
+lemon = ellipsoid(0.16, 0.13, 0.13) | rotate(y=30) | paint(lemon_m)
+lemon_row = lemon | move(2.2, 2.28, 0.6) | array(4, 0.34, 0, 0)
+lemons = lemon_row | array(3, 0, 0, 0.4) + (lemon_row | move(0.17, 0.2, 0.2) | array(2, 0, 0, 0.4))
+  + (lemon_row | move(0, 0.4, 0.4)) + (lemon_row | move(0.17, 0.58, 0.4) | array(2, -0.34, 0, 0) & box(1.2, 1, 1) | move(2.7, 0, 1.0))
+
+# --- the hanging sign ------------------------------------------------------
+board = box(4.4, 0.8, 0.12, round=0.02) | paint("walnut")
+letters = extrude(text("ROSIE'S FRUIT", 0.36, weight=0.1, align="center", face="serif"), 0.06, "z")
+  | move(0, -0.18, 0.08) | paint("cream")
+sign_face = board + letters
+chains = tube(0.045, [-1.8, 0.4, 0, -1.8, 1.2, 0]) | array(2, 3.6, 0, 0) | paint("iron")
+sign = (sign_face + chains) | move(-2.0, 3.55, 2.4)
+
+# --- the chalkboard, leaning back a little on the counter -----------------
+frame = box(1.5, 1.2, 0.08, round=0.01) | paint("oak")
+slate_board = box(1.34, 1.04, 0.08) | move(0, 0, 0.04) | paint(slate)
+price_text = text("APPLES  2", 0.16, weight=0.065, align="center") | move(0, 0.26)
+  + (text("ORANGES 3", 0.16, weight=0.065, align="center") | move(0, -0.06))
+  + (text("LEMONS  1", 0.16, weight=0.065, align="center") | move(0, -0.38))
+priced = decal(slate_board, extrude(price_text, 0.3, "z"), chalk)
+chalkboard = (frame + priced) | rotate(x=-8) | move(0.9, 2.08 + 0.58, 1.4)
+
+# --- a stack of paper bags -------------------------------------------------
+bags = empty()
+for i in range(7) {
+  bags = bags + (box(0.8, 0.07, 0.5, round=0.01) | rotate(y=(rand(i) - 0.5) * 24)
+    | move(4.3, 2.06 + 0.035 + i * 0.065, 1.0))
+}
+bags = bags | paint(paper)
+
+# --- the lantern, hung from the front beam ---------------------------------
+lx = 5.0
+lz = 2.4
+lantern_base = cylinder(0.32, 0.1) | move(0, 0.05, 0) | paint("brass")
+lantern_glass = (cylinder(0.3, 0.76) | shell(0.06)) | move(0, 0.46, 0) | paint("glass")
+lantern_cap = cone(0.34, 0.12, 0.2) | move(0, 0.94, 0) | paint("brass")
+lantern_ring = torus(0.12, 0.04) | move(0, 1.04, 0) | paint("brass")
+handle_c = bezier([-0.3, 0.98, 0, -0.3, 1.55, 0, 0.3, 1.55, 0, 0.3, 0.98, 0])
+lantern_handle = tube(0.04, handle_c) | paint("brass")
+candle = cylinder(0.06, 0.24) | move(0, 0.2, 0) | paint("ivory")
+flame = ellipsoid(0.075, 0.16, 0.075) | move(0, 0.44, 0) | paint(flame_m)
+lantern_chain = tube(0.035, [0, 1.4, 0, 0, 1.95, 0]) | paint("iron")
+lantern = (lantern_base + lantern_glass + lantern_cap + lantern_ring + lantern_handle
+  + candle + flame + lantern_chain) | move(lx, 2.7, lz)
+
+scene stall, awning, crates, apples, oranges, lemons, sign, chalkboard, bags, lantern, ground
