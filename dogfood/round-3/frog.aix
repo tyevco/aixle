@@ -1,0 +1,62 @@
+# A cartoon frog sitting on a lily pad. Front is +z. About 3 units tall.
+# Body and head are blended ellipsoids; the eyes bulge as spheres with
+# decal pupils; the mouth is a decal along an exact curve; the legs are
+# tubes through knee points with webbed feet; the pad has a notch.
+
+set light_azimuth -30
+set light_elevation 50
+
+skin = material("#62c24c", "speckle", "#4aa33a", scale=0.11, rough=0.75)
+belly_m = material("#ece6b4", "speckle", "#d9d09a", scale=0.11, rough=0.8)
+leaf = material("#3f8f3a", "noise", "#2c6b2a", scale=0.35, rough=0.85)
+eye_white = material("#f6f4ec", rough=0.3)
+pupil_m = material("#141416", rough=0.4)
+
+# lily pad: a thin disc with a wedge notch at the front-right
+pad_thick = 0.2
+pad_disc = cylinder(2.2, pad_thick, round=0.05) | move(0, pad_thick / 2, 0)
+notch = extrude(polygon(0,0, 3,-0.9, 3,0.9), 1) | rotate(y=-35)
+pad_plain = (pad_disc - notch) | paint(leaf)
+vein = box(2.0, 0.3, 0.05) | move(1.05, pad_thick, 0)
+veins = ring(vein, 9)
+pad = decal(pad_plain, veins, "#6db85a")
+
+# body and head, blended into one mass
+torso = ellipsoid(1.05, 0.75, 0.95) | move(0, 0.85, 0)
+head = ellipsoid(1.15, 0.62, 0.95) | move(0, 1.55, 0.15)
+mass = union(torso, head, k=0.35)
+skinned = mass | displace(0.02, 0.18, 2) | paint(skin)
+belly_region = ellipsoid(0.75, 0.6, 0.7) | move(0, 0.75, 0.75)
+bellied = decal(skinned, belly_region, belly_m)
+
+# mouth: a thin tube along an exact curve, used only as a decal region
+smile = curve([-0.85,1.62,0.78, -0.45,1.5,1.03, 0,1.46,1.1, 0.45,1.5,1.03, 0.85,1.62,0.78])
+mouth_region = tube(0.06, smile)
+mouthed = decal(bellied, mouth_region, "#3a1f1a")
+nostril_region = mirror(sphere(0.06) | move(0.2, 1.8, 1.06), "x")
+faced = decal(mouthed, nostril_region, "#2f5e28")
+
+# eyes: bulging spheres with decal pupils
+eye = sphere(0.45) | move(0.54, 2.22, 0.45) | paint(eye_white)
+pupil_region = sphere(0.25) | move(0.54, 2.27, 0.86)
+eye_p = decal(eye, pupil_region, pupil_m)
+eyes = mirror(eye_p, "x")
+
+# webbed foot: a flat pad plus three toes joined by a thin web
+def toe(a) = capsule(0.07, 0.5) | rotate(x=90) | move(0, 0, 0.25) | rotate(y=a)
+def foot() =
+  (ellipsoid(0.2, 0.08, 0.22) + toe(-30) + toe(0) + toe(30)
+   + (extrude(polygon(0,0, 0.32,0.5, 0,0.58, -0.32,0.5), 0.06) | move(0, 0, 0)))
+  | scale(1.1, 0.9, 1.1)
+
+# back leg: hip -> knee (up and out) -> ankle (down and forward), folded
+back_leg = tube(0.2, [0.7,0.7,-0.2, 1.25,0.95,-0.3, 1.2,0.35,0.5])
+back_foot = foot() | move(1.2, 0.2, 0.65)
+# front leg: shoulder -> elbow -> wrist, propping the chest
+front_leg = tube(0.14, [0.55,1.0,0.7, 0.75,0.6,1.05, 0.75,0.3,1.15])
+front_foot = foot() | scale(0.8) | move(0.75, 0.16, 1.25)
+legs = mirror(back_leg + back_foot + front_leg + front_foot, "x") | paint(skin)
+
+frog = faced + eyes + legs
+model = (frog | ground() | move(0, pad_thick - 0.01, 0)) + pad
+show model

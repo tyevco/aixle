@@ -104,6 +104,7 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
       cost: round.cost,
       inner: [round],
       feature: round.feature,
+      gap: round.gap,
     };
   }
   const n = segs.length;
@@ -306,6 +307,7 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
     return best;
   }, bounds, n * profile.cost);
   out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
+  out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
   return out;
 }
 

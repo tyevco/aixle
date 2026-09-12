@@ -260,6 +260,11 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     return Math.sqrt(best) - half;
   }, bounds, n);
   out.feature = weight;
+  // The narrowest counter: about 2 grid units between stroke centres for a lowercase e or a, 2.8 for capitals and
+  // digits, less one stroke. Under half a cell it closes up (measured: "Best in Show" at 0.12 became non-manifold
+  // blobs, while capitals at 0.13 with counters of 0.7 of a cell read fine).
+  const small = /[a-z]/.test(text) ? 2.0 : 2.8;
+  out.gap = Math.max(0, small * scale - weight);
   return out;
 }
 

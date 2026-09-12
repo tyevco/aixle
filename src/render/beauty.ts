@@ -37,6 +37,8 @@ export interface BeautyOptions {
   lightElevation?: number;
   /** Multiplier on the sky and ground light, 1 by default: 2 lifts a shaded interior, 0.5 is a dark room. */
   ambient?: number;
+  /** Camera zoom: 1 fits the model's bounding sphere, 1.4 fills the frame with a box-shaped model. */
+  zoom?: number;
 }
 
 /** The default key light: upper left, from the front. */
@@ -62,7 +64,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
           return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
         })();
   const ambient = Math.max(0, opts.ambient ?? 1);
-  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25);
+  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1);
   const cell = Math.max(opts.cellSize, 1e-4);
   const floorY = Math.min(0, bounds.min[1]);
   const shadowBox = boundsGrow(bounds, cell);

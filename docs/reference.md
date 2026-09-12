@@ -117,7 +117,7 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
 
 ### text
 
-Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.
+Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.
 
     text(text, size=1, weight=0.15, align="left", spacing=0, arc=0, face="sans") -> shape2
 
@@ -420,6 +420,14 @@ The size of a shape's bounds along y.
 
     tall(shape) -> number
 
+### angle
+
+The current pose's angles for a joint, as [x, y, z] degrees (all zero at rest, or for a joint the pose does not set): what a member between two moving bodies (a hydraulic cylinder, a strut) needs to work out its end points with sin and cos. Nested joints' angles are relative to their parent.
+
+    angle(joint) -> list
+
+- `joint`: the joint's name
+
 ## Materials
 
 ### paint
@@ -438,7 +446,7 @@ Paint only the part of the surface inside `region`, adding no geometry: a pupil 
 
 ### material
 
-A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie across it. Paint before moving the part, or set axis="x" for stripes running the other way.
+A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
     material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?) -> material
 

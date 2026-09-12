@@ -1,0 +1,5 @@
+# Probe: the same round-trip at a finer import grid, to see whether the
+# ground slab and the 0.08-thick canvas that vanished at resolution 96
+# come back.
+m = import("out/market/model.glb", resolution=200)
+show m

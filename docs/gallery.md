@@ -164,58 +164,90 @@ A fluted vase: a lathe profile revolved around y, sixteen flutes cut from
 
 Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).
 
-### anglepoise
+### round-1_anglepoise
 
 round 1: An anglepoise desk lamp. Unit: 1 = 10 cm. Front is +z; every hinge turns about x,
 
-![anglepoise, beauty render](../dogfood/renders/anglepoise_beauty.png) ![anglepoise, contact sheet](../dogfood/renders/anglepoise.png)
+![round-1_anglepoise, beauty render](../dogfood/renders/round-1_anglepoise_beauty.png) ![round-1_anglepoise, contact sheet](../dogfood/renders/round-1_anglepoise.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/anglepoise.aix) · <a href="/aixle/viewers/anglepoise.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/anglepoise.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/anglepoise.aix) · <a href="/aixle/viewers/round-1_anglepoise.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/anglepoise.report.md)
 
-### bench
+### round-1_bench
 
 round 1: A park bench: oak slats on two cast-iron end frames. Metres, y up,
 
-![bench, beauty render](../dogfood/renders/bench_beauty.png) ![bench, contact sheet](../dogfood/renders/bench.png)
+![round-1_bench, beauty render](../dogfood/renders/round-1_bench_beauty.png) ![round-1_bench, contact sheet](../dogfood/renders/round-1_bench.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/bench.aix) · <a href="/aixle/viewers/bench.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/bench.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/bench.aix) · <a href="/aixle/viewers/round-1_bench.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/bench.report.md)
 
-### lighthouse
+### round-1_lighthouse
 
 round 1: A lighthouse on a rocky outcrop, with a keeper's cottage and a stone path.
 
-![lighthouse, beauty render](../dogfood/renders/lighthouse_beauty.png) ![lighthouse, contact sheet](../dogfood/renders/lighthouse.png)
+![round-1_lighthouse, beauty render](../dogfood/renders/round-1_lighthouse_beauty.png) ![round-1_lighthouse, contact sheet](../dogfood/renders/round-1_lighthouse.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/lighthouse.aix) · <a href="/aixle/viewers/lighthouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/lighthouse.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/lighthouse.aix) · <a href="/aixle/viewers/round-1_lighthouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/lighthouse.report.md)
 
-### excavator
+### round-2_excavator
 
 round 2: A hydraulic excavator: tracked base, a slewing upper structure, a bent
 
-![excavator, beauty render](../dogfood/renders/excavator_beauty.png) ![excavator, contact sheet](../dogfood/renders/excavator.png)
+![round-2_excavator, beauty render](../dogfood/renders/round-2_excavator_beauty.png) ![round-2_excavator, contact sheet](../dogfood/renders/round-2_excavator.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/excavator.aix) · <a href="/aixle/viewers/excavator.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/excavator.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/excavator.aix) · <a href="/aixle/viewers/round-2_excavator.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/excavator.report.md)
 
-### frog
+### round-2_frog
 
 round 2: A cartoon frog sitting on a lily pad. Front is +z. One unit ~ 10 cm; the frog is ~3 tall.
 
-![frog, beauty render](../dogfood/renders/frog_beauty.png) ![frog, contact sheet](../dogfood/renders/frog.png)
+![round-2_frog, beauty render](../dogfood/renders/round-2_frog_beauty.png) ![round-2_frog, contact sheet](../dogfood/renders/round-2_frog.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/frog.aix) · <a href="/aixle/viewers/frog.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/frog.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/frog.aix) · <a href="/aixle/viewers/round-2_frog.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/frog.report.md)
 
-### market
+### round-2_market
 
 round 2: A market stall. Front is +z, one unit is about 25 cm; the stall is 12
 
-![market, beauty render](../dogfood/renders/market_beauty.png) ![market, contact sheet](../dogfood/renders/market.png)
+![round-2_market, beauty render](../dogfood/renders/round-2_market_beauty.png) ![round-2_market, contact sheet](../dogfood/renders/round-2_market.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/market.aix) · <a href="/aixle/viewers/market.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/market.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/market.aix) · <a href="/aixle/viewers/round-2_market.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/market.report.md)
 
-### trophy
+### round-2_trophy
 
 round 2: An award trophy, about 5 units tall, front on +z.
 
-![trophy, beauty render](../dogfood/renders/trophy_beauty.png) ![trophy, contact sheet](../dogfood/renders/trophy.png)
+![round-2_trophy, beauty render](../dogfood/renders/round-2_trophy_beauty.png) ![round-2_trophy, contact sheet](../dogfood/renders/round-2_trophy.png)
 
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/trophy.aix) · <a href="/aixle/viewers/trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/trophy.report.md)
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-2/trophy.aix) · <a href="/aixle/viewers/round-2_trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-2/trophy.report.md)
+
+### round-3_excavator
+
+round 3: A hydraulic excavator on tracks. Front is +z; one unit is about a metre.
+
+![round-3_excavator, beauty render](../dogfood/renders/round-3_excavator_beauty.png) ![round-3_excavator, contact sheet](../dogfood/renders/round-3_excavator.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-3/excavator.aix) · <a href="/aixle/viewers/round-3_excavator.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-3/excavator.report.md)
+
+### round-3_frog
+
+round 3: A cartoon frog sitting on a lily pad. Front is +z. About 3 units tall.
+
+![round-3_frog, beauty render](../dogfood/renders/round-3_frog_beauty.png) ![round-3_frog, contact sheet](../dogfood/renders/round-3_frog.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-3/frog.aix) · <a href="/aixle/viewers/round-3_frog.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-3/frog.report.md)
+
+### round-3_market
+
+round 3: A market stall, facing +z. One unit is about half a metre; the stall is
+
+![round-3_market, beauty render](../dogfood/renders/round-3_market_beauty.png) ![round-3_market, contact sheet](../dogfood/renders/round-3_market.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-3/market.aix) · <a href="/aixle/viewers/round-3_market.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-3/market.report.md)
+
+### round-3_trophy
+
+round 3: An award trophy, about 5 units tall, front on +z.
+
+![round-3_trophy, beauty render](../dogfood/renders/round-3_trophy_beauty.png) ![round-3_trophy, contact sheet](../dogfood/renders/round-3_trophy.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-3/trophy.aix) · <a href="/aixle/viewers/round-3_trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-3/trophy.report.md)

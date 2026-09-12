@@ -1,0 +1,4 @@
+# Round-trip check: the market stall's exported GLB imported back as one
+# shape, sampled to a distance field, to compare against the original.
+m = import("out/market/model.glb")
+show m

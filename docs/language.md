@@ -72,7 +72,7 @@ for c in letters {
 | --- | --- | --- |
 | number | `1.5`, `2 * r + 1`, `sin(30)` | `+ - * / % ^`, unary `-` |
 | string | `"wood"`, `"#a0522d"`, `"x"` | material and axis arguments; `+` joins |
-| list | `[1, 2, 3]`, `range(4)` | `for`, `polygon`, `len` |
+| list | `[1, 2, 3]`, `range(4)` | `for`, `polygon`, `len`, `list[i]` (0-based, `-1` is the last), `+` joins |
 | shape | `box(...)`, `a + b`, `a \| move(...)` | `+` union, `-` difference, `&` intersection |
 | profile (2D) | `circle(...)`, `rect(...)`, `polygon(...)` | same operators; `extrude`, `revolve` make it a shape |
 | material | `"oak"`, `material("#c04020", "stripes")` | `paint` |
@@ -154,7 +154,8 @@ y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
 **Paths**: `tube(r, [x,y,z, x,y,z, ...])` is a round tube along the
 points with rounded joins and hemispherical ends that reach `r` past
 each end point (`cap="flat"` cuts them flat at the points); `sweep(profile, [points])` carries a 2D profile
-along them (its x across the path, its y up); `loft(a, b, h)` blends from
+along them (its x across the path, its y as near world up as the path
+allows; on a vertical run, y points to -z); `loft(a, b, h)` blends from
 profile `a` at the bottom to `b` at the top over height `h`. Both path
 functions take `smooth=n` to curve the path through the points; a handle is
 four points and `smooth=6`. A hollow spout is one tube minus a thinner one
@@ -181,7 +182,13 @@ about that of a spline's. A `spline` is still fine for anything gentle.
 profile from a built-in single-stroke font (upper and lower case, digits,
 punctuation), laid out on the baseline. `face="serif"` adds slab serifs
 to the same letters and sets them a little wider, for a nameplate or a
-title; the default face is `"sans"`. Extrude it for raised lettering,
+title; the default face is `"sans"`. A line of n characters is about
+0.8 × n × size wide (0.93 with serifs), so 12 characters at size 0.36
+need 3.5 units; `check` prints the exact box. Lowercase needs size at
+least three times the weight or the counters (the gaps inside e, a, o)
+close up; `check` warns when they are under a cell. Judge lettering with
+`--focus` on the step: at a whole model's cell a 0.05 stroke is a blob on
+the sheet. Extrude it for raised lettering,
 subtract an extrusion for engraving. `size` is the cap height, `weight`
 the stroke width; keep `weight` above a grid cell or so (`check` warns
 when it is not). The profile's box reaches half the weight past the
@@ -200,14 +207,19 @@ radius `r`, with x = 0 landing on +z and reading left to right from the
 front, and depth z riding at radius `r + z`. Both are exact, so the box
 `check` prints is the bent shape's. A name round a cup's rim is
 `extrude(text("CHAMPION", 0.2, align="center"), 0.06, "z") | wrap(1.3) |
-move(0, 4.3, 0)`; a curved bench seat is a box bent by a few degrees.
+move(0, 4.3, 0)`; it spans `57.3 × width / r` degrees of the cylinder, so
+keep that under the angle between the handles; a curved bench seat is a
+box bent by a few degrees.
 
 **Import**: `import("part.obj")` or a `.glb`, relative to the program's
 folder, makes an existing mesh a shape: it is sampled into a distance
 field (`resolution=` cells on its longest side, default 96), so it can be
 cut, blended, hollowed and painted like anything else. `size=` scales its
 longest side to that many units. Closed meshes work; an open mesh has no
-inside, and `check` says so. The import's own detail is limited by its
+inside, and `check` says so. Positions and triangles only: the mesh's
+materials are not read, and `resolution` is the sampling of the import,
+separate from the render grid. Sampling a large mesh takes tens of
+seconds, and `check` and `render` each do it. The import's own detail is limited by its
 resolution, so a fine mesh wants `resolution=160` or so.
 
 ## Scenes, joints and poses
@@ -221,7 +233,9 @@ copy, so a forest costs one tree.
 
 `joint(part, "elbow", x, y, z)` makes a part turn about a pivot. Build the
 part in place, declare the joint at its world pivot, then combine it with
-`+` and `paint`; a joint nested inside another part's joint turns with it.
+`+` and `paint`; a joint nested inside another part's joint turns with it,
+and its angles are relative to its parent: a stick at `-45` on a boom at
+`35` lies at `-10` in the world. Joint names must be unique.
 `pose("reach", shoulder=[0, 0, 25], elbow=[0, 0, -40])` names a set of
 angles (degrees about x, then y, then z; unnamed joints rest);
 `animation("wave", ["rest", "reach", "rest"], seconds=2)` strings poses
@@ -236,19 +250,29 @@ matters at full size with `set pose`.
 
 A pose is applied by evaluating the program again with the angles, so
 anything computed from a joint's shape (its bounds, a `ground()`) follows
-the pose, and so does any number you compute from the angles: a member
-between two moving bodies (a hydraulic cylinder, a strut) is a
-`tube(r, [a, b])` whose end points you work out from the pose's angles
-with `sin` and `cos`, rebuilt for every pose. `pose(...)` may be called
-from a `def`, so a set of poses with a shared shape is one `def` and a
-line per pose. `check` prints number steps as well as shapes, so the
+the pose, and so does any number you compute from the angles:
+`angle("boom")` is the current pose's `[x, y, z]` for that joint (zeros
+at rest), so a member between two moving bodies (a hydraulic cylinder, a
+strut) is a `tube(r, [a, b])` whose end points you work out from
+`angle(...)` with `sin` and `cos`, rebuilt for every pose:
+
+```
+b = angle("boom")[0]
+tip = [0, 1 + 3 * cos(b), 3 * sin(b)]
+ram = tube(0.08, [0, 0.5, 0.4, tip[0], tip[1], tip[2]]) | paint("steel")
+``` `pose(...)` may be called
+from a `def`, with its angles from the `def`'s parameters, so a set of
+poses with a shared shape is one `def` and a line per pose. `check` prints number steps as well as shapes, so the
 distances you compute are there to read.
 
 ## Materials
 
 `decal(shape, region, m)` paints only the surface inside `region`, adding
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
-a jar; `region` is any shape. Patterns are laid out in the frame the part is painted in, along the
+a jar; `region` is any shape. A decal is a skin: the cross-sections show
+the base material underneath, and a step used only as a region is not
+geometry, so it gets no thin-part warning and is never named as a loose
+piece. Patterns are laid out in the frame the part is painted in, along the
 material's `axis` (y unless given): `stripes` are bands stacked along it
 (`scale` wide), `wood` rings go round it with the grain along it, `brick`
 courses and `tiles` rows lie across it, `checker` and `dots` are cubic.
@@ -285,7 +309,9 @@ shadows; 0.5 is a lamp); `set light_azimuth -40` and `set light_elevation
 the defaults, upper left, fixed in the world, not the camera); `set
 ambient 2` lifts the sky and ground light for a shaded interior (0.5 is a
 dark room); `set dof 1` adds depth of field there, blurring away from the
-model's centre. A material with `glow=1` gives off its own light in every
+model's centre; `set zoom 1.4` brings the beauty camera closer (1 fits
+the model's bounding sphere, which leaves a box-shaped model small in
+the frame; `--zoom` on the command line). A material with `glow=1` gives off its own light in every
 render, unshadowed: a flame, a lamp, a screen. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
@@ -346,6 +372,10 @@ under).
   a corner's radius. `check` prints bounds; the render's "Surface extent"
   row and `ground()` read the surface itself (rays from below), so they
   are not fooled.
+- The sheet and the views colour the mesh per vertex, so a pattern or a
+  decal near the cell size looks blocky there (a 0.07 speckle at a 0.03
+  cell reads as camouflage); the beauty render and the baked atlas sample
+  the material exactly. Judge fine patterns in the beauty render.
 - Non-uniform `scale`, `twist`, `bend` and `displace` distort distances; the
   surface is still right, but a `round` or smooth blend applied *after* them
   is approximate.
