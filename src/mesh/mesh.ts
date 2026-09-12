@@ -67,7 +67,17 @@ export function isWatertight(m: Mesh): boolean {
  * triangle (a hole) or with more than two (two sheets of surface through
  * one cell, which is what a feature about a cell thin produces).
  */
-export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string; where?: Bounds; clusters?: { centre: Vec3; count: number }[] } {
+export interface EdgeCluster {
+  /** The mean of the cluster's edge midpoints: for sorting, not a place (a ring of edges averages to its middle). */
+  centre: Vec3;
+  /** The midpoint of the edge nearest the mean: a point that is on the model. */
+  at: Vec3;
+  /** The box the cluster's edges span. */
+  box: Bounds;
+  count: number;
+}
+
+export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string; where?: Bounds; clusters?: EdgeCluster[] } {
   const count = new Map<string, number>();
   const ix = m.indices;
   for (let i = 0; i < ix.length; i += 3)
@@ -98,19 +108,31 @@ export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonMani
   }
   // Where the bad edges bunch: an 8-cell grid over their box, the fullest cells first (measured: one box over a
   // whole trophy named only the final step).
-  const clusters: { centre: Vec3; count: number }[] = [];
+  const clusters: EdgeCluster[] = [];
   if (mids.length) {
     const size = [0, 1, 2].map((k) => Math.max(1e-9, where.max[k] - where.min[k]));
-    const buckets = new Map<string, { sum: Vec3; count: number }>();
+    const buckets = new Map<string, { sum: Vec3; count: number; mids: Vec3[] }>();
     for (const mid of mids) {
       const key = [0, 1, 2].map((k) => Math.min(7, Math.floor(((mid[k] - where.min[k]) / size[k]) * 8))).join(",");
-      const b = buckets.get(key) ?? { sum: [0, 0, 0], count: 0 };
+      const b = buckets.get(key) ?? { sum: [0, 0, 0], count: 0, mids: [] };
       for (let k = 0; k < 3; k++) b.sum[k] += mid[k];
       b.count++;
+      b.mids.push(mid);
       buckets.set(key, b);
     }
-    for (const b of [...buckets.values()].sort((x, y) => y.count - x.count).slice(0, 3))
-      clusters.push({ centre: [b.sum[0] / b.count, b.sum[1] / b.count, b.sum[2] / b.count], count: b.count });
+    for (const b of [...buckets.values()].sort((x, y) => y.count - x.count).slice(0, 3)) {
+      const centre: Vec3 = [b.sum[0] / b.count, b.sum[1] / b.count, b.sum[2] / b.count];
+      // The mean of a ring of edges round a hub is inside the hub (measured: a bicycle's report pointed there);
+      // the edge nearest the mean is on the surface, and the box says whether the edges lie along a line or a plane.
+      let at = b.mids[0], best = Infinity;
+      const box: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      for (const mid of b.mids) {
+        const d = (mid[0] - centre[0]) ** 2 + (mid[1] - centre[1]) ** 2 + (mid[2] - centre[2]) ** 2;
+        if (d < best) { best = d; at = mid; }
+        for (let k = 0; k < 3; k++) { box.min[k] = Math.min(box.min[k], mid[k]); box.max[k] = Math.max(box.max[k], mid[k]); }
+      }
+      clusters.push({ centre, at, box, count: b.count });
+    }
   }
   const ok = holes === 0 && nonManifold === 0;
   const note = ok

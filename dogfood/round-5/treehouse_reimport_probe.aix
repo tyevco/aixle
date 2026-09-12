@@ -1,0 +1,4 @@
+# Re-import the treehouse GLB to see what survived the export: sizes,
+# pieces, and whether the thin parts (ropes, rungs, rails) are still there.
+back = import("../out/treehouse/model.glb", resolution=160)
+show back

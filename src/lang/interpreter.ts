@@ -108,8 +108,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
   const settings: Settings = {};
-  const warnings: string[] = [];
+  const warnings: string[] = [...(program.warnings ?? [])];
   const shadowed = new Set<string>();
+  // "pose:joint" for every pose value given as one number rather than a triple.
+  const singles = new Set<string>();
   let shown: { names: string[]; shapes: Shape3[]; scene: boolean } | undefined;
   const poses: Pose[] = [];
   const animations: Animation[] = [];
@@ -234,6 +236,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     for (const v of values) {
       if (!v.name) continue;
       const a = v.value;
+      // One number is an angle about the joint's axis (a joint declared with axis=); it is checked against the joint below.
+      if (typeof a === "number") { angles[v.name] = [a, 0, 0]; singles.add(`${nameArg.value}:${v.name}`); continue; }
       if (!Array.isArray(a) || a.length !== 3 || a.some((n) => typeof n !== "number"))
         throw new RuntimeError(`pose("${nameArg.value}"): ${v.name} must be [x, y, z] degrees`, line);
       angles[v.name] = [a[0] as number, a[1] as number, a[2] as number];
@@ -262,7 +266,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   function callJoint(args: Arg[], scope: Scope, line: number): Value {
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
-    const order = ["part", "name", "x", "y", "z"];
+    const order = ["part", "name", "x", "y", "z", "axis"];
     const got: Record<string, Value | undefined> = {};
     let pos = 0;
     for (const v of values) {
@@ -274,7 +278,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (typeof name !== "string") throw new RuntimeError(`joint(): name must be a string`, line);
     for (const k of ["x", "y", "z"]) if (typeof got[k] !== "number") throw new RuntimeError(`joint("${name}"): missing '${k}', the pivot in world units`, line);
     const a = options.jointAngles?.[name] ?? [0, 0, 0];
-    return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, a);
+    let axis: [number, number, number] | undefined;
+    if (got.axis !== undefined) {
+      const ax = got.axis;
+      if (!Array.isArray(ax) || ax.length !== 3 || ax.some((n) => typeof n !== "number") || Math.hypot(...(ax as number[])) === 0)
+        throw new RuntimeError(`joint("${name}"): axis must be a direction [x, y, z] (e.g. [cos(72), sin(72), 0] for a head tube raked 18 degrees)`, line);
+      axis = [ax[0] as number, ax[1] as number, ax[2] as number];
+    }
+    return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, a, axis);
   }
 
   function call(callee: string, args: Arg[], scope: Scope, line: number): Value {
@@ -520,10 +531,17 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
   // Poses and animations must name real joints and poses.
   if (output) {
-    const jointNames = new Set(allJoints(output).map((j) => j.joint!.name));
+    const jointList = allJoints(output);
+    const jointNames = new Set(jointList.map((j) => j.joint!.name));
+    const axisJoints = new Set(jointList.filter((j) => j.joint!.axis).map((j) => j.joint!.name));
     for (const p of poses)
-      for (const j of Object.keys(p.angles))
-        if (!jointNames.has(j)) warnings.push(`pose "${p.name}" (line ${p.line}) sets joint "${j}", which is not in the output${jointNames.size ? `; joints: ${[...jointNames].join(", ")}` : ""}`);
+      for (const j of Object.keys(p.angles)) {
+        if (!jointNames.has(j)) { warnings.push(`pose "${p.name}" (line ${p.line}) sets joint "${j}", which is not in the output${jointNames.size ? `; joints: ${[...jointNames].join(", ")}` : ""}`); continue; }
+        // A single angle belongs to an axis joint; an [x, y, z] triple to one without; the wrong kind is a mistake to name.
+        const single = singles.has(`${p.name}:${j}`);
+        if (single && !axisJoints.has(j)) warnings.push(`pose "${p.name}" (line ${p.line}): ${j} is one number, but joint "${j}" has no axis=, so it takes [x, y, z] degrees`);
+        if (!single && axisJoints.has(j) && (p.angles[j][1] !== 0 || p.angles[j][2] !== 0)) warnings.push(`pose "${p.name}" (line ${p.line}): joint "${j}" turns about its axis, so it takes one angle, not [x, y, z]; only the first number is used`);
+      }
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
     for (const a of animations)
       for (const pn of new Set(a.poses))

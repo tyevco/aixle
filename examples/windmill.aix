@@ -31,7 +31,7 @@ door = box(0.8, 1.6, 0.3) | anchor("sill", 0, -0.8, 0) | paint("walnut")
 door_on = door | attach("sill", tower, "doorway")
 step = box(1.2, 0.2, 0.7) | attach("top", door_on, "bottom") | paint("stone")
 
-windmill = tower + cap_on + rotor + door_on + step | ground()
+windmill = (tower + cap_on + rotor + door_on + step) | ground()
 pose("quarter", rotor=[0, 0, 45])
 animation("turn", ["rest", "quarter"], seconds=1.5)
 show windmill

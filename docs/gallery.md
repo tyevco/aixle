@@ -291,3 +291,27 @@ round 4: An award trophy, about 6.3 units tall, front on +z, one solid piece for
 ![round-4_trophy, beauty render](../dogfood/renders/round-4_trophy_beauty.png) ![round-4_trophy, contact sheet](../dogfood/renders/round-4_trophy.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-4/trophy.aix) · <a href="/aixle/viewers/round-4_trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-4/trophy.report.md)
+
+### round-5_bicycle
+
+round 5: A bicycle as a product picture. Faces +x, drive side towards +z (the viewer
+
+![round-5_bicycle, beauty render](../dogfood/renders/round-5_bicycle_beauty.png) ![round-5_bicycle, contact sheet](../dogfood/renders/round-5_bicycle.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/bicycle.aix) · <a href="/aixle/viewers/round-5_bicycle.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/bicycle.report.md)
+
+### round-5_clock
+
+round 5: A grandfather clock, about 6 units tall, front on +z.
+
+![round-5_clock, beauty render](../dogfood/renders/round-5_clock_beauty.png) ![round-5_clock, contact sheet](../dogfood/renders/round-5_clock.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/clock.aix) · <a href="/aixle/viewers/round-5_clock.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/clock.report.md)
+
+### round-5_treehouse
+
+round 5: A treehouse: a rough-barked tree with four branches and a blended canopy,
+
+![round-5_treehouse, beauty render](../dogfood/renders/round-5_treehouse_beauty.png) ![round-5_treehouse, contact sheet](../dogfood/renders/round-5_treehouse.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/treehouse.aix) · <a href="/aixle/viewers/round-5_treehouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/treehouse.report.md)

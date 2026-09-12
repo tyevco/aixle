@@ -281,3 +281,38 @@ describe("anchors", () => {
     expect(() => run('a = box(1)\np = at(a, "nose")')).toThrow(/no anchor "nose".*top, bottom/);
   });
 });
+
+describe("joints about an axis", () => {
+  it("turns about the given axis by one angle, and a pose gives a number", () => {
+    const src = [
+      "fork = box(0.2, 2, 0.2) | move(0, -1, 0)",
+      'steer = joint(fork, "steer", 0, 0, 0, axis=[cos(72), sin(72), 0])',
+      "m = box(1, 0.2, 0.2) | move(0, 1, 0) + steer",
+      'pose("turned", steer=25)',
+    ].join("\n");
+    const ev = run(src);
+    expect(ev.warnings).toEqual([]);
+    expect(ev.poses[0].angles.steer).toEqual([25, 0, 0]);
+    // Turned 90 about the axis through the origin: a point on the fork's bottom (0, -2, 0) sweeps about the raked axis.
+    const posed = evaluate(parse(src), { jointAngles: { steer: [90, 0, 0] } });
+    const j = posed.steps.find((s) => s.name === "steer")!.value as Shape3;
+    const p = j.warp!(0, -2, 0);
+    const ax = Math.cos(Math.PI * 0.4), ay = Math.sin(Math.PI * 0.4);
+    // Rotation about the axis keeps the component along it: dot(p, axis) is unchanged.
+    expect(p[0] * ax + p[1] * ay).toBeCloseTo(-2 * ay, 6);
+    expect(Math.hypot(p[0], p[1], p[2])).toBeCloseTo(2, 6);
+    expect(p[2]).not.toBeCloseTo(0, 3);
+    // A triple on an axis joint, or a number on a plain joint, is named.
+    expect(run(src.replace("steer=25", "steer=[25, 0, 5]")).warnings.join()).toMatch(/turns about its axis, so it takes one angle/);
+    expect(run('a = joint(box(1), "hinge", 0, 0, 0)\nm = a\npose("p", hinge=25)').warnings.join()).toMatch(/has no axis=, so it takes \[x, y, z\]/);
+  });
+});
+
+describe("a transform on the right of a union", () => {
+  it("warns when a named step is moved alone after '+', not when a fresh primitive is placed that way", () => {
+    expect(run("a = box(1)\nb = box(1)\nm = a + b | move(0, 2, 0)").warnings.join()).toMatch(/line 3: '\+ \.\.\. \| move\(\.\.\.\)' applies move to the right side only/);
+    expect(run("a = box(1)\nb = box(1)\nm = (a + b) | move(0, 2, 0)").warnings).toEqual([]);
+    expect(run("a = box(1)\nm = a + sphere(0.3) | move(0, 2, 0)").warnings).toEqual([]);
+    expect(run("a = box(1)\nb = box(1)\nm = a + (b | move(0, 2, 0))").warnings).toEqual([]);
+  });
+});

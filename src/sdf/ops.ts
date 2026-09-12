@@ -7,7 +7,7 @@
  * hundred parts cheap to extract.
  */
 import { fbm3 } from "../core/noise.js";
-import { apply, length2, rad, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
+import { apply, length2, rad, rotAxis, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
 import { DEFAULT_MATERIAL } from "./materials.js";
 import { primitive, cylinder } from "./primitives.js";
 import { buildSpatialIndex, cellsFor } from "./spatial.js";
@@ -651,11 +651,14 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
  * subtree reads as empty, which is how a parent's own geometry is meshed
  * without the parts that hang off it.
  */
-export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0]): Shape3 {
-  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false };
-  const turned = angles[0] === 0 && angles[1] === 0 && angles[2] === 0 ? child : move(rotate(move(child, -px, -py, -pz), angles[0], angles[1], angles[2]), px, py, pz);
+export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0], axis?: Vec3): Shape3 {
+  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false, axis };
+  // About one axis when given (a steering column raked 18 degrees is one number, not an Euler triple worked out
+  // elsewhere: round 5), else x, then y, then z.
+  const m = axis ? rotAxis(axis, angles[0]) : rotXYZ(angles[0], angles[1], angles[2]);
+  const still = axis ? angles[0] === 0 : angles[0] === 0 && angles[1] === 0 && angles[2] === 0;
+  const turned = still ? child : move(rotateBy(move(child, -px, -py, -pz), m), px, py, pz);
   const d = turned.dist, h = turned.hit;
-  const m = rotXYZ(angles[0], angles[1], angles[2]);
   const [a, b, c, e, f, g, i, j, l] = transpose(m);
   return {
     kind: "shape3",
@@ -799,6 +802,15 @@ export function hasLooseBounds(s: Shape3): boolean {
  * no forward map.
  */
 export function placedBounds(root: Shape3, target: Shape3, own: Bounds): Bounds | undefined {
+  const maps = placementChain(root, target);
+  if (!maps) return undefined;
+  let pts = boundsCorners(own);
+  for (let k = maps.length - 1; k >= 0; k--) pts = pts.map((p) => maps[k].warp!(p[0], p[1], p[2]));
+  return boundsFromPoints(pts);
+}
+
+/** The transforms and joints on the path from `root` down to `target`, outermost first; undefined when not under the root or a map is one-way. */
+function placementChain(root: Shape3, target: Shape3): Shape3[] | undefined {
   const chain: Shape3[] = [];
   const seen = new Set<Shape3>();
   const find = (n: Shape3): boolean => {
@@ -813,10 +825,32 @@ export function placedBounds(root: Shape3, target: Shape3, own: Bounds): Bounds 
   };
   if (!find(root)) return undefined;
   const maps = chain.filter((n) => n.unwarp || n.warp);
-  if (maps.some((n) => !n.warp)) return undefined;
-  let pts = boundsCorners(own);
-  for (let k = maps.length - 1; k >= 0; k--) pts = pts.map((p) => maps[k].warp!(p[0], p[1], p[2]));
-  return boundsFromPoints(pts);
+  return maps.some((n) => !n.warp || !n.unwarp) ? undefined : maps;
+}
+
+/**
+ * The shape as it ends up under `root`: its field read through the inverses
+ * of every transform and posed joint above it, so its surface can be
+ * measured where the pose put it (round 5: a turned front wheel's posed
+ * box was the box of a turned box, and whether it touched the floor was
+ * not readable from it). Undefined when there is nothing between them.
+ */
+export function placedShape(root: Shape3, target: Shape3): Shape3 | undefined {
+  const maps = placementChain(root, target);
+  if (!maps || !maps.length) return undefined;
+  const d = target.dist;
+  const back = (x: number, y: number, z: number): Vec3 => {
+    let p: Vec3 = [x, y, z];
+    for (const m of maps) p = m.unwarp!(p[0], p[1], p[2]);
+    return p;
+  };
+  return {
+    kind: "shape3",
+    dist: (x, y, z) => { const p = back(x, y, z); return d(p[0], p[1], p[2]); },
+    hit: (x, y, z) => { const p = back(x, y, z); return target.hit(p[0], p[1], p[2]); },
+    bounds: placedBounds(root, target, target.bounds) ?? target.bounds,
+    cost: target.cost,
+  };
 }
 
 /** The joints anywhere inside a shape, outermost first, without descending into a joint's child. */

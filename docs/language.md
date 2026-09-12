@@ -195,7 +195,12 @@ path, so three circles swept along `helix(r, h, turns)` with
 from y = 0 to `h`, an arc lies on y = 0; move the result afterwards);
 `spline` is the one to reach for on a curve: it passes through the points and subdivides until no piece turns
 more than three degrees, so the sweep shows no facets. Any list of
-numbers works, including one built in a loop.
+numbers works, including one built in a loop. A tapered tube along a
+smoothed polyline is a chain of round cones, and where two meet at an
+angle their surfaces cross in a ring thinner than any cell, so a bent,
+tapered branch leaves open edges at every join (measured: 158 on four
+branches); `tube(r, curve([...]), taper=)` has no joins, so use the
+exact curve for anything tapered that bends.
 
 **Exact curves**: `bezier([x,y,z, ...])` takes cubic Bezier control
 points (an anchor, then two handles and an anchor per piece: 4, 7, 10, ...
@@ -251,7 +256,10 @@ inside, and `check` says so. Positions and triangles only: the mesh's
 materials are not read, and `resolution` is the sampling of the import,
 separate from the render grid. Sampling a large mesh takes tens of
 seconds, and `check` and `render` each do it. The import's own detail is limited by its
-resolution, so a fine mesh wants `resolution=160` or so.
+resolution: anything in the mesh thinner than about 1.2 of its sampling
+cell is gone whatever the render grid, and `check` warns with the
+`resolution=` that matches the render's cell when the import's is
+coarser, so a fine mesh wants `resolution=160` or so.
 
 ## Scenes, joints and poses
 
@@ -262,11 +270,21 @@ at each position and yaw (degrees about y; `fields=5` adds a scale per
 copy): the render is the union, the export is one mesh with a node per
 copy, so a forest costs one tree.
 
+`ground()` moves one shape, so in a `scene` it moves that object alone
+and the others stay where their numbers put them: ground the whole
+scene's parts by the same amount, or cut them at y = 0 (a box
+subtracted below the floor), rather than grounding one object.
+
 `joint(part, "elbow", x, y, z)` makes a part turn about a pivot. Build the
 part in place, declare the joint at its world pivot, then combine it with
 `+` and `paint`; a joint nested inside another part's joint turns with it,
 and its angles are relative to its parent: a stick at `-45` on a boom at
 `35` lies at `-10` in the world. Joint names must be unique.
+`joint(fork, "steer", x, y, z, axis=[cos(72), sin(72), 0])` turns about
+one axis through the pivot instead, for a raked steering column, a
+slanted hinge or a tilted rotor: a pose then gives it one angle
+(`steer=25`), `angle("steer")[0]` reads it, and the GLB animation turns
+about that axis rather than through an Euler triple.
 `pose("reach", shoulder=[0, 0, 25], elbow=[0, 0, -40])` names a set of
 angles (degrees about x, then y, then z; unnamed joints rest);
 `animation("wave", ["rest", "reach", "rest"], seconds=2)` strings poses
@@ -411,8 +429,8 @@ than the small grid's cell), in a second or two; `--watch` re-renders on every s
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
 detail thinner than its cell, and the sheet says which steps it dropped.
-When it dropped any, the pieces count is not judged on that sheet, since
-the dropped steps are often the joins; a bucket's teeth or a rail are
+When it dropped any, the pieces count and the footprint are not judged
+on that sheet, since the dropped steps are often the joins or the feet; a bucket's teeth or a rail are
 blobs or gone at a quick cell, so judge a working end at full grid, with
 `--focus` on the step to spend the cells there.
 
@@ -431,7 +449,9 @@ Warnings cover: a shape computed but never assigned; a step that is not part
 of the output; an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
-still catch it, below it they may not), including a `shell` wall, a
+still catch it, below it they may not; between 1.2 and 2 cells a tube
+or a wall meshes but often not watertight, and the report names such
+parts when the mesh has open edges), including a `shell` wall, a
 `tube`, a `sweep` profile or a `text` stroke inside a thick part (those
 carry their own thickness, since a bounding box cannot see it); a
 lettering counter or a slot under a cell (under half a cell it closes,
@@ -440,7 +460,14 @@ watertight); a union that paints over parts that already had materials,
 or joins painted and unpainted parts; a program that both names a step
 `top` and calls `top(...)`; a model in separate pieces (a part that
 floats free) or with slivers left by a cut, each named by the innermost
-step whose surface passes there, then its nearest named parent; a model
+step whose surface passes there, then its nearest named parent (open
+edges are placed at an edge that is on the model, with the steps whose
+surfaces meet there, or "with itself" when one step's surfaces cross,
+and a cluster of edges all on one plane is called out as a face lying
+exactly on a sample plane, which a nudge of a fraction of a cell cures);
+a named step transformed alone on the right of a `+` (`a + b | move(...)`
+moves b only, since `|` binds tighter; `(a + b) | move(...)` moves both,
+and `+ sphere(0.2) | move(...)` is the ordinary way to place one); a model
 that would tip over, from its centre of mass and the footprint of its
 base; and, as a note, a model that does not rest on `y = 0`. Two parts
 count as joined when they overlap by about a cell in the field: parts

@@ -4,7 +4,7 @@
  *   aixle check  <file.aix>
  *   aixle doc    [--write FILE]
  */
-import { anchorsOf, hasLooseBounds, placedBounds, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
+import { anchorsOf, hasLooseBounds, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
@@ -110,11 +110,12 @@ function main(argv: string[]): number {
         // Named anchors, where they are in this step's frame.
         const anchors = Object.entries(anchorsOf(st.value));
         if (anchors.length) console.log(`${"  anchors".padEnd(18)} ${anchors.map(([k, p]) => `${k} (${p.map(short).join(", ")})`).join("  ")}`);
-        // In a pose, where the step ends up once the joints above it have turned (its surface extent carried
-        // through them, so still a box, but of the surface rather than of a box).
+        // In a pose, where the step ends up once the joints above it have turned: the surface itself, measured
+        // through the joints' inverses, so a turned wheel's posed line says whether it still touches the floor.
         if (pose && ev.output) {
-          const placed = placedBounds(ev.output, st.value, own);
-          if (placed && [0, 1, 2].some((k) => Math.abs(placed.min[k] - b.min[k]) > 1e-6 || Math.abs(placed.max[k] - b.max[k]) > 1e-6))
+          const placedS = placedShape(ev.output, st.value);
+          const placed = placedS ? surfaceExtent(placedS, 24) : undefined;
+          if (placed && !isEmpty(placed) && [0, 1, 2].some((k) => Math.abs(placed.min[k] - own.min[k]) > 1e-6 || Math.abs(placed.max[k] - own.max[k]) > 1e-6))
             console.log(`${"  posed".padEnd(18)} ${spanBox(placed)}`);
         }
       }

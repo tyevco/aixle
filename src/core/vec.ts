@@ -58,6 +58,18 @@ export function rotZ(deg: number): Mat3 {
 }
 
 /** Rotation applying x, then y, then z (R = Rz * Ry * Rx). */
+/** Rotation by `deg` degrees about a unit axis (Rodrigues), right-handed. */
+export function rotAxis(axis: Vec3, deg: number): Mat3 {
+  const len = Math.hypot(axis[0], axis[1], axis[2]) || 1;
+  const x = axis[0] / len, y = axis[1] / len, z = axis[2] / len;
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), t = 1 - c;
+  return [
+    t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+    t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+    t * x * z - s * y, t * y * z + s * x, t * z * z + c,
+  ];
+}
+
 export function rotXYZ(x: number, y: number, z: number): Mat3 {
   return matMul(rotZ(z), matMul(rotY(y), rotX(x)));
 }

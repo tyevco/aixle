@@ -8,7 +8,7 @@ describe("aixle explain", () => {
     const out = cli("explain", "examples/windmill.aix");
     const lines = out.split("\n");
     expect(lines[0]).toMatch(/^windmill \(line \d+\)  [\d.]+ × [\d.]+ × [\d.]+  painted  anchors: crown/);
-    expect(lines[1]).toMatch(/^    = tower \+ cap_on \+ rotor \+ door_on \+ step \| ground\(\)/);
+    expect(lines[1]).toMatch(/^    = \(tower \+ cap_on \+ rotor \+ door_on \+ step\) \| ground\(\)/);
     // A child is indented under its parent, a repeated step is not printed twice, a number step shows its value.
     expect(out).toMatch(/\n  cap_on \(line \d+\)[^\n]*anchors: seat, hub\n      = cap \| attach\("seat", tower, "crown"\)/);
     expect(out).toMatch(/\n    tower \(see above\)/);

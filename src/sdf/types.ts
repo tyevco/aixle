@@ -100,6 +100,8 @@ export interface Shape3 {
   unwarp?: (x: number, y: number, z: number) => Vec3;
   /** For a rigid transform or a joint: where a point of the child lands, so a step inside a posed joint can be framed where it is. */
   warp?: (x: number, y: number, z: number) => Vec3;
+  /** For an import: the cell its mesh was sampled at, so a render finer than that can say what the import cannot show. */
+  sampledAt?: number;
   /** Named points on the shape, in its own frame, set by anchor(); anchorsOf() carries them through the tree. */
   anchors?: Record<string, Vec3>;
   /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
@@ -116,8 +118,10 @@ export interface JointState {
   name: string;
   pivot: Vec3;
   child: Shape3;
-  /** The rotation this joint was built with, degrees about x, y, z (applied x, then y, then z). */
+  /** The rotation this joint was built with, degrees about x, y, z (applied x, then y, then z); with an axis, angles[0] about it. */
   angles: Vec3;
+  /** When set, the joint turns about this one axis through the pivot and a pose gives it one angle (a steering column, a slanted hinge). */
+  axis?: Vec3;
   /** When true the joint's whole subtree reads as empty, so a parent's own geometry can be meshed alone. */
   hidden: boolean;
 }

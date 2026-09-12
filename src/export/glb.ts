@@ -134,6 +134,13 @@ export interface GlbAnimation {
 }
 
 /** Quaternion for rotations about x, then y, then z, in degrees (the joint convention). */
+/** A quaternion for `deg` degrees about an axis, for a joint declared with one: the animation then turns about it. */
+export function axisAngleToQuat(axis: [number, number, number], deg: number): [number, number, number, number] {
+  const len = Math.hypot(axis[0], axis[1], axis[2]) || 1;
+  const h = (deg * Math.PI) / 360, s = Math.sin(h);
+  return [(axis[0] / len) * s, (axis[1] / len) * s, (axis[2] / len) * s, Math.cos(h)];
+}
+
 export function eulerToQuat(x: number, y: number, z: number): [number, number, number, number] {
   const r = (d: number) => (d * Math.PI) / 180 / 2;
   const cx = Math.cos(r(x)), sx = Math.sin(r(x)), cy = Math.cos(r(y)), sy = Math.sin(r(y)), cz = Math.cos(r(z)), sz = Math.sin(r(z));

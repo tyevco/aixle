@@ -7,7 +7,15 @@ export interface List { type: "list"; items: Expr[]; line: number }
 export interface Unary { type: "unary"; op: "-"; arg: Expr; line: number }
 export interface Binary { type: "binary"; op: "+" | "-" | "*" | "/" | "%" | "^" | "&"; left: Expr; right: Expr; line: number }
 export interface Arg { name?: string; value: Expr }
-export interface Call { type: "call"; callee: string; args: Arg[]; line: number }
+export interface Call {
+  type: "call";
+  callee: string;
+  args: Arg[];
+  line: number;
+  /** Made by `x | f(...)`, and not wrapped in parentheses: the parser uses this to notice `a + b | move(...)`. */
+  piped?: boolean;
+  grouped?: boolean;
+}
 /** `list[i]`: one item of a list, 0-based; negative counts from the end. */
 export interface Index { type: "index"; target: Expr; index: Expr; line: number }
 
@@ -25,4 +33,6 @@ export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt;
 
 export interface Program {
   body: Stmt[];
+  /** Things the parser noticed that are legal but probably not meant; the interpreter reports them with its own. */
+  warnings?: string[];
 }

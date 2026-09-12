@@ -10,7 +10,7 @@ import { parseObj } from "./import/obj.js";
 import { parseGlb } from "./import/glb.js";
 import { meshField } from "./mesh/meshSdf.js";
 import { box, primitive } from "./sdf/primitives.js";
-import { eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
+import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
@@ -115,6 +115,7 @@ export function importResolver(sourceName: string, log: (line: string) => void =
     const field = meshField(mesh, opts.resolution);
     log(`import ${path}: ${field.triangles} triangles sampled at cell ${fmt(field.cell)} in ${Math.round(performance.now() - t0)} ms${field.openness > 0.01 ? ` (mesh is not closed: ${(field.openness * 100).toFixed(0)}% of rays end inside)` : ""}`);
     const shape = primitive(field.dist, field.bounds, 8);
+    shape.sampledAt = field.cell;
     cache.set(key, shape);
     return shape;
   };
@@ -136,6 +137,14 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     const t = Math.min(ss[0], ss[1], ss[2]);
     if (t > 0 && t < cellSize * 1.2) {
       out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it or raise the grid (set grid ${gridFor(t)}).`);
+      // Its own feature size is settled too, or the union above it would repeat the warning under its own name
+      // (measured: 'house', forty parts, listed as thin for its mullion).
+      if (st.value.feature !== undefined) reportedFeatures.add(Math.round(st.value.feature * 1e6));
+      continue;
+    }
+    // An import is one step: nothing in its mesh thinner than its sampling cell survived, whatever the render grid.
+    if (st.value.sampledAt !== undefined && st.value.sampledAt > cellSize * 1.05) {
+      out.push(`'${st.name}' (line ${st.line}) is an import sampled at cell ${fmt(st.value.sampledAt)}, coarser than this render's ${fmt(cellSize)}: anything in its mesh thinner than about ${fmt(st.value.sampledAt * 1.2)} (rails, hooks, rungs) is gone or broken, whatever the grid. Give import() resolution=${Math.ceil(Math.max(...boundsSize(st.value.bounds)) / cellSize)} to match.`);
       continue;
     }
     // A gap (a letter's counters, a slot) narrower than a cell closes up; reported once per size like features.
@@ -207,7 +216,7 @@ export function geometrySteps(evaluation: Evaluation): Set<string> {
  * stretches a step of `tol`. Smallest box first, so the most specific
  * name comes first.
  */
-export function stepsNear(evaluation: Evaluation, c: [number, number, number], tol: number, limit = 2): string[] {
+function stepsNearDetailed(evaluation: Evaluation, c: [number, number, number], tol: number): { name: string; leaf: boolean; d: number }[] {
   const names = new Map<Shape3, string>();
   for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
   const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
@@ -246,8 +255,12 @@ export function stepsNear(evaluation: Evaluation, c: [number, number, number], t
   const bucket = (v: number) => Math.round(v * 3);
   return [...found.entries()]
     .sort((a, b) => bucket(a[1].d) - bucket(b[1].d) || Number(b[1].leaf) - Number(a[1].leaf) || b[1].depth - a[1].depth)
-    .slice(0, limit)
-    .map(([name]) => `'${name}'`);
+    .map(([name, f]) => ({ name, leaf: f.leaf, d: f.d }));
+}
+
+/** The names near a point, quoted, at most `limit`: what the warnings print. */
+export function stepsNear(evaluation: Evaluation, c: [number, number, number], tol: number, limit = 2): string[] {
+  return stepsNearDetailed(evaluation, c, tol).slice(0, limit).map((n) => `'${n.name}'`);
 }
 
 /**
@@ -318,9 +331,15 @@ export function paintWarnings(evaluation: Evaluation): string[] {
   return out;
 }
 
+/** A speck: tiny in volume and in extent, a sliver left by a cut or a blend neck (round 5: counted as a piece and as a cavity). */
+function isSpeck(pc: Piece, physics: Physics, cellSize: number): boolean {
+  const main = physics.pieces[0];
+  return Math.abs(pc.volume) < Math.abs(main.volume) * 0.001 && pc.size < cellSize * 4;
+}
+
 /** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and step. */
 function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): string {
-  const solid = physics.pieces.filter((pc) => !pc.cavity);
+  const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics, cellSize));
   if (solid.length <= 1) return `${solid.length}`;
   const rest = solid.slice(1, 5).map((pc) => {
     const at = stepsNear(evaluation, pc.centre, Math.max(pc.size * 0.5, Math.cbrt(Math.abs(pc.volume))) + cellSize * 2);
@@ -329,15 +348,66 @@ function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): 
   return `${solid.length} (the largest ${fmt(Math.abs(solid[0].volume))}; then ${rest.join("; ")}${solid.length > 5 ? "; ..." : ""})`;
 }
 
-/** The watertight line, with where the bad edges are and which steps hold them, so it can be acted on. */
+/**
+ * Steps whose feature is between 1.2 and 2 cells: they mesh (the thin warning's threshold is 1.2) but a tube or a
+ * wall that thin often meshes with open edges, so when the mesh is not watertight they are the first suspects
+ * (measured: a bicycle's spokes and stays at 1.3 to 1.8 cells carried the edges; at 2 cells they were clean).
+ */
+function nearlyThin(evaluation: Evaluation, cellSize: number): string {
+  const geometry = geometrySteps(evaluation);
+  const seen = new Set<number>();
+  const names: string[] = [];
+  for (const st of evaluation.steps) {
+    if (!isShape3(st.value) || !geometry.has(st.name)) continue;
+    const f = st.value.feature;
+    if (f === undefined || !(f >= cellSize * 1.2) || f >= cellSize * 2) continue;
+    const key = Math.round(f * 1e6);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(`'${st.name}' (${(f / cellSize).toFixed(1)} cells)`);
+  }
+  if (!names.length) return "";
+  return ` Parts between 1.2 and 2 cells thick mesh but often not watertight: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ", ..." : ""}; thicken them to two cells or raise the grid.`;
+}
+
+/** The cavities row: enclosed voids, without the sub-cell ones a grazing contact leaves (those are the watertight row's). */
+function cavitiesRow(physics: Physics, cellSize: number): string {
+  const cavities = physics.pieces.filter((pc) => pc.cavity && !isSpeck(pc, physics, cellSize));
+  if (!cavities.length) return "none";
+  return cavities.slice(0, 4).map((pc) => `volume ${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})`).join("; ") + " (enclosed voids, not loose parts)";
+}
+
+/**
+ * The watertight line, with where the bad edges are and which steps hold
+ * them, so it can be acted on. Each cluster names the steps whose surface
+ * passes there; when only one step does, two of its own surfaces cross
+ * (a tube's segments at a join, a fold in a displaced skin), and it says
+ * so rather than naming the step's parent as if it were the other party
+ * (round 5: "'swing_branch', 'wood'" read as a branch meeting the tree).
+ * A tally per step follows, so one construct carrying every edge shows
+ * in one read.
+ */
 function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number): string {
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
-  // Each cluster of bad edges with the geometry steps whose surface passes near it: the parts to look at.
+  const tally = new Map<string, number>();
+  let planar = 0;
   const spots = (w.clusters ?? []).map((cl) => {
-    const steps = stepsNear(evaluation, cl.centre, cellSize * 3, 2);
-    return `${cl.count} at (${cl.centre.map(fmt).join(", ")})${steps.length ? ` in ${steps.join(", ")}` : ""}`;
+    // Named at an edge that is on the model, not at the cluster's mean, which for a ring of edges is inside the part.
+    const near = stepsNearDetailed(evaluation, cl.at, cellSize * 2);
+    const leaves = near.filter((n) => n.leaf).slice(0, 2);
+    const names = leaves.length ? leaves : near.slice(0, 1);
+    for (const n of names) tally.set(n.name, (tally.get(n.name) ?? 0) + cl.count);
+    const label = names.length === 0 ? "" : names.length === 1 ? ` in '${names[0].name}' (with itself: two of its own surfaces cross there)` : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
+    // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
+    // plane, which the extractor cannot resolve (measured: a down tube's side and a tyre's equator on grid planes).
+    const flat = cl.count >= 3 ? [0, 1, 2].find((k) => cl.box.max[k] - cl.box.min[k] < cellSize * 0.05) : undefined;
+    if (flat !== undefined) planar++;
+    const plane = flat !== undefined ? `, all on the plane ${"xyz"[flat]} = ${fmt(cl.at[flat])}` : "";
+    return `${cl.count} at (${cl.at.map(fmt).join(", ")})${label}${plane}`;
   });
-  return `${w.note} The edges are mostly ${spots.join("; ")}.`;
+  const byStep = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `'${n}' ${c}`).join(", ");
+  const planeNote = planar ? " Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part or the grid by a fraction of a cell, or change the radius a little." : "";
+  return `${w.note} The edges are mostly ${spots.join("; ")}.${byStep ? ` By step: ${byStep}.` : ""}${planeNote}`;
 }
 
 /**
@@ -491,7 +561,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];
       if (dropped.length) {
         quickDropped = dropped.length;
-        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet (${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ", ..." : ""}), so the pieces count is not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
+        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet (${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ", ..." : ""}), so the pieces count and the footprint are not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
       }
     }
     // The true extent comes from the mesh: bounds are boxes, and a difference keeps the left side's box
@@ -547,9 +617,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         // clip faces are open by construction, so only edges away from the frame's faces count.
         const inside = (p: [number, number, number]) => [0, 1, 2].every((k) => p[k] > frame.min[k] + close.cellSize * 1.5 && p[k] < frame.max[k] - close.cellSize * 1.5);
         const w = watertightReport(close.mesh);
-        const clusters = (w.clusters ?? []).filter((cl) => inside(cl.centre));
+        const clusters = (w.clusters ?? []).filter((cl) => inside(cl.at));
         closeUpNote = clusters.length
-          ? `not watertight at cell ${fmt(close.cellSize)}: ${clusters.map((cl) => `${cl.count} edges at (${cl.centre.map(fmt).join(", ")})${stepsNear(evaluation, cl.centre, close.cellSize * 3, 2).length ? ` in ${stepsNear(evaluation, cl.centre, close.cellSize * 3, 2).join(", ")}` : ""}`).join("; ")} (edges on the frame's own faces are not counted)`
+          ? `not watertight at cell ${fmt(close.cellSize)}: ${clusters.map((cl) => `${cl.count} edges at (${cl.at.map(fmt).join(", ")})${stepsNear(evaluation, cl.at, close.cellSize * 2, 2).length ? ` in ${stepsNear(evaluation, cl.at, close.cellSize * 2, 2).join(", ")}` : ""}`).join("; ")} (edges on the frame's own faces are not counted)`
           : `yes at cell ${fmt(close.cellSize)} (the clip faces of the frame are not counted)`;
       }
     }
@@ -583,7 +653,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
           const rotations: Record<string, [number, number, number, number][]> = {};
           for (const j of joints) {
             const jn = j.joint!.name;
-            rotations[jn] = keys.map((k) => { const an = k.angles[jn] ?? [0, 0, 0]; return eulerToQuat(an[0], an[1], an[2]); });
+            const axis = j.joint!.axis;
+            rotations[jn] = keys.map((k) => { const an = k.angles[jn] ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
           }
           return { name: a.name, times, rotations };
         });
@@ -619,7 +690,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const ambient = typeof evaluation.settings.ambient === "number" ? evaluation.settings.ambient : undefined;
       const zoom = opts.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
       // Framed like the views: on the focused step when there is one.
-      time("beauty", () => write("beauty.png", renderBeauty(output, mesh!, frame, { size: bsize, cellSize, azimuth, elevation, lightSize, dof, lightAzimuth, lightElevation, ambient, zoom, label: `${shownName}  ${dimsLabel(frame)}` }).toPng()));
+      // Framed on the surface the mesh found, not the box a blend or a displace padded (measured: a tree's box was
+      // 10% wider than its surface on every side, and the zoom could not reach past it).
+      const beautyFrame = focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
+      time("beauty", () => write("beauty.png", renderBeauty(output, mesh!, beautyFrame, { size: bsize, cellSize, azimuth, elevation, lightSize, dof, lightAzimuth, lightElevation, ambient, zoom, label: `${shownName}  ${dimsLabel(beautyFrame)}` }).toPng()));
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
     }
   }
@@ -643,13 +717,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Physical checks: mass, centre of mass, stability, pieces.
   let physics: Physics | undefined;
   if (mesh && bounds && triangleCount(mesh) > 0) {
-    physics = time("physics", () => analyse(mesh!, cellSize));
-    const main = physics.pieces[0];
+    const ph = time("physics", () => analyse(mesh!, cellSize));
+    physics = ph;
+    const main = ph.pieces[0];
     // A cavity (an inward shell, a lidded cup's inside) is not a piece; a speck is tiny in volume and in extent, so a
     // small real part (a star finial 0.6 wide) is a loose piece, not a sliver (measured: the two were swapped).
-    const cavities = physics.pieces.filter((pc) => pc.cavity);
-    const specks = physics.pieces.filter((pc) => !pc.cavity && Math.abs(pc.volume) < Math.abs(main.volume) * 0.001 && pc.size < cellSize * 4);
-    const parts = physics.pieces.length - specks.length - cavities.length;
+    const cavities = ph.pieces.filter((pc) => pc.cavity && !isSpeck(pc, ph, cellSize));
+    const specks = ph.pieces.filter((pc) => !pc.cavity && isSpeck(pc, ph, cellSize));
+    // Sub-cell cavities are grazing contacts, the watertight row's business, not voids; they count for nothing here.
+    const parts = ph.pieces.length - specks.length - cavities.length - ph.pieces.filter((pc) => pc.cavity && isSpeck(pc, ph, cellSize)).length;
     if (parts > 1 && !evaluation.objects.some((o) => o.shape.instanced) && evaluation.objects.length === 1) {
       // Name the steps whose surface is near each loose piece's centre, smallest first (by the field, not the box:
       // measured, a blended step's box named the wrong part). A piece's centre can be inside a hollow, so the
@@ -661,12 +737,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // railed excavator said "4 pieces"); the note above says so instead.
       if (!quickDropped) warnings.push(`The model is ${parts} separate pieces: the largest is ${fmt(Math.abs(main.volume))}, the loose ${loose.length === 1 ? "piece is" : "pieces are"} ${where}${parts - 1 > loose.length ? ", ..." : ""}. A piece not touching the rest floats free: overlap parts slightly, or use scene for separate objects.`);
     }
-    if (specks.length) {
+    if (specks.length && !quickDropped) {
       const s0 = specks[0];
       const at = stepsNear(evaluation, s0.centre, s0.size + cellSize * 2);
       warnings.push(`${specks.length} tiny speck${specks.length === 1 ? "" : "s"} of mesh (under 0.1% of the volume and a few cells across): a sliver left by a cut or a part thinner than a cell. The largest is at (${s0.centre.map(fmt).join(", ")})${at.length ? ` in ${at.join(", ")}` : ""}.`);
     }
-    if (!physics.stable && physics.footprint.length >= 3)
+    // A quick pass that dropped thin steps may have dropped the feet (measured: a bicycle's stand), so it does not
+    // judge standing either.
+    if (quickDropped) { /* the quick note says the footprint is not judged */ }
+    else if (!physics.stable && physics.footprint.length >= 3)
       warnings.push(`The centre of mass (${physics.centre.map(fmt).join(", ")}) is ${fmt(-physics.stabilityMargin)} units outside the base's footprint: the model would tip over. Widen the base or move weight over it.`);
     else if (physics.stable && physics.stabilityMargin < cellSize * 3)
       warnings.push(`The centre of mass is only ${fmt(physics.stabilityMargin)} units inside the base's footprint: the model would balance, barely.`);
@@ -686,7 +765,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight | ${watertightNote(watertightReport(mesh), evaluation, cellSize)} |`,
+      `| Watertight | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       "",
@@ -704,7 +783,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         `| Stands | ${physics.footprint.length < 3 ? "unknown" : physics.stable ? `yes, centre of mass ${fmt(physics.stabilityMargin)} inside the footprint` : `no, centre of mass ${fmt(-physics.stabilityMargin)} outside the footprint`} |`,
         `| Overhangs | ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface faces down more than 45° above the floor${physics.overhang > 0.005 ? " (a printer would need support there)" : ""} |`,
         `| Pieces | ${piecesRow(physics, evaluation, cellSize)} |`,
-        `| Cavities | ${physics.pieces.filter((pc) => pc.cavity).length ? physics.pieces.filter((pc) => pc.cavity).slice(0, 4).map((pc) => `volume ${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})`).join("; ") + " (enclosed voids, not loose parts)" : "none"} |`,
+        `| Cavities | ${cavitiesRow(physics, cellSize)} |`,
         "",
       );
     }
