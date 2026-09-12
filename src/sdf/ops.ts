@@ -95,6 +95,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       cost,
       parts: live,
       inner: live,
+      feature: minFeature(live),
     };
   }
   return {
@@ -120,7 +121,15 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     bounds,
     cost,
     inner: live,
+    feature: minFeature(live),
   };
+}
+
+/** The smallest known feature among shapes, or undefined when none carries one. */
+function minFeature(shapes: Shape3[]): number | undefined {
+  let f: number | undefined;
+  for (const s of shapes) if (s.feature !== undefined && (f === undefined || s.feature < f)) f = s.feature;
+  return f;
 }
 
 export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
@@ -137,6 +146,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     bounds: a.bounds,
     cost: a.cost + b.cost,
     inner: [a, b],
+    feature: a.feature,
   };
 }
 
@@ -153,6 +163,7 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     bounds: boundsIntersect(a.bounds, b.bounds),
     cost: a.cost + b.cost,
     inner: [a, b],
+    feature: a.feature,
   };
 }
 
@@ -168,6 +179,7 @@ export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {
     bounds: isEmpty(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy, b.min[2] + dz], max: [b.max[0] + dx, b.max[1] + dy, b.max[2] + dz] },
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -184,6 +196,7 @@ export function rotateBy(s: Shape3, m: Mat3): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -211,6 +224,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature === undefined ? undefined : s.feature * m,
   };
 }
 
@@ -237,6 +251,7 @@ export function offset(s: Shape3, r: number): Shape3 {
     bounds: boundsGrow(s.bounds, Math.max(r, 0)),
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -250,6 +265,7 @@ export function shell(s: Shape3, t: number): Shape3 {
     bounds: s.bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature === undefined ? t : Math.min(s.feature, t),
   };
 }
 
@@ -274,6 +290,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -298,6 +315,7 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -321,6 +339,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     bounds: boundsGrow(s.bounds, Math.abs(amp)),
     cost: s.cost + 8,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -379,6 +398,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
     bounds: s.bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
   };
 }
 
@@ -407,6 +427,7 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
     cost: child.cost,
     inner: [child],
     joint: state,
+    feature: child.feature,
   };
 }
 
@@ -452,4 +473,30 @@ export function place(base: Shape3, placements: Placement[]): Shape3 {
   });
   const u = union(copies);
   return { ...u, instanced: { base, placements } };
+}
+
+/**
+ * The y of the highest surface of `s` above the point (x, z): a march down
+ * from the top of the bounds. Undefined when nothing is there.
+ */
+export function heightAt(s: Shape3, x: number, z: number): number | undefined {
+  if (isEmpty(s.bounds)) return undefined;
+  const top = s.bounds.max[1], bottom = s.bounds.min[1];
+  const span = Math.max(top - bottom, 1e-6);
+  const eps = span * 1e-4;
+  let y = top + eps;
+  for (let i = 0; i < 512 && y >= bottom - eps; i++) {
+    const d = s.dist(x, y, z);
+    if (d < eps) {
+      // Refine by bisection between the last outside point and here.
+      let hi = y + Math.max(d, eps) * 2, lo = y;
+      for (let k = 0; k < 24; k++) {
+        const m = (hi + lo) / 2;
+        if (s.dist(x, m, z) < 0) lo = m; else hi = m;
+      }
+      return hi;
+    }
+    y -= Math.max(d, eps);
+  }
+  return undefined;
 }

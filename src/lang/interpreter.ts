@@ -13,6 +13,9 @@ import { difference2, intersect2 } from "../sdf/shapes2d.js";
 import type { Shape3 } from "../sdf/types.js";
 import { isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
+/** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
+const NAME_SETTINGS = new Set(["pose", "focus"]);
+
 export class RuntimeError extends Error {
   constructor(message: string, readonly line: number) {
     super(`line ${line}: ${message}`);
@@ -301,8 +304,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         throw new RuntimeError(`${b.name}(): ${(err as Error).message}`, line);
       }
     }
-    const sigs = b.overloads.map((o) => `  ${signature(b.name, o)}`).join("\n");
-    const reason = b.overloads.length === 1 ? failures[0] : failures.map((f) => `- ${f}`).join("\n");
+    // Report only the overloads whose first parameter accepts the first argument (a shape versus a
+    // profile), so the message does not also complain about the other kind.
+    const first = args.find((a) => !a.name)?.value ?? args[0]?.value;
+    const fits = b.overloads.map((o) => first === undefined || o.params.length === 0 || !("error" in coerce(o.params[0], first)));
+    const relevant = fits.some(Boolean) ? b.overloads.filter((_, i) => fits[i]) : b.overloads;
+    const relevantFailures = fits.some(Boolean) ? failures.filter((_, i) => fits[i]) : failures;
+    const sigs = relevant.map((o) => `  ${signature(b.name, o)}`).join("\n");
+    const reason = relevantFailures.length === 1 ? relevantFailures[0] : relevantFailures.map((f) => `- ${f}`).join("\n");
     throw new RuntimeError(`${b.name}(): ${reason}\nusage:\n${sigs}`, line);
   }
 
@@ -444,7 +453,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "set": {
-        const v = evalExpr(stmt.value, scope);
+        // `set pose reading` and `set focus lid` name things; a bare word there is the name, not a variable read.
+        const v = stmt.value.type === "ident" && NAME_SETTINGS.has(stmt.key) ? stmt.value.name : evalExpr(stmt.value, scope);
         if (typeof v !== "number" && typeof v !== "string") throw new RuntimeError(`set ${stmt.key}: expected a number or a string`, stmt.line);
         settings[stmt.key] = v;
         return;
@@ -481,9 +491,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     for (const p of poses)
       for (const j of Object.keys(p.angles))
         if (!jointNames.has(j)) warnings.push(`pose "${p.name}" (line ${p.line}) sets joint "${j}", which is not in the output${jointNames.size ? `; joints: ${[...jointNames].join(", ")}` : ""}`);
+    // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
     for (const a of animations)
-      for (const pn of a.poses)
-        if (!poses.some((p) => p.name === pn)) warnings.push(`animation "${a.name}" (line ${a.line}) uses pose "${pn}", which is not defined`);
+      for (const pn of new Set(a.poses))
+        if (pn !== "rest" && !poses.some((p) => p.name === pn)) warnings.push(`animation "${a.name}" (line ${a.line}) uses pose "${pn}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}`);
   }
   const used = new Set<string>();
   const stack = [...roots];

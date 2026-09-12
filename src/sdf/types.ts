@@ -78,6 +78,12 @@ export interface Shape3 {
   parts?: Shape3[];
   /** For any wrapper (transform, modifier, paint, boolean): the shapes it was built from, so a tree can be walked. */
   inner?: Shape3[];
+  /**
+   * The thinnest feature the shape is known to carry, in model units: a
+   * shell's wall, a tube's diameter, a stroke's weight. Bounds cannot see
+   * these, so the thin-part warning reads this instead.
+   */
+  feature?: number;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
   joint?: JointState;
   /** For a placed shape: the base and where its copies go. */
@@ -111,6 +117,8 @@ export interface Shape2 {
   bounds: Bounds2;
   cost: number;
   parts?: Shape2[];
+  /** The thinnest feature the profile is known to carry (a stroke's weight, a 2D shell's wall); see Shape3.feature. */
+  feature?: number;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

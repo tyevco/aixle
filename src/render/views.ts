@@ -11,7 +11,7 @@ import type { Vec3 } from "../core/vec.js";
 import { albedo } from "../sdf/materials.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
-import { triangleCount, type Mesh } from "../mesh/mesh.js";
+import { meshBounds, triangleCount, type Mesh } from "../mesh/mesh.js";
 import { orthographic, perspective, project, toView, type Camera, type OrthoView } from "./camera.js";
 import { Canvas, mixColor, rgbf, type Color } from "./canvas.js";
 import { drawText, textWidth } from "./font.js";
@@ -44,6 +44,13 @@ export interface ViewInfo {
 }
 
 const fmt = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
+
+/** A cell size to three significant figures, so 0.007 and 0.014 do not both read 0.01. */
+export function fmtCell(v: number): string {
+  if (!(v > 0)) return "0";
+  const digits = Math.max(0, 2 - Math.floor(Math.log10(v)));
+  return v.toFixed(Math.min(6, digits)).replace(/\.?0+$/, "");
+}
 
 export function dimsLabel(b: Bounds): string {
   const s = boundsSize(b);
@@ -160,12 +167,12 @@ export function renderSheet(mesh: Mesh, info: SheetInfo, size: number): Canvas {
   const gutter = 4, bar = 30;
   const sheet = new Canvas(size * 2 + gutter * 3, size * 2 + gutter * 3 + bar, INK.page);
   sheet.fill(0, 0, sheet.width, bar, INK.bar);
-  const title = `${info.name.toUpperCase()}   ${dimsLabel(info.bounds)} units   ${info.triangles} tris   cell ${fmt(info.cellSize)}`;
-  drawText(sheet, 10, 8, title, INK.barText, 2);
-  if (info.warnings > 0) {
-    const w = `${info.warnings} warning${info.warnings === 1 ? "" : "s"} in report.md`;
-    drawText(sheet, sheet.width - textWidth(w, 2) - 10, 8, w, 0xf0a060, 2);
-  }
+  const title = `${info.name.toUpperCase()}   ${dimsLabel(info.bounds)} units   ${info.triangles} tris   cell ${fmtCell(info.cellSize)}`;
+  const w = info.warnings > 0 ? `${info.warnings} warning${info.warnings === 1 ? "" : "s"} in report.md` : "";
+  // The title at 2x, the warning right-aligned; when they would collide (a small sheet), both at 1x.
+  const scale = textWidth(title, 2) + textWidth(w, 2) + 30 <= sheet.width ? 2 : 1;
+  drawText(sheet, 10, scale === 2 ? 8 : 11, title, INK.barText, scale);
+  if (w) drawText(sheet, sheet.width - textWidth(w, scale) - 10, scale === 2 ? 8 : 11, w, 0xf0a060, scale);
   const views: ViewName[] = ["persp", "front", "right", "top"];
   views.forEach((v, i) => {
     const c = renderView(mesh, info, v, size);
@@ -257,13 +264,16 @@ export interface StepView {
  * `maxResolution` cells to keep a big step cheap, and marked `coarse` when
  * the cap made the cell larger than the output's.
  */
-export function meshSteps(steps: StepView[], cellSize = 0, maxResolution = 64, output?: { shape: Shape3; mesh: Mesh }): StepView[] {
+export function meshSteps(steps: StepView[], cellSize = 0, maxResolution = 96, output?: { shape: Shape3; mesh: Mesh }): StepView[] {
   return steps.map((st) => {
     if (st.mesh || isEmpty(st.shape.bounds)) return st;
     if (output && st.shape === output.shape) return { ...st, mesh: output.mesh, coarse: false };
     const s = boundsSize(st.shape.bounds);
     const longest = Math.max(s[0], s[1], s[2]);
-    const wanted = cellSize > 0 ? Math.ceil(longest / cellSize) : 48;
+    const thinnest = Math.min(s[0], s[1], s[2]);
+    // Enough cells for the output's cell size, and at least three across the thinnest dimension, so a
+    // small part in a wide array (bolts along a bench) still draws; capped so a huge step stays cheap.
+    const wanted = Math.max(cellSize > 0 ? Math.ceil(longest / cellSize) : 48, thinnest > 0 ? Math.ceil((longest / thinnest) * 3) : 0);
     const resolution = Math.max(16, Math.min(maxResolution, wanted));
     return { ...st, mesh: surfaceNets(st.shape, { resolution }).mesh, coarse: wanted > maxResolution };
   });
@@ -287,7 +297,11 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
     } else {
       const mesh = st.mesh ?? surfaceNets(st.shape, { resolution }).mesh;
       canvas = renderView(mesh, { name: st.name, bounds: st.shape.bounds }, "persp", thumb, { label: false });
-      if (triangleCount(mesh) === 0) drawText(canvas, 8, thumb / 2 - 4, "NO SURFACE", INK.warn, 1);
+      if (triangleCount(mesh) === 0) {
+        // Coarse means the thumbnail's grid, not the model, lost it: say so in grey, not in the warning colour.
+        if (st.coarse) drawText(canvas, 8, thumb / 2 - 4, "TOO FINE FOR THIS THUMBNAIL", INK.dim, 1);
+        else drawText(canvas, 8, thumb / 2 - 4, "NO SURFACE", INK.warn, 1);
+      }
     }
     if (!st.used) canvas.rect(0, 0, thumb, thumb, INK.warn);
     out.blit(canvas, x, y);
@@ -324,29 +338,39 @@ export interface PoseView {
 
 export type ShapeAt = (angles: Record<string, [number, number, number]>) => Shape3 | undefined;
 
-function poseThumb(shapeAt: ShapeAt, angles: Record<string, [number, number, number]>, framing: Bounds, thumb: number, cellSize: number, label: string, azimuth?: number, elevation?: number): Canvas {
+/** The mesh of the model in one pose, at about `cellSize`; undefined when the pose has no shape. */
+function poseMesh(shapeAt: ShapeAt, angles: Record<string, [number, number, number]>, cellSize: number): Mesh | undefined {
   const shape = shapeAt(angles);
-  if (!shape || isEmpty(shape.bounds)) {
+  if (!shape || isEmpty(shape.bounds)) return undefined;
+  const s = boundsSize(shape.bounds);
+  const resolution = Math.max(12, Math.min(112, Math.ceil(Math.max(s[0], s[1], s[2]) / cellSize)));
+  return surfaceNets(shape, { resolution }).mesh;
+}
+
+function poseThumb(mesh: Mesh | undefined, framing: Bounds, thumb: number, label: string, azimuth?: number, elevation?: number): Canvas {
+  if (!mesh || triangleCount(mesh) === 0) {
     const c = new Canvas(thumb, thumb, INK.viewPersp);
     drawText(c, 6, 6, label, INK.text, 1);
     return c;
   }
-  const s = boundsSize(shape.bounds);
-  const resolution = Math.max(12, Math.min(64, Math.ceil(Math.max(s[0], s[1], s[2]) / cellSize)));
-  const mesh = surfaceNets(shape, { resolution }).mesh;
   const c = renderView(mesh, { name: label, bounds: framing }, "persp", thumb, { label: false, azimuth, elevation });
   drawText(c, 6, 6, label, INK.text, 1);
   return c;
 }
 
-/** The union of the bounds over every pose, so all thumbnails share one framing. */
-function framingFor(shapeAt: ShapeAt, all: PoseView[]): Bounds {
+/**
+ * One framing for every thumbnail, from the meshes themselves: the bounds of
+ * a turned joint are a box around the turned box, so a framing from bounds
+ * left a lamp using a fifth of its thumbnail (measured on a three-joint rig).
+ */
+function framingFor(meshes: (Mesh | undefined)[]): Bounds {
   let b: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-  for (const p of all) {
-    const s = shapeAt(p.angles);
-    if (s && !isEmpty(s.bounds)) b = { min: [Math.min(b.min[0], s.bounds.min[0]), Math.min(b.min[1], s.bounds.min[1]), Math.min(b.min[2], s.bounds.min[2])], max: [Math.max(b.max[0], s.bounds.max[0]), Math.max(b.max[1], s.bounds.max[1]), Math.max(b.max[2], s.bounds.max[2])] };
+  for (const m of meshes) {
+    if (!m || triangleCount(m) === 0) continue;
+    const mb = meshBounds(m);
+    b = { min: [Math.min(b.min[0], mb.min[0]), Math.min(b.min[1], mb.min[1]), Math.min(b.min[2], mb.min[2])], max: [Math.max(b.max[0], mb.max[0]), Math.max(b.max[1], mb.max[1]), Math.max(b.max[2], mb.max[2])] };
   }
-  return b;
+  return isEmpty(b) ? { min: [-1, -1, -1], max: [1, 1, 1] } : b;
 }
 
 /** One thumbnail per pose, the rest pose first, all framed alike. `shapeAt` rebuilds the model for a set of angles. */
@@ -358,9 +382,10 @@ export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseV
   const out = new Canvas(cols * (thumb + gutter) + gutter, bar + rows * (thumb + gutter) + gutter, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
   drawText(out, 10, 8, `POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${jointNames.join(", ")}`, INK.barText, 2);
-  const framing = framingFor(shapeAt, all);
+  const meshes = all.map((p) => poseMesh(shapeAt, p.angles, cellSize));
+  const framing = framingFor(meshes);
   all.forEach((p, i) => {
-    const c = poseThumb(shapeAt, p.angles, framing, thumb, cellSize, p.name, azimuth, elevation);
+    const c = poseThumb(meshes[i], framing, thumb, p.name, azimuth, elevation);
     out.blit(c, gutter + (i % cols) * (thumb + gutter), bar + gutter + Math.floor(i / cols) * (thumb + gutter));
   });
   return out;
@@ -387,10 +412,12 @@ export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: st
   const out = new Canvas(frames * (frame + gutter) + gutter, frame + gutter * 2 + bar + labelH, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
   drawText(out, 10, 6, `${name.toUpperCase()}   ${fmt(seconds)}s   keyframes: ${keys.map((k) => k.name).join(" → ")}`, INK.barText, 2);
-  const framing = framingFor(shapeAt, keys);
+  const meshes: (Mesh | undefined)[] = [];
+  for (let i = 0; i < frames; i++) meshes.push(poseMesh(shapeAt, interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1)), cellSize));
+  const framing = framingFor(meshes);
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : i / (frames - 1);
-    const c = poseThumb(shapeAt, interpolatePose(keys, jointNames, t), framing, frame, cellSize, "", azimuth, elevation);
+    const c = poseThumb(meshes[i], framing, frame, "", azimuth, elevation);
     out.blit(c, gutter + i * (frame + gutter), bar + gutter);
     drawText(out, gutter + i * (frame + gutter), bar + gutter + frame + 2, `${fmt(t * seconds)}s`, INK.dim, 1);
   }

@@ -298,8 +298,7 @@ describe("text", () => {
     expect(textWidth("II", 6)).toBeGreaterThan(textWidth("I", 6));
     expect(textProfile("", 1).dist(0, 0)).toBeGreaterThan(1e5);
   });
-  it("folds lowercase up and draws a ? for the unknown", () => {
-    expect(textProfile("a", 6, 1).dist(2, 2.4)).toBeCloseTo(textProfile("A", 6, 1).dist(2, 2.4));
+  it("draws a ? for an unknown character", () => {
     expect(textProfile("~", 6, 1).bounds.max[0]).toBeGreaterThan(3);
   });
 });
@@ -336,5 +335,74 @@ describe("spatial index", () => {
     const sw = W.sweep(S.circle(0.15), pts);
     expect(sw.dist(1, 0, 0)).toBeLessThan(0);
     expect(sw.dist(1.3, 0, 0)).toBeGreaterThan(0.1);
+  });
+});
+
+describe("partial revolve, spline, lowercase, arc text", () => {
+  it("a partial revolve keeps the wedge and cuts flat ends", () => {
+    const arch = S.revolve(S.move2(S.circle(0.3), 2, 0), 0, 180);
+    expect(arch.dist(0, 0, 2)).toBeLessThan(0); // at 0 degrees (+z)
+    expect(arch.dist(2, 0, 0)).toBeLessThan(0); // at 90 degrees (+x)
+    expect(arch.dist(0, 0, -2)).toBeLessThan(0); // at 180 degrees (-z), the far end
+    expect(arch.dist(-2, 0, 0)).toBeGreaterThan(1); // 270 degrees: outside the wedge
+    const quarter = S.revolve(S.move2(S.circle(0.3), 2, 0), 0, 90);
+    expect(quarter.dist(0, 0, -2)).toBeGreaterThan(1);
+    expect(quarter.dist(-0.2, 0, 2)).toBeCloseTo(0.2, 1);
+  });
+  it("spline densifies where the path turns and keeps straights sparse", () => {
+    const pts = W.splinePath([[0, 0, 0], [4, 0, 0], [4, 4, 0], [8, 4, 0]], 3);
+    expect(pts.length % 3).toBe(0);
+    expect(pts.length / 3).toBeGreaterThan(20);
+    expect(pts.slice(0, 3)).toEqual([0, 0, 0]);
+    expect(pts.slice(-3)).toEqual([8, 4, 0]);
+    expect(W.splinePath([[0, 0, 0], [1, 0, 0]], 3)).toEqual([0, 0, 0, 1, 0, 0]);
+  });
+  it("lowercase glyphs exist and differ from uppercase", () => {
+    for (const ch of "abcdefghijklmnopqrstuvwxyz") expect(FONT_GLYPHS.has(ch), ch).toBe(true);
+    const upper = textProfile("A", 6, 0.5), lower = textProfile("a", 6, 0.5);
+    expect(upper.bounds.max[1]).toBeGreaterThan(lower.bounds.max[1] + 1);
+    expect(textProfile("g", 6, 0.5).bounds.min[1]).toBeLessThan(-1);
+  });
+  it("arc text bends around a circle, centred at the top", () => {
+    const t = textProfile("ABCDEF", 1, 0.2, 0, 4);
+    // Every point of the profile lies near radius 4..5 from the origin, above it.
+    const b = t.bounds;
+    expect(b.max[1]).toBeLessThan(5.3);
+    expect(b.max[1]).toBeGreaterThan(4.5);
+    expect(Math.abs(b.min[0] + b.max[0])).toBeLessThan(0.5);
+    const under = textProfile("ABC", 1, 0.2, 0, -4);
+    expect(under.bounds.min[1]).toBeLessThan(-4);
+  });
+});
+
+describe("height query", () => {
+  it("finds the top surface under a point, through blends and bumps", () => {
+    const mound = O.union([P.sphere(1), O.move(P.sphere(0.8), 1, 0.5, 0)], 0.3);
+    expect(O.heightAt(mound, 0, 0)!).toBeCloseTo(1, 2);
+    expect(O.heightAt(mound, 1, 0)!).toBeCloseTo(1.3, 2);
+    expect(O.heightAt(mound, 5, 5)).toBeUndefined();
+    const rough = O.displace(P.sphere(1), 0.1, 0.5, 2);
+    const h = O.heightAt(rough, 0.2, 0.1)!;
+    expect(Math.abs(rough.dist(0.2, h, 0.1))).toBeLessThan(1e-3);
+  });
+});
+
+describe("feature size", () => {
+  it("is carried by walls, tubes and strokes, and follows transforms and unions", () => {
+    // Bounds cannot see a shell's wall or a tube's radius; the shape carries the thinnest feature it knows.
+    expect(O.shell(P.box(2, 2, 2), 0.1).feature).toBeCloseTo(0.1);
+    expect(W.tube([[0, 0, 0], [0, 3, 0]], 0.05).feature).toBeCloseTo(0.1);
+    expect(W.tube([[0, 0, 0], [0, 3, 0]], 0.05, 0.5, "flat").feature).toBeCloseTo(0.05);
+    expect(textProfile("A", 1, 0.12).feature).toBeCloseTo(0.12);
+    expect(S.extrude(S.move2(textProfile("A", 1, 0.12), 1, 0), 0.3).feature).toBeCloseTo(0.12);
+    expect(S.revolve(S.shell2(S.circle(1), 0.07), 2).feature).toBeCloseTo(0.07);
+    expect(W.sweep(S.rect(0.2, 0.5), [[0, 0, 0], [1, 0, 0]]).feature).toBeCloseTo(0.2);
+    const wall = O.shell(P.box(2, 2, 2), 0.1);
+    expect(O.move(O.rotate(wall, 30, 0, 0), 1, 2, 3).feature).toBeCloseTo(0.1);
+    expect(O.scale(wall, 0.5, 2, 2).feature).toBeCloseTo(0.05);
+    expect(O.union([P.box(1, 1, 1), wall, O.shell(P.sphere(1), 0.02)]).feature).toBeCloseTo(0.02);
+    expect(O.difference(wall, P.sphere(0.5)).feature).toBeCloseTo(0.1);
+    expect(O.paint(wall, preset("wood")!).feature).toBeCloseTo(0.1);
+    expect(P.box(1, 1, 1).feature).toBeUndefined();
   });
 });

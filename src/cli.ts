@@ -7,20 +7,24 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { check, run } from "./pipeline.js";
+import { cellFor, check, diff, QUICK, run, thinWarnings } from "./pipeline.js";
+import { watch } from "node:fs";
 import { isEmpty } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
 import { isShape3 } from "./lang/values.js";
+
+const short = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
 
 function usage(): never {
   console.error(
     [
       "usage:",
-      "  aixle render <file.aix> [--out DIR] [--grid N] [--size N] [--views persp,front,right,top]",
+      "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
       "                          [--beauty [--beauty-size N]] [--soft] [--texture N | --no-texture]",
-      "                          [--azimuth DEG] [--elevation DEG]",
+      "                          [--azimuth DEG] [--elevation DEG] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
-      "  aixle check  <file.aix>        parse and evaluate; print sizes and warnings, render nothing",
+      "  aixle check  <file.aix> [--pose NAME]   parse and evaluate; print sizes and warnings, render nothing",
+      "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
     ].join("\n"),
   );
@@ -66,45 +70,104 @@ function main(argv: string[]): number {
   }
   if (cmd === "check") {
     try {
-      const ev = check(source, file, (l) => console.log(l));
+      const rest = check(source, file, (l) => console.log(l));
+      // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
+      const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
+      const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
+      const ev = pose ? check(source, file, undefined, pose.angles) : rest;
+      if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
+      if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
+      else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
+      const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       for (const st of ev.steps) {
         if (!isShape3(st.value)) continue;
         const used = ev.used.has(st.name) ? "" : "   (not in output)";
-        console.log(`${st.name.padEnd(20)} ${isEmpty(st.value.bounds) ? "empty" : dimsLabel(st.value.bounds)}${used}`);
+        const b = st.value.bounds;
+        console.log(`${st.name.padEnd(18)} ${isEmpty(b) ? "empty" : `${dimsLabel(b).padEnd(20)} ${span(b)}`}${used}`);
       }
       if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
-      for (const w of ev.warnings) console.log(`warning: ${w}`);
+      const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
+      if (cellSize > 0) console.log(`grid ${grid}: cell ${short(cellSize)} units`);
+      for (const w of [...ev.warnings, ...(cellSize > 0 ? thinWarnings(ev, cellSize, grid) : [])]) console.log(`warning: ${w}`);
       return 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);
       return 1;
     }
   }
+  if (cmd === "diff") {
+    const other = positional[1];
+    if (!other) usage();
+    let b: string;
+    try {
+      b = readFileSync(other, "utf8");
+    } catch {
+      console.error(`cannot read ${other}`);
+      return 1;
+    }
+    const outFile = typeof opts.out === "string" ? resolve(opts.out) : resolve("out", `diff_${basename(file).replace(/\.[^.]+$/, "")}_${basename(other).replace(/\.[^.]+$/, "")}.png`);
+    try {
+      const r = diff({ source, name: file }, { source: b, name: other }, outFile);
+      for (const w of r.warnings) console.log(`warning: ${w}`);
+      console.log(`wrote ${outFile}: A on the left, B on the right`);
+      return 0;
+    } catch (err) {
+      console.error(`${(err as Error).message}`);
+      return 1;
+    }
+  }
   if (cmd !== "render") usage();
   const outDir = typeof opts.out === "string" ? resolve(opts.out) : resolve("out", basename(file).replace(/\.[^.]+$/, ""));
+  const once = (src: string): number => renderOnce(src, file, outDir, opts);
+  if (opts.watch) {
+    console.log(`watching ${file}; render on every save, ctrl-c to stop`);
+    once(source);
+    let timer: NodeJS.Timeout | undefined;
+    watch(file, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        try {
+          const fresh = readFileSync(file, "utf8");
+          console.log(`\n${new Date().toLocaleTimeString()} ${file} changed`);
+          once(fresh);
+        } catch (err) {
+          console.error((err as Error).message);
+        }
+      }, 150);
+    });
+    return new Promise<number>(() => {}) as unknown as number;
+  }
+  return once(source);
+}
+
+function renderOnce(source: string, file: string, outDir: string, opts: Record<string, string | boolean>): number {
   try {
-    const result = run(source, file, outDir, {
+    const quick = opts.quick ? QUICK : {};
+    const given: Record<string, unknown> = {
       grid: typeof opts.grid === "string" ? Number(opts.grid) : undefined,
       size: typeof opts.size === "string" ? Number(opts.size) : undefined,
-      views: typeof opts.views === "string" ? (opts.views.split(",") as never) : undefined,
-      steps: !opts["no-steps"],
-      slices: !opts["no-slices"],
-      turntable: !opts["no-turntable"],
-      obj: !opts["no-export"],
-      glb: !opts["no-export"],
-      viewer: !opts["no-viewer"],
-      beauty: opts.beauty === true,
+      views: typeof opts.views === "string" ? opts.views.split(",") : undefined,
+      steps: opts["no-steps"] ? false : undefined,
+      slices: opts["no-slices"] ? false : undefined,
+      turntable: opts["no-turntable"] ? false : undefined,
+      obj: opts["no-export"] ? false : undefined,
+      glb: opts["no-export"] ? false : undefined,
+      viewer: opts["no-viewer"] ? false : undefined,
+      beauty: opts.beauty === true ? true : undefined,
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       sharp: opts.soft ? false : undefined,
       texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,
       azimuth: typeof opts.azimuth === "string" ? Number(opts.azimuth) : undefined,
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
-      log: (l) => console.log(l),
-    });
+      focus: typeof opts.focus === "string" ? opts.focus : undefined,
+      pose: typeof opts.pose === "string" ? opts.pose : undefined,
+    };
+    for (const k of Object.keys(given)) if (given[k] === undefined) delete given[k];
+    const result = run(source, file, outDir, { ...quick, ...given, log: (l) => console.log(l) });
     console.log(`wrote ${result.files.length} files to ${outDir}`);
     for (const w of result.warnings) console.log(`warning: ${w}`);
-    console.log(`look at ${resolve(outDir, "sheet.png")} first, then slices.png and steps.png; details in report.md`);
+    console.log(opts.quick ? `look at ${resolve(outDir, "sheet.png")}` : `look at ${resolve(outDir, "sheet.png")} first, then slices.png and steps.png; details in report.md`);
     return result.mesh ? 0 : 1;
   } catch (err) {
     console.error(`${file}: ${(err as Error).message}`);
@@ -112,4 +175,5 @@ function main(argv: string[]): number {
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+const code = main(process.argv.slice(2));
+if (typeof code === "number") process.exitCode = code;

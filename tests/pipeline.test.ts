@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { check, run } from "../src/pipeline.js";
+import { cellFor, check, diff, QUICK, run, thinWarnings } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -72,6 +72,53 @@ describe("pipeline", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("reports physics and warns about a model that would tip over or floats apart", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("base = box(0.5, 0.2, 0.5) | move(0, 0.1, 0)\ntop = box(0.3, 3, 0.3) | move(0.9, 1.7, 0)\nm = base + top", "tip.aix", dir, { ...QUICK, grid: 32 });
+      expect(r.report).toMatch(/## Physics/);
+      expect(r.warnings.join()).toMatch(/separate pieces/);
+      // A post leaning out past its small base: its foot overlaps the base, its mass hangs beyond it.
+      const r2 = run("post = box(0.3, 3, 0.3) | move(0, 1.5, 0) | rotate(z=-35) | move(0.5, 0.15, 0)\nbase = box(0.5, 0.2, 0.5) | move(0.5, 0.1, 0)\nm = post + base", "tip2.aix", dir, { ...QUICK, grid: 32 });
+      expect(r2.warnings.join()).toMatch(/tip over/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("diff renders two programs side by side", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const out = join(dir, "d.png");
+      const r = diff({ source: "a = sphere(1)", name: "a.aix" }, { source: "b = box(2)", name: "b.aix" }, out, { size: 64, grid: 16 });
+      expect(existsSync(out)).toBe(true);
+      expect(r.warnings).toEqual([]);
+      const png = readFileSync(out);
+      expect(png.readUInt32BE(16)).toBe(64 * 2 + 12);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("check can warn about thin parts from the grid it would use", () => {
+    const ev = check("plate = box(10, 0.05, 10)\nknob = sphere(1) | move(0, 1, 0)\nm = plate + knob");
+    const { grid, cellSize } = cellFor(ev);
+    expect(grid).toBe(128);
+    expect(cellSize).toBeCloseTo(10 / 128);
+    expect(thinWarnings(ev, cellSize, grid).join()).toMatch(/'plate' \(line 1\) is only 0.05/);
+  });
+  it("frames a focused step and notes the true lowest point, not the bounds", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A ball cut in half by a difference: bounds still reach y = -1, the surface does not.
+      const r = run("ball = sphere(1) | move(0, 1, 0)\ncut = ball - (box(4, 4, 4) | move(0, -1, 0))\nknob = sphere(0.2) | move(0, 2, 0)\nm = cut + knob", "half.aix", dir, { ...QUICK, grid: 32, focus: "knob" });
+      expect(r.report).not.toMatch(/pipe the model through ground\(\)/);
+      expect(r.report).toMatch(/Surface extent \| x .*, y 0?\.?\d*\.\.2\.2/);
+      expect(r.warnings.join()).not.toMatch(/focus/);
+      const r2 = run("m = sphere(1)", "s.aix", dir, { ...QUICK, grid: 16, focus: "nope" });
+      expect(r2.warnings.join()).toMatch(/focus nope: no such step/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("check evaluates without rendering", () => {
     const ev = check("a = box(2)\nset grid 40");
     expect(ev.outputName).toBe("a");
@@ -88,5 +135,47 @@ describe("reference", () => {
     }
     expect(md).toMatch(/cylinder\(r, h, round=0\) -> shape/);
     expect(md).toMatch(/\| wood \| wood \|/);
+  });
+});
+
+describe("rigs, features and overhangs", () => {
+  it("warns about a wall, tube or stroke thinner than a cell inside a thick step, once", () => {
+    const ev = check('cup = shell(cylinder(1, 2), 0.01) - (cylinder(0.8, 1) | move(0, 1.5, 0))\nlabel = extrude(text("Hi", 0.5, weight=0.02), 0.2) | rotate(x=90) | move(0, 1, 1)\nm = cup + label');
+    const { grid, cellSize } = cellFor(ev);
+    const w = thinWarnings(ev, cellSize, grid);
+    expect(w.join("\n")).toMatch(/'cup' \(line 1\) has a wall, tube or stroke only 0.01 thick/);
+    expect(w.join("\n")).toMatch(/'label' \(line 2\) has a wall, tube or stroke only 0.02 thick/);
+    // 'm' carries both features but introduced neither, so it is not reported again.
+    expect(w.filter((x) => x.startsWith("'m'"))).toHaveLength(0);
+    expect(thinWarnings(check("cup = shell(cylinder(1, 2), 0.2)"), cellSize, grid)).toHaveLength(0);
+  });
+  it("shows a pose from the option or the setting and says which", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    const src = 'arm = box(0.4, 3, 0.4) | move(0, 1.5, 0)\nj = joint(arm, "hinge", 0, 0, 0)\npose("flat", hinge=[0, 0, 90])\nshow j';
+    try {
+      const r = run(src, "rig.aix", dir, { ...QUICK, grid: 24, pose: "flat" });
+      expect(r.report).toMatch(/sheet shows "flat"/);
+      // Turned flat about z, the arm lies along -x: the report's extent is wide and low.
+      expect(r.report).toMatch(/Surface extent \| x -3\.?\d*\.\.0?\.?\d*, y/);
+      const r2 = run(src, "rig.aix", dir, { ...QUICK, grid: 24, pose: "nope" });
+      expect(r2.warnings.join()).toMatch(/pose nope: no such pose \(poses: flat\)/);
+      const r3 = run(src + "\nset pose flat", "rig.aix", dir, { ...QUICK, grid: 24 });
+      expect(r3.report).toMatch(/sheet shows "flat"/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("measures overhangs: a table top on a thin leg, none on a box", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const table = run("top = box(3, 0.3, 3) | move(0, 2.15, 0)\nleg = box(0.4, 2, 0.4) | move(0, 1, 0)\nm = top + leg", "table.aix", dir, { ...QUICK, grid: 32 });
+      expect(table.physics?.overhang ?? 0).toBeGreaterThan(0.25);
+      expect(table.report).toMatch(/Overhangs \| \d+% of the surface faces down/);
+      const cube = run("m = box(2)", "cube.aix", dir, { ...QUICK, grid: 16 });
+      expect(cube.physics?.overhang ?? 1).toBe(0);
+      expect(cube.report).toMatch(/Overhangs \| none/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

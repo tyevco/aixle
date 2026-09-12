@@ -61,3 +61,29 @@ export function isWatertight(m: Mesh): boolean {
   }
   return true;
 }
+
+/**
+ * Why a mesh is not watertight, when it is not: edges with only one
+ * triangle (a hole) or with more than two (two sheets of surface through
+ * one cell, which is what a feature about a cell thin produces).
+ */
+export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string } {
+  const count = new Map<string, number>();
+  const ix = m.indices;
+  for (let i = 0; i < ix.length; i += 3)
+    for (let e = 0; e < 3; e++) {
+      const a = ix[i + e], b = ix[i + ((e + 1) % 3)];
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      count.set(key, (count.get(key) ?? 0) + 1);
+    }
+  let holes = 0, nonManifold = 0;
+  for (const c of count.values()) {
+    if (c === 1) holes++;
+    else if (c > 2) nonManifold++;
+  }
+  const ok = holes === 0 && nonManifold === 0;
+  const note = ok
+    ? "yes"
+    : `no: ${nonManifold ? `${nonManifold} edge${nonManifold === 1 ? "" : "s"} shared by more than two triangles, where two surfaces pass through one grid cell (a feature about a cell thin; raise the grid or thicken it)` : ""}${nonManifold && holes ? "; " : ""}${holes ? `${holes} open edge${holes === 1 ? "" : "s"}` : ""}. Renders and most viewers are unaffected; a slicer or a boolean tool may complain.`;
+  return { ok, holes, nonManifold, note };
+}

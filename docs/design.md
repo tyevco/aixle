@@ -148,6 +148,29 @@ weight of them, a chain of 2D capsules, so the letters are exact and round
 themselves off at the weight. It was checked by rendering every glyph on
 one plate and reading it.
 
+## Physical checks
+
+Volume and centre of mass come from the closed mesh by the divergence
+theorem; the base footprint is the convex hull of the vertices within a
+cell and a half of the lowest point; the model stands when the centre of
+mass projects inside that hull, and the margin says by how much. Pieces
+are the connected components of the triangle graph, each with its own
+volume, so a sliver left by a cut is reported as a speck and a part that
+never touched the rest as a floating piece. Overhang is the share of the
+surface area whose normal points down more than 45 degrees, floor faces
+excluded. None of this needs the field: it is what the mesh says, which is
+what would be printed.
+
+## Feature sizes
+
+A bounding box sees a thin plate but not a thin wall: a shelled cup is as
+big as the cup. So a shape carries `feature`, the thinnest thing it knows
+it contains: a shell sets its wall, a tube twice its radius, text its
+stroke weight, and every transform, boolean and union passes the smallest
+one along (a scale multiplies it by its smallest factor). The thin-part
+warning reads it next to the cell size and names the step that introduced
+it, which is the line to edit.
+
 ## Glass, a light with a size, depth of field
 
 A transmitting material is shaded by continuing the ray: refract in at the
