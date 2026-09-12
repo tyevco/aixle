@@ -83,9 +83,29 @@ function arcLengths(points: Vec3[]): { at: Float64Array; total: number } {
  * capsules, exact. With `taper` the radius runs from `r` at the start to
  * `r * taper` at the end along the arc length (each piece is a round cone).
  */
-export function tube(points: Vec3[], r: number, taper = 1): Shape3 {
+export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat" = "round"): Shape3 {
   const segs = segments(points);
   if (segs.length === 0) return primitive(() => 1e6, EMPTY_BOUNDS, 0);
+  if (cap === "flat") {
+    // Cut the rounded ends off with the planes through the path's ends, perpendicular to the first and last pieces.
+    const round = tube(points, r, taper, "round");
+    const first = segs[0], last = segs[segs.length - 1];
+    const t0 = normalize(first.d), t1 = normalize(last.d);
+    const a = first.a, b: Vec3 = [last.a[0] + last.d[0], last.a[1] + last.d[1], last.a[2] + last.d[2]];
+    const d = round.dist, h = round.hit;
+    const caps = (x: number, y: number, z: number): number =>
+      Math.max(-((x - a[0]) * t0[0] + (y - a[1]) * t0[1] + (z - a[2]) * t0[2]), (x - b[0]) * t1[0] + (y - b[1]) * t1[1] + (z - b[2]) * t1[2]);
+    const cut = (v: number, c: number): number => (c > 0 ? (v > 0 ? Math.sqrt(v * v + c * c) : c) : v);
+    return {
+      kind: "shape3",
+      dist: (x, y, z) => cut(d(x, y, z), caps(x, y, z)),
+      hit: (x, y, z) => { const q = h(x, y, z); return { ...q, d: cut(q.d, caps(x, y, z)) }; },
+      bounds: round.bounds,
+      cost: round.cost,
+      inner: [round],
+      feature: round.feature,
+    };
+  }
   const n = segs.length;
   const arcs = arcLengths(points);
   const ax = new Float64Array(n), ay = new Float64Array(n), az = new Float64Array(n);
@@ -128,7 +148,7 @@ export function tube(points: Vec3[], r: number, taper = 1): Shape3 {
     return Math.sqrt(qx * qx + qy * qy + qz * qz) - r;
   };
   if (taper === 1) {
-    return primitive((x, y, z) => {
+    const straight = primitive((x, y, z) => {
       if (index) return index.min(x, y, z, capsule, boxDist, Infinity);
       let best = Infinity;
       for (let i = 0; i < n; i++) {
@@ -138,6 +158,8 @@ export function tube(points: Vec3[], r: number, taper = 1): Shape3 {
       }
       return best;
     }, bounds, n);
+    straight.feature = 2 * r;
+    return straight;
   }
   // Round cone per piece (Quilez), exact for a linearly varying radius.
   const cone = (i: number, x: number, y: number, z: number): number => {
@@ -160,7 +182,7 @@ export function tube(points: Vec3[], r: number, taper = 1): Shape3 {
       return (Math.sqrt(x2 * a2 * il2) + yv * rr * il2) - ra;
     }
   };
-  return primitive((x, y, z) => {
+  const out = primitive((x, y, z) => {
     if (index) return index.min(x, y, z, cone, boxDist, Infinity);
     let best = Infinity;
     for (let i = 0; i < n; i++) {
@@ -170,6 +192,8 @@ export function tube(points: Vec3[], r: number, taper = 1): Shape3 {
     }
     return best;
   }, bounds, n * 2);
+  out.feature = 2 * r * Math.min(1, taper);
+  return out;
 }
 
 /**
@@ -271,7 +295,7 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
       return cap > 0 ? (d2 > 0 ? length2(d2, cap) : cap) : d2;
     }
   };
-  return primitive((x, y, z) => {
+  const out = primitive((x, y, z) => {
     if (index) return index.min(x, y, z, piece, boxDist, 1e6);
     let best = 1e6;
     for (let i = 0; i < n; i++) {
@@ -281,6 +305,8 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
     }
     return best;
   }, bounds, n * profile.cost);
+  out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
+  return out;
 }
 
 /** Points of a helix of radius `r`, rising `h` over `turns` turns around y, `perTurn` points each turn. */
@@ -315,12 +341,51 @@ export function loft(a: Shape2, b: Shape2, h: number): Shape3 {
   const da = a.dist, db = b.dist, hh = h / 2;
   const minx = Math.min(a.bounds.min[0], b.bounds.min[0]), maxx = Math.max(a.bounds.max[0], b.bounds.max[0]);
   const miny = Math.min(a.bounds.min[1], b.bounds.min[1]), maxy = Math.max(a.bounds.max[1], b.bounds.max[1]);
-  return primitive((x, y, z) => {
+  const out = primitive((x, y, z) => {
     const t = Math.max(0, Math.min(1, (y + hh) / h));
     const d2 = da(x, -z) * (1 - t) + db(x, -z) * t;
     const cap = Math.abs(y) - hh;
     return Math.min(Math.max(d2, cap), 0) + length2(Math.max(d2, 0), Math.max(cap, 0));
   }, { min: [minx, -hh, -maxy], max: [maxx, hh, -miny] }, a.cost + b.cost);
+  out.feature = a.feature === undefined ? b.feature : b.feature === undefined ? a.feature : Math.min(a.feature, b.feature);
+  return out;
 }
 
 export { length3 };
+
+/**
+ * A path through the points as a Catmull-Rom curve, subdivided so that no
+ * piece turns more than `maxDegrees` from the last: enough that a sweep or
+ * tube along it shows no faceting at any normal grid. Returns a flat list.
+ */
+export function splinePath(points: Vec3[], maxDegrees = 3): number[] {
+  if (points.length < 3) return points.flat();
+  const fine = smoothPath(points, 64);
+  // Walk the fine curve and keep a point whenever the direction has turned enough, or every so often on straights.
+  const out: Vec3[] = [fine[0]];
+  const limit = (maxDegrees * Math.PI) / 180;
+  let lastDir: Vec3 | undefined;
+  let sinceKept = 0;
+  let total = 0;
+  for (let i = 1; i < fine.length; i++) {
+    const a = fine[i - 1], b = fine[i];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    total += len;
+  }
+  const straightEvery = total / 24;
+  for (let i = 1; i < fine.length; i++) {
+    const prev = out[out.length - 1], cur = fine[i];
+    const dx = cur[0] - prev[0], dy = cur[1] - prev[1], dz = cur[2] - prev[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-9) continue;
+    const dir: Vec3 = [dx / len, dy / len, dz / len];
+    sinceKept += Math.hypot(cur[0] - fine[i - 1][0], cur[1] - fine[i - 1][1], cur[2] - fine[i - 1][2]);
+    const turned = lastDir ? Math.acos(Math.max(-1, Math.min(1, dir[0] * lastDir[0] + dir[1] * lastDir[1] + dir[2] * lastDir[2]))) : 0;
+    if (i === fine.length - 1 || turned > limit || sinceKept > straightEvery) {
+      out.push(cur);
+      lastDir = dir;
+      sinceKept = 0;
+    }
+  }
+  return out.flat();
+}

@@ -139,17 +139,24 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
     return d;
   }, bounds, live.reduce((c, s) => c + s.cost, 0));
   if (k <= 0) out.parts = live;
+  for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) out.feature = s.feature;
   return out;
 }
 
 export function difference2(a: Shape2, b: Shape2, k = 0): Shape2 {
   const da = a.dist, db = b.dist;
-  return shape2((x, y) => smax(da(x, y), -db(x, y), k), a.bounds, a.cost + b.cost);
+  return keep(shape2((x, y) => smax(da(x, y), -db(x, y), k), a.bounds, a.cost + b.cost), a);
 }
 
 export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
   const da = a.dist, db = b.dist;
-  return shape2((x, y) => smax(da(x, y), db(x, y), k), bounds2Intersect(a.bounds, b.bounds), a.cost + b.cost);
+  return keep(shape2((x, y) => smax(da(x, y), db(x, y), k), bounds2Intersect(a.bounds, b.bounds), a.cost + b.cost), a);
+}
+
+/** The result carries the feature size of the shape it was built from (scaled by `by`). */
+function keep(out: Shape2, from: Shape2, by = 1): Shape2 {
+  if (from.feature !== undefined) out.feature = from.feature * by;
+  return out;
 }
 
 // --- transforms and modifiers ------------------------------------------------
@@ -157,7 +164,7 @@ export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
 export function move2(s: Shape2, dx: number, dy: number): Shape2 {
   const d = s.dist;
   const b = s.bounds;
-  return shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost);
+  return keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s);
 }
 
 export function rotate2(s: Shape2, deg: number): Shape2 {
@@ -173,7 +180,7 @@ export function rotate2(s: Shape2, deg: number): Shape2 {
     }
   }
   // Inverse rotation of the point.
-  return shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost);
+  return keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s);
 }
 
 export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
@@ -186,7 +193,7 @@ export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
         min: [Math.min(b.min[0] * sx, b.max[0] * sx), Math.min(b.min[1] * sy, b.max[1] * sy)],
         max: [Math.max(b.min[0] * sx, b.max[0] * sx), Math.max(b.min[1] * sy, b.max[1] * sy)],
       };
-  return shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost);
+  return keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m);
 }
 
 export function flip2(s: Shape2, axis: "x" | "y"): Shape2 {
@@ -200,13 +207,15 @@ export function mirror2(s: Shape2, axis: "x" | "y"): Shape2 {
 /** Grow (r > 0) or shrink (r < 0) the profile by `r`, rounding convex corners. */
 export function offset2(s: Shape2, r: number): Shape2 {
   const d = s.dist;
-  return shape2((x, y) => d(x, y) - r, bounds2Grow(s.bounds, Math.max(r, 0)), s.cost);
+  return keep(shape2((x, y) => d(x, y) - r, bounds2Grow(s.bounds, Math.max(r, 0)), s.cost), s);
 }
 
 /** Keep only a band of width `t` inside the profile's outline. */
 export function shell2(s: Shape2, t: number): Shape2 {
   const d = s.dist;
-  return shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost);
+  const out = shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost);
+  out.feature = s.feature === undefined ? t : Math.min(s.feature, t);
+  return out;
 }
 
 // --- to 3D ------------------------------------------------------------------
@@ -239,19 +248,44 @@ export function extrude(profile: Shape2, h: number, axis: ExtrudeAxis = "y"): Sh
       : axis === "z"
         ? (x: number, y: number, z: number) => inner(d(x, y), z)
         : (x: number, y: number, z: number) => inner(d(-z, y), x);
-  return primitive(dist, bounds, profile.cost);
+  const out = primitive(dist, bounds, profile.cost);
+  out.feature = profile.feature;
+  return out;
 }
 
 /**
  * Revolve a profile around the y axis: the profile's x is the radius, shifted
  * out by `offset`. Draw the profile on x >= 0; anything on x < 0 is folded over.
  */
-export function revolve(profile: Shape2, offset = 0): Shape3 {
+export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
   const d = profile.dist;
   const b = profile.bounds;
   const R = isEmpty2(b) ? 0 : Math.max(Math.abs(b.min[0] + offset), Math.abs(b.max[0] + offset));
   const bounds = isEmpty2(b)
     ? { min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
     : { min: [-R, b.min[1], -R] as [number, number, number], max: [R, b.max[1], R] as [number, number, number] };
-  return primitive((x, y, z) => d(length2(x, z) - offset, y), bounds, profile.cost);
+  if (angle >= 360) {
+    const full = primitive((x, y, z) => d(length2(x, z) - offset, y), bounds, profile.cost);
+    full.feature = profile.feature;
+    return full;
+  }
+  // A partial revolve: the profile sweeps from +z (0 degrees) towards +x through `angle` degrees.
+  // Outside the wedge the distance is to the nearer of the two end faces of the sweep.
+  const half = (Math.max(0, angle) * Math.PI) / 360;
+  const mid = half; // wedge centred on angle/2 so it starts at 0
+  const out = primitive((x, y, z) => {
+    // Angle of the point about y measured from +z towards +x, folded about the wedge's middle.
+    const a = Math.atan2(x, z) - mid;
+    const aa = Math.abs(((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI);
+    const r = length2(x, z);
+    if (aa <= half) return d(r - offset, y);
+    // Rotate the point onto the nearer end plane and measure the profile there, plus the out-of-plane distance.
+    const over = aa - half;
+    const inPlane = r * Math.cos(over);
+    const off = r * Math.sin(over);
+    const d2 = d(inPlane - offset, y);
+    return d2 > 0 ? length2(d2, off) : off > 0 ? off : d2;
+  }, bounds, profile.cost);
+  out.feature = profile.feature;
+  return out;
 }

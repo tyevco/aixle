@@ -7,6 +7,7 @@ import { toObj } from "../src/export/obj.js";
 import { toGlb } from "../src/export/glb.js";
 import { albedo, preset } from "../src/sdf/materials.js";
 import { bakeAtlas } from "../src/export/atlas.js";
+import { analyse, hull2, insideMargin } from "../src/mesh/physics.js";
 import { materialFromString } from "../src/sdf/materials.js";
 
 describe("surface nets", () => {
@@ -151,5 +152,37 @@ describe("texture atlas", () => {
     expect((obj.match(/^vt /gm) ?? []).length).toBe(atlas.uv.length / 2);
     expect(obj).toMatch(/^f \d+\/\d+\/\d+ /m);
     expect(mtl).toMatch(/map_Kd t.png/);
+  });
+});
+
+describe("physics", () => {
+  it("measures volume and centre of mass, and finds a standing box stable", () => {
+    const box = surfaceNets(O.move(P.box(2, 1, 2), 0, 0.5, 0), { resolution: 20 });
+    const ph = analyse(box.mesh, box.cellSize);
+    expect(Math.abs(ph.volume - 4) / 4).toBeLessThan(0.02);
+    expect(ph.centre[1]).toBeCloseTo(0.5, 1);
+    expect(ph.stable).toBe(true);
+    expect(ph.stabilityMargin).toBeGreaterThan(0.8);
+    expect(ph.pieces).toHaveLength(1);
+  });
+  it("finds a leaning tower unstable and a split model in pieces", () => {
+    // A tall thin post on a small base, shifted so its mass hangs past the base.
+    const lean = O.union([O.move(P.box(0.4, 0.2, 0.4), 0, 0.1, 0), O.move(P.box(0.3, 3, 0.3), 1.2, 1.7, 0)]);
+    const m = surfaceNets(lean, { resolution: 40 });
+    const ph = analyse(m.mesh, m.cellSize);
+    expect(ph.pieces.length).toBe(2);
+    const twoPieces = surfaceNets(O.union([P.sphere(0.5), O.move(P.sphere(0.5), 3, 0, 0)]), { resolution: 24 });
+    expect(analyse(twoPieces.mesh, twoPieces.cellSize).pieces).toHaveLength(2);
+    const tipped = O.union([O.move(P.box(1, 0.2, 1), 0, 0.1, 0), O.move(P.box(0.3, 3, 0.3), 0.4, 1.7, 0)]);
+    const t = surfaceNets(tipped, { resolution: 40 });
+    const pt = analyse(t.mesh, t.cellSize);
+    expect(pt.pieces).toHaveLength(1);
+    expect(pt.stable).toBe(true);
+  });
+  it("hull and margin", () => {
+    const h = hull2([[0, 0], [2, 0], [2, 2], [0, 2], [1, 1]]);
+    expect(h).toHaveLength(4);
+    expect(insideMargin(h, 1, 1)).toBeCloseTo(1);
+    expect(insideMargin(h, 3, 1)).toBeLessThan(0);
   });
 });

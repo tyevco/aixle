@@ -117,38 +117,42 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
 
 ### text
 
-Lettering as a 2D profile from a single-stroke font (A-Z, 0-9, punctuation; lowercase folds up), laid out from x = 0 on the baseline y = 0. `size` is the cap height, `weight` the stroke width; `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving.
+Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.
 
-    text(text, size=1, weight=0.15, align="left", spacing=0) -> shape2
+    text(text, size=1, weight=0.15, align="left", spacing=0, arc=0) -> shape2
 
 - `size`: cap height
 - `weight`: stroke width
 - `spacing`: extra gap between letters
+- `arc`: bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom
 
 ## 2D to 3D
 
 ### extrude
 
-Thicken a profile to height h. Axis y (default) lays the profile flat, its y towards -z; z makes it face +z; x makes it face +x.
+Thicken a profile to height h, centred on its plane. axis="y" (default): the profile lies flat, its x along world x and its y along world -z, thickened up. axis="z": the profile stands facing +z, its x along x and its y along y. axis="x": it stands facing +x, its x along world -z and its y along y.
 
     extrude(profile, h, axis="y") -> shape
 
 ### revolve
 
-Spin a profile around y; its x is the radius (draw it on x >= 0), pushed out by `offset`.
+Spin a profile around y; its x is the radius (draw it on x >= 0), pushed out by `offset`. `angle` below 360 sweeps only that far, from +z towards +x, with flat ends: an arch, a cutaway.
 
-    revolve(profile, offset=0) -> shape
+    revolve(profile, offset=0, angle=360) -> shape
+
+- `angle`: degrees swept
 
 ## Paths
 
 ### tube
 
-A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty); `taper` is the radius at the end relative to the start.
+A round tube of radius r along a path of x, y, z points, joins rounded and the ends hemispheres unless cap="flat". `smooth` > 0 curves the path through the points (8 is plenty); `taper` is the radius at the end relative to the start.
 
-    tube(r, points, smooth=0, taper=1) -> shape
+    tube(r, points, smooth=0, taper=1, cap="round") -> shape
 
 - `points`: a flat list [x,y,z, x,y,z, ...]
 - `taper`: end radius / start radius
+- `cap`: "round" (hemispheres, reaching r past each end) or "flat" (cut at the ends)
 
 ### sweep
 
@@ -162,11 +166,20 @@ A 2D profile carried along a path of x, y, z points: its x runs across the path,
 
 ### helix
 
-A path list for a helix of radius r rising h over `turns` turns around y, for tube() or sweep().
+A path list for a helix of radius r around y, for tube() or sweep(): it starts at (r, 0, 0) and rises from y = 0 to y = h over `turns` turns.
 
     helix(r, h, turns, per_turn=16) -> list
 
 - `per_turn`: points per turn
+
+### spline
+
+A smooth path through the points, subdivided until no piece turns more than `degrees`: a curve that shows no faceting in a tube or sweep, however tight.
+
+    spline(points, degrees=3) -> list
+
+- `points`: a flat list [x,y,z, x,y,z, ...]
+- `degrees`: largest turn between pieces
 
 ### arc
 
@@ -220,7 +233,7 @@ Translate by x, y, z (a profile takes x, y).
 
 ### rotate
 
-Rotate by degrees about x, then y, then z, around the origin. rotate(shape, y=45) is the usual call. A profile takes one angle.
+Rotate by degrees about x, then y, then z, around the origin, right-handed: a positive x angle turns +y towards +z, a positive y angle turns +z towards +x, a positive z angle turns +x towards +y. rotate(shape, y=45) is the usual call. A profile takes one angle, counter-clockwise.
 
     rotate(shape, x=0, y=0, z=0) -> shape
     rotate(profile, angle) -> shape2
@@ -280,7 +293,7 @@ Grow (r > 0) or shrink (r < 0) the surface by r.
 
 ### shell
 
-Hollow the shape leaving a wall t thick inside its surface. Subtract something to open it up.
+Hollow the shape leaving a wall t thick inside its surface. Subtract something to open it up. check warns when t is under a grid cell.
 
     shell(shape, t) -> shape
     shell(profile, t) -> shape2
@@ -338,6 +351,44 @@ Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optiona
 - `placements`: [x,y,z,yaw, x,y,z,yaw, ...]
 - `fields`: 4 for x,y,z,yaw or 5 to add a scale
 
+## Queries
+
+### height
+
+The y of the highest surface of the shape above the point (x, z): where to set something down on a blended or roughened surface. An error when nothing is there.
+
+    height(shape, x, z) -> number
+
+### top
+
+The highest y of a shape's bounds (a bound, not necessarily a surface point); bottom(), left()... are the other faces of the box.
+
+    top(shape) -> number
+
+### bottom
+
+The lowest y of a shape's bounds.
+
+    bottom(shape) -> number
+
+### width
+
+The size of a shape's bounds along x.
+
+    width(shape) -> number
+
+### depth
+
+The size of a shape's bounds along z.
+
+    depth(shape) -> number
+
+### tall
+
+The size of a shape's bounds along y.
+
+    tall(shape) -> number
+
 ## Materials
 
 ### paint
@@ -348,11 +399,13 @@ Give the whole shape a material: a preset name, a colour ("#rrggbb" or a name), 
 
 ### material
 
-A custom material. Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass.
+A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass.
 
-    material(color, pattern="solid", color2="", scale=1, metal=0, rough=0.6, seed=0, transmit=0) -> material
+    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?) -> material
 
+- `color`: a colour, or a preset name to start from
 - `color2`: second colour for two-tone patterns
+- `scale`: feature size in units
 - `transmit`: 0 opaque .. 1 clear glass (beauty render only)
 
 ### rgb
@@ -515,67 +568,69 @@ A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], second
 
 Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a"`) also works.
 
-| Name | Pattern | Look |
-| --- | --- | --- |
-| clay | solid | #c9b8a6 |
-| white | solid | #f2f2f0 |
-| black | solid | #1a1a1c |
-| gray | solid | #8a8a8a |
-| red | solid | #c8342a |
-| green | solid | #3f9a45 |
-| blue | solid | #2f66c4 |
-| yellow | solid | #e8c53a |
-| orange | solid | #e07a2a |
-| purple | solid | #7a4bb0 |
-| pink | solid | #e58cb8 |
-| brown | solid | #7a4d2b |
-| teal | solid | #2a9b8f |
-| cream | solid | #f0e6c8 |
-| navy | solid | #213a6b |
-| tan | solid | #c9a97a |
-| olive | solid | #7a7a2e |
-| maroon | solid | #6e1f2a |
-| sky | solid | #8cc4ea |
-| lime | solid | #9ad13a |
-| charcoal | solid | #3a3a3e |
-| ivory | solid | #f4f0e2 |
-| coral | solid | #e8735a |
-| gold | solid | #e2b13c, metal |
-| silver | solid | #d4d6da, metal |
-| copper | solid | #c67a4a, metal |
-| bronze | solid | #a5772f, metal |
-| steel | solid | #8e949c, metal |
-| iron | solid | #5c5e62, metal |
-| brass | solid | #c9a54a, metal |
-| chrome | solid | #e8eaee, metal |
-| wood | wood | #b07d4a / #7a4f2a |
-| oak | wood | #c69a63 / #8f6539 |
-| walnut | wood | #6b4327 / #3e2414 |
-| pine | wood | #e0c08a / #b48c55 |
-| ebony | wood | #2c2420 / #171210 |
-| marble | marble | #ececea / #9a9aa0 |
-| granite | speckle | #8e8a86 / #3c3a38 |
-| stone | noise | #9a9590 / #6e6a66 |
-| sandstone | noise | #d9b98a / #b8945f |
-| concrete | speckle | #a9a8a4 / #8c8b87 |
-| brick | brick | #b0503a / #d8cbb8 |
-| tiles | tiles | #e8e4dc / #7a7670 |
-| checker | checker | #f0f0ec / #2a2a2e |
-| stripes | stripes | #e8e4dc / #c8342a |
-| dots | dots | #f4f0e2 / #2f66c4 |
-| grass | noise | #5a9a3a / #3e7228 |
-| dirt | noise | #6e4e32 / #4d341f |
-| sand | speckle | #e2cf9a / #c8b27a |
-| water | noise | #3a8ad8 / #6fb4ee |
-| glass | solid | #dff0f6 |
-| amber | solid | #e0a030 |
-| emerald | solid | #40b070 |
-| leather | speckle | #6b3f24 / #4a2a16 |
-| rubber | solid | #2a2a2c |
-| plastic | solid | #e8e8e8 |
-| porcelain | solid | #f6f4ee |
-| snow | noise | #f8f9fb / #dfe6ef |
-| lava | marble | #f06a1a / #3a1a10 |
+| Name | Pattern | Feature size | Colours | Notes |
+| --- | --- | --- | --- | --- |
+| clay | solid |  | #c9b8a6 | rough 0.7 |
+| white | solid |  | #f2f2f0 | rough 0.6 |
+| black | solid |  | #1a1a1c | rough 0.6 |
+| gray | solid |  | #8a8a8a | rough 0.6 |
+| red | solid |  | #c8342a | rough 0.6 |
+| green | solid |  | #3f9a45 | rough 0.6 |
+| blue | solid |  | #2f66c4 | rough 0.6 |
+| yellow | solid |  | #e8c53a | rough 0.6 |
+| orange | solid |  | #e07a2a | rough 0.6 |
+| purple | solid |  | #7a4bb0 | rough 0.6 |
+| pink | solid |  | #e58cb8 | rough 0.6 |
+| brown | solid |  | #7a4d2b | rough 0.6 |
+| teal | solid |  | #2a9b8f | rough 0.6 |
+| cream | solid |  | #f0e6c8 | rough 0.6 |
+| navy | solid |  | #213a6b | rough 0.6 |
+| tan | solid |  | #c9a97a | rough 0.6 |
+| olive | solid |  | #7a7a2e | rough 0.6 |
+| maroon | solid |  | #6e1f2a | rough 0.6 |
+| sky | solid |  | #8cc4ea | rough 0.6 |
+| lime | solid |  | #9ad13a | rough 0.6 |
+| charcoal | solid |  | #3a3a3e | rough 0.6 |
+| ivory | solid |  | #f4f0e2 | rough 0.6 |
+| coral | solid |  | #e8735a | rough 0.6 |
+| gold | solid |  | #e2b13c | metal, rough 0.3 |
+| silver | solid |  | #d4d6da | metal, rough 0.25 |
+| copper | solid |  | #c67a4a | metal, rough 0.35 |
+| bronze | solid |  | #a5772f | metal, rough 0.4 |
+| steel | solid |  | #8e949c | metal, rough 0.45 |
+| iron | solid |  | #5c5e62 | metal, rough 0.6 |
+| brass | solid |  | #c9a54a | metal, rough 0.35 |
+| chrome | solid |  | #e8eaee | metal, rough 0.1 |
+| wood | wood | 0.25 units | #b07d4a / #7a4f2a | rough 0.7 |
+| oak | wood | 0.3 units | #c69a63 / #8f6539 | rough 0.7 |
+| walnut | wood | 0.22 units | #6b4327 / #3e2414 | rough 0.6 |
+| pine | wood | 0.35 units | #e0c08a / #b48c55 | rough 0.75 |
+| ebony | wood | 0.2 units | #2c2420 / #171210 | rough 0.4 |
+| marble | marble | 1.2 units | #ececea / #9a9aa0 | rough 0.3 |
+| granite | speckle | 0.05 units | #8e8a86 / #3c3a38 | rough 0.5 |
+| stone | noise | 0.5 units | #9a9590 / #6e6a66 | rough 0.9 |
+| sandstone | noise | 0.6 units | #d9b98a / #b8945f | rough 0.9 |
+| concrete | speckle | 0.03 units | #a9a8a4 / #8c8b87 | rough 0.95 |
+| brick | brick | 0.5 units | #b0503a / #d8cbb8 | rough 0.9 |
+| tiles | tiles | 0.5 units | #e8e4dc / #7a7670 | rough 0.3 |
+| checker | checker | 0.5 units | #f0f0ec / #2a2a2e | rough 0.5 |
+| stripes | stripes | 0.25 units | #e8e4dc / #c8342a | rough 0.6 |
+| dots | dots | 0.5 units | #f4f0e2 / #2f66c4 | rough 0.6 |
+| grass | noise | 0.3 units | #5a9a3a / #3e7228 | rough 0.95 |
+| dirt | noise | 0.2 units | #6e4e32 / #4d341f | rough 0.95 |
+| sand | speckle | 0.04 units | #e2cf9a / #c8b27a | rough 0.95 |
+| water | noise | 0.8 units | #3a8ad8 / #6fb4ee | rough 0.1 |
+| glass | solid |  | #dff0f6 | glass (transmit 0.9), rough 0.05 |
+| amber | solid |  | #e0a030 | glass (transmit 0.7), rough 0.1 |
+| emerald | solid |  | #40b070 | glass (transmit 0.7), rough 0.08 |
+| leather | speckle | 0.06 units | #6b3f24 / #4a2a16 | rough 0.7 |
+| rubber | solid |  | #2a2a2c | rough 0.95 |
+| plastic | solid |  | #e8e8e8 | rough 0.35 |
+| porcelain | solid |  | #f6f4ee | rough 0.2 |
+| snow | noise | 0.3 units | #f8f9fb / #dfe6ef | rough 0.9 |
+| lava | marble | 0.8 units | #f06a1a / #3a1a10 | rough 0.6 |
+
+A pattern's feature size is in model units: a wood ring every 0.25 units suits a table leg, not a 20-unit floor. Use `material(color, pattern, color2, scale=)` with the two colours from this table for the same look at another size.
 
 ## Patterns
 

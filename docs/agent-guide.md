@@ -14,11 +14,26 @@ the inside is cut open.
 3. **`npx aixle check model.aix`.** Fixes syntax and type errors in a
    second, prints each step's size and every warning. Sizes that look wrong
    here are wrong.
-4. **`npx aixle render model.aix`.** Read `out/model/sheet.png`. Then
-   `slices.png` if anything is hollow or nested. Then `steps.png` if a part
-   is missing or misplaced, to see which step went wrong.
+4. **`npx aixle render model.aix --quick`** while iterating: the sheet
+   in a second or two. Then the full render: read `out/model/sheet.png`,
+   then `slices.png` if anything is hollow or nested, then `steps.png` if a
+   part is missing or misplaced, to see which step went wrong, and
+   `report.md` for the numbers (does it stand, is it one piece).
 5. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
+
+## The commands
+
+```
+npx aixle check model.aix                  sizes and warnings, no pictures (--pose NAME: in that pose)
+npx aixle render model.aix --quick         the sheet only, small grid, fast; --watch re-renders on save
+npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
+npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
+npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
+npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows
+npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
+npx aixle diff before.aix after.aix        the two sheets side by side
+```
 
 ## Reading the sheet
 
@@ -30,10 +45,19 @@ the inside is cut open.
 - The perspective view's floor grid is at y = 0 (or under the model if it
   goes lower); the red, green and blue lines are +x, +y, +z at the origin.
 - A part visible in the steps sheet with a red frame is not in the output:
-  you forgot to add it.
+  you forgot to add it. A thumbnail that says "too fine for this
+  thumbnail" is a small part in a large step (bolts along a bench) that
+  the thumbnail's own grid could not draw; the output is not affected. "No
+  surface" in the warning colour means the step really has none.
 - **Slices** are the truth about interiors: a cup that is not hollow, a wall
   that is thicker on one side, a hole that does not go through, a cavity
   that broke out where it should not. Filled means solid.
+- A small part of a large model is a few pixels on the sheet: `--focus
+  name` frames every view on that step alone.
+- With joints, `poses.png` shows every pose and `anim_<name>.png` frames
+  through each animation, coarsely; to judge one pose properly, `--pose
+  name` renders the whole sheet in it, and `check --pose name` prints the
+  posed sizes.
 
 ## Common mistakes and their fixes
 
@@ -48,12 +72,34 @@ the inside is cut open.
 | stripes or checks look stretched | the pattern is in the painted frame, before a non-uniform scale | paint after scaling, or use a smaller `scale=` in `material()` |
 | "is not part of the output" | a step never got added to the final shape | add it, or delete it |
 | an edge looks jagged | the grid is coarse for the size | `--grid 200` (slower, cubic) |
+| a shell wall, a tube or lettering is broken or gone, though the part is thick | the wall, tube radius or stroke weight is under a grid cell | `check` says which step and what grid; thicken it or raise the grid |
+| a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
+| a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
+| a rig's part swings about the wrong point | the joint's pivot is not where the part turns | give `joint` the world point of the hinge, after the part is moved into place |
+| `set pose reach` shows the rest pose | the pose is not named that | the warning lists the poses that exist |
 
 When the model is right, `npx aixle render model.aix --beauty` adds
 `beauty.png`, the field ray-marched with shadows, for showing rather than
 checking; `viewer.html` next to it orbits the mesh in a browser, and
 `model.glb` carries the materials as a baked texture (`model.png`), so it
 looks the same wherever it is loaded.
+
+## Rigs
+
+```
+upper  = capsule(0.15, 1.6) | move(0, 1.8, 0) | paint("steel")        # built in place
+fore   = capsule(0.12, 1.2) | move(0, 3.2, 0) | paint("steel")
+elbow  = joint(fore, "elbow", 0, 2.6, 0)                              # pivot: a world point
+arm    = joint(upper + elbow, "shoulder", 0, 1, 0)                    # the inner joint turns with it
+pose("reach", shoulder=[0, 0, -40], elbow=[0, 0, 60])
+animation("wave", ["rest", "reach", "rest"], seconds=2)
+set pose reach
+show arm
+```
+
+Angles are degrees about x, then y, then z, right-handed. Sizes printed
+by `check` and shown on the sheet are for the pose being shown; the
+exports are at rest and carry the joints and animations.
 
 ## Style that renders well
 

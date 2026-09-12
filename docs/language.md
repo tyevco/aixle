@@ -94,9 +94,11 @@ radius: `union(a, b, k=0.4)` melts the join; `difference(a, b, k=0.1)`
 fillets the cut. Cut surfaces keep the material of the shape being cut.
 
 **Transforms**: `move(x, y, z)`, `rotate(x=, y=, z=)` (about the origin, x
-then y then z), `scale(s)` or `scale(x, y, z)`, `mirror("x")` (keeps both
-halves: model one arm, mirror it), `flip("x")` (reflects only), `ground()`,
-`center()`.
+then y then z, right-handed: a positive `x` angle turns +y towards +z, so
+`rotate(x=-15)` leans a backrest's top towards -z; a positive `y` angle
+turns +z towards +x; a positive `z` angle turns +x towards +y), `scale(s)`
+or `scale(x, y, z)`, `mirror("x")` (keeps both halves: model one arm,
+mirror it), `flip("x")` (reflects only), `ground()`, `center()`.
 
 Transforms are about the origin, so the order matters: build a part at the
 origin, rotate it, then move it into place.
@@ -112,17 +114,32 @@ dz)` on the ground, `ring(n, radius)` around y (each copy is first pushed
 out along +x by `radius`, then turned). These are real copies, so a rotated
 copy of a box is exactly a rotated box.
 
+**Bounds** are boxes: exact for primitives and unions, loose after a cut
+(`a - b` keeps a's box however much was removed), a rotation or a twist;
+`a & b` tightens to the overlap, which is the way to trim a bounding box
+after a big cut. `check` prints every step's box; the report also gives
+the surface's true extent from the mesh. Queries read the box:
+`top(s)`, `bottom(s)`, `width(s)`, `tall(s)`, `depth(s)`; and
+`height(s, x, z)` marches down to the real surface above a point, so a
+stone can be set on a rough rock: `stone | move(1, height(rock, 1, 2), 2)`.
+
 **2D profiles** live in the x/y plane: `circle`, `rect`, `ellipse`, `ngon`,
-`star`, `polygon(x1,y1, x2,y2, ...)`. They take the same booleans, `move(x,
+`star`, `polygon(x1,y1, x2,y2, ...)` (either winding). They take the same booleans, `move(x,
 y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
 
 - `revolve(profile)` spins it around y; the profile's x is the radius, so
   draw it on `x >= 0`. A vase is one polygon and one `revolve`.
-- `extrude(profile, h)` lays the profile flat (its y towards -z) and
-  thickens it `h` up; `extrude(profile, h, "z")` makes it face the front.
+  `revolve(profile, angle=180)` sweeps only that far, from +z towards +x,
+  with flat ends: an arch is a half revolve of a circle laid on its side.
+- `extrude(profile, h)` lays the profile flat (its x along x, its y along
+  -z) and thickens it `h` up, centred on y = 0; `extrude(profile, h, "z")`
+  stands it facing the front (x along x, y along y, thickness along z);
+  `extrude(profile, h, "x")` stands it facing +x (x along -z, y along y),
+  which is the one for a side profile such as a chair's end frame.
 
 **Paths**: `tube(r, [x,y,z, x,y,z, ...])` is a round tube along the
-points with rounded joins; `sweep(profile, [points])` carries a 2D profile
+points with rounded joins and hemispherical ends that reach `r` past
+each end point (`cap="flat"` cuts them flat at the points); `sweep(profile, [points])` carries a 2D profile
 along them (its x across the path, its y up); `loft(a, b, h)` blends from
 profile `a` at the bottom to `b` at the top over height `h`. Both path
 functions take `smooth=n` to curve the path through the points; a handle is
@@ -130,14 +147,23 @@ four points and `smooth=6`. A hollow spout is one tube minus a thinner one
 on the same path. `taper=` scales the end relative to the start (a horn,
 a tapering tail) and `sweep` also takes `twist=` degrees over the whole
 path, so three circles swept along `helix(r, h, turns)` with
-`twist = 360 * turns` is a rope. `helix()` and `arc(r, from, to)` make
-point lists; any list of numbers works, including one built in a loop.
+`twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to)` and
+`spline(points)` make point lists (a helix starts at `(r, 0, 0)` and rises
+from y = 0 to `h`, an arc lies on y = 0; move the result afterwards);
+`spline` is the one to reach for on a curve: it passes through the points and subdivides until no piece turns
+more than three degrees, so the sweep shows no facets. Any list of
+numbers works, including one built in a loop.
 
-**Text**: `text("AIXLE", size=1, weight=0.15, align="center")` is a 2D
-profile from a built-in single-stroke font (A-Z, 0-9, punctuation;
-lowercase folds up), laid out on the baseline. Extrude it for raised
-lettering, subtract an extrusion for engraving. `size` is the cap height,
-`weight` the stroke width; keep `weight` above two grid cells.
+**Text**: `text("Aixle", size=1, weight=0.15, align="center")` is a 2D
+profile from a built-in single-stroke font (upper and lower case, digits,
+punctuation), laid out on the baseline. Extrude it for raised lettering,
+subtract an extrusion for engraving. `size` is the cap height, `weight`
+the stroke width; keep `weight` above a grid cell or so (`check` warns
+when it is not). The profile's box reaches half the weight past the
+strokes, so the lettering stands `size` plus `weight` tall. `arc=r` bends the
+text onto a circle of radius `r` centred on the origin, reading over the
+top (or under the bottom with a negative radius): a coin's rim, a label
+round a jar once revolved... or extruded and wrapped by hand.
 
 **Import**: `import("part.obj")` or a `.glb`, relative to the program's
 folder, makes an existing mesh a shape: it is sampled into a distance
@@ -165,8 +191,11 @@ angles (degrees about x, then y, then z; unnamed joints rest);
 into evenly spaced keyframes. Every pose is drawn on `poses.png`, every
 animation on `anim_<name>.png`, and the GLB carries the joints as nodes
 with the animations as glTF channels, which the viewer page plays. `set
-pose reach` makes the sheet and the beauty render show that pose; exports
-are always at rest.
+pose reach` (or `--pose reach` on the command line) makes the sheet, the
+views, the slices and the beauty render show that pose, and `check --pose
+reach` prints every step's size in it; exports are always at rest. The
+thumbnails on `poses.png` are meshed coarsely, so judge a pose that
+matters at full size with `set pose`.
 
 A pose is applied by evaluating the program again with the angles, so
 anything computed from a joint's shape (its bounds, a `ground()`) follows
@@ -177,6 +206,10 @@ the pose.
 `paint(shape, m)` gives the whole shape one material; `m` is a preset name
 (`"wood"`, `"brass"`, `"marble"`, see the reference), a colour (`"red"`,
 `"#40e0ff"`), or `material(color, pattern, color2, scale, metal, rough)`.
+A preset at another feature size is `material("granite", scale=0.4)`:
+start from the preset, change only what is given. Pattern sizes are in
+model units (the reference lists each preset's), so a 0.25-unit wood
+ring suits a table leg and a 20-unit floor wants `scale=2`.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
 tiles, dots. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 
@@ -199,16 +232,30 @@ shadows; 0.5 is a lamp), `set dof 1` adds depth of field there, blurring
 away from the model's centre. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
-else. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
+else. Glass shows what is behind it, not what is inside it: a lamp
+unioned into a solid glass drum is part of one solid and only tints the
+light, so make a lantern hollow (`shell`, or a tube minus a thinner one)
+and put the lamp in the air inside. `set focus name` frames every view on
+one step or object (`--focus` on the command line): the way to check a
+small part of a large scene. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
 and `--elevation` override). `set grid N` sets the extraction resolution (cells along the longest side,
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
 of a view. `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
-cross-section plane. `set beauty 1` always writes the ray-marched
+cross-section plane; a scene's default cut goes through its first
+object, so list the one to cut first. `set beauty 1` always writes the ray-marched
 `beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
 to rounded vertex placement if a sharp corner ever misbehaves. `set texture
 2048` sizes the baked texture atlas (`0` turns it off and the GLB carries
 vertex colours instead).
+
+## The fast loop
+
+`aixle render model.aix --quick` renders the sheet only, at a small grid,
+in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
+b.aix` draws two versions side by side, A on the left, for judging a
+change. Use the full render for the final check: the quick grid drops
+detail thinner than its cell.
 
 ## What the tool checks for you
 
@@ -216,8 +263,16 @@ vertex colours instead).
 also writes them into `report.md` and counts them on the sheet's title bar.
 Warnings cover: a shape computed but never assigned; a step that is not part
 of the output; an empty output (a difference that removed everything, an
-intersection that did not overlap); a model thinner than a few grid cells;
-and, as a note, a model that does not rest on `y = 0`.
+intersection that did not overlap); a model or part thinner than a grid
+cell, including a `shell` wall, a `tube`, a `sweep` profile or a `text`
+stroke inside a thick part (those carry their own thickness, since a
+bounding box cannot see it); a model in separate pieces (a part that floats free) or with slivers
+left by a cut; a model that would tip over, from its centre of mass and
+the footprint of its base; and, as a note, a model that does not rest on
+`y = 0`. The report's Physics section has the numbers: mass at `set
+density`, centre of mass, footprint, pieces, and how much of the surface
+overhangs (faces down more than 45°, which a printer would need support
+under).
 
 ## Limits worth knowing
 

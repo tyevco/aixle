@@ -61,11 +61,16 @@ export function referenceMarkdown(): string {
     "",
   );
   out.push("## Material presets", "", "Use any of these by name in `paint()`. A colour name (`\"red\"`) or hex (`\"#c8342a\"`) also works.", "");
-  out.push("| Name | Pattern | Look |", "| --- | --- | --- |");
+  out.push(
+    "| Name | Pattern | Feature size | Colours | Notes |",
+    "| --- | --- | --- | --- | --- |",
+  );
   for (const m of PRESETS.values()) {
     const hex = (c: number[]) => "#" + c.map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
-    out.push(`| ${m.name} | ${m.pattern} | ${hex(m.color)}${m.pattern !== "solid" ? " / " + hex(m.color2) : ""}${m.metal ? ", metal" : ""} |`);
+    const notes = [m.metal ? "metal" : "", m.transmit ? `glass (transmit ${m.transmit})` : "", `rough ${m.rough}`].filter(Boolean).join(", ");
+    out.push(`| ${m.name} | ${m.pattern} | ${m.pattern === "solid" ? "" : `${m.scale} units`} | ${hex(m.color)}${m.pattern !== "solid" ? " / " + hex(m.color2) : ""} | ${notes} |`);
   }
+  out.push("", "A pattern's feature size is in model units: a wood ring every 0.25 units suits a table leg, not a 20-unit floor. Use `material(color, pattern, color2, scale=)` with the two colours from this table for the same look at another size.");
   out.push("", "## Patterns", "", `For \`material(color, pattern, ...)\`: ${PATTERNS.join(", ")}.`, "");
   return out.join("\n");
 }

@@ -205,9 +205,14 @@ class Parser {
   }
 
   private args(callee: string): Arg[] {
-    this.expectOp("(");
+    const open = this.expectOp("(");
     const args: Arg[] = [];
+    const where = (): string => (this.peek().line !== open.line ? ` (the call opened on line ${open.line})` : "");
     while (!this.atOp(")")) {
+      // Inside parentheses the lexer drops line breaks, so a newline token here is the file's last one.
+      if (this.at("eof") || this.at("newline")) throw new SyntaxError(`the call to ${callee} opened on line ${open.line} is never closed: missing ')'`, open.line);
+      if (this.at("ident") && KEYWORDS.has(this.peek().value) && this.peek().line !== open.line)
+        throw new SyntaxError(`the call to ${callee} opened on line ${open.line} is never closed: missing ')' before '${this.peek().value}' on line ${this.peek().line}`, open.line);
       if (this.at("ident") && this.peek(1).type === "op" && this.peek(1).value === "=") {
         const name = this.next().value;
         this.next();
@@ -216,7 +221,7 @@ class Parser {
         args.push({ value: this.expr() });
       }
       if (this.atOp(",")) this.next();
-      else if (!this.atOp(")")) throw new SyntaxError(`expected ',' or ')' in call to ${callee}, found ${describe(this.peek())}`, this.peek().line);
+      else if (!this.atOp(")")) throw new SyntaxError(`expected ',' or ')' in call to ${callee}, found ${describe(this.peek())}${where()}`, this.peek().line);
     }
     this.expectOp(")");
     return args;

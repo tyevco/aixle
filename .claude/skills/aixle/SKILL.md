@@ -24,9 +24,12 @@ Reference: `docs/reference.md` (every function, generated from the code),
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
    size, every warning, in a second. Sizes that look wrong are wrong.
-4. **`npx aixle render model.aix`**, then read `out/model/sheet.png`.
-   Read `slices.png` if anything is hollow or nested, `steps.png` if a
-   part is missing or misplaced. `report.md` has the numbers.
+4. **`npx aixle render model.aix --quick`** while iterating (the sheet in
+   a second or two), then read `out/model/sheet.png`. Drop `--quick` for
+   the full render: read `slices.png` if anything is hollow or nested,
+   `steps.png` if a part is missing or misplaced; `report.md` has the
+   numbers, including whether the model stands and is in one piece.
+   `npx aixle diff before.aix after.aix` shows two versions side by side.
 5. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
    `--beauty` for the presentation picture.
@@ -38,7 +41,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
 - Front is from +z, right from +x, top from above with the back at the top.
   Grids are whole units; darker lines pass through the origin. The
   perspective view's red, green, blue lines are +x, +y, +z.
-- A red frame in `steps.png` is a shape that never reached the output.
+- A red frame in `steps.png` is a shape that never reached the output;
+  "too fine for this thumbnail" is a tiny part the thumbnail's grid could
+  not draw, nothing wrong with the model.
 - Slices are the truth about interiors: filled means solid.
 
 ## The language in one screen
@@ -50,13 +55,15 @@ for i in range(6) { ... }        # loops; range(a, b), range(a, b, step), [1, 2.
 show name                        # the output (default: the last shape)
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(n, r, h)
-circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("ABC", size)   # 2D
-extrude(profile, h)  revolve(profile)  loft(a, b, h)                                     # 2D to 3D
+circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("Abc", size, arc=r)   # 2D
+extrude(profile, h)  revolve(profile, angle=360)  loft(a, b, h)                          # 2D to 3D
 tube(r, [x,y,z, ...], smooth=6, taper=1)  sweep(profile, [x,y,z, ...], smooth=6, twist=0, taper=1)
-helix(r, h, turns)  arc(r, from, to)                                                     # path lists
+helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # path lists
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
+height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)                          # read sizes to place parts
+set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)
@@ -65,7 +72,11 @@ a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)
 ```
 
 y is up, angles are degrees, primitives are centred on the origin and stand
-along y, `a | f(x)` is `f(a, x)`, `|` binds tighter than `+ - &`.
+along y, `a | f(x)` is `f(a, x)`, `|` binds tighter than `+ - &`. Rotation
+is right-handed: `rotate(x=+θ)` turns +y towards +z, `rotate(y=+θ)` turns
++z towards +x, `rotate(z=+θ)` turns +x towards +y. `extrude(p, h)` lays the
+profile flat (its y along -z); `"z"` stands it facing the front; `"x"`
+facing +x (its x along -z), the one for a side profile.
 
 ## A worked example
 
@@ -86,7 +97,19 @@ right (+x) and the slices show the wall thickness and the open top.
 For a rig: build each part in place, wrap it with `joint` at its pivot,
 nest the forearm's joint inside the upper arm's part, write poses, then
 read `poses.png` and `anim_<name>.png`: a part that swings about the
-wrong point has the wrong pivot.
+wrong point has the wrong pivot. To judge one pose properly render it
+at full size with `--pose name` (or `set pose name`); `check --pose name`
+prints the posed sizes.
+
+```
+upper = capsule(0.15, 1.6) | move(0, 1.8, 0) | paint("steel")
+fore  = capsule(0.12, 1.2) | move(0, 3.2, 0) | paint("steel")
+elbow = joint(fore, "elbow", 0, 2.6, 0)             # pivot is a world point
+arm   = joint(upper + elbow, "shoulder", 0, 1, 0)   # the elbow turns with the shoulder
+pose("reach", shoulder=[0, 0, -40], elbow=[0, 0, 60])
+set pose reach
+show arm
+```
 
 ## Mistakes the renders catch
 
@@ -100,6 +123,10 @@ wrong point has the wrong pivot.
 | speckle on a thin shell | the wall tapers below a cell | thicken it; see `examples/lamp.aix` |
 | "is not part of the output" | a step was never added to the final shape | add it or delete it |
 | corrugated sweep | tight bends with few points | raise `smooth=` |
+| a shell wall, tube or lettering is broken though the part is thick | its wall, radius or stroke weight is under a cell | `check` names the step and the grid to set; thicken it or raise the grid |
+| a small part is a few pixels on the sheet | the whole model sets the framing | `--focus name` or `set focus name` |
+| stone or wood reads as flat colour | the pattern is larger than the part | `material("granite", scale=0.3)` |
+| a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
 
 ## Style that renders well
 

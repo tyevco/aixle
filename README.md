@@ -54,10 +54,13 @@ generated from the code so it cannot drift.
 
 ```
 npm install
-npx aixle check  model.aix           # parse, evaluate, print sizes and warnings; no pictures
+npx aixle check  model.aix           # parse, evaluate, print sizes and warnings; no pictures (--pose NAME for a rig's pose)
 npx aixle render model.aix           # everything, into out/model/
+npx aixle render model.aix --quick   # the sheet only, in a second or two; add --watch to re-render on save
+npx aixle diff before.aix after.aix  # two versions side by side
 npx aixle render model.aix --beauty         # plus beauty.png (a second or a few)
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
+npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle doc                        # the reference, to stdout
 ```
@@ -77,7 +80,7 @@ npx aixle doc                        # the reference, to stdout
 | `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
-| `report.md`, `report.json` | size, bounds, triangle count, volume, every step's size and whether it is used, warnings |
+| `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings |
 
 ## The language in one screen
 
@@ -88,10 +91,10 @@ for i in range(6) { ... }        # loops; also range(a, b), range(a, b, step), o
 show name                        # what to output (default: the last shape)
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(sides, r, h)
-circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("HI", size)   # 2D
-extrude(profile, h)  revolve(profile)  loft(a, b, h)                                     # to solids
+circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("Hi", size, arc=r)   # 2D
+extrude(profile, h)  revolve(profile, angle=180)  loft(a, b, h)                          # to solids
 tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, taper=1)   # along a path
-helix(r, h, turns)  arc(r, from, to)                                                     # point lists
+helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # point lists
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)

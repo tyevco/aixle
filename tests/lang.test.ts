@@ -56,6 +56,11 @@ describe("parser", () => {
     expect(() => parse("scene = box(1)")).toThrow(/line 1: 'scene' is a keyword and cannot be a name/);
     expect(() => parse("show = 1")).toThrow(/'show' is a keyword/);
   });
+  it("names the line an unclosed call opened on", () => {
+    expect(() => parse("a = move(box(1),\nshow a")).toThrow(/line 1: the call to move opened on line 1 is never closed: missing '\)' before 'show' on line 2/);
+    expect(() => parse("a = move(box(1)\n  b = 2")).toThrow(/found 'b' \(the call opened on line 1\)/);
+    expect(() => parse("a = box(1,")).toThrow(/call to box opened on line 1 is never closed/);
+  });
   it("names the line of a syntax error", () => {
     expect(() => parse("a = 1\nb = box(1,")).toThrow(/line 2/);
     expect(() => parse("for i in range(3) {\n x = 1")).toThrow(/never closed/);
@@ -122,6 +127,19 @@ describe("interpreter", () => {
     expect(rope.bounds.max[0]).toBeGreaterThan(1.19);
     expect(rope.bounds.max[0]).toBeLessThan(1.3);
   });
+  it("queries heights and bounds, and derives materials from presets", () => {
+    const ev = run('r = sphere(1) | displace(0.1, 0.4)\nh = height(r, 0, 0)\nt = top(r)\nw = width(r)\nm = material("granite", scale=0.4)\ns = r | paint(m)');
+    const h = ev.steps.find((s) => s.name === "h")!.value as number;
+    expect(h).toBeGreaterThan(0.85);
+    expect(h).toBeLessThan(1.15);
+    expect(ev.steps.find((s) => s.name === "t")!.value).toBeCloseTo(1.1);
+    expect(ev.steps.find((s) => s.name === "w")!.value).toBeCloseTo(2.2);
+    const m = ev.steps.find((s) => s.name === "m")!.value as { pattern: string; scale: number; name: string };
+    expect(m.pattern).toBe("speckle");
+    expect(m.scale).toBe(0.4);
+    expect(() => run("h = height(sphere(1), 5, 5)")).toThrow(/no surface above \(5, 5\)/);
+    expect(() => run('m = material("nonsense")')).toThrow(/not a preset or a colour/);
+  });
   it("runs user functions with defaults and loops that build up a shape", () => {
     const src = "def peg(h, r=0.1) = cylinder(r, h)\nall = empty()\nfor i in range(4) {\n all = all + (peg(1) | move(i, 0, 0))\n}";
     const all = shape(src, "all");
@@ -141,6 +159,14 @@ describe("interpreter", () => {
     const ev = run("r = 1\na = sphere(r)\nb = a | move(1, 0, 0)\nc = box(1)\nshow b");
     expect([...ev.used].sort()).toEqual(["a", "b", "r"]);
   });
+  it("reports only the overload that fits the first argument", () => {
+    let msg = "";
+    try { run("a = sphere(1) | rotate(y=45, pitch=3)"); } catch (e) { msg = (e as Error).message; }
+    expect(msg).toMatch(/no parameter named 'pitch'/);
+    expect(msg).not.toMatch(/profile/);
+    expect(msg).toMatch(/rotate\(shape, x=0, y=0, z=0\)/);
+    expect(msg).not.toMatch(/rotate\(profile/);
+  });
   it("explains errors with the line and the usage", () => {
     expect(() => run("a = sphere()")).toThrow(/line 1: sphere\(\): missing 'r'/);
     expect(() => run("a = sphere(1)\nb = a | move(\"x\")")).toThrow(/line 2: move\(\)[\s\S]*x: expected a number, got the string "x"/);
@@ -154,6 +180,20 @@ describe("interpreter", () => {
   });
   it("reads settings", () => {
     expect(run("set grid 200\na = sphere(1)").settings.grid).toBe(200);
+  });
+  it("lets an animation use the implicit rest pose and names a missing one once", () => {
+    const src = 'j = joint(box(1), "hinge", 0, 0, 0)\npose("open", hinge=[30, 0, 0])\nanimation("swing", ["rest", "open", "rest"], seconds=1)\nanimation("bad", ["nope", "open", "nope"], seconds=1)\nshow j';
+    const w = run(src).warnings.filter((x) => x.includes("animation"));
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatch(/"bad" .*uses pose "nope", which is not defined; poses: open/);
+  });
+  it("takes a bare word as the name in set pose and set focus", () => {
+    // A dogfooding agent wrote `set pose reading`, as the docs show, and was told 'reading' is not defined.
+    const ev = run('lid = box(1)\nj = joint(lid, "hinge", 0, 0.5, 0)\npose("open", hinge=[30, 0, 0])\nset pose open\nset focus lid\nshow j');
+    expect(ev.settings.pose).toBe("open");
+    expect(ev.settings.focus).toBe("lid");
+    expect(run('a = box(1)\nset pose "open"').settings.pose).toBe("open");
+    expect(() => run("set grid nope")).toThrow(/nope/);
   });
   it("refuses runaway loops", () => {
     expect(() => run("for i in range(30000) { a = 1 }")).toThrow(/loop iterations/);
