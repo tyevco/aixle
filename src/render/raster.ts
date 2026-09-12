@@ -49,13 +49,15 @@ function normalize3(v: Vec3): Vec3 {
 }
 
 /** Shade a surface point: `n` is the unit view-space normal, `base` the albedo. */
-export function shade(n: Vec3, base: Vec3, metal: number, rough: number): Vec3 {
+export function shade(n: Vec3, base: Vec3, metal: number, rough: number, glow = 0): Vec3 {
   const nl = Math.max(0, n[0] * KEY[0] + n[1] * KEY[1] + n[2] * KEY[2]);
   const fl = Math.max(0, n[0] * FILL[0] + n[1] * FILL[1] + n[2] * FILL[2]);
   const rl = Math.max(0, n[0] * RIM[0] + n[1] * RIM[1] + n[2] * RIM[2]);
   const hemi = 0.5 + 0.5 * n[1];
   const ambient = 0.22 + 0.16 * hemi;
-  const diffuse = (ambient + 0.72 * nl + 0.18 * fl) * (1 - metal * 0.55);
+  // A metal reflects its surroundings rather than scattering light; in a sheet with no environment, stand in a
+  // hemisphere term for it so silver reads as silver, not charcoal (measured on a trophy's plate).
+  const diffuse = (ambient + 0.72 * nl + 0.18 * fl) * (1 - metal * 0.35) + metal * (0.25 + 0.3 * hemi) * (1 - rough * 0.5);
   // Blinn highlight from the key light; the eye is +z in view space.
   const hx = KEY[0], hy = KEY[1], hz = KEY[2] + 1;
   const hl = Math.hypot(hx, hy, hz);
@@ -68,9 +70,9 @@ export function shade(n: Vec3, base: Vec3, metal: number, rough: number): Vec3 {
   const sg = metal > 0 ? base[1] * (0.4 + 0.6 * metal) + (1 - metal) : 1;
   const sb = metal > 0 ? base[2] * (0.4 + 0.6 * metal) + (1 - metal) : 1;
   return [
-    Math.min(1, base[0] * diffuse + spec * sr + rim),
-    Math.min(1, base[1] * diffuse + spec * sg + rim),
-    Math.min(1, base[2] * diffuse + spec * sb + rim),
+    Math.min(1, base[0] * (diffuse + glow) + spec * sr + rim),
+    Math.min(1, base[1] * (diffuse + glow) + spec * sg + rim),
+    Math.min(1, base[2] * (diffuse + glow) + spec * sb + rim),
   ];
 }
 
@@ -141,7 +143,7 @@ export function renderMesh(mesh: Mesh, cam: Camera, target: RenderTarget, opts: 
           const lz = local[a * 3 + 2] * w0 + local[b * 3 + 2] * w1 + local[c * 3 + 2] * w2;
           base = albedo(mat, lx, ly, lz);
         }
-        const col = shade([nx, ny, nz], base, flat ? 0 : mat.metal, flat ? 0.6 : mat.rough);
+        const col = shade([nx, ny, nz], base, flat ? 0 : mat.metal, flat ? 0.6 : mat.rough, flat ? 0 : mat.glow);
         canvas.set(px, py, rgbf(col[0], col[1], col[2]));
       }
     }

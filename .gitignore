@@ -3,3 +3,6 @@ dist/
 out/
 .DS_Store
 .claude/worktrees/
+.vitepress/cache/
+.vitepress/dist/
+.vitepress/public/viewers/

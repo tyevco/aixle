@@ -1,0 +1,50 @@
+# A park bench: oak slats on two cast-iron end frames. Metres, y up,
+# the sitter faces +z, so the backrest is on the -z side.
+set grid 256
+
+L = 1.8              # slat length along x
+xf = 0.78            # the end frames sit at x = +-xf
+bar = 0.03           # iron bar radius
+seat_y = 0.44        # centre height of the seat rail
+tilt = 15            # backrest recline, degrees
+slat_t = 0.035       # slat thickness
+oak = material("#c69a63", "wood", "#8f6539", scale=0.25)
+back_h = 0.56        # back rail length along the recline
+
+# One end frame, drawn in the y/z plane at x = 0: two bowed legs, a seat
+# rail, a curved armrest, and a foot pad under each leg.
+def end_frame() =
+  tube(bar, [0,bar,0.26, 0,0.22,0.31, 0,seat_y,0.26], smooth=6)
+  + tube(bar, [0,bar,-0.2, 0,0.22,-0.25, 0,seat_y,-0.2], smooth=6)
+  + tube(bar, [0,seat_y,0.3, 0,seat_y,-0.22])
+  + tube(bar * 0.7, [0,0.2,0.3, 0,0.15,0.05, 0,0.2,-0.24], smooth=6)
+  + tube(bar * 0.8, [0,seat_y,0.28, 0,0.6,0.34, 0,0.68,0.2, 0,0.66,-0.25], smooth=6)
+  + (cylinder(0.055, 0.025) | move(0, 0.0125, 0.26))
+  + (cylinder(0.055, 0.025) | move(0, 0.0125, -0.2))
+
+# The back rail is straight so the slats can lie flat on it; it is built
+# upright with the back slats and reclined with them.
+back_rail = tube(bar, [0,-0.02,0, 0,back_h,0])
+
+frames = (end_frame() | move(xf, 0, 0) | mirror("x")) | paint("iron")
+back_rails = (back_rail | move(xf, 0, 0) | mirror("x")) | paint("iron")
+
+# Seat: four slats resting on the seat rails.
+seat_slat = box(L, slat_t, 0.09, round=0.006)
+seat = seat_slat | array(4, 0, 0, 0.12) | move(0, seat_y + bar + slat_t / 2 - 0.004, -0.18) | paint(oak)
+
+# Back: three slats stacked up the rail, just in front of it (+z in the
+# upright frame), then the whole back is reclined and moved onto the seat.
+back_slat = box(L, 0.09, slat_t, round=0.006)
+back_slats = back_slat | array(3, 0, 0.14, 0) | move(0, 0.2, bar + slat_t / 2 - 0.004) | paint(oak)
+
+# Bolt heads: a dome where each slat crosses a frame.
+bolt = cylinder(0.02, 0.02, round=0.007) | paint("iron")
+seat_bolts = bolt | array(4, 0, 0, 0.12) | move(xf, seat_y + bar + slat_t, -0.18) | mirror("x")
+back_bolt = bolt | rotate(x=90)
+back_bolts = back_bolt | array(3, 0, 0.14, 0) | move(xf, 0.2, bar + slat_t) | mirror("x")
+
+back = (back_rails + back_slats + back_bolts) | rotate(x=-tilt) | move(0, seat_y, -0.2)
+
+bench = (frames + seat + seat_bolts + back) | ground()
+show bench

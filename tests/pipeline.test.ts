@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, diff, QUICK, run, thinWarnings } from "../src/pipeline.js";
+import { cellFor, check, diff, foldThinWarnings, QUICK, run, thinWarnings, tightBounds } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -143,8 +143,8 @@ describe("rigs, features and overhangs", () => {
     const ev = check('cup = shell(cylinder(1, 2), 0.01) - (cylinder(0.8, 1) | move(0, 1.5, 0))\nlabel = extrude(text("Hi", 0.5, weight=0.02), 0.2) | rotate(x=90) | move(0, 1, 1)\nm = cup + label');
     const { grid, cellSize } = cellFor(ev);
     const w = thinWarnings(ev, cellSize, grid);
-    expect(w.join("\n")).toMatch(/'cup' \(line 1\) has a wall, tube or stroke only 0.01 thick/);
-    expect(w.join("\n")).toMatch(/'label' \(line 2\) has a wall, tube or stroke only 0.02 thick/);
+    expect(w.join("\n")).toMatch(/'cup' \(line 1\) has a wall, tube \(at its thin end, if tapered\) or stroke only 0.01 thick/);
+    expect(w.join("\n")).toMatch(/'label' \(line 2\) has a wall, tube \(at its thin end, if tapered\) or stroke only 0.02 thick/);
     // 'm' carries both features but introduced neither, so it is not reported again.
     expect(w.filter((x) => x.startsWith("'m'"))).toHaveLength(0);
     expect(thinWarnings(check("cup = shell(cylinder(1, 2), 0.2)"), cellSize, grid)).toHaveLength(0);
@@ -174,6 +174,54 @@ describe("rigs, features and overhangs", () => {
       const cube = run("m = box(2)", "cube.aix", dir, { ...QUICK, grid: 16 });
       expect(cube.physics?.overhang ?? 1).toBe(0);
       expect(cube.report).toMatch(/Overhangs \| none/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("quick pass warnings", () => {
+  it("judges thin parts at the grid a full render would use, and says where a mesh is not watertight", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // 0.06 thin: under a cell at the quick grid (64 over 8 units) but two cells at the file's grid 260.
+      const src = "set grid 260\nplate = box(8, 0.06, 8)\nknob = sphere(1) | move(0, 1, 0)\nm = plate + knob";
+      const quick = run(src, "thin.aix", dir, QUICK);
+      expect(quick.warnings.some((w) => w.startsWith("'plate'"))).toBe(false);
+      const full = run(src.replace("260", "40"), "thin.aix", dir, { ...QUICK, quick: false, grid: 40 });
+      expect(full.warnings.join()).toMatch(/'plate' \(line 2\) is only 0.06/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("extents and close-ups", () => {
+  it("extracts over the surface's extent when the bounds are loose, and folds many thin warnings into one", () => {
+    // A box turned 45 degrees has a box of a box: the tight extent is the turned box itself, and the report says so.
+    const ev = check("m = box(2, 0.2, 0.2) | rotate(z=45)");
+    const t = tightBounds(ev.output!);
+    const b = ev.output!.bounds;
+    expect(b.max[0] - b.min[0]).toBeCloseTo(2 * Math.SQRT1_2 + 0.2 * Math.SQRT1_2, 3);
+    expect(t.max[0] - t.min[0]).toBeLessThanOrEqual(b.max[0] - b.min[0]);
+    // A blend pads the bounds; the extent is the spheres.
+    const bl = check("m = union(sphere(1), sphere(0.5) | move(0, 1.2, 0), k=1)");
+    const tb = tightBounds(bl.output!);
+    expect(tb.min[1]).toBeGreaterThan(bl.output!.bounds.min[1]);
+    expect(tb.min[1]).toBeLessThanOrEqual(-1);
+    const folded = foldThinWarnings(["'a' (line 1) is only 0.01 units thin, 0.3 of the 0.03 cell: x (set grid 300).", "'b' (line 2) is only 0.02 units thin: x (set grid 200).", "'c' (line 3) has a wall only 0.015 thick: x (set grid 250).", "'d' (line 4) is only 0.02 units thin: x (set grid 210)."]);
+    expect(folded).toHaveLength(1);
+    expect(folded[0]).toMatch(/4 steps are thinner than a grid cell \(a, b, c, d\), the thinnest 'a' at 0.01/);
+    expect(folded[0]).toMatch(/set grid 300 covers them all/);
+  });
+  it("a focused render is a close-up: the views are extracted at the frame's own cell", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = "slab = box(10, 0.5, 10) | move(0, 0.25, 0)\nknob = sphere(0.3) | move(3, 0.8, 3)\nm = slab + knob";
+      const r = run(src, "focus.aix", dir, { ...QUICK, grid: 32, focus: "knob" });
+      // The sheet's cell is the knob's box over 32 cells, far finer than the slab's 10 units over 32.
+      expect(r.files).toContain("sheet.png");
+      expect(r.timings.focus).toBeDefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

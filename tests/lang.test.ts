@@ -199,3 +199,29 @@ describe("interpreter", () => {
     expect(() => run("for i in range(30000) { a = 1 }")).toThrow(/loop iterations/);
   });
 });
+
+describe("curves and faces in the language", () => {
+  it("passes a bezier or curve to tube and sweep, and rejects a list where a curve is needed", () => {
+    const ev = run('rail = tube(0.2, bezier([0,0,0, 1,0,0, 3,0,0, 4,0,0]))\nband = sweep(rect(0.5, 0.2), curve([0,0,0, 1,1,0, 2,0,0]), twist=90)\nm = rail + band');
+    expect(isShape3(ev.steps.find((s) => s.name === "rail")!.value)).toBe(true);
+    expect(isShape3(ev.steps.find((s) => s.name === "band")!.value)).toBe(true);
+    expect(() => run("t = tube(0.2, bezier([0,0,0, 1,0,0]))")).toThrow(/4, 7, 10/);
+    expect(() => run('t = sweep(rect(1, 1), "nope")')).toThrow(/sweep/);
+  });
+  it("text takes face=\"serif\"", () => {
+    const ev = run('a = extrude(text("Ab", 1, face="serif"), 0.2)\nb = extrude(text("Ab", 1), 0.2)');
+    const wa = (ev.steps.find((s) => s.name === "a")!.value as Shape3).bounds, wb = (ev.steps.find((s) => s.name === "b")!.value as Shape3).bounds;
+    expect(wa.max[0] - wa.min[0]).toBeGreaterThan(wb.max[0] - wb.min[0]);
+    expect(() => run('a = text("A", face="bold")')).toThrow(/sans.*serif/);
+  });
+});
+
+describe("wrap in the language", () => {
+  it("wraps standing text round a radius", () => {
+    const ev = run('rim = extrude(text("ABC", 0.3, align="center"), 0.05, "z") | wrap(1) | move(0, 2, 0)');
+    const b = (ev.steps.find((s) => s.name === "rim")!.value as Shape3).bounds;
+    expect(b.max[2]).toBeGreaterThan(1);
+    expect(b.max[2]).toBeLessThan(1.2);
+    expect(b.min[1]).toBeGreaterThan(1.8);
+  });
+});

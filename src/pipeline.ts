@@ -9,11 +9,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { parseObj } from "./import/obj.js";
 import { parseGlb } from "./import/glb.js";
 import { meshField } from "./mesh/meshSdf.js";
-import { primitive } from "./sdf/primitives.js";
+import { box, primitive } from "./sdf/primitives.js";
 import { eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
-import { allJoints } from "./sdf/ops.js";
+import { allJoints, intersect, move } from "./sdf/ops.js";
 import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -26,12 +26,16 @@ import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, t
 import { analyse, type Physics } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, dimsLabel, type StepView, type ViewName } from "./render/views.js";
-import { boundsSize, isEmpty, type Bounds, type Shape3 } from "./sdf/types.js";
+import { boundsCenter, boundsSize, isEmpty, type Bounds, type Shape3 } from "./sdf/types.js";
 
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
-export const QUICK: RunOptions = { grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
+export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
 
 export interface RunOptions {
+  /** A quick pass: the grid is coarse for speed, so thin-part warnings are judged at the grid a full render would use. */
+  quick?: boolean;
+  /** Write poses.png and the animation strips (default true when the model has joints). */
+  poses?: boolean;
   /** Cells along the longest side of the model; overrides a `set grid` in the file. Default 128. */
   grid?: number;
   /** Used only when neither `grid` nor the file's `set grid` is given. */
@@ -81,7 +85,10 @@ export interface RunResult {
   physics?: Physics;
 }
 
-const fmt = (v: number): string => (Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, ""));
+const fmt = (v: number): string => {
+  const s = Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  return s === "-0" ? "0" : s;
+};
 
 /** Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field. */
 export function importResolver(sourceName: string, log: (line: string) => void = () => {}) {
@@ -133,9 +140,62 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     const key = Math.round(f * 1e6);
     if (reportedFeatures.has(key)) continue;
     reportedFeatures.add(key);
-    out.push(`'${st.name}' (line ${st.line}) has a wall, tube or stroke only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it or raise the grid (set grid ${gridFor(f)}).`);
+    out.push(`'${st.name}' (line ${st.line}) has a wall, tube (at its thin end, if tapered) or stroke only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it or raise the grid (set grid ${gridFor(f)}).`);
   }
   return out;
+}
+
+/** The watertight line, with where the bad edges are and which steps hold them, so it can be acted on. */
+function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation): string {
+  if (w.ok || !w.where || isEmpty(w.where)) return w.note;
+  const c = boundsCenter(w.where);
+  const inside = (b: Bounds) => c[0] >= b.min[0] && c[0] <= b.max[0] && c[1] >= b.min[1] && c[1] <= b.max[1] && c[2] >= b.min[2] && c[2] <= b.max[2];
+  // The smallest used steps whose box holds the centre of the bad edges: the parts to look at.
+  const steps = evaluation.steps
+    .filter((st) => isShape3(st.value) && evaluation.used.has(st.name) && !isEmpty(st.value.bounds) && inside(st.value.bounds))
+    .map((st) => ({ name: st.name, size: Math.max(...boundsSize((st.value as Shape3).bounds)) }))
+    .sort((a, b) => a.size - b.size)
+    .slice(0, 3);
+  const span = boundsSize(w.where);
+  const where = Math.max(...span) < 1e-9 ? `at (${c.map(fmt).join(", ")})` : `within x ${fmt(w.where.min[0])}..${fmt(w.where.max[0])}, y ${fmt(w.where.min[1])}..${fmt(w.where.max[1])}, z ${fmt(w.where.min[2])}..${fmt(w.where.max[2])}`;
+  return `${w.note} The edges are ${where}${steps.length ? `, in ${steps.map((s) => `'${s.name}'`).join(", ")}` : ""}.`;
+}
+
+/**
+ * Many thin-part warnings at once (a scene's chalk lines, teeth, rails) are
+ * one problem with one answer, so past three they fold into a line that
+ * names the steps and the single grid that covers them all.
+ */
+export function foldThinWarnings(list: string[]): string[] {
+  if (list.length <= 3) return list;
+  const names = list.map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?");
+  const grids = list.map((w) => Number(w.match(/set grid (\d+)/)?.[1] ?? 0));
+  const thinnest = list.map((w) => Number(w.match(/only ([\d.]+)/)?.[1] ?? Infinity));
+  const worst = thinnest.indexOf(Math.min(...thinnest));
+  return [
+    `${list.length} steps are thinner than a grid cell (${names.slice(0, 10).join(", ")}${names.length > 10 ? ", ..." : ""}), the thinnest '${names[worst]}' at ${fmt(thinnest[worst])}: they may be missing or broken in the mesh. Thicken them, or set grid ${Math.max(...grids)} covers them all.`,
+  ];
+}
+
+/**
+ * The surface's extent from a coarse extraction, grown by two coarse cells,
+ * within the bounds; the bounds themselves when they are already tight (so a
+ * well-bounded model extracts exactly as before) or when nothing was found.
+ */
+export function tightBounds(shape: Shape3, resolution = 28): Bounds {
+  const b = shape.bounds;
+  if (isEmpty(b)) return b;
+  const coarse = surfaceNets(shape, { resolution, sharp: false });
+  if (triangleCount(coarse.mesh) === 0) return b;
+  const mb = meshBounds(coarse.mesh);
+  const g = coarse.cellSize * 2;
+  const t: Bounds = {
+    min: [Math.max(b.min[0], mb.min[0] - g), Math.max(b.min[1], mb.min[1] - g), Math.max(b.min[2], mb.min[2] - g)],
+    max: [Math.min(b.max[0], mb.max[0] + g), Math.min(b.max[1], mb.max[1] + g), Math.min(b.max[2], mb.max[2] + g)],
+  };
+  const bs = boundsSize(b), ts = boundsSize(t);
+  const loose = [0, 1, 2].some((k) => ts[k] < bs[k] * 0.94);
+  return loose ? t : b;
 }
 
 /** The grid and cell size a render of this evaluation would use, from its settings and bounds. */
@@ -201,7 +261,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     warnings.push(`'${evaluation.outputName}' is empty: nothing to render. A difference may have removed everything, or an intersection may not overlap.`);
   } else {
     bounds = output.bounds;
-    const nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
+    // The box sets the cell size, and a rotated joint or a blend leaves it loose (measured: a posed excavator's box
+    // was twice its surface, costing a third of the resolution), so find the surface's extent coarsely first.
+    const extractBox = time("extent", () => tightBounds(output));
+    const nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, bounds: extractBox }));
     mesh = nets.mesh;
     cellSize = nets.cellSize;
     log(`mesh: ${triangleCount(mesh)} triangles, cell ${fmt(cellSize)} (${nets.dims.join("×")} cells, ${nets.samples} samples) in ${timings.mesh} ms`);
@@ -211,9 +274,18 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       warnings.push(`'${evaluation.outputName}' has bounds ${dimsLabel(output.bounds)} but no surface was found inside them at grid ${grid}: it may be thinner than a cell (${fmt(cellSize)}), or empty.`);
     const s = boundsSize(bounds);
     const thin = Math.min(s[0], s[1], s[2]);
-    if (thin > 0 && thin < cellSize * 3)
-      warnings.push(`The model is only ${fmt(thin)} units thin on one axis, about ${fmt(thin / cellSize)} cells; raise the grid (set grid 256) if it looks broken.`);
-    warnings.push(...thinWarnings(evaluation, cellSize, grid));
+    // A quick pass judges thinness at the grid the full render will use, or every quick sheet would cry wolf.
+    const fullGrid = opts.quick ? Math.max(8, Math.round((evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128)) : grid;
+    const fullCell = opts.quick ? (cellSize * grid) / fullGrid : cellSize;
+    if (thin > 0 && thin < fullCell * 3)
+      warnings.push(`The model is only ${fmt(thin)} units thin on one axis, about ${fmt(thin / fullCell)} cells; raise the grid (set grid 256) if it looks broken.`);
+    warnings.push(...foldThinWarnings(thinWarnings(evaluation, fullCell, fullGrid)));
+    if (opts.quick) {
+      // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
+      const dropped = thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?");
+      if (dropped.length)
+        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet (${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ", ..." : ""}); the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
+    }
     // The true extent comes from the mesh: bounds are boxes, and a difference keeps the left side's box
     // however much was cut away, so a note based on bounds once told a scene on the floor to ground() itself.
     const extent = triangleCount(mesh) > 0 ? meshBounds(mesh) : bounds;
@@ -233,16 +305,27 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (focusName) {
       const st = evaluation.steps.find((x) => x.name === focusName && isShape3(x.value));
       const obj = evaluation.objects.find((o) => o.name === focusName);
-      const fb = st ? (st.value as Shape3).bounds : obj?.shape.bounds;
-      if (fb && !isEmpty(fb)) {
+      const fs = st ? (st.value as Shape3) : obj?.shape;
+      if (fs && !isEmpty(fs.bounds)) {
+        // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the whole machine).
+        const fb = tightBounds(fs);
         const grow = Math.max(...boundsSize(fb)) * 0.08;
         frame = { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] };
         shownName = `${evaluation.outputName} → ${focusName}`;
       } else warnings.push(`focus ${focusName}: no such step or object; framing the whole model`);
     }
-    const info = { name: shownName, bounds: frame, triangles: triangleCount(mesh), cellSize, warnings: warnings.length, azimuth, elevation };
-    time("sheet", () => write("sheet.png", renderSheet(mesh!, info, size).toPng()));
-    for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(mesh!, info, v, size, { azimuth, elevation }).toPng()));
+    // A focused sheet is a close-up: the model clipped to the frame and re-extracted at the frame's own cell, so a
+    // lantern in a market is drawn with a lantern's detail rather than the market's (measured: a blob of six cells).
+    let viewMesh = mesh, viewCell = cellSize;
+    if (focusName && frame !== (trueBounds ?? bounds)) {
+      const fc = boundsCenter(frame), fsz = boundsSize(frame);
+      const clip = intersect(output, move(box(fsz[0], fsz[1], fsz[2]), fc[0], fc[1], fc[2]));
+      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, bounds: frame }));
+      if (triangleCount(close.mesh) > 0) { viewMesh = close.mesh; viewCell = close.cellSize; }
+    }
+    const info = { name: shownName, bounds: frame, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation };
+    time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size).toPng()));
+    for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(viewMesh, info, v, size, { azimuth, elevation }).toPng()));
     if (opts.slices !== false) {
       const at: Partial<Record<"x" | "y" | "z", number>> = {};
       for (const axis of ["x", "y", "z"] as const) {
@@ -251,7 +334,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       }
       // A scene's default cut goes through its first object, which is the one to list first.
       const first = evaluation.objects.length > 1 ? evaluation.objects[0].shape.bounds : undefined;
-      const sliceInfo = first && !isEmpty(first) ? { ...info, bounds: first } : info;
+      const sliceInfo = first && !isEmpty(first) ? { ...info, bounds: first, name: `${info.name} → ${evaluation.objects[0].name}` } : info;
       time("slices", () => write("slices.png", renderSlices(output, sliceInfo, Math.round(size * 0.75), at).toPng()));
     }
     if (opts.turntable !== false) time("turntable", () => write("turntable.png", renderTurntable(mesh!, info, Math.round(size / 2)).toPng()));
@@ -285,7 +368,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name)));
       }
     }
-    if (joints.length > 0) {
+    if (joints.length > 0 && opts.poses !== false) {
       // Pose thumbnails are meshed at 1.5 cells: measured, 2 cells at a 0.35 sheet was too coarse to tell a
       // bent elbow from a broken one; a full-size check of one pose is `set pose name` or `--pose name`.
       const poseCell = cellSize * 1.5;
@@ -299,7 +382,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const bsize = Math.max(64, Math.round(opts.beautySize ?? size));
       const lightSize = typeof evaluation.settings.light_size === "number" ? evaluation.settings.light_size : undefined;
       const dof = typeof evaluation.settings.dof === "number" ? evaluation.settings.dof : undefined;
-      time("beauty", () => write("beauty.png", renderBeauty(output, mesh!, bounds!, { size: bsize, cellSize, azimuth, elevation, lightSize, dof, label: `${evaluation.outputName}  ${dimsLabel(bounds!)}` }).toPng()));
+      const lightAzimuth = typeof evaluation.settings.light_azimuth === "number" ? evaluation.settings.light_azimuth : undefined;
+      const lightElevation = typeof evaluation.settings.light_elevation === "number" ? evaluation.settings.light_elevation : undefined;
+      const ambient = typeof evaluation.settings.ambient === "number" ? evaluation.settings.ambient : undefined;
+      // Framed like the views: on the focused step when there is one.
+      time("beauty", () => write("beauty.png", renderBeauty(output, mesh!, frame, { size: bsize, cellSize, azimuth, elevation, lightSize, dof, lightAzimuth, lightElevation, ambient, label: `${shownName}  ${dimsLabel(frame)}` }).toPng()));
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
     }
   }
@@ -327,8 +414,18 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     const main = physics.pieces[0];
     const specks = physics.pieces.filter((pc) => Math.abs(pc.volume) < Math.abs(main.volume) * 0.001);
     const parts = physics.pieces.length - specks.length;
-    if (parts > 1 && !evaluation.objects.some((o) => o.shape.instanced) && evaluation.objects.length === 1)
-      warnings.push(`The model is ${parts} separate pieces (by volume: ${physics.pieces.filter((pc) => !specks.includes(pc)).map((pc) => fmt(Math.abs(pc.volume))).join(", ")}); a piece not touching the rest floats free. Overlap parts slightly, or use scene for separate objects.`);
+    if (parts > 1 && !evaluation.objects.some((o) => o.shape.instanced) && evaluation.objects.length === 1) {
+      // Name the steps the loose pieces sit in, smallest box first, so the warning says what to move.
+      const stepsAt = (c: [number, number, number]) =>
+        evaluation.steps
+          .filter((st) => isShape3(st.value) && evaluation.used.has(st.name) && !isEmpty(st.value.bounds) && c.every((v, k) => v >= (st.value as Shape3).bounds.min[k] && v <= (st.value as Shape3).bounds.max[k]))
+          .sort((a, b) => Math.max(...boundsSize((a.value as Shape3).bounds)) - Math.max(...boundsSize((b.value as Shape3).bounds)))
+          .slice(0, 2)
+          .map((st) => `'${st.name}'`);
+      const loose = physics.pieces.filter((pc) => !specks.includes(pc) && pc !== main).slice(0, 4);
+      const where = loose.map((pc) => `volume ${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})${stepsAt(pc.centre).length ? ` in ${stepsAt(pc.centre).join(", ")}` : ""}`).join("; ");
+      warnings.push(`The model is ${parts} separate pieces: the largest is ${fmt(Math.abs(main.volume))}, the loose ${loose.length === 1 ? "piece is" : "pieces are"} ${where}${parts - 1 > loose.length ? ", ..." : ""}. A piece not touching the rest floats free: overlap parts slightly, or use scene for separate objects.`);
+    }
     if (specks.length) warnings.push(`${specks.length} tiny speck${specks.length === 1 ? "" : "s"} of mesh (under 0.1% of the volume): a sliver left by a cut or a part thinner than a cell.`);
     if (!physics.stable && physics.footprint.length >= 3)
       warnings.push(`The centre of mass (${physics.centre.map(fmt).join(", ")}) is ${fmt(-physics.stabilityMargin)} units outside the base's footprint: the model would tip over. Widen the base or move weight over it.`);
@@ -350,7 +447,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight | ${watertightReport(mesh).note} |`,
+      `| Watertight | ${watertightNote(watertightReport(mesh), evaluation)} |`,
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       "",
     );

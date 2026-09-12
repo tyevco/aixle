@@ -13,6 +13,7 @@ import * as O from "../sdf/ops.js";
 import * as P from "../sdf/primitives.js";
 import * as S from "../sdf/shapes2d.js";
 import * as W from "../sdf/sweeps.js";
+import { bezierCurve, curveThrough, sweepCurve, tubeCurve, type Curve } from "../sdf/curves.js";
 import { textProfile, textWidth } from "../sdf/font.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
@@ -52,6 +53,9 @@ function makeMaterial(args: Value[]): Material {
   const first = args[0] as string;
   const pattern = args[1] as string, c2text = args[2] as string;
   const scale = n(args[3]), metal = n(args[4]), rough = n(args[5]), seed = n(args[6]), transmit = n(args[7]);
+  const axisText = args[8] as string, glow = n(args[9]);
+  if (axisText !== "" && !["x", "y", "z"].includes(axisText)) throw new Error(`material(): axis must be "x", "y" or "z"`);
+  const axis = axisText === "" ? undefined : (axisText as "x" | "y" | "z");
   const given = (v: number) => !Number.isNaN(v);
   // A preset name: start from it and override only what was given.
   const base = preset(first);
@@ -69,6 +73,8 @@ function makeMaterial(args: Value[]): Material {
       rough: given(rough) ? rough : base.rough,
       seed: given(seed) ? seed : base.seed,
       transmit: given(transmit) ? transmit : base.transmit,
+      axis: axis ?? base.axis,
+      glow: given(glow) ? glow : base.glow,
     });
   }
   const color = parseColor(first);
@@ -77,7 +83,7 @@ function makeMaterial(args: Value[]): Material {
   if (!PATTERNS.includes(pat as PatternKind)) throw new Error(`material(): unknown pattern "${pat}"; one of ${PATTERNS.join(", ")}`);
   const color2 = c2text === "" ? undefined : parseColor(c2text);
   if (c2text !== "" && !color2) throw new Error(`material(): "${c2text}" is not a colour`);
-  return customMaterial({ color, color2, pattern: pat as PatternKind, scale: given(scale) ? scale : 1, metal: given(metal) ? metal : 0, rough: given(rough) ? rough : 0.6, seed: given(seed) ? seed : 0, transmit: given(transmit) ? transmit : 0 });
+  return customMaterial({ color, color2, pattern: pat as PatternKind, scale: given(scale) ? scale : 1, metal: given(metal) ? metal : 0, rough: given(rough) ? rough : 0.6, seed: given(seed) ? seed : 0, transmit: given(transmit) ? transmit : 0, axis, glow: given(glow) ? glow : 0 });
 }
 
 function hexOf(r: number, g: number, b: number): string {
@@ -136,15 +142,17 @@ export const BUILTINS: Builtin[] = [
     ov([{ name: "points", type: "list" }], "shape2", (a) => S.polygon((a[0] as Value[]).map((v) => n(v)))),
     ov([{ name: "coords", type: "number", rest: true }], "shape2", (_a, rest) => S.polygon(rest.map((v) => n(v))))),
 
-  def("text", "2D profiles", "Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall); `align` is \"left\", \"center\" or \"right\". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.",
-    ov([str("text"), num("size", "cap height", 1), num("weight", "stroke width", 0.15), str("align", "", "left"), num("spacing", "extra gap between letters", 0), num("arc", "bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom", 0)], "shape2",
+  def("text", "2D profiles", "Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face=\"serif\" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall); `align` is \"left\", \"center\" or \"right\". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.",
+    ov([str("text"), num("size", "cap height", 1), num("weight", "stroke width", 0.15), str("align", "", "left"), num("spacing", "extra gap between letters", 0), num("arc", "bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom", 0), str("face", "\"sans\" or \"serif\" (slab serifs on the same letters, set a little wider)", "sans")], "shape2",
       (a) => {
         const t = a[0] as string, size = n(a[1]), spacing = n(a[4]), arc = n(a[5]);
-        if (arc !== 0) return textProfile(t, size, n(a[2]), spacing, arc);
-        const w = textWidth(t, size, spacing);
+        const face = a[6] as string;
+        if (face !== "sans" && face !== "serif") throw new Error(`face must be "sans" or "serif"`);
+        if (arc !== 0) return textProfile(t, size, n(a[2]), spacing, arc, face);
+        const w = textWidth(t, size, spacing, face);
         const align = a[3] as string;
         const shift = align === "center" ? -w / 2 : align === "right" ? -w : 0;
-        return S.move2(textProfile(t, size, n(a[2]), spacing), shift, 0);
+        return S.move2(textProfile(t, size, n(a[2]), spacing, 0, face), shift, 0);
       })),
 
   // --- 2D to 3D ---
@@ -160,10 +168,22 @@ export const BUILTINS: Builtin[] = [
         const cap = a[4] as string;
         if (cap !== "round" && cap !== "flat") throw new Error(`cap must be "round" or "flat"`);
         return W.tube(W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "tube"), n(a[2])), n(a[0]), n(a[3]), cap);
+      }),
+    ov([num("r"), { name: "curve", type: "curve", doc: "a bezier() or curve()" }, num("taper", "end radius / start radius", 1), str("cap", "\"round\" or \"flat\"", "round")], "shape",
+      (a) => {
+        const cap = a[3] as string;
+        if (cap !== "round" && cap !== "flat") throw new Error(`cap must be "round" or "flat"`);
+        return tubeCurve(a[1] as Curve, n(a[0]), n(a[2]), cap);
       })),
   def("sweep", "Paths", "A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path; `twist` turns the profile by that many degrees over the whole path; `taper` scales it to that factor by the end.",
     ov([shape2(), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0), num("twist", "degrees over the path", 0), num("taper", "end scale", 1)], "shape",
-      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "sweep"), n(a[2])), n(a[3]), n(a[4])))),
+      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "sweep"), n(a[2])), n(a[3]), n(a[4]))),
+    ov([shape2(), { name: "curve", type: "curve", doc: "a bezier() or curve()" }, num("twist", "degrees over the curve", 0), num("taper", "end scale", 1)], "shape",
+      (a) => sweepCurve(s2(a[0]), a[1] as Curve, n(a[2]), n(a[3])))),
+  def("bezier", "Paths", "An exact curve from cubic Bezier control points: an anchor, then two handles and an anchor for each piece (4, 7, 10, ... points). A tube or sweep along it is the true offset of the curve, with no facets at any grid, and costs about as much per piece as a spline's.",
+    ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }], "curve", (a) => bezierCurve(W.toPoints((a[0] as Value[]).map((v) => n(v)), "bezier")))),
+  def("curve", "Paths", "An exact smooth curve through the points, the same shape spline() draws, for tube() and sweep(): the surface follows the true curve rather than a polyline through it.",
+    ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }], "curve", (a) => curveThrough(W.toPoints((a[0] as Value[]).map((v) => n(v)), "curve")))),
   def("helix", "Paths", "A path list for a helix of radius r around y, for tube() or sweep(): it starts at (r, 0, 0) and rises from y = 0 to y = h over `turns` turns.",
     ov([num("r"), num("h"), num("turns"), num("per_turn", "points per turn", 16)], "list", (a) => W.helixPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
   def("spline", "Paths", "A smooth path through the points, subdivided until no piece turns more than `degrees`: a curve that shows no faceting in a tube or sweep, however tight.",
@@ -202,7 +222,7 @@ export const BUILTINS: Builtin[] = [
   def("flip", "Transforms", "Reflect across the plane perpendicular to `axis` (no copy kept).",
     ov([shape(), axis()], "shape", (a) => O.flip(s3(a[0]), a[1] as O.Axis)),
     ov([shape2(), axis()], "shape2", (a) => S.flip2(s2(a[0]), a[1] as "x" | "y"))),
-  def("ground", "Transforms", "Move the shape so its lowest point rests on y = 0.", ov([shape()], "shape", (a) => O.ground(s3(a[0])))),
+  def("ground", "Transforms", "Move the shape so the lowest point of its surface rests on y = 0 (the surface, found by rays from below, not the bounding box, which a blend or a cut can leave loose).", ov([shape()], "shape", (a) => O.ground(s3(a[0])))),
   def("center", "Transforms", "Move the shape so its bounding box is centred on the origin; `axes` picks which of x, y, z.",
     ov([shape(), str("axes", "", "xyz")], "shape", (a) => O.center(s3(a[0]), a[1] as string))),
 
@@ -218,7 +238,8 @@ export const BUILTINS: Builtin[] = [
     ov([shape(), num("t", "wall thickness")], "shape", (a) => O.shell(s3(a[0]), n(a[1]))),
     ov([shape2(), num("t")], "shape2", (a) => S.shell2(s2(a[0]), n(a[1])))),
   def("twist", "Modifiers", "Twist around y by `degrees` for every unit of height.", ov([shape(), num("degrees")], "shape", (a) => O.twist(s3(a[0]), n(a[1])))),
-  def("bend", "Modifiers", "Bend around z: the shape curves up by `degrees` for every unit along x.", ov([shape(), num("degrees")], "shape", (a) => O.bend(s3(a[0]), n(a[1])))),
+  def("bend", "Modifiers", "Bend about z: the shape's x axis becomes an arc of a circle of radius 57.3 / degrees centred above the origin at (0, R), curving up by `degrees` for every unit along x (negative bends down). A point at height y rides at radius R - y. Exact, so the box check prints is the bent shape's.", ov([shape(), num("degrees")], "shape", (a) => O.bend(s3(a[0]), n(a[1])))),
+  def("wrap", "Modifiers", "Wrap around y: the shape's x axis goes round a cylinder of radius r, x = 0 landing on +z and reading left to right from the front; depth z rides at radius r + z. Standing lettering (extrude(text(...), h, \"z\")) wrapped this way is a label round a jar or a name round a rim: wrap(letters, 1.3) | move(0, y, 0).", ov([shape(), num("r", "the cylinder's radius")], "shape", (a) => O.wrap(s3(a[0]), n(a[1])))),
   def("displace", "Modifiers", "Roughen the surface with noise: in and out by up to `amp`, features about `size` across.",
     ov([shape(), num("amp"), num("size", "", 1), num("seed", "", 0)], "shape", (a) => O.displace(s3(a[0]), n(a[1]), n(a[2]), n(a[3])))),
 
@@ -264,8 +285,10 @@ export const BUILTINS: Builtin[] = [
   // --- materials ---
   def("paint", "Materials", "Give the whole shape a material: a preset name, a colour (\"#rrggbb\" or a name), or material(...). Paint parts before combining them to keep several materials.",
     ov([shape(), mat()], "shape", (a) => O.paint(s3(a[0]), a[1] as Material))),
-  def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass.",
-    ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN)], "material", makeMaterial)),
+  def("decal", "Materials", "Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), \"black\")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material.",
+    ov([shape(), shape("region", "the part of the surface inside this shape gets the material"), mat()], "shape", (a) => O.decal(s3(a[0]), s3(a[1]), a[2] as Material))),
+  def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie across it. Paint before moving the part, or set axis=\"x\" for stripes running the other way.",
+    ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN), str("axis", "the pattern's axis: stripes stack along it, grain runs along it", ""), num("glow", "light the surface gives off, 0..2 (unshadowed, for flames and lamps)", NaN)], "material", makeMaterial)),
   def("rgb", "Materials", "A colour string from red, green, blue in 0..255.", ov([num("r"), num("g"), num("b")], "string", (a) => hexOf(n(a[0]), n(a[1]), n(a[2])))),
   def("hsl", "Materials", "A colour string from hue in degrees, saturation and lightness in 0..1.", ov([num("h"), num("s"), num("l")], "string", (a) => hslToHex(n(a[0]), n(a[1]), n(a[2])))),
 

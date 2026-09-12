@@ -54,6 +54,10 @@ export interface Material {
   /** 0 = opaque, 1 = clear glass: the beauty render refracts and reflects; other outputs treat it as opaque. */
   transmit: number;
   seed: number;
+  /** The axis a pattern is stacked along or oriented by: stripes cross it, wood grain and brick courses run along it. Default "y". */
+  axis: "x" | "y" | "z";
+  /** Light the surface gives off, 0..2: a flame, a lamp, a screen; added in the renders, unshadowed. */
+  glow: number;
 }
 
 export interface Hit {

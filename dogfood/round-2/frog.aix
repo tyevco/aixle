@@ -1,0 +1,61 @@
+# A cartoon frog sitting on a lily pad. Front is +z. One unit ~ 10 cm; the frog is ~3 tall.
+set grid 200
+set azimuth 30
+set elevation 18
+
+skin = material("#6cbc42", "noise", "#357520", scale=0.12, rough=0.55)
+belly = material("#d9e8a0", "noise", "#b8cc80", scale=0.2, rough=0.6)
+leaf = material("#2b6b3a", "noise", "#1f5230", scale=0.35, rough=0.8)
+eyewhite = material("#f6f4ea", rough=0.3)
+pupil = material("#141416", rough=0.2)
+
+# lily pad: a thin disc with a wedge notch at the front-left; it already rests on y = 0
+pad_disc = cylinder(2.3, 0.14, round=0.05) | move(0, 0.07, 0)
+veins = tube(0.035, [0,0.12,0.2, 0,0.12,2.15], taper=0.5) | ring(9)
+notch = box(1.0, 0.5, 1.4) | rotate(y=25) | move(-1.1, 0.07, 1.9)
+pad = (pad_disc + veins - notch) | paint(leaf)
+
+# body and head, blended, roughened a little for skin
+body = ellipsoid(1.05, 0.8, 1.0) | move(0, 0.95, 0)
+head = ellipsoid(0.95, 0.62, 0.85) | move(0, 1.85, 0.2)
+trunk = union(body, head, k=0.35) | displace(0.02, 0.25) | paint(skin)
+tummy = ellipsoid(0.7, 0.55, 0.5) | move(0, 0.85, 0.65) | paint(belly)
+
+# eyes bulging from the top of the head, pupils on the front of each eyeball
+eye_r = sphere(0.42) | move(0.5, 2.5, 0.45)
+eyes = mirror(eye_r, "x") | paint(eyewhite)
+socket_r = sphere(0.36) | move(0.5, 2.22, 0.38)
+sockets = mirror(socket_r, "x") | paint(skin)
+pupil_r = ellipsoid(0.21, 0.21, 0.12) | move(0.42, 2.5, 0.8)
+pupils = mirror(pupil_r, "x") | paint(pupil)
+glint_r = sphere(0.055) | move(0.34, 2.6, 0.9)
+glints = mirror(glint_r, "x") | paint(eyewhite)
+
+# mouth line: a thin dark tube along a smile drawn on the head's surface; nostrils on the snout
+smile = spline([-0.72,1.86,0.66, -0.45,1.72,0.9, 0,1.68,1.04, 0.45,1.72,0.9, 0.72,1.86,0.66])
+mouth = tube(0.045, smile) | paint(pupil)
+nostril_r = sphere(0.05) | move(0.16, 2.02, 1.0)
+nostrils = mirror(nostril_r, "x") | paint(pupil)
+
+# a foot: three toes fanning forward with a thin web between them
+def toe(angle) = capsule(0.09, 0.55) | rotate(x=90) | move(0, 0, 0.27) | rotate(y=angle)
+def foot() =
+  toe(-28) + toe(0) + toe(28)
+  + extrude(polygon(0,0, -0.32,0.5, 0.32,0.5), 0.07)
+
+# hind leg: hip inside the body, knee up at the back, ankle forward on the pad
+thigh_r = tube(0.32, [0.7,0.9,0.2, 1.2,0.9,-0.35])
+shin_r = tube(0.2, [1.2,0.9,-0.35, 1.2,0.32,0.65])
+hind_foot_r = foot() | scale(1.2) | move(1.2, 0.2, 0.95)
+hind_r = union(thigh_r, shin_r, hind_foot_r, k=0.15)
+hinds = mirror(hind_r, "x") | paint(skin)
+
+# front leg: short arm from the chest down to the pad, foot forward
+arm_r = tube(0.16, [0.55,1.1,0.55, 0.6,0.3,1.05])
+front_foot_r = foot() | move(0.6, 0.19, 1.2)
+front_r = union(arm_r, front_foot_r, k=0.1)
+fronts = mirror(front_r, "x") | paint(skin)
+
+frog = union(trunk + tummy + sockets, hinds + fronts, k=0.1) + eyes + pupils + glints + mouth + nostrils
+model = pad + frog
+show model

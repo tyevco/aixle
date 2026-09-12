@@ -67,7 +67,7 @@ export function isWatertight(m: Mesh): boolean {
  * triangle (a hole) or with more than two (two sheets of surface through
  * one cell, which is what a feature about a cell thin produces).
  */
-export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string } {
+export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string; where?: Bounds } {
   const count = new Map<string, number>();
   const ix = m.indices;
   for (let i = 0; i < ix.length; i += 3)
@@ -77,13 +77,24 @@ export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonMani
       count.set(key, (count.get(key) ?? 0) + 1);
     }
   let holes = 0, nonManifold = 0;
-  for (const c of count.values()) {
+  // Where the bad edges are, so the report can say which part to look at.
+  const where: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  const p = m.positions;
+  for (const [key, c] of count) {
+    if (c === 2) continue;
     if (c === 1) holes++;
-    else if (c > 2) nonManifold++;
+    else nonManifold++;
+    for (const v of key.split(",")) {
+      const o = Number(v) * 3;
+      for (let k = 0; k < 3; k++) {
+        where.min[k] = Math.min(where.min[k], p[o + k]);
+        where.max[k] = Math.max(where.max[k], p[o + k]);
+      }
+    }
   }
   const ok = holes === 0 && nonManifold === 0;
   const note = ok
     ? "yes"
     : `no: ${nonManifold ? `${nonManifold} edge${nonManifold === 1 ? "" : "s"} shared by more than two triangles, where two surfaces pass through one grid cell (a feature about a cell thin; raise the grid or thicken it)` : ""}${nonManifold && holes ? "; " : ""}${holes ? `${holes} open edge${holes === 1 ? "" : "s"}` : ""}. Renders and most viewers are unaffected; a slicer or a boolean tool may complain.`;
-  return { ok, holes, nonManifold, note };
+  return ok ? { ok, holes, nonManifold, note } : { ok, holes, nonManifold, note, where };
 }
