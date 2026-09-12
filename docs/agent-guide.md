@@ -57,7 +57,13 @@ npx aixle diff before.aix after.aix        the two sheets side by side
   that is thicker on one side, a hole that does not go through, a cavity
   that broke out where it should not. Filled means solid.
 - A small part of a large model is a few pixels on the sheet: `--focus
-  name` frames every view on that step alone.
+  name` frames every view on that step alone, meshed at the frame's own
+  finer cell, where the step is in the pose being shown; the report adds
+  a "Close-up watertight" row for that mesh, so a lug or a tooth can be
+  judged sound on its own.
+- A quick sheet that dropped thin steps says so and does not judge the
+  pieces count; teeth, rails and rods at a quick cell are blobs or gone,
+  so judge a working end at full grid.
 - With joints, `poses.png` shows every pose and `anim_<name>.png` frames
   through each animation, coarsely; to judge one pose properly, `--pose
   name` renders the whole sheet in it, and `check --pose name` prints the
@@ -83,7 +89,7 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | a fine pattern looks like blocks or camouflage on the sheet | the sheet colours per vertex and the pattern is near the cell size | judge it in the beauty render, or coarsen `scale=` |
 | lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
 | the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
-| the beauty render leaves the model small in the frame | the camera fits the bounding sphere | `set zoom 1.4` or `--zoom 1.4` |
+| the beauty render leaves the model small in the frame | the camera fits the box's corners, so a diagonal model has empty corners | `set zoom 1.2` or `--zoom 1.2` (it stops where the box would touch the edge) |
 | a material boundary speckles in the views | two painted surfaces nearly coincide, so each vertex picks either | give them a clear angle, or one shape with a `decal`; the beauty render is unaffected |
 | a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |
 | "watertight: no" with edges you cannot find | two surfaces pass through one cell | the report says where the edges are and which steps hold them |
@@ -117,9 +123,15 @@ show arm
 Angles are degrees about x, then y, then z, right-handed, and a nested
 joint's angles are relative to its parent. `angle("elbow")` reads the
 current pose's angles, which is how a member between two moving parts (a
-hydraulic cylinder) finds its end points. Sizes printed by `check` and
-shown on the sheet are for the pose being shown; the exports are at rest
-and carry the joints and animations.
+hydraulic cylinder) finds its end points; the language doc has the
+cylinder written out. Sizes printed by `check` and
+shown on the sheet are for the pose being shown: a step built at rest and
+turned by a joint above it keeps its rest box and gets a `posed` line
+saying where it ends up, and a step whose box is a turned box gets a
+`surface` line with the true extent. The exports are at rest
+and carry the joints and animations. Loose pieces and open edges are
+named by the innermost step whose surface passes there, in the pose
+shown, so a lug welded to a boom is blamed as the lug, not the boom.
 
 ## Style that renders well
 

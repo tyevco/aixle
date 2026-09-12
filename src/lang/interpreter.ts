@@ -11,7 +11,7 @@ import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
 import { isEmpty, type Shape3 } from "../sdf/types.js";
-import { isCurve, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { isCurve, isMaterial, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus"]);
@@ -109,6 +109,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const steps = new Map<string, Step>();
   const settings: Settings = {};
   const warnings: string[] = [];
+  const shadowed = new Set<string>();
   let shown: { names: string[]; shapes: Shape3[]; scene: boolean } | undefined;
   const poses: Pose[] = [];
   const animations: Animation[] = [];
@@ -284,6 +285,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const user = scope.get(callee);
     if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
+    // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
+    // reaches the builtin, and the program says so once (round 4 asked; a name alone, never called, is fine).
+    if (builtin && user !== undefined && !shadowed.has(callee)) {
+      shadowed.add(callee);
+      warnings.push(`line ${line}: ${callee}(...) calls the builtin, but '${callee}' is also a step in this program; rename the step so the two do not read as one.`);
+    }
     if (!builtin) {
       if (user !== undefined) throw new RuntimeError(`'${callee}' is a ${typeName(user)}, not a function`, line);
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
@@ -427,7 +434,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "assign": {
         const collecting = topLevel && reads === undefined;
         if (collecting) reads = new Set();
-        const value = evalExpr(stmt.value, scope);
+        let value = evalExpr(stmt.value, scope);
+        // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
+        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
+        if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
+          value = { ...value, name: stmt.name };
         scope.set(stmt.name, value);
         if (topLevel) {
           const prev = steps.get(stmt.name);

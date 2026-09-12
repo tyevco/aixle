@@ -72,7 +72,7 @@ for c in letters {
 | --- | --- | --- |
 | number | `1.5`, `2 * r + 1`, `sin(30)` | `+ - * / % ^`, unary `-` |
 | string | `"wood"`, `"#a0522d"`, `"x"` | material and axis arguments; `+` joins |
-| list | `[1, 2, 3]`, `range(4)` | `for`, `polygon`, `len`, `list[i]` (0-based, `-1` is the last), `+` joins |
+| list | `[1, 2, 3]`, `range(4)` | `for`, `polygon`, `len`, `list[i]` (0-based, `-1` is the last), `+` joins; a path may nest points: `[hip, knee]` with each a `[x, y, z]` |
 | shape | `box(...)`, `a + b`, `a \| move(...)` | `+` union, `-` difference, `&` intersection |
 | profile (2D) | `circle(...)`, `rect(...)`, `polygon(...)` | same operators; `extrude`, `revolve` make it a shape |
 | material | `"oak"`, `material("#c04020", "stripes")` | `paint` |
@@ -149,14 +149,19 @@ y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
   -z) and thickens it `h` up, centred on y = 0; `extrude(profile, h, "z")`
   stands it facing the front (x along x, y along y, thickness along z);
   `extrude(profile, h, "x")` stands it facing +x (x along -z, y along y),
-  which is the one for a side profile such as a chair's end frame.
+  which is the one for a side profile such as a chair's end frame; since
+  the profile's x runs along -z, a side profile drawn with its front on
+  the right comes out facing -z, and `| flip("z")` turns it to face +z
+  (measured by an agent on an excavator's counterweight).
 
 **Paths**: `tube(r, [x,y,z, x,y,z, ...])` is a round tube along the
 points with rounded joins and hemispherical ends that reach `r` past
 each end point (`cap="flat"` cuts them flat at the points); `sweep(profile, [points])` carries a 2D profile
 along them (its x across the path, its y as near world up as the path
 allows; on a vertical run, y points to -z); `loft(a, b, h)` blends from
-profile `a` at the bottom to `b` at the top over height `h`. Both path
+profile `a` at y = 0 to `b` at y = `h`, each laid flat like `extrude`
+(its x along x, its y along -z), so `loft(rect(1.5, 1.9), rect(2, 2.5),
+0.5)` is a skirt 0.5 tall whose second dimension runs along z. Both path
 functions take `smooth=n` to curve the path through the points; a handle is
 four points and `smooth=6`. A hollow spout is one tube minus a thinner one
 on the same path. `taper=` scales the end relative to the start (a horn,
@@ -186,7 +191,10 @@ title; the default face is `"sans"`. A line of n characters is about
 0.8 × n × size wide (0.93 with serifs), so 12 characters at size 0.36
 need 3.5 units; `check` prints the exact box. Lowercase needs size at
 least three times the weight or the counters (the gaps inside e, a, o)
-close up; `check` warns when they are under a cell. Judge lettering with
+close up; `check` warns when they are under a cell. The space between
+neighbouring letters is a gap too (about a fifth of the size in sans,
+less with serifs, plus `spacing=`, less the weight), and it is the one
+that goes first on small serif lettering: `spacing=` opens it. Judge lettering with
 `--focus` on the step: at a whole model's cell a 0.05 stroke is a blob on
 the sheet. Extrude it for raised lettering,
 subtract an extrusion for engraving. `size` is the cap height, `weight`
@@ -260,7 +268,35 @@ strut) is a `tube(r, [a, b])` whose end points you work out from
 b = angle("boom")[0]
 tip = [0, 1 + 3 * cos(b), 3 * sin(b)]
 ram = tube(0.08, [0, 0.5, 0.4, tip[0], tip[1], tip[2]]) | paint("steel")
-``` `pose(...)` may be called
+```
+
+`angle()` may be read anywhere in the program, before or after the
+`joint(...)` it names: it is the pose's number, not the joint's. A
+telescoping cylinder is the pattern in full: the barrel is a tube in the
+parent's frame from its base pin towards the rod's eye, the rod a tube in
+the child's frame from its eye back towards the barrel, and the rod's
+visible length is the pin-to-pin distance less the barrel's, so the two
+can never gap or overshoot. Both pins are lists, and `surface(shape, x,
+y, z)` gives the point on a curved body nearest to a guess when a foot
+must sit on it:
+
+```
+def turn(p, c, a) = [c[0] + (p[0] - c[0]) * cos(a) - (p[1] - c[1]) * sin(a),
+                     c[1] + (p[0] - c[0]) * sin(a) + (p[1] - c[1]) * cos(a)]
+a = angle("boom")[0]
+base = [0.2, 0.9]                       # barrel pin on the body (y, z)
+eye = turn([1.6, 2.4], [0.4, 1.2], a)   # rod pin on the boom, turned about the boom's pivot
+ram = sqrt((eye[0] - base[0]) ^ 2 + (eye[1] - base[1]) ^ 2)
+barrel = tube(0.11, [0.35, base[0], base[1], 0.35, base[0] + (eye[0] - base[0]) * 1.2 / ram, base[1] + (eye[1] - base[1]) * 1.2 / ram], cap="flat")
+```
+
+The rod is the same tube from `eye` towards `base`, `ram - 1.2 + 0.3`
+long, built inside the boom's joint so it turns with it. The cost is
+that the GLB's animation moves only joints, so the exported cylinders do
+not telescope; the sheets and the beauty render do. Six small joints, one
+per barrel and rod, is the form to choose when the export matters.
+
+`pose(...)` may be called
 from a `def`, with its angles from the `def`'s parameters, so a set of
 poses with a shared shape is one `def` and a line per pose. `check` prints number steps as well as shapes, so the
 distances you compute are there to read.
@@ -312,9 +348,10 @@ shadows; 0.5 is a lamp); `set light_azimuth -40` and `set light_elevation
 the defaults, upper left, fixed in the world, not the camera); `set
 ambient 2` lifts the sky and ground light for a shaded interior (0.5 is a
 dark room); `set dof 1` adds depth of field there, blurring away from the
-model's centre; `set zoom 1.4` brings the beauty camera closer (1 fits
-the model's bounding sphere, which leaves a box-shaped model small in
-the frame; `--zoom` on the command line). A material with `glow=1` gives off its own light in every
+model's centre; the camera fits the model's box corners with a small
+margin, and `set zoom 1.2` brings it closer, up to the point where the
+box would touch the frame's edge and no further, so a zoom never crops
+(`--zoom` on the command line). A material with `glow=1` gives off its own light in every
 render, unshadowed: a flame, a lamp, a screen. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
@@ -345,21 +382,46 @@ vertex colours instead).
 in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
-detail thinner than its cell.
+detail thinner than its cell, and the sheet says which steps it dropped.
+When it dropped any, the pieces count is not judged on that sheet, since
+the dropped steps are often the joins; a bucket's teeth or a rail are
+blobs or gone at a quick cell, so judge a working end at full grid, with
+`--focus` on the step to spend the cells there.
 
 ## What the tool checks for you
 
-`aixle check` prints every step's size and the warnings; `aixle render`
-also writes them into `report.md` and counts them on the sheet's title bar.
+`aixle check` prints every step's size and the warnings: shapes as their
+box, 2D profiles as their box in the plane, numbers and lists of numbers
+as their values. A step whose tree holds a rotation, a warp or a posed
+joint gets a second `surface` line when the surface's own extent is
+tighter than the box (a box after a rotation is the box of a turned box),
+and with `--pose` a `posed` line says where the step ends up once the
+joints above it have turned, since a part built at rest and turned by a
+joint keeps its rest box. `aixle render`
+also writes the warnings into `report.md` and counts them on the sheet's title bar.
 Warnings cover: a shape computed but never assigned; a step that is not part
 of the output; an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
-cell, including a `shell` wall, a `tube`, a `sweep` profile or a `text`
-stroke inside a thick part (those carry their own thickness, since a
-bounding box cannot see it); a model in separate pieces (a part that floats free) or with slivers
-left by a cut; a model that would tip over, from its centre of mass and
-the footprint of its base; and, as a note, a model that does not rest on
-`y = 0`. The report's Physics section has the numbers: mass at `set
+cell (the threshold is 1.2 cells: at that thickness the surface nets
+still catch it, below it they may not), including a `shell` wall, a
+`tube`, a `sweep` profile or a `text` stroke inside a thick part (those
+carry their own thickness, since a bounding box cannot see it); a
+lettering counter or a slot under a cell (under half a cell it closes,
+between half and one it survives but the mesh round it may not be
+watertight); a union that paints over parts that already had materials,
+or joins painted and unpainted parts; a program that both names a step
+`top` and calls `top(...)`; a model in separate pieces (a part that
+floats free) or with slivers left by a cut, each named by the innermost
+step whose surface passes there, then its nearest named parent; a model
+that would tip over, from its centre of mass and the footprint of its
+base; and, as a note, a model that does not rest on `y = 0`. Two parts
+count as joined when they overlap by about a cell in the field: parts
+that only touch (a barrel resting on a beam's top face, a box on a
+box) leave a seam that reads as an open edge or a second piece, so sink
+one into the other by a cell or two, or blend them with `union(k=)`,
+which also seals the void a tangency leaves. A focused render adds a
+"Close-up watertight" row for the close-up's own finer mesh, with the
+frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
 overhangs (faces down more than 45°, which a printer would need support
 under).
@@ -385,4 +447,10 @@ under).
 - Rotated shapes have conservative bounding boxes, so `ground()` and
   `center()` after a rotation can be off by a little.
 - Sweeps follow polylines (smoothed or not): a tight bend needs a few more
-  points. There is no import of meshes yet.
+  points; `curve` and `bezier` are exact.
+- `a & b` and `a - b` keep a's material on every face, including the
+  faces b made; paint the result to colour a cut face differently.
+- A cross-section draws the surface's outline a cell or so behind the cut
+  plane as a thin line, so a plate just behind the plane shows as a dashed
+  line across an opening that is open. Move the slice (`set slice_x`) or
+  render a `--focus` close-up to be sure.

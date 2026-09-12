@@ -1,0 +1,144 @@
+# A cartoon frog squatting on a notched lily pad, built to print in one piece.
+# Front is +z. The pad is 4.4 across and 0.2 thick; the frog is about 2.5 tall.
+#
+# Parts, bottom up:
+#   pad    a disc minus a wedge at the front, radial veins as a decal, a lotus bud
+#   body   two ellipsoids blended: a fat torso whose widest ring sits just above
+#          the pad (so the flank slopes inward all the way up) and a head set
+#          forward on it; belly, back spots, smile and nostrils are decals
+#   eyes   spheres sunk below their equators into the head, blended in, with
+#          decal iris, pupil and glint
+#   legs   back: a dome haunch pressed on the flank, a shin lying along the pad,
+#          a webbed foot; front: a near-vertical arm hugging the chest, a foot
+#
+# Print rules used throughout: anything that rests on the pad is sunk into it
+# by more than a grid cell, the frog is trimmed flat at `floor_y` inside the
+# pad so nothing pokes out underneath, and every contact is a smooth union so
+# there are no tangent surfaces or sharp creases.
+
+set grid 160
+set light_azimuth -30
+set light_elevation 50
+
+# ---- materials ----------------------------------------------------------------
+skin      = material("#62c24c", "speckle", "#4aa33a", scale=0.11, rough=0.75)
+belly_m   = material("#ece6b4", "speckle", "#d9d09a", scale=0.11, rough=0.8)
+spot_m    = material("#2f7a2b", rough=0.75)
+leaf      = material("#3f8f3a", "noise", "#2c6b2a", scale=0.35, rough=0.85)
+vein_m    = "#6db85a"
+eye_white = material("#f6f4ec", rough=0.3)
+iris_m    = material("#e8a83a", rough=0.35)
+pupil_m   = material("#141416", rough=0.4)
+mouth_m   = "#3a1f1a"
+nostril_m = "#2f5e28"
+petal_m   = material("#f7a3b9", rough=0.55)
+petal_tip = material("#fff0e6", rough=0.55)
+
+# ---- the pad ------------------------------------------------------------------
+pad_r     = 2.2
+pad_thick = 0.2
+pad_top   = pad_thick
+floor_y   = pad_top - 0.06        # the frog is cut off here, inside the pad
+
+pad_disc = cylinder(pad_r, pad_thick, round=0.05) | move(0, pad_thick / 2, 0)
+# the notch: a slim wedge from 1.4 units out to past the rim, rounded at its
+# tip, laid flat along +x, then turned so it opens at the front (just right of
+# centre), under the chin, where no foot sits over it
+notch = extrude(polygon(1.4,0, 3,-0.55, 3,0.55) | round(0.1), 1) | rotate(y=-88)
+pad_plain = (pad_disc - notch) | paint(leaf)
+vein  = box(2.0, 0.3, 0.05) | move(1.05, pad_top, 0)    # straddles the top face
+veins = ring(vein, 9)
+pad   = decal(pad_plain, veins, vein_m)
+
+# a closed lotus bud on the front-left of the pad: a revolved teardrop core
+# with six petals leaning in around it, in a green sepal cup
+bud_core = revolve(polygon(0,0, 0.16,0, 0.24,0.2, 0.2,0.42, 0.07,0.62, 0,0.66)) | paint(petal_tip)
+petal    = ellipsoid(0.11, 0.34, 0.07) | rotate(z=22) | move(0.15, 0.3, 0) | paint(petal_m)   # leaning in over the core
+petals   = ring(petal, 6)
+sepal    = cone(0.32, 0.12, 0.26) | move(0, 0.13, 0) | paint(leaf)
+bud      = (bud_core + petals + sepal) | move(-1.5, pad_top - 0.04, 0.9)
+
+# ---- the body -----------------------------------------------------------------
+torso_y = pad_top + 0.35          # widest ring 0.35 above the pad; the rest is trimmed
+torso = ellipsoid(1.0, 0.95, 1.05) | move(0, torso_y, 0)
+head_y = 1.55
+head  = ellipsoid(1.15, 0.62, 0.92) | move(0, head_y, 0.2)   # wider than the torso: a frog's head
+mass  = union(torso, head, k=0.3)
+skinned = mass | displace(0.02, 0.18, seed=2) | paint(skin)
+
+# decals on the body, each a region that cuts through the surface
+belly_region = ellipsoid(0.8, 0.8, 0.8) | move(0, 0.7, 0.8)
+bellied = decal(skinned, belly_region, belly_m)
+# dark spots: spheres centred on the back's surface (each z solved from the
+# torso's or the head's ellipsoid at that x, y)
+spots = sphere(0.18) | move(0.5, 1.2, -0.56)
+      + sphere(0.15) | move(-0.7, 1.0, -0.56)
+      + sphere(0.2) | move(-0.15, 1.45, -0.7)
+      + sphere(0.14) | move(0.85, 0.7, -0.52)
+      + sphere(0.16) | move(-0.45, 1.85, -0.52)
+      + sphere(0.13) | move(0.3, 2.0, -0.38)
+spotted = decal(bellied, spots, spot_m)
+# the smile: a thin tube along a curve lying on the head's front, used only as a region
+smile = curve([-0.9,1.62,0.76, -0.45,1.5,1.04, 0,1.46,1.11, 0.45,1.5,1.04, 0.9,1.62,0.76])
+mouth_region = tube(0.07, smile)
+mouthed = decal(spotted, mouth_region, mouth_m)
+nostril_region = mirror(sphere(0.07) | move(0.2, 1.75, 1.05), "x")
+body = decal(mouthed, nostril_region, nostril_m)
+
+# ---- the eyes -----------------------------------------------------------------
+# the head's surface at (x 0.55, z 0.4) is y 2.08; the eye's centre is a hair below
+# it, so most of it bulges out and its outer underside stays under 30 degrees; the blend gives it a lid
+eye_r = 0.42
+eye_c_x = 0.55
+eye_c_y = 2.06
+eye_c_z = 0.4
+# the iris looks forward and a little up: centre + eye_r * (0, 0.3, 0.95)
+iris_x = eye_c_x
+iris_y = eye_c_y + eye_r * 0.3
+iris_z = eye_c_z + eye_r * 0.95
+eye_ball = sphere(eye_r) | move(eye_c_x, eye_c_y, eye_c_z) | paint(eye_white)
+iris_region  = sphere(0.24) | move(iris_x, iris_y, iris_z)
+pupil_region = sphere(0.14) | move(iris_x, iris_y, iris_z)
+glint_region = sphere(0.06) | move(iris_x - 0.05, iris_y + 0.06, iris_z - 0.03)
+eye_iris  = decal(eye_ball, iris_region, iris_m)
+eye_pupil = decal(eye_iris, pupil_region, pupil_m)
+eye = decal(eye_pupil, glint_region, "white")
+eyes = mirror(eye, "x")
+
+# ---- the legs (right side, mirrored) ------------------------------------------
+# a webbed foot at the origin: a heel, three toes fanning towards +z, and a
+# web between them. extrude() lays a profile with its y along -z, so the web
+# polygon is drawn on negative y to land in front of the heel.
+def toe(a) = capsule(0.08, 0.55) | rotate(x=90) | move(0, 0, 0.275) | rotate(y=a)
+# The parts are joined with a small blend: two toes diverging at 30 degrees
+# otherwise leave a groove narrower than a grid cell where they separate,
+# which meshes as a non-manifold edge.
+def foot() =
+  union(ellipsoid(0.22, 0.1, 0.24),
+        toe(-30), toe(0), toe(30),
+        extrude(polygon(0,0, 0.3,-0.44, 0,-0.5, -0.3,-0.44), 0.08),
+        k=0.05)
+
+# back leg: a haunch that is a dome (its centre at the pad's top, so no face
+# looks down), a shin lying along the pad from the haunch's rear to the ankle,
+# and a foot turned 35 degrees outward
+haunch = ellipsoid(0.5, 0.6, 0.62) | move(1.05, pad_top + 0.02, -0.15)
+shin = tube(0.16, [1.25,0.28,-0.35, 1.15,0.28,0.5])
+back_foot = foot() | rotate(y=35) | move(1.15, pad_top, 0.7)
+back_leg = union(haunch, shin, k=0.15) + back_foot
+
+# front leg: shoulder -> elbow -> wrist, steep (27 degrees off vertical) and
+# pressed into the chest, with a smaller foot in front
+front_arm = tube(0.14, [0.55,1.0,0.66, 0.65,0.45,0.87, 0.65,0.28,0.97])   # 0.05 into the chest, so it is a relief, not a tangent tube
+front_foot = foot() | scale(0.85) | move(0.65, pad_top, 1.15)
+front_leg = front_arm + front_foot
+
+legs = mirror(back_leg + front_leg, "x") | paint(skin)
+
+# ---- assembly -----------------------------------------------------------------
+limbed = union(body, legs, k=0.25)      # haunches and arms fillet into the body
+eyed   = union(limbed, eyes, k=0.12)    # the eyes get lids
+keep   = box(10, 10, 10) | move(0, 5 + floor_y, 0)
+frog   = eyed & keep                    # trim everything sunk into the pad
+model  = union(frog + bud, pad, k=0.1)  # a fillet wherever the frog meets the pad
+show model

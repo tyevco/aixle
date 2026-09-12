@@ -1,0 +1,177 @@
+# ROSIE'S FRUIT: a market stall facing +z, built as ONE piece for printing.
+# One unit is about half a metre; the stall is 12 units wide, the slab 13.6.
+#
+# Layout (x right, y up, z towards the front):
+#   a cobble slab lies at y 0..slab_t; the stall is built with ITS floor at
+#   y = 0 (so every height below reads from the stall's floor) and the whole
+#   stall is lifted onto the slab in the last step.
+#   four posts (the back pair taller) carry a striped canvas sloping down to
+#   the front beam, with a scalloped valance; a solid plank counter with an
+#   oak top at counter_top_y carries three crates (apples, oranges, lemons),
+#   a leaning chalkboard and a stack of paper bags; a walnut sign and a brass
+#   cage lantern (open windows, candle and flame inside) hang from the front
+#   beam; a barrel stands on the cobbles at the front right.
+#
+# Anything resting on something else sinks `sink` into it: more than a grid
+# cell, so the mesh is one piece with no coincident faces. Round tubes (the
+# chains) are at least two cells thick for the same reason.
+
+set grid 200
+set light_azimuth -35
+set light_elevation 38
+set ambient 2.2
+set azimuth 28
+set elevation 18
+set zoom 1.5
+
+# --- dimensions everything else is measured from ---------------------------
+slab_t = 0.3                     # cobble slab thickness; the stall is lifted by this
+sink = 0.08                      # how far a resting part is sunk into its support
+counter_h = 2.0                  # counter body height
+counter_top_y = counter_h + 0.08 # top face of the oak counter top
+front_z = 2.4                    # the front posts and beam
+back_z = -2.2                    # the back posts and beam
+front_beam_y = 4.7               # centre of the front beam (the front posts reach 4.8)
+back_beam_y = 5.5                # centre of the back beam (the back posts reach 5.6)
+
+# --- materials (all named *_m) ----------------------------------------------
+cobble_m = material("#7f7a75", "tiles", "#57534f", scale=0.45, rough=0.9)
+plank_m = material("#9a6b3f", "stripes", "#7a5030", scale=0.35, rough=0.8)
+canvas_m = material("#c8342a", "stripes", "#f0e6c8", scale=0.7, axis="x", rough=0.8)
+paper_m = material("#c9a97a", "noise", "#b8945f", scale=0.2, rough=0.9)
+slate_m = material("#2e3033", rough=0.9)
+chalk_m = material("#f4f0e2", rough=1)
+flame_m = material("#ffd070", glow=2)
+apple_m = material("#c8342a", "noise", "#e0603a", scale=0.15, rough=0.5)
+orange_m = material("#e8862a", "speckle", "#c86a1a", scale=0.04, rough=0.7)
+lemon_m = material("#e8d43a", "speckle", "#d0b820", scale=0.04, rough=0.6)
+# the beds under the fruit piles: the fruit's colour in shadow
+apple_shade_m = material("#6e1a12", rough=0.8)
+orange_shade_m = material("#7a3f10", rough=0.8)
+lemon_shade_m = material("#7a6a14", rough=0.8)
+
+# --- the slab: the only thing at world y = 0 ---------------------------------
+slab = box(13.6, slab_t, 7.4, round=0.03) | move(0, slab_t / 2, 0.2) | paint(cobble_m)
+
+# --- frame: posts and beams ---------------------------------------------------
+# a post standing on y = 0, sunk into the slab underneath
+def post(h) = cylinder(0.14, h + sink) | move(0, (h - sink) / 2, 0)
+back_posts = post(5.6) | move(-5.6, 0, back_z) | array(2, 11.2, 0, 0)
+front_posts = post(4.8) | move(-5.6, 0, front_z) | array(2, 11.2, 0, 0)
+posts = (back_posts + front_posts) | paint("wood")
+back_beam = box(12, 0.2, 0.2) | move(0, back_beam_y, back_z)
+front_beam = box(12, 0.2, 0.2) | move(0, front_beam_y, front_z)
+beams = (back_beam + front_beam) | paint("wood")
+frame = posts + beams
+
+# --- counter: a solid plank body under an oak top (no underside to support) --
+counter_body = box(11.2, counter_h + sink, 2.2) | paint(plank_m) | move(0, (counter_h - sink) / 2, 1.0)
+counter_top = box(11.2, 0.16, 2.24, round=0.02) | paint("oak") | move(0, counter_h, 1.0)
+counter = counter_body + counter_top
+
+# --- awning: painted flat (stripes across x), then tilted so the front is lower
+canvas = box(12.6, 0.1, 5.2) | paint(canvas_m) | rotate(x=9.5) | move(0, 5.15, 0.2)
+valance_bar = box(12.6, 0.6, 0.12) | paint(canvas_m) | move(0, 4.5, 2.72)
+scallop_cutters = cylinder(0.3, 0.4) | rotate(x=90) | move(-6, 4.2, 2.72) | array(21, 0.6, 0, 0)
+valance = valance_bar - scallop_cutters
+awning = canvas + valance
+
+# --- crates: an open box with a floor `wall` thick ---------------------------
+def crate(w, h, d, wall=0.09) =
+  box(w, h, d) - (box(w - 2 * wall, h, d - 2 * wall) | move(0, wall, 0))
+
+crate_h = 0.55                            # low enough that the fruit shows over the rim
+crate_d = 1.5
+crate_bottom = counter_top_y - sink        # sunk into the counter top
+crate_floor = crate_bottom + 0.09          # where the fruit rests
+def crate_at(x) = crate(1.6, crate_h, crate_d) | paint("pine") | move(x, crate_bottom + crate_h / 2, 1.0)
+apple_crate = crate_at(-4.2)
+orange_crate = crate_at(-2.3)
+lemon_crate = crate_at(2.7)
+crates = apple_crate + orange_crate + lemon_crate
+
+# --- fruit: a bed of the fruit's colour in shadow fills each crate to just above the
+# low layer's equator (so no void between fruit can close up), the low layer
+# is a grid whose neighbours overlap by more than a cell, and the upper fruit
+# sit in the grooves between two neighbours, never in a hollow of four.
+def bed(x, top, m) = box(1.4, top - crate_floor + 0.02, crate_d - 0.2) | paint(m)
+  | move(x, (crate_floor - 0.02 + top) / 2, 1.0)
+
+stem = cylinder(0.05, 0.14) | move(0, 0.22, 0) | paint("brown")
+apple = (sphere(0.21) | paint(apple_m)) + stem
+apple_y = crate_floor + 0.14
+apple_bed = bed(-4.2, apple_y + 0.04, apple_shade_m)
+apples_low = apple | move(-4.56, apple_y, 0.64) | grid(3, 3, 0.36, 0.36)
+apples_top = (apple | move(-4.38, apple_y + 0.28, 0.64) | array(2, 0.36, 0, 0))
+  + (apple | move(-4.2, apple_y + 0.28, 1.36))
+apples = apple_bed + apples_low + apples_top
+
+orange = sphere(0.22) | paint(orange_m)
+orange_y = crate_floor + 0.15
+orange_bed = bed(-2.3, orange_y + 0.04, orange_shade_m)
+oranges_low = orange | move(-2.66, orange_y, 0.64) | grid(3, 3, 0.36, 0.36)
+oranges_top = (orange | move(-2.48, orange_y + 0.32, 1.0) | array(2, 0.36, 0, 0))
+  + (orange | move(-2.3, orange_y + 0.32, 0.64))
+oranges = orange_bed + oranges_low + oranges_top
+
+lemon = ellipsoid(0.19, 0.13, 0.13) | rotate(y=30) | paint(lemon_m)   # yawed so the rows do not read as a grid
+lemon_y = crate_floor + 0.07
+lemon_bed = bed(2.7, lemon_y + 0.03, lemon_shade_m)
+lemons_low = lemon | move(2.22, lemon_y, 0.66) | grid(4, 3, 0.32, 0.34)
+lemon_b = ellipsoid(0.19, 0.13, 0.13) | rotate(y=-30) | paint(lemon_m)  # the top ones cross the low ones
+lemons_top = lemon_b | move(2.38, lemon_y + 0.13, 0.66) | grid(3, 2, 0.32, 0.68)
+lemons = lemon_bed + lemons_low + lemons_top
+
+# --- the hanging sign: a walnut board with raised serif lettering -------------
+board = box(4.4, 0.8, 0.14, round=0.02) | paint("walnut")
+letters = extrude(text("ROSIE'S FRUIT", 0.36, weight=0.1, align="center", face="serif"), 0.1, "z")
+  | move(0, -0.18, 0.1) | paint("cream")
+sign_chains = tube(0.06, [-1.8, 0.3, 0, -1.8, 1.2, 0]) | array(2, 3.6, 0, 0) | paint("iron")
+sign = (board + letters + sign_chains) | move(-2.0, 3.55, front_z)
+
+# --- the chalkboard, leaning back 8 degrees on the counter --------------------
+chalk_frame = box(1.5, 1.2, 0.14, round=0.01) | paint("oak")
+slate_board = box(1.34, 1.04, 0.14) | move(0, 0, 0.04) | paint(slate_m)
+price_text = text("APPLES  2", 0.16, weight=0.065, align="center") | move(0, 0.26)
+  + (text("ORANGES 3", 0.16, weight=0.065, align="center") | move(0, -0.06))
+  + (text("LEMONS  1", 0.16, weight=0.065, align="center") | move(0, -0.38))
+priced_slate = decal(slate_board, extrude(price_text, 0.4, "z"), chalk_m)
+chalkboard = (chalk_frame + priced_slate) | rotate(x=-8) | move(0.9, counter_top_y - sink + 0.6, 1.4)
+
+# --- a stack of paper bags, each yawed a little ------------------------------
+bag_t = 0.09
+bags = empty()
+for i in range(7) {
+  bags = bags + (box(0.8, bag_t, 0.5, round=0.01) | rotate(y=(rand(i) - 0.5) * 24)
+    | move(4.3, counter_top_y - sink + bag_t / 2 + i * 0.07, 1.0))
+}
+bags = bags | paint(paper_m)
+
+# --- the lantern: a brass cage with open windows, a candle inside -------------
+# built with its base on y = 0, then hung under the front beam by its chain
+lantern_base = cylinder(0.32, 0.1) | move(0, 0.05, 0) | paint("brass")
+cage_drum = (cylinder(0.3, 0.76) | shell(0.1)) | move(0, 0.46, 0) | paint("brass")
+windows = (box(0.3, 0.5, 1) + box(1, 0.5, 0.3)) | move(0, 0.46, 0)
+cage = cage_drum - windows
+lantern_cap = cone(0.34, 0.12, 0.2) | move(0, 0.94, 0) | paint("brass")
+lantern_ring = torus(0.12, 0.05) | move(0, 1.0, 0) | paint("brass")
+handle_curve = bezier([-0.3, 0.98, 0, -0.3, 1.55, 0, 0.3, 1.55, 0, 0.3, 0.98, 0])
+lantern_handle = tube(0.05, handle_curve) | paint("brass")
+candle = cylinder(0.07, 0.3) | move(0, 0.23, 0) | paint("ivory")
+flame = ellipsoid(0.08, 0.16, 0.08) | move(0, 0.5, 0) | paint(flame_m)
+lantern_chain = tube(0.06, [0, 1.38, 0, 0, 1.95, 0]) | paint("iron")
+lantern = (lantern_base + cage + lantern_cap + lantern_ring + lantern_handle
+  + candle + flame + lantern_chain) | move(5.0, 2.7, front_z)
+
+# --- a barrel on the cobbles at the front right -------------------------------
+barrel_profile = polygon(0,-sink, 0.5,-sink, 0.56,0.4, 0.58,0.7, 0.56,1.0, 0.5,1.4, 0,1.4)
+barrel_body = revolve(barrel_profile) | paint("oak")
+hoops = (torus(0.55, 0.05) | move(0, 0.3, 0)) + (torus(0.575, 0.05) | move(0, 0.85, 0))
+  + (torus(0.55, 0.05) | move(0, 1.2, 0))
+barrel = (barrel_body + (hoops | paint("iron"))) | move(6.1, 0, 3.1)
+
+# --- the whole stall, lifted onto the slab ------------------------------------
+stall = frame + counter + awning + crates + apples + oranges + lemons + sign
+  + chalkboard + bags + lantern + barrel
+market = slab + (stall | move(0, slab_t, 0))
+show market

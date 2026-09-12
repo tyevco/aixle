@@ -251,3 +251,35 @@ round 3: An award trophy, about 5 units tall, front on +z.
 ![round-3_trophy, beauty render](../dogfood/renders/round-3_trophy_beauty.png) ![round-3_trophy, contact sheet](../dogfood/renders/round-3_trophy.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-3/trophy.aix) · <a href="/aixle/viewers/round-3_trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-3/trophy.report.md)
+
+### round-4_excavator
+
+round 4: A hydraulic excavator on tracks. Front is +z; one unit is about a metre.
+
+![round-4_excavator, beauty render](../dogfood/renders/round-4_excavator_beauty.png) ![round-4_excavator, contact sheet](../dogfood/renders/round-4_excavator.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-4/excavator.aix) · <a href="/aixle/viewers/round-4_excavator.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-4/excavator.report.md)
+
+### round-4_frog
+
+round 4: A cartoon frog squatting on a notched lily pad, built to print in one piece.
+
+![round-4_frog, beauty render](../dogfood/renders/round-4_frog_beauty.png) ![round-4_frog, contact sheet](../dogfood/renders/round-4_frog.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-4/frog.aix) · <a href="/aixle/viewers/round-4_frog.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-4/frog.report.md)
+
+### round-4_market
+
+round 4: ROSIE'S FRUIT: a market stall facing +z, built as ONE piece for printing.
+
+![round-4_market, beauty render](../dogfood/renders/round-4_market_beauty.png) ![round-4_market, contact sheet](../dogfood/renders/round-4_market.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-4/market.aix) · <a href="/aixle/viewers/round-4_market.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-4/market.report.md)
+
+### round-4_trophy
+
+round 4: An award trophy, about 6.3 units tall, front on +z, one solid piece for printing.
+
+![round-4_trophy, beauty render](../dogfood/renders/round-4_trophy_beauty.png) ![round-4_trophy, contact sheet](../dogfood/renders/round-4_trophy.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-4/trophy.aix) · <a href="/aixle/viewers/round-4_trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-4/trophy.report.md)

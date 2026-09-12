@@ -1,0 +1,3 @@
+# Round-trip check: the trophy's exported GLB read back as a shape.
+m = import("out/final/model.glb")
+show m

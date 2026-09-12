@@ -125,7 +125,8 @@ describe("interpreter", () => {
     expect(spring.bounds.max[1]).toBeCloseTo(3.1);
     const rope = shape("r = sweep(circle(0.2), helix(1, 2, 2), twist=360)", "r");
     expect(rope.bounds.max[0]).toBeGreaterThan(1.19);
-    expect(rope.bounds.max[0]).toBeLessThan(1.3);
+    // The box also allows for the mitres at the helix joins (about a third of the reach at these turns).
+    expect(rope.bounds.max[0]).toBeLessThan(1.4);
   });
   it("queries heights and bounds, and derives materials from presets", () => {
     const ev = run('r = sphere(1) | displace(0.1, 0.4)\nh = height(r, 0, 0)\nt = top(r)\nw = width(r)\nm = material("granite", scale=0.4)\ns = r | paint(m)');
@@ -223,5 +224,24 @@ describe("wrap in the language", () => {
     expect(b.max[2]).toBeGreaterThan(1);
     expect(b.max[2]).toBeLessThan(1.2);
     expect(b.min[1]).toBeGreaterThan(1.8);
+  });
+});
+
+describe("round-4 findings in the language", () => {
+  it("flattens nested point lists in paths, names a material after its step, and warns on a shadowed builtin that is called", () => {
+    const ev = run("hip = [0, 0, 0]\nknee = [0, 2, 0]\nleg = tube(0.1, [hip, knee])\nbody = material(\"#e9b125\", rough=0.5)\nm = leg | paint(body)");
+    expect(ev.warnings).toEqual([]);
+    const leg = ev.steps.find((s) => s.name === "leg")!.value as Shape3;
+    expect(leg.bounds.max[1]).toBeCloseTo(2.1, 5);
+    expect(leg.bounds.min[1]).toBeCloseTo(-0.1, 5);
+    expect(ev.output!.hit(0, 1, 0.1).mat.name).toBe("body");
+    const shadow = run("top = box(1)\nlid = box(2) | move(0, top(top), 0)\nm = top + lid");
+    expect(shadow.warnings.join()).toMatch(/top\(\.\.\.\) calls the builtin, but 'top' is also a step/);
+    expect(run("top = box(1)\nm = top + box(2)").warnings).toEqual([]);
+  });
+  it("surface() finds the nearest surface point, so a rod can meet a curved body", () => {
+    const ev = run("body = sphere(2)\np = surface(body, 0, 5, 0)\nrod = tube(0.1, [p, [0, 5, 0]])\nm = body + rod");
+    const p = ev.steps.find((s) => s.name === "p")!.value as number[];
+    expect(p[1]).toBeCloseTo(2, 4);
   });
 });

@@ -1,0 +1,94 @@
+# An award trophy, about 6.3 units tall, front on +z, one solid piece for printing.
+# Taken over from dogfood/round-3/trophy.aix. Parts, bottom to top: a white marble
+# plinth with a bevel and a black marble top step; a silver nameplate engraved in two
+# serif lines; a fluted silver stem (a twisted 8-point star), a cone collar and a knop;
+# a solid gold loving cup (filled: the lid hides the inside, and a void cannot print)
+# with "AWARD OF EXCELLENCE" wrapped round its rim band; two angular silver rod
+# handles whose legs stay within 42 degrees of vertical so they print without support;
+# a gold lid, a post and a star finial.
+#
+# Parts are stacked with on(part, below, sink): the part's bottom is set `sink` below
+# the top of the part under it, so no y position is a hand-added number.
+set grid 360
+set azimuth 18
+set elevation 18
+set zoom 1.05
+set light_azimuth -35
+set light_elevation 48
+set light_size 1.5
+set ambient 1.2
+
+def on(part, below, sink=0.04) = part | move(0, top(below) - bottom(part) - sink, 0)
+
+white_marble = material("marble", scale=0.5)
+black_marble = material("#2b2b31", "marble", "#8a8a94", scale=0.45, rough=0.3)
+
+# Base: plinth, bevel, top step.
+base_w = 3.4
+plinth_h = 0.7
+step_w = 2.5
+plinth = box(base_w, plinth_h, base_w, round=0.03) | move(0, plinth_h / 2, 0) | paint(white_marble)
+bevel = on(loft(rect(base_w - 0.06, base_w - 0.06), rect(step_w, step_w), 0.2), plinth, 0.02) | paint(white_marble)
+step = on(box(step_w, 0.3, step_w, round=0.03), bevel, 0.02) | paint(black_marble)
+base = plinth + bevel + step
+
+# Nameplate on the plinth's front face (z = base_w / 2): 0.16 thick, 0.10 sunk into the
+# stone and 0.06 proud (the ledge under it faces down, so it is kept small); the lettering
+# is cut 0.06 into its front by an extrusion centred on the front face.
+plate_h = 0.54
+plate_front = base_w / 2 + 0.06
+plate = extrude(rect(2.8, plate_h, round=0.05), 0.16, "z") | move(0, plinth_h / 2, plate_front - 0.08) | paint("silver")
+def engraving(t, size, w, baseline) =
+  extrude(text(t, size, weight=w, align="center", face="serif"), 0.12, "z") | move(0, baseline, plate_front)
+line_gap = 0.11
+line2_base = plinth_h / 2 - (0.18 + 0.14 + line_gap) / 2
+line1 = engraving("CHAMPION", 0.18, 0.05, line2_base + 0.14 + line_gap)
+line2 = engraving("BEST IN SHOW 2026", 0.14, 0.04, line2_base)
+nameplate = plate - (line1 + line2)
+
+# Stem: a foot, a fluted column (an 8-point star twisted 50 degrees per unit), a cone
+# collar (no flat underside) and a knop sunk into it so its exposed band is under 45 degrees.
+foot = on(cylinder(0.5, 0.12, round=0.03), base) | paint("silver")
+stem = on(extrude(star(8, 0.3, 0.22), 1.55) | twist(50), foot) | paint("silver")
+collar = on(cone(0.33, 0.44, 0.18), stem) | paint("silver")
+knop = on(sphere(0.28), collar, 0.11) | paint("silver")
+
+# Cup: a solid revolved profile; every flank climbs at 50 degrees or more (so its underside
+# needs no support), the bottom disc (r 0.2) is hidden inside the knop, and the top 0.55
+# is a vertical band for the rim text.
+cup_h = 1.95
+band_h = 0.55
+cup_r = 1.15
+bowl = polygon(0,0, 0.2,0, 0.45,0.3, 0.75,0.68, 1.0,1.05, cup_r,cup_h - band_h, cup_r,cup_h, 0,cup_h)
+cup = on(revolve(bowl), knop, 0.13) | paint("gold")
+cup_y = bottom(cup)
+
+# Rim text: standing lettering 0.14 thick wrapped round the band, 0.08 proud and 0.06 sunk.
+# spacing keeps adjacent letters two cells apart (at one cell the walls merged and left
+# non-manifold edges); the line spans about 135 degrees, clear of the handles at 90.
+rim_text = extrude(text("AWARD OF EXCELLENCE", 0.15, weight=0.04, align="center", spacing=0.025), 0.14, "z")
+  | wrap(cup_r + 0.01) | move(0, cup_y + cup_h - 0.32, 0) | paint("gold")
+
+# Handles: a rod on an angular path, springing from inside the stem top, up and out past
+# the knop and the bowl at a steady 0.25 stand-off to a peak 0.4 clear of the band, then
+# back into the band; the joins are the tube's own spheres. Both legs are within 42
+# degrees of vertical, so no point of the rod faces down more than that. The path's y is
+# relative to the cup's bottom; the tube's ends reach 0.1 past the end points, so both
+# end points are 0.1 or more inside the stem and the band.
+handle_path = [0.22,-0.5,0, 1.55,1.3,0, 1.02,1.9,0]
+handle = tube(0.1, handle_path) | move(0, cup_y, 0) | paint("silver")
+handles = mirror(handle, "x")
+
+# Lid: a revolved profile that leaves the band's top edge at the band's own radius (a
+# cone 0.01 wider left two faces a cell apart and 120 non-manifold edges), a domed top,
+# a post and a star finial on a boss.
+lid_profile = polygon(0,0, cup_r,0.03, 0.82,0.25, 0,0.25)
+lid_cone = on(revolve(lid_profile), cup, 0.03)
+dome = ellipsoid(0.82, 0.3, 0.82) | move(0, top(lid_cone), 0)
+lid = (lid_cone + dome) | paint("gold")
+post = on(cylinder(0.1, 0.4), lid, 0.1) | paint("gold")
+boss = sphere(0.13) | move(0, top(post), 0) | paint("gold")
+finial = extrude(star(5, 0.3, 0.13), 0.14, "z") | move(0, top(post) + 0.06, 0) | paint("gold")
+
+trophy = base + nameplate + foot + stem + collar + knop + cup + rim_text + handles + lid + post + boss + finial
+show trophy

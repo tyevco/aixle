@@ -109,21 +109,21 @@ so callers place it without reading it (depends on 1).
 
 ## 4. Printing: STL, hollowing, a print report
 
-**Why.** Round 4's bar is print-readiness, and the pieces, cavity,
-watertight, stands and overhang checks now exist; what is missing is the
-file a printer takes and the two operations every print needs.
+**Why.** Round 4's bar was print-readiness, and the pieces, cavity,
+watertight, stands and overhang checks exist, as do `model.stl` and
+`hollow(shape, wall, x, y, z)` (built for that round); what is missing
+is the report a slicer's user wants before opening it.
 
-**What.** `model.stl` (binary) next to the OBJ and GLB; `hollow(shape,
-wall, drain=[x, y, z])` which is `shell` plus a drain hole and no cavity
-warning; and a print section in the report: minimum wall thickness found
+**What.** A print section in the report: minimum wall thickness found
 (from the feature sizes and the mesh), support volume estimate from the
 overhang faces, whether it fits a named bed (`set bed 200 200 200`), and
-the unit assumed (`set units mm`).
+the unit assumed (`set units mm`). Round 4 also asked for the distance
+between the two surfaces at an open edge ("the barrel's side is 0.03
+from the bracket's top"), which the same inward-ray pass can give.
 
-**How.** STL is forty lines over the mesh; `hollow` is `shell` minus a
-cylinder along the drain direction; the print report reads what physics
-already computes plus one pass over the mesh for the thinnest local
-wall (ray from each vertex inward along its normal).
+**How.** The print report reads what physics already computes plus one
+pass over the mesh for the thinnest local wall (ray from each vertex
+inward along its normal).
 
 **Must prototype.** Whether the inward-ray wall thickness agrees with
 the feature sizes on the examples.
@@ -244,7 +244,9 @@ output down (`model = body + lid + handles`, then each), each line with
 its size, material state and line number; `--json` for tools.
 
 **How.** The evaluation already records every step's dependencies and
-the shape tree; this is a printer over them.
+the shape tree; this is a printer over them. Round 4's `check` already
+prints profiles, numbers, lists, surface extents and posed placement;
+the tree is the part that is missing.
 
 **Must prototype.** Nothing.
 

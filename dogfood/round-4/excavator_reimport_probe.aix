@@ -1,0 +1,3 @@
+# Round trip: the excavator's exported GLB read back as a shape (geometry only, at rest).
+m = import("../out/excavator/model.glb")
+show m

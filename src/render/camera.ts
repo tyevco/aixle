@@ -5,7 +5,7 @@
  * of the model) at the top of the image, the way a plan is drawn.
  */
 import { cross, normalize, sub, type Vec3 } from "../core/vec.js";
-import { boundsCenter, boundsSize, type Bounds } from "../sdf/types.js";
+import { boundsCenter, boundsCorners, boundsSize, type Bounds } from "../sdf/types.js";
 
 export interface Camera {
   eye: Vec3;
@@ -77,12 +77,40 @@ export function perspective(bounds: Bounds, width: number, height: number, azimu
   const aspect = width / height;
   const vfov = (fov * Math.PI) / 180;
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
-  // The bounding sphere fits the view at zoom 1; a box model fills less than half of it, so zoom lets a presentation
-  // picture come closer (measured: a frog filled 45% of its beauty render).
-  const dist = (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.08 / Math.max(0.2, zoom);
   const az = (azimuth * Math.PI) / 180, el = (elevation * Math.PI) / 180;
-  const eye: Vec3 = [c[0] + dist * Math.cos(el) * Math.sin(az), c[1] + dist * Math.sin(el), c[2] + dist * Math.cos(el) * Math.cos(az)];
-  return { eye, ...basis(eye, c, [0, 1, 0]), fov, width, height };
+  const dir: Vec3 = [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
+  const place = (d: number) => {
+    const eye: Vec3 = [c[0] + d * dir[0], c[1] + d * dir[1], c[2] + d * dir[2]];
+    return { eye, ...basis(eye, c, [0, 1, 0]) };
+  };
+  // Start with the bounding sphere in view, then pull in until the box's own corners fill the frame with a margin: a
+  // sphere fit left a box model in less than half the picture (measured: a frog filled 45% of its beauty render, and
+  // round 4 asked for the corners). Two passes settle it, since moving the eye changes the projection a little.
+  let dist = radius / Math.sin(Math.min(vfov, hfov) / 2);
+  const tx = Math.tan(hfov / 2), ty = Math.tan(vfov / 2);
+  const corners = boundsCorners(bounds);
+  for (let pass = 0; pass < 3; pass++) {
+    const { eye, right, up, forward } = place(dist);
+    let extent = 0;
+    for (const p of corners) {
+      const vx = p[0] - eye[0], vy = p[1] - eye[1], vz = p[2] - eye[2];
+      const depth = Math.max(1e-6, vx * forward[0] + vy * forward[1] + vz * forward[2]);
+      const sx = (vx * right[0] + vy * right[1] + vz * right[2]) / (depth * tx);
+      const sy = (vx * up[0] + vy * up[1] + vz * up[2]) / (depth * ty);
+      extent = Math.max(extent, Math.abs(sx), Math.abs(sy));
+    }
+    if (!(extent > 0)) break;
+    // The corners span 2 * extent of the frame's 2; aim for 0.92 of it (the sphere fit gave a wide, flat model
+    // about that, and less shrank it), and never closer than the sphere's radius.
+    dist = Math.max(radius * 1.05, dist * (extent / 0.92));
+  }
+  // Zoom brings the camera in, but never past the point where the box's corners would leave the frame: a zoom
+  // chosen for the older sphere fit cropped a market's awning and barrel once the corners fit (measured), and
+  // a picture with a corner cut off is worse than one a little wider than asked.
+  const closest = dist * (0.92 / 0.98);
+  dist = Math.max(closest, dist / Math.max(0.2, zoom));
+  const { eye, right, up, forward } = place(dist);
+  return { eye, right, up, forward, fov, width, height };
 }
 
 export type OrthoView = "front" | "right" | "top" | "back" | "left" | "bottom";

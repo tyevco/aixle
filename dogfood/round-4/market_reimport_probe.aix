@@ -1,0 +1,6 @@
+# Round-trip check: the market stall's exported GLB imported back as one
+# shape, sampled to a distance field, to compare against the original
+# (size, triangles, which parts survive). Runs only after market.aix has
+# been rendered, since it reads that render's out/ folder.
+m = import("out/market/model.glb")
+show m

@@ -94,6 +94,12 @@ export interface Shape3 {
   painted?: boolean;
   /** Set by move, rotate and scale: below this node the shapes are in another frame, so they are not where they end up. */
   transform?: boolean;
+  /** For a transform or warp: the world point in the child's frame, so a point can be attributed to the innermost named step. */
+  unwarp?: (x: number, y: number, z: number) => Vec3;
+  /** For a rigid transform or a joint: where a point of the child lands, so a step inside a posed joint can be framed where it is. */
+  warp?: (x: number, y: number, z: number) => Vec3;
+  /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
+  loose?: boolean;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */

@@ -429,6 +429,12 @@ The size of a shape's bounds along y.
 
     tall(shape) -> number
 
+### surface
+
+The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.
+
+    surface(shape, x, y, z) -> list
+
 ### angle
 
 The current pose's angles for a joint, as [x, y, z] degrees (all zero at rest, or for a joint the pose does not set): what a member between two moving bodies (a hydraulic cylinder, a strut) needs to work out its end points with sin and cos. Nested joints' angles are relative to their parent.

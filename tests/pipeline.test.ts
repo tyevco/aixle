@@ -173,7 +173,7 @@ describe("rigs, features and overhangs", () => {
       expect(table.report).toMatch(/Overhangs \| \d+% of the surface faces down/);
       const cube = run("m = box(2)", "cube.aix", dir, { ...QUICK, grid: 16 });
       expect(cube.physics?.overhang ?? 1).toBe(0);
-      expect(cube.report).toMatch(/Overhangs \| none/);
+      expect(cube.report).toMatch(/Overhangs \| 0\.0% of the surface faces down more than 45° above the floor \|/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -262,6 +262,12 @@ describe("round-3 findings", () => {
       const r2 = run("post = cylinder(0.08, 1) | move(0, 0.5, 0)\nstar = extrude(star(5, 0.3, 0.13), 0.08) | move(0, 1.3, 0)\nm = post + star", "star.aix", dir, { ...QUICK, grid: 48 });
       expect(r2.warnings.join()).toMatch(/separate pieces.*'star'/);
       expect(r2.warnings.join()).not.toMatch(/speck/);
+      // A lug built at the origin and moved into place, inside a posed joint, is named by the lug: the innermost step,
+      // found by walking the tree with each transform's inverse (round 4: the arm's union was named instead).
+      const rig = "lug = sphere(0.2)\narm = box(0.3, 2, 0.3) | move(0, 1, 0)\nboom = arm + (lug | move(0, 2.6, 0))\nrig = joint(boom, \"hinge\", 0, 0, 0)\nbase = box(2, 0.3, 2)\nm = base + rig";
+      const r3 = run(rig, "rig.aix", dir, { ...QUICK, grid: 48, poses: false });
+      expect(r3.warnings.join()).toMatch(/separate pieces.*'lug'/);
+      expect(r3.warnings.join()).not.toMatch(/'arm'/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -273,7 +279,7 @@ describe("round-3 findings", () => {
     expect(paintWarnings(lid).join()).toMatch(/'lid' \(line 1\) joins painted and unpainted parts/);
     expect(paintWarnings(check('lid = (cone(1, 0.5, 0.3) + ellipsoid(0.5, 0.2, 0.5)) | paint("gold")'))).toHaveLength(0);
     const small = check('t = extrude(text("Best in Show", 0.12, weight=0.05), 0.1)\nbase = box(5, 0.2, 5)\nm = t + base');
-    expect(thinWarnings(small, 0.04, 128).join()).toMatch(/'t' \(line 1\) has (gaps \(a letter's counters, a slot\) only|lettering whose counters .* close up)/);
+    expect(thinWarnings(small, 0.04, 128).join()).toMatch(/'t' \(line 1\) has (gaps \(a letter's counters, the space between letters, a slot\) only|lettering whose gaps .* close up)/);
     expect(thinWarnings(check('t = extrude(text("Best in Show", 0.4, weight=0.06), 0.1)'), 0.02, 128)).toHaveLength(0);
   });
   it("angle() reads the pose being evaluated, and numbers print whole", () => {

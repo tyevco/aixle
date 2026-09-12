@@ -28,6 +28,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 3 | Hydraulic excavator, again | [`round-3/excavator.aix`](round-3/excavator.aix) | [report](round-3/excavator.report.md) | six extra joints keep every cylinder pin-to-pin; nested joint angles were undocumented and no builtin read the pose, both fixed |
 | 3 | Market stall, again | [`round-3/market.aix`](round-3/market.aix) | [report](round-3/market.report.md) | eleven objects with a lit lantern; a silent empty intersection and the clipped ground slab, both fixed |
 | 3 | Award trophy, again | [`round-3/trophy.aix`](round-3/trophy.aix) | [report](round-3/trophy.report.md) | product-photo quality in nine renders; a cavity reported as a loose piece and a star reported as a speck, both fixed |
+| 4 | Frog, inherited | [`round-4/frog.aix`](round-4/frog.aix) | [report](round-4/frog.report.md) | watertight with no overhangs from a program it read cold; found a webbed foot the round-3 report never mentioned; open edges were blamed on the wrong step, fixed |
+| 4 | Excavator, inherited | [`round-4/excavator.aix`](round-4/excavator.aix) | [report](round-4/excavator.report.md) | six cylinder joints replaced by `angle()`, a real bucket, one open edge left; `--focus` in a pose framed the rest position and `check` hid profiles, both fixed |
+| 4 | Market stall, inherited | [`round-4/market.aix`](round-4/market.aix) | [report](round-4/market.report.md) | one piece from two, overhangs down, fruit-on-fruit contacts left; a zero-volume piece and a quick pass's pieces count were noise, both fixed |
+| 4 | Trophy, inherited | [`round-4/trophy.aix`](round-4/trophy.aix) | [report](round-4/trophy.report.md) | overhangs 8% to 1%, cup filled for the slicer; rim lettering never watertight, which was the space between its letters, now warned |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -47,6 +51,21 @@ the export path, which the brief now covers: each agent shipped a GLB,
 tried a headless-browser screenshot of the viewer page (blank in this
 sandbox, whose proxy drops the browser's connection to the three.js CDN)
 and re-imported the GLB through `import()` to compare.
+
+Round 4 changed the shape of the exercise: each fresh agent inherited a
+round-3 program, its renders and its report, had to read and understand
+it, make it print-ready (one piece, watertight, standing, low overhang,
+an STL a slicer takes) and improve it, and verify the result by the
+beauty render and a GLB round trip. What they reported was the cost of
+working from someone else's program: defects named by the assembly
+rather than the part, posed parts framed and listed where they were
+built rather than where the pose put them, profiles invisible to
+`check`, and a report with rows that hid the number. One agent's own
+diagnosis was wrong in an instructive way: the trophy's hundred open
+edges were read as acute stroke junctions, and a smooth minimum across
+the strokes was tried and changed nothing (29 edges to 30); the edges
+were neighbouring letters whose strokes came within a third of a cell of
+each other, which the letter spacing now reports as a gap.
 
 ## What each round changed
 
@@ -90,6 +109,27 @@ for the beauty camera; `angle("joint")` reads the current pose and
 for nested joint angles being relative, text width and legibility,
 `wrap` arc angles, `tiles` orientation, the sheet's per-vertex colouring,
 `--quick --beauty` limits, and what `import` keeps.
+
+**Round 4** (round-3 programs inherited by fresh agents, print-ready
+as the bar): loose pieces and open edges named by the innermost step
+whose surface passes there, found by walking the shape tree with each
+transform's inverse, then its nearest named parent; `--focus` frames a
+step where the pose puts it and the close-up gets its own watertight
+row; `check` lists 2D profiles and number lists, prints a `surface`
+line under a turned box and a `posed` line under a step inside a turned
+joint; the space between letters counts as a gap, with a softer warning
+between half a cell and a cell; a warning when a union paints over parts
+that had materials, and when a program names a step after a builtin it
+also calls; `surface(shape, x, y, z)` for the nearest surface point;
+nested point lists in paths; `a & b` keeps a's material like `a - b`; a
+sweep's box allows for its mitres; the beauty camera fits the box's
+corners rather than its sphere; zero-volume pieces dropped; the pieces
+count not judged on a quick sheet that dropped thin steps; custom
+materials named after their step; the overhang row always a number;
+`import` says it is sampling before the wait; `check`'s cell to three
+figures; docs for `loft`'s frame, the side-profile flip, the `angle()`
+cylinder pattern, contact versus overlap, the thin threshold, and the
+outline a cross-section draws just behind its plane.
 
 ## Running a round
 

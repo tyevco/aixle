@@ -149,9 +149,11 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     kind: "shape3",
     dist: (x, y, z) => smax(da(x, y, z), db(x, y, z), k),
     hit: (x, y, z) => {
-      const p = ha(x, y, z), q = hb(x, y, z);
-      const d = smax(p.d, q.d, k);
-      return { ...(p.d >= q.d ? p : q), d };
+      // Like difference, the first shape's material shows everywhere: `a & b` keeps a's paint on the faces b cut
+      // (measured: a painted lemon row intersected with a box came out in the box's default grey on the cut faces).
+      const p = ha(x, y, z);
+      const d = smax(p.d, hb(x, y, z).d, k);
+      return { ...p, d };
     },
     bounds: boundsIntersect(a.bounds, b.bounds),
     cost: a.cost + b.cost,
@@ -175,6 +177,8 @@ export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {
     cost: s.cost,
     inner: [s],
     transform: true,
+    unwarp: (x, y, z) => [x - dx, y - dy, z - dz],
+    warp: (x, y, z) => [x + dx, y + dy, z + dz],
     feature: s.feature,
     gap: s.gap,
   };
@@ -194,6 +198,9 @@ export function rotateBy(s: Shape3, m: Mat3): Shape3 {
     cost: s.cost,
     inner: [s],
     transform: true,
+    unwarp: (x, y, z) => [a * x + b * y + c * z, e * x + f * y + g * z, i * x + j * y + l * z],
+    warp: (x, y, z) => apply(m, [x, y, z]),
+    loose: true,
     feature: s.feature,
     gap: s.gap,
   };
@@ -224,6 +231,8 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     cost: s.cost,
     inner: [s],
     transform: true,
+    unwarp: (x, y, z) => [x / sx, y / sy, z / sz],
+    warp: (x, y, z) => [x * sx, y * sy, z * sz],
     feature: s.feature === undefined ? undefined : s.feature * m,
     gap: s.gap === undefined ? undefined : s.gap * m,
   };
@@ -305,6 +314,8 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    unwarp: warp,
+    loose: true,
     feature: s.feature,
     gap: s.gap,
   };
@@ -359,6 +370,8 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    unwarp,
+    loose: true,
     feature: s.feature,
     gap: s.gap,
   };
@@ -401,6 +414,8 @@ export function wrap(s: Shape3, r: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    unwarp,
+    loose: true,
     feature: s.feature,
     gap: s.gap,
   };
@@ -610,6 +625,8 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
   const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false };
   const turned = angles[0] === 0 && angles[1] === 0 && angles[2] === 0 ? child : move(rotate(move(child, -px, -py, -pz), angles[0], angles[1], angles[2]), px, py, pz);
   const d = turned.dist, h = turned.hit;
+  const m = rotXYZ(angles[0], angles[1], angles[2]);
+  const [a, b, c, e, f, g, i, j, l] = transpose(m);
   return {
     kind: "shape3",
     dist: (x, y, z) => (state.hidden ? FAR : d(x, y, z)),
@@ -617,10 +634,87 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
     bounds: turned.bounds,
     cost: child.cost,
     inner: [child],
+    // The child is authored in place; a world point on the posed part is pulled back through the turn about the pivot.
+    unwarp: (x, y, z) => {
+      const qx = x - px, qy = y - py, qz = z - pz;
+      return [a * qx + b * qy + c * qz + px, e * qx + f * qy + g * qz + py, i * qx + j * qy + l * qz + pz];
+    },
+    warp: (x, y, z) => {
+      const q = apply(m, [x - px, y - py, z - pz]);
+      return [q[0] + px, q[1] + py, q[2] + pz];
+    },
+    loose: turned !== child,
     joint: state,
     feature: child.feature,
     gap: child.gap,
   };
+}
+
+/**
+ * The point on a shape's surface nearest to (x, y, z), by sliding along the
+ * field's gradient: each step moves by the signed distance against the
+ * gradient, which lands on the surface in a few steps for an exact field
+ * and settles close for a blended or warped one. What a rod that must
+ * meet a curved body needs: the body's own surface point, not a guess
+ * from its box (round 4: a hydraulic cylinder's foot was placed by eye).
+ */
+export function surfacePoint(s: Shape3, x: number, y: number, z: number): Vec3 {
+  let px = x, py = y, pz = z;
+  const e = 1e-4;
+  for (let i = 0; i < 12; i++) {
+    const d = s.dist(px, py, pz);
+    if (Math.abs(d) < 1e-6) break;
+    let gx = s.dist(px + e, py, pz) - s.dist(px - e, py, pz);
+    let gy = s.dist(px, py + e, pz) - s.dist(px, py - e, pz);
+    let gz = s.dist(px, py, pz + e) - s.dist(px, py, pz - e);
+    const len = Math.hypot(gx, gy, gz);
+    if (len < 1e-12) break;
+    gx /= len; gy /= len; gz /= len;
+    px -= d * gx; py -= d * gy; pz -= d * gz;
+  }
+  return [px, py, pz];
+}
+
+/** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
+export function hasLooseBounds(s: Shape3): boolean {
+  const seen = new Set<Shape3>();
+  const walk = (n: Shape3): boolean => {
+    if (seen.has(n)) return false;
+    seen.add(n);
+    if (n.loose) return true;
+    for (const k of n.parts ?? n.inner ?? []) if (walk(k)) return true;
+    return n.instanced ? walk(n.instanced.base) : false;
+  };
+  return walk(s);
+}
+
+/**
+ * Where a shape inside `root` ends up: its bounds carried through every
+ * transform and posed joint on the path down to it. A step built at the
+ * origin and moved, or a bucket inside a turned joint, is not where its
+ * own box says (round 4: --focus in a pose framed the rest position).
+ * Undefined when the shape is not under the root or a warp on the way has
+ * no forward map.
+ */
+export function placedBounds(root: Shape3, target: Shape3, own: Bounds): Bounds | undefined {
+  const chain: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const find = (n: Shape3): boolean => {
+    if (n === target) return true;
+    if (seen.has(n)) return false;
+    seen.add(n);
+    chain.push(n);
+    for (const k of n.parts ?? n.inner ?? []) if (find(k)) return true;
+    if (n.instanced && find(n.instanced.base)) return true;
+    chain.pop();
+    return false;
+  };
+  if (!find(root)) return undefined;
+  const maps = chain.filter((n) => n.unwarp || n.warp);
+  if (maps.some((n) => !n.warp)) return undefined;
+  let pts = boundsCorners(own);
+  for (let k = maps.length - 1; k >= 0; k--) pts = pts.map((p) => maps[k].warp!(p[0], p[1], p[2]));
+  return boundsFromPoints(pts);
 }
 
 /** The joints anywhere inside a shape, outermost first, without descending into a joint's child. */

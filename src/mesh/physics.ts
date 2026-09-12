@@ -135,6 +135,10 @@ export function analyse(mesh: Mesh, cellSize: number): Physics {
     // The main body's winding gives a positive volume; a shell wound the other way is a void inside something.
     pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre, size: Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), cavity: false });
   }
+  // A piece with no volume is a stray triangle or a flat sliver, not a part; naming it as a loose piece sent an agent
+  // looking for something that is not there (round 4). It is dropped unless it is all there is.
+  const solid = pieces.filter((pc) => pc.volume !== 0);
+  if (solid.length) pieces.length = 0, pieces.push(...solid);
   pieces.sort((a, b) => Math.abs(b.volume) - Math.abs(a.volume));
   const sign = pieces.length ? Math.sign(pieces[0].volume) || 1 : 1;
   for (const pc of pieces) pc.cavity = Math.sign(pc.volume) === -sign && pc.volume !== 0;
