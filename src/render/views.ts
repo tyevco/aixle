@@ -243,11 +243,26 @@ export interface StepView {
   line: number;
   /** The step's mesh, if already extracted; otherwise it is extracted here. */
   mesh?: Mesh;
+  /** True when the step was meshed at a coarser cell than the output, so a missing surface proves nothing. */
+  coarse?: boolean;
 }
 
-/** Extract a small mesh for each step; the pipeline uses these for warnings before drawing them. */
-export function meshSteps(steps: StepView[], resolution = 48): StepView[] {
-  return steps.map((st) => (st.mesh || isEmpty(st.shape.bounds) ? st : { ...st, mesh: surfaceNets(st.shape, { resolution }).mesh }));
+/**
+ * Extract a mesh for each step at the output's cell size, so a step that
+ * has no surface here has none in the output either; capped at
+ * `maxResolution` cells to keep a big step cheap, and marked `coarse` when
+ * the cap made the cell larger than the output's.
+ */
+export function meshSteps(steps: StepView[], cellSize = 0, maxResolution = 64, output?: { shape: Shape3; mesh: Mesh }): StepView[] {
+  return steps.map((st) => {
+    if (st.mesh || isEmpty(st.shape.bounds)) return st;
+    if (output && st.shape === output.shape) return { ...st, mesh: output.mesh, coarse: false };
+    const s = boundsSize(st.shape.bounds);
+    const longest = Math.max(s[0], s[1], s[2]);
+    const wanted = cellSize > 0 ? Math.ceil(longest / cellSize) : 48;
+    const resolution = Math.max(16, Math.min(maxResolution, wanted));
+    return { ...st, mesh: surfaceNets(st.shape, { resolution }).mesh, coarse: wanted > maxResolution };
+  });
 }
 
 /** One perspective thumbnail per step, five per row, labelled with the name and size. */

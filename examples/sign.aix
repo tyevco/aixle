@@ -1,0 +1,14 @@
+# A hanging sign: a rounded oak board with raised brass lettering, a name
+# engraved under it, and two rings on a bar. text() is a 2D profile, so it
+# extrudes for relief and subtracts for engraving. The small engraved line
+# is 0.09 wide, so the grid is raised to keep it above two cells.
+set grid 200
+board = box(7.2, 3.0, 0.3, round=0.08) | paint("oak")
+title = extrude(text("AIXLE", size=1.3, weight=0.22, align="center"), 0.18, "z") | move(0, 0.55, 0.22) | paint("brass")
+line = extrude(text("MODELS FOR MACHINES", size=0.42, weight=0.09, align="center"), 0.5, "z") | move(0, -0.75, 0.15)
+engraved = board - line
+ring = torus(0.28, 0.07) | rotate(x=90) | move(0, 1.7, 0) | paint("iron")
+rings = (ring | move(-2.4, 0, 0)) + (ring | move(2.4, 0, 0))
+bar = cylinder(0.08, 7.6) | rotate(z=90) | move(0, 1.99, 0) | paint("iron")
+sign = (engraved + title + rings + bar) | ground()
+show sign

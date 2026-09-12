@@ -127,7 +127,17 @@ along them (its x across the path, its y up); `loft(a, b, h)` blends from
 profile `a` at the bottom to `b` at the top over height `h`. Both path
 functions take `smooth=n` to curve the path through the points; a handle is
 four points and `smooth=6`. A hollow spout is one tube minus a thinner one
-on the same path.
+on the same path. `taper=` scales the end relative to the start (a horn,
+a tapering tail) and `sweep` also takes `twist=` degrees over the whole
+path, so three circles swept along `helix(r, h, turns)` with
+`twist = 360 * turns` is a rope. `helix()` and `arc(r, from, to)` make
+point lists; any list of numbers works, including one built in a loop.
+
+**Text**: `text("AIXLE", size=1, weight=0.15, align="center")` is a 2D
+profile from a built-in single-stroke font (A-Z, 0-9, punctuation;
+lowercase folds up), laid out on the baseline. Extrude it for raised
+lettering, subtract an extrusion for engraving. `size` is the cap height,
+`weight` the stroke width; keep `weight` above two grid cells.
 
 ## Materials
 
@@ -156,7 +166,9 @@ default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
 of a view. `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
 cross-section plane. `set beauty 1` always writes the ray-marched
 `beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
-to rounded vertex placement if a sharp corner ever misbehaves.
+to rounded vertex placement if a sharp corner ever misbehaves. `set texture
+2048` sizes the baked texture atlas (`0` turns it off and the GLB carries
+vertex colours instead).
 
 ## What the tool checks for you
 
@@ -178,5 +190,5 @@ and, as a note, a model that does not rest on `y = 0`.
   is approximate.
 - Rotated shapes have conservative bounding boxes, so `ground()` and
   `center()` after a rotation can be off by a little.
-- Sweeps follow polylines (smoothed or not); there is no sweep along a true
-  curve with a twist, no text, and no import of meshes yet.
+- Sweeps follow polylines (smoothed or not): a tight bend needs a few more
+  points. There is no import of meshes yet.

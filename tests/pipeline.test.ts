@@ -12,7 +12,7 @@ describe("pipeline", () => {
     try {
       const src = "a = sphere(1) | paint(\"red\")\nb = box(0.5)\nm = a - (box(3, 0.5, 3) | move(0, 1, 0))\nshow m";
       const r = run(src, "test.aix", dir, { grid: 32, size: 96, views: ["front"] });
-      for (const f of ["sheet.png", "front.png", "slices.png", "steps.png", "turntable.png", "model.obj", "model.mtl", "model.glb", "report.md", "report.json"])
+      for (const f of ["sheet.png", "front.png", "slices.png", "steps.png", "turntable.png", "model.obj", "model.mtl", "model.glb", "model.png", "report.md", "report.json"])
         expect(existsSync(join(dir, f)), f).toBe(true);
       expect(r.warnings.join()).toMatch(/'b' \(line 2\) is not part of the output/);
       const report = readFileSync(join(dir, "report.md"), "utf8");

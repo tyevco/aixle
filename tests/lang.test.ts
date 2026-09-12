@@ -108,6 +108,16 @@ describe("interpreter", () => {
     expect(l.dist(0, 0.9, 0)).toBeLessThan(0);
     expect(() => run("t = tube(0.2, [0, 0])")).toThrow(/triples/);
   });
+  it("makes text profiles, helix paths and twisted sweeps from the language", () => {
+    const sign = shape('s = extrude(text("HI", size=2, align="center"), 0.3)', "s");
+    expect(sign.bounds.min[0]).toBeLessThan(0);
+    expect(sign.bounds.max[0]).toBeGreaterThan(0);
+    const spring = shape("s = tube(0.1, helix(1, 3, 4), taper=0.5)", "s");
+    expect(spring.bounds.max[1]).toBeCloseTo(3.1);
+    const rope = shape("r = sweep(circle(0.2), helix(1, 2, 2), twist=360)", "r");
+    expect(rope.bounds.max[0]).toBeGreaterThan(1.19);
+    expect(rope.bounds.max[0]).toBeLessThan(1.3);
+  });
   it("runs user functions with defaults and loops that build up a shape", () => {
     const src = "def peg(h, r=0.1) = cylinder(r, h)\nall = empty()\nfor i in range(4) {\n all = all + (peg(1) | move(i, 0, 0))\n}";
     const all = shape(src, "all");

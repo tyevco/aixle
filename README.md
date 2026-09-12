@@ -45,7 +45,9 @@ red frame means it never made it into the output:
 The loop an agent runs is: write a `.aix` file, `check` it, `render` it,
 read `sheet.png`, compare against what was intended, fix, repeat.
 [`docs/agent-guide.md`](docs/agent-guide.md) is the short version of that
-loop with the checklist; drop it into a system prompt or a skill.
+loop with the checklist, and [`.claude/skills/aixle/SKILL.md`](.claude/skills/aixle/SKILL.md)
+packages it as a Claude Code skill: copy that folder into another
+project's `.claude/skills/` and `/aixle` brings the whole loop along.
 [`docs/language.md`](docs/language.md) is the language guide and
 [`docs/reference.md`](docs/reference.md) every function with its signature,
 generated from the code so it cannot drift.
@@ -68,8 +70,9 @@ npx aixle doc                        # the reference, to stdout
 | `steps.png` | one thumbnail per named shape in program order; red = not part of the output |
 | `turntable.png` | eight views around the model |
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
-| `model.obj`, `model.mtl` | the mesh with one group per material |
-| `model.glb` | binary glTF, materials with vertex colours baked from the patterns |
+| `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |
+| `model.png` | the texture atlas: the procedural materials baked per chart |
+| `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
 | `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `report.md`, `report.json` | size, bounds, triangle count, volume, every step's size and whether it is used, warnings |
@@ -83,9 +86,10 @@ for i in range(6) { ... }        # loops; also range(a, b), range(a, b, step), o
 show name                        # what to output (default: the last shape)
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(sides, r, h)
-circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, x2,y2, ...)     # 2D profiles
-extrude(profile, h)  revolve(profile)  loft(a, b, h)                             # profiles to solids
-tube(r, [x,y,z, ...], smooth=6)  sweep(profile, [x,y,z, ...], smooth=6)         # along a path
+circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("HI", size)   # 2D
+extrude(profile, h)  revolve(profile)  loft(a, b, h)                                     # to solids
+tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, taper=1)   # along a path
+helix(r, h, turns)  arc(r, from, to)                                                     # point lists
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
@@ -101,19 +105,22 @@ materials.
 
 ## Examples
 
-[`examples/`](examples/) has ten models exercising the language, each with
-its sheet, slices, steps and beauty render under
+[`examples/`](examples/) has twelve models exercising the language, each
+with its sheet, slices, steps and beauty render under
 [`examples/renders/`](examples/renders/): a mug, a fluted vase from a
 revolved profile, a teapot with a tube spout and a swept handle, a desk
-lamp with a lofted shade, a table with parametric chairs, a brick tower, a
-pair of gears from 2D profiles, a spiral staircase from a loop, a robot
-with per-part materials, and a tree with smooth blends and displacement.
+lamp with a lofted shade, a reel of three-strand rope swept along a helix
+with a twist, a hanging sign with raised and engraved text, a table with
+parametric chairs, a brick tower, a pair of gears from 2D profiles, a
+spiral staircase from a loop, a robot with per-part materials, and a tree
+with smooth blends and displacement.
 
 | | | |
 | --- | --- | --- |
-| ![teapot](examples/renders/teapot_beauty.png) | ![vase](examples/renders/vase_beauty.png) | ![lamp](examples/renders/lamp_beauty.png) |
-| ![tower](examples/renders/tower_beauty.png) | ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) |
-| ![table](examples/renders/table_beauty.png) | ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) |
+| ![teapot](examples/renders/teapot_beauty.png) | ![rope](examples/renders/rope_beauty.png) | ![sign](examples/renders/sign_beauty.png) |
+| ![vase](examples/renders/vase_beauty.png) | ![lamp](examples/renders/lamp_beauty.png) | ![tower](examples/renders/tower_beauty.png) |
+| ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) | ![table](examples/renders/table_beauty.png) |
+| ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) | |
 
 ## How it works
 
@@ -125,7 +132,9 @@ dual contouring on a grid (`--grid`, default 128 cells on the longest
 side), so corners stay sharp, and that one mesh is what the software
 rasteriser draws and what the exporters write, so the pictures show the
 file you get. The beauty render marches the field itself, primed by that
-mesh so it costs about a second. Materials are procedural patterns evaluated in the
+mesh so it costs about a second. For the exports, the procedural materials
+are baked into a texture atlas with UVs, so the GLB looks the same in an
+engine as it does here. Materials are procedural patterns evaluated in the
 painted part's own frame, sampled per pixel when rendering and per vertex
 when exporting; there are no UVs. [`docs/design.md`](docs/design.md) has
 the reasoning and the limits.

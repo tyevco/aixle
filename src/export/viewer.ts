@@ -76,7 +76,7 @@ const bytes = Uint8Array.from(atob(GLB), (c) => c.charCodeAt(0));
 let model;
 new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
   model = gltf.scene;
-  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.material.vertexColors = true; } });
+  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.material.map) o.material.vertexColors = true; } });
   scene.add(model);
 });
 function view(name) {

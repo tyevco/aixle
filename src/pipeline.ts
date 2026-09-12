@@ -9,6 +9,7 @@ import { basename, join } from "node:path";
 import { toGlb } from "./export/glb.js";
 import { toObj } from "./export/obj.js";
 import { viewerHtml } from "./export/viewer.js";
+import { bakeAtlas } from "./export/atlas.js";
 import { renderBeauty } from "./render/beauty.js";
 import { evaluate, type Evaluation } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
@@ -31,6 +32,8 @@ export interface RunOptions {
   glb?: boolean;
   /** Write viewer.html with the GLB embedded. Default true when the GLB is written. */
   viewer?: boolean;
+  /** Bake the materials into a texture atlas of this many pixels square for the exports; 0 disables. Default 1024. */
+  texture?: number;
   /** Ray-march the field for beauty.png. Default false: it costs seconds. */
   beauty?: boolean;
   /** Pixels for the beauty render; default `size`. */
@@ -124,13 +127,22 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       time("slices", () => write("slices.png", renderSlices(output, info, Math.round(size * 0.75), at).toPng()));
     }
     if (opts.turntable !== false) time("turntable", () => write("turntable.png", renderTurntable(mesh!, info, Math.round(size / 2)).toPng()));
+    const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
+    let exportMesh = mesh;
+    let atlas: ReturnType<typeof bakeAtlas> | undefined;
+    if (textureSize > 0 && (opts.obj !== false || opts.glb !== false)) {
+      atlas = time("atlas", () => bakeAtlas(mesh!, { size: Math.max(64, textureSize) }));
+      exportMesh = atlas.mesh;
+      write("model.png", atlas.image.toPng());
+      log(`atlas: ${atlas.charts} charts at ${fmt(atlas.texelsPerUnit)} texels per unit, ${textureSize}px, in ${timings.atlas} ms`);
+    }
     if (opts.obj !== false) {
-      const { obj, mtl } = toObj(mesh, name, "model.mtl");
+      const { obj, mtl } = toObj(exportMesh, name, "model.mtl", atlas?.uv, atlas ? "model.png" : undefined);
       write("model.obj", obj);
       write("model.mtl", mtl);
     }
     if (opts.glb !== false) {
-      const glb = toGlb(mesh, name);
+      const glb = toGlb(exportMesh, name, atlas ? { uv: atlas.uv, png: atlas.image.toPng() } : undefined);
       write("model.glb", glb);
       if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, triangleCount(mesh)));
     }
@@ -144,10 +156,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const shapeSteps = evaluation.steps.filter((s) => isShape3(s.value));
   if (opts.steps !== false && shapeSteps.length > 0) {
     const views: StepView[] = time("steps:mesh", () =>
-      meshSteps(shapeSteps.map((s) => ({ name: s.name, shape: s.value as Shape3, used: evaluation.used.has(s.name), line: s.line }))),
+      meshSteps(
+        shapeSteps.map((s) => ({ name: s.name, shape: s.value as Shape3, used: evaluation.used.has(s.name), line: s.line })),
+        cellSize,
+        64,
+        output && mesh ? { shape: output, mesh } : undefined,
+      ),
     );
     for (const st of views)
-      if (st.used && st.mesh && triangleCount(st.mesh) === 0)
+      if (st.used && st.mesh && !st.coarse && triangleCount(st.mesh) === 0)
         warnings.push(`'${st.name}' (line ${st.line}) has bounds ${dimsLabel(st.shape.bounds)} but no surface: it is missing from the model. A zero blend radius or scale, or a part thinner than a cell?`);
     time("steps", () => write("steps.png", renderSteps(views, Math.round(size * 0.35)).toPng()));
   }
@@ -189,7 +206,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "slices.png": "cross-sections through the centre on each axis",
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
     "turntable.png": "eight views around the model",
-    "model.obj": "Wavefront mesh (with model.mtl)", "model.mtl": "materials for the OBJ", "model.glb": "binary glTF with baked vertex colours",
+    "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
+    "model.png": "the texture atlas: the materials baked per chart",
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
   };

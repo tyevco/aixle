@@ -42,6 +42,24 @@ distance so far, which is exact for `min`. A shape accumulated in a loop
 flattens hard unions into one list. A hundred parts cost about a hundred
 box tests per sample, and only the near ones are evaluated.
 
+## A grid over the pieces
+
+Box culling alone is linear in the number of parts, and a sweep along a
+helix has a hundred pieces whose boxes all overlap. Unions of more than a
+dozen parts, tubes and sweeps therefore build a uniform grid over their
+pieces' boxes once. Each cell lists the pieces within one cell of it and
+carries a floor: the distance from the cell to the nearest unlisted piece's
+box. A query evaluates the listed pieces, and only when the floor is below
+the best so far scans the unlisted pieces with the ordinary box cull, so
+the result is exact everywhere and the scan almost never runs near the
+surface. A first version returned the floor itself as a lower bound: that
+is sign-exact and never overestimates, which extraction accepts, but the
+beauty render's soft shadows read the cell-shaped shortfall as nearby
+geometry and drew the grid on the floor. Measured: the staircase went from
+twelve seconds to five, the rope from fifty-nine to sixteen, and the
+indexed forms agree with the plain minimum to nine places at every sampled
+point.
+
 ## Surface nets with dual contouring, not marching cubes
 
 One vertex per cell that has a sign change; one quad per crossing lattice
@@ -84,17 +102,40 @@ keeps a 384-pixel thumbnail readable.
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.
 
-## Materials without UVs
+## Twist, taper, text
+
+Twist and taper are functions of arc length applied inside each straight
+piece of a sweep, so they are continuous across the mitres; a twisted
+profile's distance is only sign-exact, like the `twist` modifier, which
+extraction does not mind. Text is a single-stroke font: each glyph is a few
+polylines on a 4 by 6 grid, and the profile is everything within half the
+weight of them, a chain of 2D capsules, so the letters are exact and round
+themselves off at the weight. It was checked by rendering every glyph on
+one plate and reading it.
+
+## Materials without UVs, and the atlas that bakes them anyway
 
 A material is a colour, a second colour, and a procedural pattern evaluated
 at a 3D point. The point is in the frame where `paint` was applied: the
 material query carries it through every transform above the paint, so wood
 grain stays on a table leg when the leg is moved. The renderer samples the
-pattern per pixel from the interpolated local point; the exporters sample it
-per vertex (vertex colours in the GLB; the OBJ can only carry the base
-colour in its MTL). Unwrapping to a texture atlas is possible later and
-would be the way to carry the patterns into engines that ignore vertex
-colour.
+pattern per pixel from the interpolated local point.
+
+For the exports the patterns are baked into a texture atlas (`model.png`),
+because most engines ignore vertex colours and a mesh whose colour lives
+only in a function cannot leave the tool. Each triangle takes the axis its
+normal points along most; triangles sharing an edge and an axis form a
+chart; a chart is projected flat along its axis (nearly distortion-free for
+a surface facing that way), and charts are shelf-packed at one
+texels-per-unit scale with padding. Every texel is shaded by the same
+`albedo()` from its interpolated local point, chart borders are dilated so
+filtering never bleeds background into a seam, and vertices are split per
+chart so each has one UV. The GLB embeds the PNG and samples it; the OBJ
+gets `vt` and `map_Kd`. Vertex colours are left out of a textured GLB,
+because a viewer multiplies the two and would show the pattern squared.
+The known limit is a patch that folds back on itself along its own axis
+within one chart: those texels are written twice and the later triangle
+wins.
 
 Where two materials meet, a triangle takes the material of its nearest
 vertex per pixel, which makes a clean edge at grid resolution.
@@ -136,6 +177,7 @@ once. It exists for people; an agent verifies from the PNGs.
 
 ## What is not here yet
 
-- Sweeps along true curves with twist control; text.
-- Texture baking to an atlas for the GLB (patterns travel as vertex colours).
+- Sweeps along true curves rather than fine polylines.
+- Lowercase and accented glyphs; a second, serif face.
 - Refraction for glass, area lights, depth of field in the beauty render.
+- Mesh import, so an existing model can be a primitive.

@@ -6,7 +6,19 @@
 import { albedo } from "../sdf/materials.js";
 import type { Mesh } from "../mesh/mesh.js";
 
-export function toGlb(mesh: Mesh, name: string): Buffer {
+export interface GlbTexture {
+  /** u, v per vertex, glTF convention. */
+  uv: Float32Array;
+  /** PNG bytes of the atlas. */
+  png: Buffer;
+}
+
+/**
+ * With `texture`, the mesh's UVs and the atlas PNG go into the file and the
+ * material samples it; vertex colours are left out then, since a viewer
+ * multiplies the two and would show the pattern squared.
+ */
+export function toGlb(mesh: Mesh, name: string, texture?: GlbTexture): Buffer {
   const n = mesh.positions.length / 3;
   const colors = new Float32Array(n * 3);
   for (let v = 0; v < n; v++) {
@@ -26,7 +38,7 @@ export function toGlb(mesh: Mesh, name: string): Buffer {
   const pushView = (data: Buffer, target: number): number => {
     const padded = Buffer.concat([data, Buffer.alloc((4 - (data.length % 4)) % 4)]);
     chunks.push(padded);
-    bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: data.length, target });
+    bufferViews.push(target ? { buffer: 0, byteOffset: offset, byteLength: data.length, target } : { buffer: 0, byteOffset: offset, byteLength: data.length });
     offset += padded.length;
     return bufferViews.length - 1;
   };
@@ -48,7 +60,15 @@ export function toGlb(mesh: Mesh, name: string): Buffer {
   };
   const posAcc = vec3Accessor(mesh.positions, true);
   const nrmAcc = vec3Accessor(mesh.normals, false);
-  const colAcc = vec3Accessor(colors, false);
+  const colAcc = texture ? -1 : vec3Accessor(colors, false);
+  let uvAcc = -1, imageView = -1;
+  if (texture) {
+    if (texture.uv.length !== n * 2) throw new Error(`texture uv count ${texture.uv.length / 2} does not match ${n} vertices`);
+    const view = pushView(Buffer.from(texture.uv.buffer, texture.uv.byteOffset, texture.uv.byteLength), 34962);
+    accessors.push({ bufferView: view, componentType: 5126, count: n, type: "VEC2" });
+    uvAcc = accessors.length - 1;
+    imageView = pushView(texture.png, 0);
+  }
 
   const primitives: object[] = [];
   const materials: object[] = [];
@@ -58,18 +78,16 @@ export function toGlb(mesh: Mesh, name: string): Buffer {
     const arr = new Uint32Array(tris);
     const view = pushView(Buffer.from(arr.buffer), 34963);
     accessors.push({ bufferView: view, componentType: 5125, count: arr.length, type: "SCALAR" });
-    materials.push({
-      name: m.name,
-      pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: m.metal, roughnessFactor: m.rough },
-    });
-    primitives.push({
-      attributes: { POSITION: posAcc, NORMAL: nrmAcc, COLOR_0: colAcc },
-      indices: accessors.length - 1,
-      material: materials.length - 1,
-    });
+    const pbr: Record<string, unknown> = { baseColorFactor: [1, 1, 1, 1], metallicFactor: m.metal, roughnessFactor: m.rough };
+    if (texture) pbr.baseColorTexture = { index: 0 };
+    materials.push({ name: m.name, pbrMetallicRoughness: pbr });
+    const attributes: Record<string, number> = { POSITION: posAcc, NORMAL: nrmAcc };
+    if (texture) attributes.TEXCOORD_0 = uvAcc;
+    else attributes.COLOR_0 = colAcc;
+    primitives.push({ attributes, indices: accessors.length - 1, material: materials.length - 1 });
   });
 
-  const json = {
+  const json: Record<string, unknown> = {
     asset: { version: "2.0", generator: "aixle" },
     scene: 0,
     scenes: [{ nodes: [0] }],
@@ -78,8 +96,14 @@ export function toGlb(mesh: Mesh, name: string): Buffer {
     materials,
     accessors,
     bufferViews,
-    buffers: [{ byteLength: offset }],
+    buffers: [{ byteLength: 0 }],
   };
+  if (texture) {
+    json.images = [{ bufferView: imageView, mimeType: "image/png", name: `${name} atlas` }];
+    json.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 }];
+    json.textures = [{ sampler: 0, source: 0 }];
+  }
+  (json.buffers as { byteLength: number }[])[0].byteLength = offset;
   let jsonBuf = Buffer.from(JSON.stringify(json), "utf8");
   jsonBuf = Buffer.concat([jsonBuf, Buffer.alloc((4 - (jsonBuf.length % 4)) % 4, 0x20)]);
   const bin = Buffer.concat(chunks);

@@ -9,10 +9,12 @@
 import { fbm3 } from "../core/noise.js";
 import { apply, length2, rad, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
 import { primitive } from "./primitives.js";
+import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import { smax, smin } from "./shapes2d.js";
 import {
   boundsCenter,
   boundsCorners,
+  boundsSize,
   boundsDistance,
   boundsFromPoints,
   boundsGrow,
@@ -60,9 +62,15 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
   };
   const cost = live.reduce((c, s) => c + s.cost, 0);
   if (k <= 0) {
+    // Many parts: a grid over their boxes, so a query touches only the parts near it.
+    const size = boundsSize(bounds);
+    const margin = Math.max(size[0], size[1], size[2]) * 0.1;
+    const index = n > 12 ? buildSpatialIndex(n, bmin, bmax, { min: bounds.min.map((v) => v - margin), max: bounds.max.map((v) => v + margin) }, cellsFor(n)) : undefined;
+    const piece = (i: number, x: number, y: number, z: number): number => fns[i](x, y, z);
     return {
       kind: "shape3",
       dist: (x, y, z) => {
+        if (index) return index.min(x, y, z, piece, boxDist, FAR);
         let best = FAR;
         for (let i = 0; i < n; i++) {
           if (boxDist(i, x, y, z) >= best) continue;

@@ -115,6 +115,16 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
     polygon(points) -> shape2
     polygon(coords...) -> shape2
 
+### text
+
+Lettering as a 2D profile from a single-stroke font (A-Z, 0-9, punctuation; lowercase folds up), laid out from x = 0 on the baseline y = 0. `size` is the cap height, `weight` the stroke width; `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving.
+
+    text(text, size=1, weight=0.15, align="left", spacing=0) -> shape2
+
+- `size`: cap height
+- `weight`: stroke width
+- `spacing`: extra gap between letters
+
 ## 2D to 3D
 
 ### extrude
@@ -133,19 +143,36 @@ Spin a profile around y; its x is the radius (draw it on x >= 0), pushed out by 
 
 ### tube
 
-A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty).
+A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty); `taper` is the radius at the end relative to the start.
 
-    tube(r, points, smooth=0) -> shape
+    tube(r, points, smooth=0, taper=1) -> shape
 
 - `points`: a flat list [x,y,z, x,y,z, ...]
+- `taper`: end radius / start radius
 
 ### sweep
 
-A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path.
+A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path; `twist` turns the profile by that many degrees over the whole path; `taper` scales it to that factor by the end.
 
-    sweep(profile, points, smooth=0) -> shape
+    sweep(profile, points, smooth=0, twist=0, taper=1) -> shape
 
 - `points`: a flat list [x,y,z, x,y,z, ...]
+- `twist`: degrees over the path
+- `taper`: end scale
+
+### helix
+
+A path list for a helix of radius r rising h over `turns` turns around y, for tube() or sweep().
+
+    helix(r, h, turns, per_turn=16) -> list
+
+- `per_turn`: points per turn
+
+### arc
+
+A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).
+
+    arc(r, from=0, to=90, segments=16) -> list
 
 ### loft
 
