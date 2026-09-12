@@ -17,7 +17,8 @@ function usage(): never {
     [
       "usage:",
       "  aixle render <file.aix> [--out DIR] [--grid N] [--size N] [--views persp,front,right,top]",
-      "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export]",
+      "                          [--beauty [--beauty-size N]] [--soft]",
+      "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix>        parse and evaluate; print sizes and warnings, render nothing",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
     ].join("\n"),
@@ -91,6 +92,10 @@ function main(argv: string[]): number {
       turntable: !opts["no-turntable"],
       obj: !opts["no-export"],
       glb: !opts["no-export"],
+      viewer: !opts["no-viewer"],
+      beauty: opts.beauty === true,
+      beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
+      sharp: opts.soft ? false : undefined,
       log: (l) => console.log(l),
     });
     console.log(`wrote ${result.files.length} files to ${outDir}`);

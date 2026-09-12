@@ -49,6 +49,10 @@ the inside is cut open.
 | "is not part of the output" | a step never got added to the final shape | add it, or delete it |
 | an edge looks jagged | the grid is coarse for the size | `--grid 200` (slower, cubic) |
 
+When the model is right, `npx aixle render model.aix --beauty` adds
+`beauty.png`, the field ray-marched with shadows, for showing rather than
+checking; `viewer.html` next to it orbits the mesh in a browser.
+
 ## Style that renders well
 
 - Overlap parts slightly (a peg 0.02 into its hole) rather than touching;

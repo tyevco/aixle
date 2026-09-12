@@ -121,6 +121,14 @@ y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
 - `extrude(profile, h)` lays the profile flat (its y towards -z) and
   thickens it `h` up; `extrude(profile, h, "z")` makes it face the front.
 
+**Paths**: `tube(r, [x,y,z, x,y,z, ...])` is a round tube along the
+points with rounded joins; `sweep(profile, [points])` carries a 2D profile
+along them (its x across the path, its y up); `loft(a, b, h)` blends from
+profile `a` at the bottom to `b` at the top over height `h`. Both path
+functions take `smooth=n` to curve the path through the points; a handle is
+four points and `smooth=6`. A hollow spout is one tube minus a thinner one
+on the same path.
+
 ## Materials
 
 `paint(shape, m)` gives the whole shape one material; `m` is a preset name
@@ -146,7 +154,9 @@ with the part: paint, then `move`.
 `set grid N` sets the extraction resolution (cells along the longest side,
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
 of a view. `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
-cross-section plane.
+cross-section plane. `set beauty 1` always writes the ray-marched
+`beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
+to rounded vertex placement if a sharp corner ever misbehaves.
 
 ## What the tool checks for you
 
@@ -160,10 +170,13 @@ and, as a note, a model that does not rest on `y = 0`.
 ## Limits worth knowing
 
 - Detail thinner than a grid cell disappears. The cell size is on the sheet
-  (`CELL 0.03`); raise `--grid` for fine work, at a cubic cost.
+  (`CELL 0.03`); raise `--grid` for fine work, at a cubic cost. Edges and
+  corners are exact (the vertex placement fits the tangent planes), so a
+  box is a box at any grid; only features smaller than a cell go.
 - Non-uniform `scale`, `twist`, `bend` and `displace` distort distances; the
   surface is still right, but a `round` or smooth blend applied *after* them
   is approximate.
 - Rotated shapes have conservative bounding boxes, so `ground()` and
   `center()` after a rotation can be off by a little.
-- There is no text, no sweep along a path, and no import of meshes yet.
+- Sweeps follow polylines (smoothed or not); there is no sweep along a true
+  curve with a twist, no text, and no import of meshes yet.

@@ -129,6 +129,30 @@ Spin a profile around y; its x is the radius (draw it on x >= 0), pushed out by 
 
     revolve(profile, offset=0) -> shape
 
+## Paths
+
+### tube
+
+A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty).
+
+    tube(r, points, smooth=0) -> shape
+
+- `points`: a flat list [x,y,z, x,y,z, ...]
+
+### sweep
+
+A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path.
+
+    sweep(profile, points, smooth=0) -> shape
+
+- `points`: a flat list [x,y,z, x,y,z, ...]
+
+### loft
+
+A solid h tall that is profile a at the bottom and profile b at the top, blending between them.
+
+    loft(a, b, h) -> shape
+
 ## Booleans
 
 ### union

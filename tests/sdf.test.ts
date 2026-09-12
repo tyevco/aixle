@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
+import * as W from "../src/sdf/sweeps.js";
 import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
 import { albedo, materialFromString, preset } from "../src/sdf/materials.js";
 
@@ -193,5 +194,51 @@ describe("materials", () => {
     expect(albedo(c, 0.6, 0.1, 0.1)).toEqual(c.color2);
     const w = materialFromString("wood")!;
     expect(albedo(w, 0.3, 0.2, 0.1)).toEqual(albedo(w, 0.3, 0.2, 0.1));
+  });
+});
+
+describe("paths", () => {
+  it("tube is a capsule chain with exact distance", () => {
+    const t = W.tube([[0, 0, 0], [2, 0, 0], [2, 2, 0]], 0.25);
+    expect(t.dist(1, 0, 0)).toBeCloseTo(-0.25);
+    expect(t.dist(2, 1, 0)).toBeCloseTo(-0.25);
+    expect(t.dist(1, 1, 0)).toBeCloseTo(1 - 0.25);
+    expect(t.dist(3, 0, 0)).toBeCloseTo(0.75);
+    expect(t.bounds.max).toEqual([2.25, 2.25, 0.25]);
+  });
+  it("sweep carries a profile in a frame with its y up", () => {
+    const s = W.sweep(S.rect(1, 0.2), [[0, 0, 0], [4, 0, 0]]);
+    expect(s.dist(2, 0, 0)).toBeCloseTo(-0.1);
+    expect(s.dist(2, 0, 0.4)).toBeCloseTo(-0.1);
+    expect(s.dist(2, 0.4, 0)).toBeCloseTo(0.3);
+    expect(s.dist(5, 0, 0)).toBeCloseTo(1);
+  });
+  it("sweep covers the outside of a bend and cuts the path's ends flat", () => {
+    const bent = W.sweep(S.circle(0.3), [[0, 0, 0], [2, 0, 0], [2, 2, 0]]);
+    // The outer corner of the bend, just off the join, is inside.
+    expect(bent.dist(2.15, 0.15, 0)).toBeLessThan(0);
+    expect(bent.dist(2.28, -0.1, 0)).toBeLessThan(0);
+    // The start is cut flat: nothing before x = 0.
+    expect(bent.dist(-0.05, 0, 0)).toBeGreaterThan(0);
+    expect(bent.dist(2, 2.05, 0)).toBeGreaterThan(0);
+  });
+  it("smoothing a path passes through its points and adds them in between", () => {
+    const pts: [number, number, number][] = [[0, 0, 0], [1, 1, 0], [2, 0, 0]];
+    const sm = W.smoothPath(pts, 4);
+    expect(sm.length).toBe(9);
+    expect(sm[4]).toEqual([1, 1, 0]);
+    expect(sm[8]).toEqual([2, 0, 0]);
+    expect(W.smoothPath(pts, 0)).toBe(pts);
+  });
+  it("loft is a at the bottom and b at the top", () => {
+    const l = W.loft(S.circle(1), S.rect(0.5, 0.5), 2);
+    expect(l.dist(0, -0.99, 0.9)).toBeLessThan(0);
+    expect(l.dist(0, 0.99, 0.9)).toBeGreaterThan(0);
+    expect(l.dist(0, 0.99, 0.2)).toBeLessThan(0);
+    expect(l.dist(0, 1.5, 0)).toBeCloseTo(0.5);
+    expect(l.bounds.min[1]).toBe(-1);
+  });
+  it("rejects a malformed point list with a count", () => {
+    expect(() => W.toPoints([1, 2, 3, 4], "tube")).toThrow(/triples.*got 4/);
   });
 });

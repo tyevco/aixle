@@ -26,6 +26,22 @@ describe("pipeline", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("writes the viewer page and a beauty render when asked", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("m = box(1) | paint(\"gold\")", "box.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, beauty: true, beautySize: 64 });
+      expect(r.files).toContain("viewer.html");
+      expect(r.files).toContain("beauty.png");
+      const html = readFileSync(join(dir, "viewer.html"), "utf8");
+      expect(html).toContain("<title>m · aixle viewer</title>");
+      expect(html).toMatch(/const GLB = "Z2xURg/); // "glTF" in base64
+      expect(html).toContain("three@0.160.0");
+      const png = readFileSync(join(dir, "beauty.png"));
+      expect(png.readUInt32BE(16)).toBe(64);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("warns instead of failing when the output is empty", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {

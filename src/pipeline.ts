@@ -8,6 +8,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { toGlb } from "./export/glb.js";
 import { toObj } from "./export/obj.js";
+import { viewerHtml } from "./export/viewer.js";
+import { renderBeauty } from "./render/beauty.js";
 import { evaluate, type Evaluation } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
@@ -27,6 +29,14 @@ export interface RunOptions {
   turntable?: boolean;
   obj?: boolean;
   glb?: boolean;
+  /** Write viewer.html with the GLB embedded. Default true when the GLB is written. */
+  viewer?: boolean;
+  /** Ray-march the field for beauty.png. Default false: it costs seconds. */
+  beauty?: boolean;
+  /** Pixels for the beauty render; default `size`. */
+  beautySize?: number;
+  /** Vertex placement: sharp (dual contouring, default) or the rounded surface-nets mean. */
+  sharp?: boolean;
   /** Called with progress lines. */
   log?: (line: string) => void;
 }
@@ -84,7 +94,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     warnings.push(`'${evaluation.outputName}' is empty: nothing to render. A difference may have removed everything, or an intersection may not overlap.`);
   } else {
     bounds = output.bounds;
-    const nets = time("mesh", () => surfaceNets(output, { resolution: grid }));
+    const nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
     mesh = nets.mesh;
     cellSize = nets.cellSize;
     log(`mesh: ${triangleCount(mesh)} triangles, cell ${fmt(cellSize)} (${nets.dims.join("×")} cells, ${nets.samples} samples) in ${timings.mesh} ms`);
@@ -119,7 +129,16 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       write("model.obj", obj);
       write("model.mtl", mtl);
     }
-    if (opts.glb !== false) write("model.glb", toGlb(mesh, name));
+    if (opts.glb !== false) {
+      const glb = toGlb(mesh, name);
+      write("model.glb", glb);
+      if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, triangleCount(mesh)));
+    }
+    if (opts.beauty || evaluation.settings.beauty === 1) {
+      const bsize = Math.max(64, Math.round(opts.beautySize ?? size));
+      time("beauty", () => write("beauty.png", renderBeauty(output, mesh!, bounds!, { size: bsize, cellSize, label: `${evaluation.outputName}  ${dimsLabel(bounds!)}` }).toPng()));
+      log(`beauty render ${bsize}px in ${timings.beauty} ms`);
+    }
   }
 
   const shapeSteps = evaluation.steps.filter((s) => isShape3(s.value));
@@ -171,6 +190,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
     "turntable.png": "eight views around the model",
     "model.obj": "Wavefront mesh (with model.mtl)", "model.mtl": "materials for the OBJ", "model.glb": "binary glTF with baked vertex colours",
+    "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
+    "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
   };
   for (const f of files) lines.push(`- \`${f}\`: ${descriptions[f] ?? ""}`);
   lines.push("", `Timings (ms): ${Object.entries(timings).map(([k, v]) => `${k} ${v}`).join(", ")}`, "");

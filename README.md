@@ -25,6 +25,11 @@ npx aixle render examples/mug.aix        # writes out/mug/
 
 ![the mug's contact sheet](examples/renders/mug.png)
 
+`--beauty` adds a ray-marched render of the field with soft shadows and
+ambient occlusion, for the picture that shows the model as meant:
+
+![the mug, ray-marched](examples/renders/mug_beauty.png)
+
 The cross-sections come straight from the distance field, so a hollow you
 cannot see from outside is still checkable:
 
@@ -49,6 +54,7 @@ generated from the code so it cannot drift.
 npm install
 npx aixle check  model.aix           # parse, evaluate, print sizes and warnings; no pictures
 npx aixle render model.aix           # everything, into out/model/
+npx aixle render model.aix --beauty         # plus beauty.png (a second or a few)
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle doc                        # the reference, to stdout
 ```
@@ -64,6 +70,8 @@ npx aixle doc                        # the reference, to stdout
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
 | `model.obj`, `model.mtl` | the mesh with one group per material |
 | `model.glb` | binary glTF, materials with vertex colours baked from the patterns |
+| `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |
+| `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `report.md`, `report.json` | size, bounds, triangle count, volume, every step's size and whether it is used, warnings |
 
 ## The language in one screen
@@ -76,7 +84,8 @@ show name                        # what to output (default: the last shape)
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(sides, r, h)
 circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, x2,y2, ...)     # 2D profiles
-extrude(profile, h)  revolve(profile)                                            # profiles to solids
+extrude(profile, h)  revolve(profile)  loft(a, b, h)                             # profiles to solids
+tube(r, [x,y,z, ...], smooth=6)  sweep(profile, [x,y,z, ...], smooth=6)         # along a path
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
@@ -92,27 +101,31 @@ materials.
 
 ## Examples
 
-[`examples/`](examples/) has eight models exercising the language, each
-with its sheet, slices and steps under [`examples/renders/`](examples/renders/):
-a mug, a fluted vase from a revolved profile, a table with parametric chairs,
-a brick tower, a pair of gears from 2D profiles, a spiral staircase from a
-loop, a robot with per-part materials, and a tree with smooth blends and
-displacement.
+[`examples/`](examples/) has ten models exercising the language, each with
+its sheet, slices, steps and beauty render under
+[`examples/renders/`](examples/renders/): a mug, a fluted vase from a
+revolved profile, a teapot with a tube spout and a swept handle, a desk
+lamp with a lofted shade, a table with parametric chairs, a brick tower, a
+pair of gears from 2D profiles, a spiral staircase from a loop, a robot
+with per-part materials, and a tree with smooth blends and displacement.
 
 | | | |
 | --- | --- | --- |
-| ![vase](examples/renders/vase.png) | ![tower](examples/renders/tower.png) | ![gears](examples/renders/gear.png) |
-| ![table](examples/renders/table.png) | ![stairs](examples/renders/stairs.png) | ![robot](examples/renders/robot.png) |
+| ![teapot](examples/renders/teapot_beauty.png) | ![vase](examples/renders/vase_beauty.png) | ![lamp](examples/renders/lamp_beauty.png) |
+| ![tower](examples/renders/tower_beauty.png) | ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) |
+| ![table](examples/renders/table_beauty.png) | ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) |
 
 ## How it works
 
 Shapes are signed distance fields, not meshes. That is why the booleans are
 exact and never fail on coincident faces, why `shell`, `round`, smooth
 blends, `twist` and `displace` are one line each, and why a cross-section
-is free. The surface is extracted once at the end by surface nets on a grid
-(`--grid`, default 128 cells on the longest side), and that one mesh is what
-the software rasteriser draws and what the exporters write, so the pictures
-show the file you get. Materials are procedural patterns evaluated in the
+is free. The surface is extracted once at the end by surface nets with
+dual contouring on a grid (`--grid`, default 128 cells on the longest
+side), so corners stay sharp, and that one mesh is what the software
+rasteriser draws and what the exporters write, so the pictures show the
+file you get. The beauty render marches the field itself, primed by that
+mesh so it costs about a second. Materials are procedural patterns evaluated in the
 painted part's own frame, sampled per pixel when rendering and per vertex
 when exporting; there are no UVs. [`docs/design.md`](docs/design.md) has
 the reasoning and the limits.

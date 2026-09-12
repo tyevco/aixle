@@ -46,6 +46,26 @@ describe("surface nets", () => {
       expect(materials[materialIndex[v]].name).toBe(expected);
     }
   });
+  it("puts vertices on a box's corners with sharp placement, and inside them without", () => {
+    const box = P.box(2, 2, 2);
+    const sharp = surfaceNets(box, { resolution: 20 });
+    const soft = surfaceNets(box, { resolution: 20, sharp: false });
+    const bs = meshBounds(sharp.mesh), bo = meshBounds(soft.mesh);
+    expect(Math.abs(bs.max[0] - 1)).toBeLessThan(sharp.cellSize * 0.05);
+    expect(Math.abs(bs.min[2] + 1)).toBeLessThan(sharp.cellSize * 0.05);
+    expect(bo.max[0]).toBeLessThanOrEqual(1);
+    expect(isWatertight(sharp.mesh)).toBe(true);
+    expect(isWatertight(soft.mesh)).toBe(true);
+    expect(Math.abs(meshVolume(sharp.mesh) - 8) / 8).toBeLessThan(0.01);
+    // The corner (1, 1, 1) has a vertex on it with sharp placement and none near it without.
+    const nearest = (m: { positions: Float32Array }) => {
+      let best = Infinity;
+      for (let i = 0; i < m.positions.length; i += 3) best = Math.min(best, Math.hypot(m.positions[i] - 1, m.positions[i + 1] - 1, m.positions[i + 2] - 1));
+      return best;
+    };
+    expect(nearest(sharp.mesh)).toBeLessThan(sharp.cellSize * 0.1);
+    expect(nearest(soft.mesh)).toBeGreaterThan(sharp.cellSize * 0.2);
+  });
   it("returns an empty mesh for an empty shape", () => {
     const r = surfaceNets(O.empty3(), { resolution: 32 });
     expect(triangleCount(r.mesh)).toBe(0);
