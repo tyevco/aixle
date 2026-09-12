@@ -22,6 +22,8 @@ export interface RenderOptions {
   outline?: boolean;
   /** Ignore per-vertex materials and show everything in this colour (for the steps sheet). */
   flatColor?: Vec3;
+  /** Draw glass solid rather than as a screen door: for a depth pass that primes rays, which must not see holes. */
+  solidGlass?: boolean;
 }
 
 export interface RenderTarget {
@@ -102,7 +104,7 @@ export function renderMesh(mesh: Mesh, cam: Camera, target: RenderTarget, opts: 
   // it shows through the checker and a pendulum behind a glazed door is on the pose sheet and the animation strip
   // (measured: both showed a grey pane and a clock in which nothing moved). No sorting or blending needed.
   const seeThrough = mesh.materials.map((m) => m.transmit > 0.3);
-  const anyGlass = seeThrough.some(Boolean) && !flat;
+  const anyGlass = seeThrough.some(Boolean) && !flat && !opts.solidGlass;
   for (let t = 0; t < ix.length; t += 3) {
     const a = ix[t], b = ix[t + 1], c = ix[t + 2];
     if (!visible[a] || !visible[b] || !visible[c]) continue;
