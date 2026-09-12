@@ -1,0 +1,27 @@
+# A table and four chairs. def makes a parametric chair; grid() and ring()
+# place the legs and the chairs. Everything stands on y = 0.
+def leg(h, t=0.12) = box(t, h, t) | move(0, h / 2, 0)
+
+# The table: a rounded top on four legs set in from the corners.
+top = box(3.2, 0.12, 1.8, round=0.04) | move(0, 1.5 - 0.06, 0)
+table_legs = leg(1.44) | move(-1.35, 0, -0.65) | grid(2, 2, 2.7, 1.3)
+table = (top + table_legs) | paint("walnut")
+
+# One chair facing +z, its seat 0.9 up, with a slatted back.
+def chair() =
+  (box(0.9, 0.08, 0.9, round=0.03) | move(0, 0.9, 0))
+  + (leg(0.9, 0.08) | move(-0.38, 0, -0.38) | grid(2, 2, 0.76, 0.76))
+  + (box(0.06, 0.9, 0.06) | move(-0.38, 0.9, -0.38) | array(2, 0.76, 0, 0))
+  + (box(0.9, 0.12, 0.05) | move(0, 1.7, -0.38))
+  + (box(0.05, 0.7, 0.04) | move(-0.2, 1.3, -0.38) | array(3, 0.2, 0, 0))
+
+# Chairs around the table, each turned to face it: a chair faces +z as
+# defined, so the one on the +z side turns 180 degrees.
+c1 = chair() | rotate(y=180) | move(0, 0, 1.6)
+c2 = chair() | move(0, 0, -1.6)
+c3 = chair() | rotate(y=90) | move(-2.3, 0, 0)
+c4 = chair() | rotate(y=-90) | move(2.3, 0, 0)
+chairs = (c1 + c2 + c3 + c4) | paint("oak")
+
+scene = table + chairs
+show scene

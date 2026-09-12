@@ -1,0 +1,24 @@
+# A spur gear built as a 2D profile and extruded: a disc, teeth added in a
+# loop with 2D rotate, a bore and four lightening holes cut out, in steel.
+teeth = 14
+disc = circle(2.0)
+tooth = rect(0.45, 0.7, round=0.08) | move(0, 2.15)
+profile = disc
+for i in range(teeth) {
+  profile = profile + (tooth | rotate(i * 360 / teeth))
+}
+bore = circle(0.4)
+hole = circle(0.35) | move(1.1, 0)
+holes = hole + (hole | rotate(90)) + (hole | rotate(180)) + (hole | rotate(270))
+cut = profile - bore - holes
+gear = extrude(cut, 0.5) | paint("steel")
+
+# A second, smaller gear meshing with the first, offset and rotated by half a tooth.
+small = circle(1.0)
+for i in range(7) {
+  small = small + (tooth | move(0, -1.0) | rotate(i * 360 / 7 + 360 / 14))
+}
+pinion = extrude(small - circle(0.25), 0.5) | move(3.55, 0, 0) | paint("brass")
+
+pair = (gear + pinion) | ground()
+show pair

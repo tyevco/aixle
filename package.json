@@ -1,0 +1,23 @@
+{
+  "name": "aixle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A procedural 3D modelling language for language models: CSG on signed distance fields, with renders an agent can look at.",
+  "type": "module",
+  "bin": { "aixle": "bin/aixle.mjs" },
+  "scripts": {
+    "aixle": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "docs": "tsx src/cli.ts doc --write docs/reference.md",
+    "examples": "tsx tools/examples.ts",
+    "check": "npm run typecheck && npm test && npm run docs && npm run examples"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.8"
+  }
+}

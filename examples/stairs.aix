@@ -1,0 +1,21 @@
+# A spiral staircase: each step is placed by the loop index, lifted and
+# turned a little more than the last; balusters and a rail follow it.
+steps = 18
+rise = 0.22
+turn = 20
+column = cylinder(0.3, steps * rise + 0.6) | move(0, (steps * rise + 0.6) / 2, 0) | paint("iron")
+flight = empty()
+posts = empty()
+for i in range(steps) {
+  tread = box(1.6, 0.08, 0.55, round=0.02) | move(1.05, i * rise + rise, 0) | rotate(y = i * turn)
+  flight = flight + tread
+  post = cylinder(0.03, 1.0) | move(1.75, i * rise + rise + 0.5, 0) | rotate(y = i * turn)
+  posts = posts + post
+}
+rail = empty()
+for i in range(steps * 3) {
+  bead = sphere(0.045) | move(1.75, (i / 3) * rise + rise + 1.0, 0) | rotate(y = (i / 3) * turn)
+  rail = rail + bead
+}
+stair = (flight | paint("oak")) + ((posts + rail) | paint("brass")) + column
+show stair

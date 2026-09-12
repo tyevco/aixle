@@ -1,0 +1,21 @@
+# A toy robot: mirror() builds both arms and legs from one side, and each
+# part is painted before the parts are joined so the colours survive.
+body = box(1.6, 2.0, 1.0, round=0.15) | move(0, 2.3, 0) | paint("red")
+chest = box(0.9, 0.5, 0.2, round=0.05) | move(0, 2.6, 0.5) | paint("silver")
+neck = cylinder(0.25, 0.3) | move(0, 3.45, 0) | paint("steel")
+head = box(1.2, 1.0, 1.0, round=0.2) | move(0, 4.1, 0) | paint("red")
+eye = sphere(0.16) | move(0.3, 4.2, 0.5)
+eyes = mirror(eye, "x") | paint("#40e0ff")
+mouth = box(0.5, 0.08, 0.1) | move(0, 3.85, 0.5) | paint("charcoal")
+antenna = (cylinder(0.05, 0.6) | move(0, 4.9, 0)) + (sphere(0.12) | move(0, 5.2, 0))
+antenna_p = antenna | paint("gold")
+shoulder = sphere(0.3) | move(1.05, 3.1, 0)
+upper_arm = capsule(0.18, 1.2) | move(1.05, 2.45, 0)
+hand = sphere(0.24) | move(1.05, 1.7, 0)
+arm = shoulder + upper_arm + hand
+arms = mirror(arm, "x") | paint("steel")
+leg = capsule(0.24, 1.6) | move(0.45, 0.75, 0)
+foot = box(0.6, 0.25, 0.9, round=0.08) | move(0.45, 0.13, 0.15)
+legs = mirror(leg + foot, "x") | paint("charcoal")
+robot = (body + chest + neck + head + eyes + mouth + antenna_p + arms + legs) | ground()
+show robot

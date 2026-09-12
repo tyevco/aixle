@@ -1,0 +1,24 @@
+# A castle tower: a hollow drum with merlons round the top, arrow slits cut
+# through the wall, a door, and a stone base. Materials differ per part.
+r = 2.0
+h = 6.0
+drum = cylinder(r, h) | move(0, h / 2, 0)
+inside = cylinder(r - 0.4, h) | move(0, h / 2 + 0.4, 0)
+walls = drum - inside
+
+# Merlons: twelve blocks around the rim.
+merlon = box(0.55, 0.6, 0.45) | move(r - 0.2, h + 0.3, 0)
+merlons = ring(merlon, 12)
+
+# Arrow slits at two heights, cut right through the wall.
+slit = box(0.12, 0.7, r * 2 + 1) | move(0, 0, 0)
+slits = ring(slit | move(0, 3.2, 0), 4) + ring(slit | move(0, 4.8, 0) | rotate(y=45), 4)
+
+# A door on the front (+z).
+door = box(0.9, 1.6, 1.0) | move(0, 0.8, r)
+
+stone = (walls + merlons - slits - door) | paint("brick")
+base = cylinder(r + 0.35, 0.5) | move(0, 0.25, 0) | paint("granite")
+floor = cylinder(r - 0.45, 0.2) | move(0, 0.5, 0) | paint("stone")
+tower = base + stone + floor
+show tower
