@@ -7,6 +7,7 @@ import { orthographic, perspective, project, toView } from "../src/render/camera
 import { preset } from "../src/sdf/materials.js";
 import { Canvas } from "../src/render/canvas.js";
 import { drawText, textWidth } from "../src/render/font.js";
+import { renderBeauty } from "../src/render/beauty.js";
 
 const sphere = P.sphere(1);
 const mesh = surfaceNets(sphere, { resolution: 32 }).mesh;
@@ -101,5 +102,20 @@ describe("canvas and font", () => {
     const end = drawText(c, 0, 0, "AB 1", 0x000000);
     expect(end).toBe(textWidth("AB 1"));
     expect(c.get(1, 0)).toBe(0x000000);
+  });
+});
+
+describe("beauty", () => {
+  it("ray-marches the field: the model in the middle, a shadow on the floor beside it, open floor behind", () => {
+    const nets = surfaceNets(sphere, { resolution: 24 });
+    const c = renderBeauty(sphere, nets.mesh, sphere.bounds, { size: 96, cellSize: nets.cellSize });
+    const mid = c.get(48, 44);
+    const back = c.get(48, 2);
+    const shadowSide = c.get(70, 78); // the light comes from the upper left, so the shadow falls right and down
+    const lum = (p: number) => ((p >> 16) & 255) + ((p >> 8) & 255) + (p & 255);
+    expect(mid).not.toBe(back);
+    // The sphere is clay: its lit side is warmer than the floor.
+    expect((mid >> 16) & 255).toBeGreaterThan(mid & 255);
+    expect(lum(shadowSide)).toBeLessThan(lum(back));
   });
 });

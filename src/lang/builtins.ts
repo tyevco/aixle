@@ -12,6 +12,7 @@ import { albedo, customMaterial, materialFromString, PATTERNS, parseColor } from
 import * as O from "../sdf/ops.js";
 import * as P from "../sdf/primitives.js";
 import * as S from "../sdf/shapes2d.js";
+import * as W from "../sdf/sweeps.js";
 import type { Material, PatternKind, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
@@ -119,6 +120,16 @@ export const BUILTINS: Builtin[] = [
     ov([shape2(), num("h"), axis("axis", "", "y")], "shape", (a) => S.extrude(s2(a[0]), n(a[1]), a[2] as S.ExtrudeAxis))),
   def("revolve", "2D to 3D", "Spin a profile around y; its x is the radius (draw it on x >= 0), pushed out by `offset`.",
     ov([shape2(), num("offset", "", 0)], "shape", (a) => S.revolve(s2(a[0]), n(a[1])))),
+
+  // --- paths ---
+  def("tube", "Paths", "A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty).",
+    ov([num("r"), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0)], "shape",
+      (a) => W.tube(W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "tube"), n(a[2])), n(a[0])))),
+  def("sweep", "Paths", "A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path.",
+    ov([shape2(), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0)], "shape",
+      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "sweep"), n(a[2]))))),
+  def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them.",
+    ov([shape2("a"), shape2("b"), num("h")], "shape", (a) => W.loft(s2(a[0]), s2(a[1]), n(a[2])))),
 
   // --- booleans ---
   def("union", "Booleans", "Everything in any of the shapes. `k` > 0 blends the joins smoothly over about k units. Same as a + b.",

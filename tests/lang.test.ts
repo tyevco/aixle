@@ -99,6 +99,15 @@ describe("interpreter", () => {
     expect(isShape3(ev.steps[1].value)).toBe(true);
     expect((ev.steps[2].value as Shape3).dist(1, 0, 0)).toBeCloseTo(-0.1, 5);
   });
+  it("builds tubes, sweeps and lofts from point lists", () => {
+    const t = shape("t = tube(0.2, [0,0,0, 1,0,0, 1,1,0], smooth=4)", "t");
+    expect(t.dist(1, 1, 0)).toBeCloseTo(-0.2);
+    const s = shape("s = sweep(rect(0.4, 0.1), [0,0,0, 0,0,3])", "s");
+    expect(s.dist(0, 0, 1.5)).toBeCloseTo(-0.05);
+    const l = shape("l = loft(circle(1), circle(0.5), 2)", "l");
+    expect(l.dist(0, 0.9, 0)).toBeLessThan(0);
+    expect(() => run("t = tube(0.2, [0, 0])")).toThrow(/triples/);
+  });
   it("runs user functions with defaults and loops that build up a shape", () => {
     const src = "def peg(h, r=0.1) = cylinder(r, h)\nall = empty()\nfor i in range(4) {\n all = all + (peg(1) | move(i, 0, 0))\n}";
     const all = shape(src, "all");

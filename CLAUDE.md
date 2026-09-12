@@ -13,11 +13,11 @@ Layers, each pure and under test:
 
 | Directory | What |
 | --- | --- |
-| `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, materials |
+| `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, materials |
 | `src/lang/` | the `.aix` language: lexer, parser, interpreter, and the builtin registry that is also the reference |
-| `src/mesh/` | surface nets extraction, mesh measures |
-| `src/export/` | OBJ+MTL and GLB writers |
-| `src/render/` | canvas, PNG, font, cameras, rasteriser, and the sheets (`views.ts`) |
+| `src/mesh/` | surface nets with dual contouring, mesh measures |
+| `src/export/` | OBJ+MTL and GLB writers, the self-contained viewer page |
+| `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-marched beauty render |
 | `src/pipeline.ts`, `src/cli.ts` | one run from source to a folder; the command line over it |
 | `tools/examples.ts` | renders `examples/*.aix` into `examples/renders/` |
 
@@ -52,7 +52,7 @@ Layers, each pure and under test:
 ```
 npm test              vitest over every layer
 npm run typecheck     tsc, including tools/ and tests/
-npm run aixle -- render examples/mug.aix     the CLI from source (also: npx aixle ...)
+npm run aixle -- render examples/mug.aix --beauty     the CLI from source (also: npx aixle ...)
 npm run docs          regenerate docs/reference.md
 npm run examples      regenerate examples/renders/ (pass names to do a few: npm run examples -- mug vase)
 npm run check         all of the above, what CI runs

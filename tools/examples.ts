@@ -1,7 +1,7 @@
 /**
  * Render every example into examples/renders/ at a size that keeps the
- * repository small: the contact sheet, the cross-sections and the steps for
- * each. CI regenerates them and fails if the committed files differ, so a
+ * repository small: the contact sheet, the cross-sections, the steps and
+ * the beauty render for each. CI regenerates them and fails if the committed files differ, so a
  * change in a render always comes with the change that caused it.
  *
  *   npm run examples
@@ -35,10 +35,13 @@ for (const file of files) {
     turntable: false,
     obj: false,
     glb: false,
+    beauty: true,
+    beautySize: 384,
   });
   copyFileSync(join(tmp, "sheet.png"), join(OUT, `${name}.png`));
   copyFileSync(join(tmp, "slices.png"), join(OUT, `${name}_slices.png`));
   copyFileSync(join(tmp, "steps.png"), join(OUT, `${name}_steps.png`));
+  copyFileSync(join(tmp, "beauty.png"), join(OUT, `${name}_beauty.png`));
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   console.log(`${name.padEnd(10)} ${secs}s  ${result.warnings.length ? result.warnings.join(" | ") : "ok"}`);
   rmSync(tmp, { recursive: true, force: true });

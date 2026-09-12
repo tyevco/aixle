@@ -42,24 +42,41 @@ distance so far, which is exact for `min`. A shape accumulated in a loop
 flattens hard unions into one list. A hundred parts cost about a hundred
 box tests per sample, and only the near ones are evaluated.
 
-## Surface nets, not marching cubes
+## Surface nets with dual contouring, not marching cubes
 
-Naive surface nets: one vertex per cell that has a sign change, placed at
-the mean of its edge crossings; one quad per crossing lattice edge. It is
-closed and manifold for any field, has no case table, and its vertices lie
-on the surface rather than on lattice edges, so a sphere at 48 cells is
-within three percent of its volume. Normals come from the field's gradient,
-not from the faces, so shading is smooth where the surface is smooth. What
-it does not do is sharp edges: a box's corner is rounded to about a cell.
-Dual contouring with a quadric fit would fix that and is the obvious next
-step if the softness bothers anyone.
+One vertex per cell that has a sign change; one quad per crossing lattice
+edge. It is closed and manifold for any field, has no case table, and a
+sphere at 48 cells is within three percent of its volume. Normals come from
+the field's gradient, not from the faces, so shading is smooth where the
+surface is smooth.
 
-## One mesh, rendered and exported
+The vertex is placed by dual contouring: the gradient at each edge crossing
+gives a tangent plane, and the vertex is the point that minimises its
+squared distance to those planes, regularised towards the crossings' mean
+(so a flat face does not slide) and clamped to its cell (so it cannot
+wander). A box's vertex lands on its corner to within a few percent of a
+cell and a gear tooth keeps its edge. Quads are split along their shorter
+diagonal so a quad bent around a corner does not fold. Crossing points and
+their normals are computed once per lattice edge and shared by the four
+cells around it, so sharpness costs about six field evaluations per
+crossing edge. `sharp: false` gives the plain surface-nets mean back.
 
-The rasteriser draws the extracted mesh, not the field. That was a choice
-between fidelity and honesty: ray-marching the field directly would give
-crisper pictures, but then the picture and the OBJ could disagree. The
-agent verifies the file it ships. The rasteriser is a plain z-buffered
+## One mesh, rendered and exported; one field, for the beauty render
+
+The checking views draw the extracted mesh, not the field. That was a
+choice between fidelity and honesty: the picture and the OBJ cannot
+disagree, so the agent verifies the file it ships.
+
+`beauty.png` is the other way round: the field itself, ray-marched, with a
+soft shadow (a second march towards the light), ambient occlusion (five
+samples along the normal) and a studio floor, for the picture that shows
+the model as meant. It stays cheap by using the mesh: each ray starts a few
+cells short of where the rasterised depth says the surface is, marches only
+that window, and falls back to the mesh's point if the march misses; empty
+space costs nothing, shadow rays that cannot reach the model's box are
+skipped, and only edge pixels (found by comparing depth, normal and
+material with their neighbours) are sampled four times. A 512-pixel render
+of the mug takes under a second. The rasteriser is a plain z-buffered
 triangle filler with perspective-correct attributes and per-pixel shading;
 an outline pass darkens depth and normal discontinuities, which is what
 keeps a 384-pixel thumbnail readable.
@@ -97,12 +114,28 @@ side-effects. A program is a straight-line construction with loops and
 parametric parts. That is enough for what has been tried, and it keeps every
 step renderable on its own.
 
+## Paths
+
+`tube` is a chain of capsules (exact). `sweep` gives each polyline segment
+a frame (across, up, along; the up vector kept as close to world y as the
+segment allows, and carried from segment to segment so it does not flip)
+and extrudes the profile in that frame, cut at each join by the plane that
+bisects the angle, so neighbours tile exactly. The cut only acts beyond its
+plane: measured the other way, with the plane's distance inside the piece
+too, every join read as a dent, because the extractor interpolates values
+across an edge and the marcher trusts them, and a swept handle came out
+corrugated. `smooth=` matters on tight bends because each piece is straight. `loft` blends the two
+profiles' distances linearly along the height: sign-exact, approximate in
+between, and enough for shades, hulls and tapered handles.
+
+## The viewer
+
+`viewer.html` embeds the GLB as base64 so it opens from disk with no
+server, and loads three.js from a CDN, so it needs a network connection
+once. It exists for people; an agent verifies from the PNGs.
+
 ## What is not here yet
 
-- Sharp-feature extraction (dual contouring).
-- Sweeps along a path, lofts between profiles, text.
-- Texture baking to an atlas for the GLB.
-- A ray-marched "beauty" render with shadows and ambient occlusion, for the
-  final picture rather than the checking pictures.
-- A browser viewer for the GLB; the repo's outputs are chosen so an agent
-  needs none.
+- Sweeps along true curves with twist control; text.
+- Texture baking to an atlas for the GLB (patterns travel as vertex colours).
+- Refraction for glass, area lights, depth of field in the beauty render.
