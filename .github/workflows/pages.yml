@@ -3,7 +3,7 @@ name: Pages
 # The documentation site: the README, docs/ and dogfood/ as they are, the
 # gallery generated from the committed renders, and a GLB viewer page per
 # model rendered at build time. Published to GitHub Pages on every push to
-# main (Settings > Pages > Source: GitHub Actions).
+# main; configure-pages enables Pages for the repository on the first run.
 
 on:
   push:
@@ -30,6 +30,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run pages
+      # Turns Pages on for the repository the first time, so no settings step is needed.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .vitepress/dist
