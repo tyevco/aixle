@@ -197,8 +197,17 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     };
   };
   const gap = GAP[face];
+  // The narrowest space between two neighbouring letters, from the x reach of their strokes (exact for stems,
+  // a lower bound for diagonals): on a trophy's rim at size 0.15, weight 0.04 and spacing 0.025 two letters came
+  // within a third of a cell of each other, and the author read the open edges there as stroke junctions.
+  let between = Infinity;
+  let prevReach: number | undefined;
   for (const ch of text) {
     const g = glyph(ch, face);
+    let minX = Infinity, maxX = -Infinity;
+    for (const st of g.strokes) for (let i = 0; i < st.length; i += 2) { minX = Math.min(minX, st[i]); maxX = Math.max(maxX, st[i]); }
+    if (prevReach !== undefined && minX !== Infinity) between = Math.min(between, (gap + minX - prevReach) * scale + spacing);
+    prevReach = maxX === -Infinity ? undefined : maxX - g.width;
     for (const st of g.strokes) {
       if (st.length === 2) {
         const x = cursor + st[0] * scale, y = st[1] * scale;
@@ -260,6 +269,15 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     return Math.sqrt(best) - half;
   }, bounds, n);
   out.feature = weight;
+  // The narrowest counter: about 2 grid units between stroke centres for a lowercase e or a, 2.8 for capitals and
+  // digits, less one stroke. Under half a cell it closes up (measured: "Best in Show" at 0.12 became non-manifold
+  // blobs, while capitals at 0.13 with counters of 0.7 of a cell read fine).
+  const small = /[a-z]/.test(text) ? 2.0 : 2.8;
+  // The space between two letters counts too (see `between` above).
+  // Letters whose strokes overlap have merged, which is a union and meshes cleanly (bold sans titles do this); it
+  // is the sliver of space between two that nearly touch that the mesh cannot close.
+  const letters = between - weight >= 0 ? between - weight : Infinity;
+  out.gap = Math.max(0, Math.min(small * scale - weight, letters));
   return out;
 }
 

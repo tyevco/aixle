@@ -140,6 +140,7 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
   }, bounds, live.reduce((c, s) => c + s.cost, 0));
   if (k <= 0) out.parts = live;
   for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) out.feature = s.feature;
+  for (const s of live) if (s.gap !== undefined && (out.gap === undefined || s.gap < out.gap)) out.gap = s.gap;
   return out;
 }
 
@@ -156,6 +157,7 @@ export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
 /** The result carries the feature size of the shape it was built from (scaled by `by`). */
 function keep(out: Shape2, from: Shape2, by = 1): Shape2 {
   if (from.feature !== undefined) out.feature = from.feature * by;
+  if (from.gap !== undefined) out.gap = from.gap * by;
   return out;
 }
 
@@ -250,6 +252,7 @@ export function extrude(profile: Shape2, h: number, axis: ExtrudeAxis = "y"): Sh
         : (x: number, y: number, z: number) => inner(d(-z, y), x);
   const out = primitive(dist, bounds, profile.cost);
   out.feature = profile.feature;
+  out.gap = profile.gap;
   return out;
 }
 
@@ -267,6 +270,7 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
   if (angle >= 360) {
     const full = primitive((x, y, z) => d(length2(x, z) - offset, y), bounds, profile.cost);
     full.feature = profile.feature;
+    full.gap = profile.gap;
     return full;
   }
   // A partial revolve: the profile sweeps from +z (0 degrees) towards +x through `angle` degrees.
@@ -287,5 +291,6 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     return d2 > 0 ? length2(d2, off) : off > 0 ? off : d2;
   }, bounds, profile.cost);
   out.feature = profile.feature;
+  out.gap = profile.gap;
   return out;
 }

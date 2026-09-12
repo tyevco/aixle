@@ -43,7 +43,7 @@ export interface ViewInfo {
   elevation?: number;
 }
 
-const fmt = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
+const fmt = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 /** A cell size to three significant figures, so 0.007 and 0.014 do not both read 0.01. */
 export function fmtCell(v: number): string {

@@ -104,6 +104,7 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
       cost: round.cost,
       inner: [round],
       feature: round.feature,
+      gap: round.gap,
     };
   }
   const n = segs.length;
@@ -219,7 +220,16 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
   const reach =
     Math.max(length2(b.min[0], b.min[1]), length2(b.max[0], b.max[1]), length2(b.min[0], b.max[1]), length2(b.max[0], b.min[1])) *
     Math.max(1, taper);
-  const bounds = boundsGrow(boundsFromPoints(points), reach);
+  // A mitre's outer corner sits reach * tan(turn / 2) past the join along each segment, so the box grows by that
+  // too, up to three times the reach for a very sharp turn (measured: a sweep with 60 degree turns had 62 open
+  // edges where the mitres crossed a box grown by the reach alone).
+  let sharpest = 0;
+  for (let i = 1; i < segs.length; i++) {
+    const a = segs[i - 1].d, b = segs[i].d;
+    const cos = Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / Math.sqrt(segs[i - 1].len2 * segs[i].len2)));
+    sharpest = Math.max(sharpest, Math.tan(Math.acos(cos) / 2));
+  }
+  const bounds = boundsGrow(boundsFromPoints(points), reach * (1 + Math.min(sharpest, 2)));
   const n = segs.length;
   // Arc length at each segment start, for twist and taper.
   const arcs = arcLengths(points);
@@ -306,6 +316,7 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
     return best;
   }, bounds, n * profile.cost);
   out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
+  out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
   return out;
 }
 

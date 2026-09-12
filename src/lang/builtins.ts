@@ -18,6 +18,9 @@ import { textProfile, textWidth } from "../sdf/font.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
+/** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
+export const CURRENT_ANGLES = new Map<string, [number, number, number]>();
+
 const num = (name: string, doc?: string, def?: number): Param => (def === undefined ? { name, type: "number", doc } : { name, type: "number", default: def, doc });
 const str = (name: string, doc?: string, def?: string): Param => (def === undefined ? { name, type: "string", doc } : { name, type: "string", default: def, doc });
 const shape = (name = "shape", doc?: string): Param => ({ name, type: "shape", doc });
@@ -26,6 +29,8 @@ const axis = (name = "axis", doc?: string, def?: string): Param => (def === unde
 const mat = (name = "material", doc?: string): Param => ({ name, type: "material", doc });
 
 const n = (v: Value): number => v as number;
+/** The numbers in a list, nested lists flattened, so `[hip, knee]` with points as lists is a path (round 4 asked). */
+const nums = (v: Value): number[] => (Array.isArray(v) ? v.flatMap(nums) : [n(v)]);
 const s3 = (v: Value): Shape3 => v as Shape3;
 const s2 = (v: Value): Shape2 => v as Shape2;
 
@@ -139,10 +144,10 @@ export const BUILTINS: Builtin[] = [
   def("star", "2D profiles", "A star with `points` points, outer radius r1 and inner radius r2.",
     ov([num("points"), num("r1"), num("r2")], "shape2", (a) => S.star(n(a[0]), n(a[1]), n(a[2])))),
   def("polygon", "2D profiles", "A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.5).",
-    ov([{ name: "points", type: "list" }], "shape2", (a) => S.polygon((a[0] as Value[]).map((v) => n(v)))),
+    ov([{ name: "points", type: "list" }], "shape2", (a) => S.polygon(nums(a[0]))),
     ov([{ name: "coords", type: "number", rest: true }], "shape2", (_a, rest) => S.polygon(rest.map((v) => n(v))))),
 
-  def("text", "2D profiles", "Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face=\"serif\" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall); `align` is \"left\", \"center\" or \"right\". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.",
+  def("text", "2D profiles", "Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face=\"serif\" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is \"left\", \"center\" or \"right\". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.",
     ov([str("text"), num("size", "cap height", 1), num("weight", "stroke width", 0.15), str("align", "", "left"), num("spacing", "extra gap between letters", 0), num("arc", "bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom", 0), str("face", "\"sans\" or \"serif\" (slab serifs on the same letters, set a little wider)", "sans")], "shape2",
       (a) => {
         const t = a[0] as string, size = n(a[1]), spacing = n(a[4]), arc = n(a[5]);
@@ -167,7 +172,7 @@ export const BUILTINS: Builtin[] = [
       (a) => {
         const cap = a[4] as string;
         if (cap !== "round" && cap !== "flat") throw new Error(`cap must be "round" or "flat"`);
-        return W.tube(W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "tube"), n(a[2])), n(a[0]), n(a[3]), cap);
+        return W.tube(W.smoothPath(W.toPoints(nums(a[1]), "tube"), n(a[2])), n(a[0]), n(a[3]), cap);
       }),
     ov([num("r"), { name: "curve", type: "curve", doc: "a bezier() or curve()" }, num("taper", "end radius / start radius", 1), str("cap", "\"round\" or \"flat\"", "round")], "shape",
       (a) => {
@@ -177,18 +182,18 @@ export const BUILTINS: Builtin[] = [
       })),
   def("sweep", "Paths", "A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path; `twist` turns the profile by that many degrees over the whole path; `taper` scales it to that factor by the end.",
     ov([shape2(), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0), num("twist", "degrees over the path", 0), num("taper", "end scale", 1)], "shape",
-      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "sweep"), n(a[2])), n(a[3]), n(a[4]))),
+      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints(nums(a[1]), "sweep"), n(a[2])), n(a[3]), n(a[4]))),
     ov([shape2(), { name: "curve", type: "curve", doc: "a bezier() or curve()" }, num("twist", "degrees over the curve", 0), num("taper", "end scale", 1)], "shape",
       (a) => sweepCurve(s2(a[0]), a[1] as Curve, n(a[2]), n(a[3])))),
   def("bezier", "Paths", "An exact curve from cubic Bezier control points: an anchor, then two handles and an anchor for each piece (4, 7, 10, ... points). A tube or sweep along it is the true offset of the curve, with no facets at any grid, and costs about as much per piece as a spline's.",
-    ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }], "curve", (a) => bezierCurve(W.toPoints((a[0] as Value[]).map((v) => n(v)), "bezier")))),
+    ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }], "curve", (a) => bezierCurve(W.toPoints(nums(a[0]), "bezier")))),
   def("curve", "Paths", "An exact smooth curve through the points, the same shape spline() draws, for tube() and sweep(): the surface follows the true curve rather than a polyline through it.",
-    ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }], "curve", (a) => curveThrough(W.toPoints((a[0] as Value[]).map((v) => n(v)), "curve")))),
+    ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }], "curve", (a) => curveThrough(W.toPoints(nums(a[0]), "curve")))),
   def("helix", "Paths", "A path list for a helix of radius r around y, for tube() or sweep(): it starts at (r, 0, 0) and rises from y = 0 to y = h over `turns` turns.",
     ov([num("r"), num("h"), num("turns"), num("per_turn", "points per turn", 16)], "list", (a) => W.helixPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
   def("spline", "Paths", "A smooth path through the points, subdivided until no piece turns more than `degrees`: a curve that shows no faceting in a tube or sweep, however tight.",
     ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("degrees", "largest turn between pieces", 3)], "list",
-      (a) => W.splinePath(W.toPoints((a[0] as Value[]).map((v) => n(v)), "spline"), n(a[1])))),
+      (a) => W.splinePath(W.toPoints(nums(a[0]), "spline"), n(a[1])))),
   def("arc", "Paths", "A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).",
     ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16)], "list", (a) => W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
   def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them.",
@@ -234,6 +239,8 @@ export const BUILTINS: Builtin[] = [
   def("offset", "Modifiers", "Grow (r > 0) or shrink (r < 0) the surface by r.",
     ov([shape(), num("r")], "shape", (a) => O.offset(s3(a[0]), n(a[1]))),
     ov([shape2(), num("r")], "shape2", (a) => S.offset2(s2(a[0]), n(a[1])))),
+  def("hollow", "Modifiers", "Hollow for printing: a shell `wall` thick with a drain hole of radius r (default the wall) cut through it at the drain point, usually on the bottom, so the void is open and resin or support can escape. hollow(cup, 0.1, 0, 0, 0) drains a model standing on y = 0 through its floor.",
+    ov([shape(), num("wall"), num("x", "the drain point"), num("y"), num("z"), num("r", "drain radius", NaN)], "shape", (a) => O.hollow(s3(a[0]), n(a[1]), n(a[2]), n(a[3]), n(a[4]), Number.isNaN(n(a[5])) ? n(a[1]) : n(a[5])))),
   def("shell", "Modifiers", "Hollow the shape leaving a wall t thick inside its surface. Subtract something to open it up. check warns when t is under a grid cell.",
     ov([shape(), num("t", "wall thickness")], "shape", (a) => O.shell(s3(a[0]), n(a[1]))),
     ov([shape2(), num("t")], "shape2", (a) => S.shell2(s2(a[0]), n(a[1])))),
@@ -287,7 +294,7 @@ export const BUILTINS: Builtin[] = [
     ov([shape(), mat()], "shape", (a) => O.paint(s3(a[0]), a[1] as Material))),
   def("decal", "Materials", "Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), \"black\")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material.",
     ov([shape(), shape("region", "the part of the surface inside this shape gets the material"), mat()], "shape", (a) => O.decal(s3(a[0]), s3(a[1]), a[2] as Material))),
-  def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie across it. Paint before moving the part, or set axis=\"x\" for stripes running the other way.",
+  def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis=\"x\" for stripes running the other way.",
     ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN), str("axis", "the pattern's axis: stripes stack along it, grain runs along it", ""), num("glow", "light the surface gives off, 0..2 (unshadowed, for flames and lamps)", NaN)], "material", makeMaterial)),
   def("rgb", "Materials", "A colour string from red, green, blue in 0..255.", ov([num("r"), num("g"), num("b")], "string", (a) => hexOf(n(a[0]), n(a[1]), n(a[2])))),
   def("hsl", "Materials", "A colour string from hue in degrees, saturation and lightness in 0..1.", ov([num("h"), num("s"), num("l")], "string", (a) => hslToHex(n(a[0]), n(a[1]), n(a[2])))),
@@ -306,6 +313,10 @@ export const BUILTINS: Builtin[] = [
       }
       return out;
     })),
+  def("surface", "Queries", "The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.",
+    ov([shape(), num("x"), num("y"), num("z")], "list", (a) => { const p = O.surfacePoint(s3(a[0]), n(a[1]), n(a[2]), n(a[3])); return [p[0], p[1], p[2]]; })),
+  def("angle", "Queries", "The current pose's angles for a joint, as [x, y, z] degrees (all zero at rest, or for a joint the pose does not set): what a member between two moving bodies (a hydraulic cylinder, a strut) needs to work out its end points with sin and cos. Nested joints' angles are relative to their parent.",
+    ov([str("joint", "the joint's name")], "list", (a) => { const v = CURRENT_ANGLES.get(a[0] as string) ?? [0, 0, 0]; return [v[0], v[1], v[2]]; })),
   def("len", "Numbers", "Length of a list.", ov([{ name: "list", type: "list" }], "number", (a) => (a[0] as Value[]).length)),
   def("sin", "Numbers", "Sine of an angle in degrees.", ov([num("degrees")], "number", (a) => Math.sin(rad(n(a[0]))))),
   def("cos", "Numbers", "Cosine of an angle in degrees.", ov([num("degrees")], "number", (a) => Math.cos(rad(n(a[0]))))),

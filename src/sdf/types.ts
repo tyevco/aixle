@@ -88,6 +88,20 @@ export interface Shape3 {
    * these, so the thin-part warning reads this instead.
    */
   feature?: number;
+  /** The narrowest gap the shape is known to contain (a letter's counters, a slot), in model units: closes up under a cell. */
+  gap?: number;
+  /** Set by paint() and decal(): the whole shape has a material of its own. Read structurally by the paint check. */
+  painted?: boolean;
+  /** Set by move, rotate and scale: below this node the shapes are in another frame, so they are not where they end up. */
+  transform?: boolean;
+  /** For a transform or warp: the world point in the child's frame, so a point can be attributed to the innermost named step. */
+  unwarp?: (x: number, y: number, z: number) => Vec3;
+  /** For a rigid transform or a joint: where a point of the child lands, so a step inside a posed joint can be framed where it is. */
+  warp?: (x: number, y: number, z: number) => Vec3;
+  /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
+  loose?: boolean;
+  /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
+  cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
   joint?: JointState;
   /** For a placed shape: the base and where its copies go. */
@@ -123,6 +137,8 @@ export interface Shape2 {
   parts?: Shape2[];
   /** The thinnest feature the profile is known to carry (a stroke's weight, a 2D shell's wall); see Shape3.feature. */
   feature?: number;
+  /** The narrowest gap the profile is known to contain; see Shape3.gap. */
+  gap?: number;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

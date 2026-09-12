@@ -1,0 +1,154 @@
+# A hydraulic excavator on tracks. Front is +z; one unit is about a metre.
+# The house slews about y; boom, stick and bucket hinge about x, each joint's
+# angle relative to its parent. Every hydraulic cylinder is a black barrel
+# drawn in the parent member's frame and a chrome rod drawn in the child's,
+# each aimed along the line between its two pins with angle(), so they
+# telescope in every pose without joints of their own.
+#
+# Print-ready in the transport pose: a 45-degree skirt carries the house on
+# the frame, the counterweight and the boom pedestal have chamfered
+# undersides, and the bucket is curled so its inside faces the stick.
+set grid 200
+set pose transport
+set azimuth -35
+set elevation 22
+set zoom 1.25
+set light_azimuth -45
+set light_elevation 50
+
+# ---- the skeleton, in the side plane: a pin is [y, z] ----
+xb = 0.35                                 # the boom's centre plane (the cab is on the left of it)
+P1 = [1.9, 0.8]                           # boom foot pin, on the house
+L1 = 3.0
+E1 = 50                                   # boom length and rest elevation (degrees above +z)
+L2 = 2.2
+E2 = -60                                  # stick length and rest elevation (pointing down and forward)
+E3 = -100                                 # bucket rest elevation, pin to teeth
+
+# a point on a member: pin p, elevation e, n above the member's axis, s along it
+def local(p, e, n, s) = [p[0] + s * sin(e) + n * cos(e), p[1] + s * cos(e) - n * sin(e)]
+# a point turned t degrees about x around pivot c (rotate(x=+t) turns +y towards +z, so +t lowers a raised member)
+def turn(p, c, t) = [c[0] + (p[0] - c[0]) * cos(t) - (p[1] - c[1]) * sin(t), c[1] + (p[0] - c[0]) * sin(t) + (p[1] - c[1]) * cos(t)]
+def dist(a, b) = sqrt((b[0] - a[0]) ^ 2 + (b[1] - a[1]) ^ 2)
+# the point len along the line from a towards b
+def toward(a, b, len) = [a[0] + len * (b[0] - a[0]) / dist(a, b), a[1] + len * (b[1] - a[1]) / dist(a, b)]
+
+P2 = local(P1, E1, 0, L1)                 # boom tip = stick pin
+P3 = local(P2, E2, 0, L2)                 # stick tip = bucket pin
+
+# cylinder pins: A on the parent member (barrel base), B on the child (rod eye)
+A1 = [1.35, 1.35]                         # boom cylinders: house to boom underside
+B1 = local(P1, E1, -0.1, 1.6)
+A2 = local(P1, E1, 0.75, 1.5)             # stick cylinder: a bracket on the boom top to the stick's heel
+B2 = local(P2, E2, 0.2, -0.8)
+A3 = local(P2, E2, 0.7, 0.4)              # bucket cylinder: a bracket on the stick to the bucket lug
+B3 = local(P3, E3, 0.6, 0.15)
+
+# the pose, as each joint's angle about x (zero at rest)
+b = angle("boom")[0]
+s = angle("stick")[0]
+k = angle("bucket")[0]
+
+# ---- parts shared by the members ----
+# a side profile (x to the right = +z, y up) extruded w wide along x
+def side(profile, w) = extrude(profile, w, "x") | flip("z")
+def pin_eye(x, p, r) = cylinder(r, 0.5) | rotate(z=90) | move(x, p[0], p[1])
+def boss(x, p, r, w) = cylinder(r, w) | rotate(z=90) | move(x, p[0], p[1])
+# a barrel from pin a towards pin b, len long; a rod from pin b back towards a
+def barrel(x, a, b, r, len) =
+  (tube(r, [x, a[0], a[1], x, toward(a, b, len)[0], toward(a, b, len)[1]], cap="flat") | paint("black"))
+  + (pin_eye(x, a, r * 1.3) | paint("iron"))
+def rod(x, b, a, r, len) =
+  (tube(r, [x, b[0], b[1], x, toward(b, a, len)[0], toward(b, a, len)[1]], cap="flat") | paint("chrome"))
+  + (pin_eye(x, b, r * 2) | paint("iron"))
+
+# ---- undercarriage ----
+body_paint = material("#e9b125", rough=0.55)
+track_mat = material("#2a2a2c", "stripes", "#4a4a4e", scale=0.14, axis="z")
+track = side(rect(3.6, 0.72, round=0.36), 0.6) | move(1.0, 0.36, 0) | paint(track_mat)
+tracks = mirror(track, "x")
+frame = box(1.5, 0.55, 2.2, round=0.05) | move(0, 0.575, 0) | paint("charcoal")
+slew = cylinder(0.85, 0.36) | move(0, 0.97, 0) | paint("iron")
+
+# ---- house (slews about y at 0, 1.1, 0) ----
+hazard = material("#e8c53a", "stripes", "#1a1a1c", scale=0.22, axis="x")
+skirt = loft(rect(1.4, 1.7, round=0.2), rect(2.25, 2.55, round=0.1), 0.5) | move(0, 0.9, -0.2) | paint("charcoal")
+house_body = box(2.3, 1.1, 2.6, round=0.06) | move(0, 1.65, -0.2) | paint(body_paint)
+plate = extrude(text("AIXLE", size=0.32, weight=0.08, face="serif", align="center"), 0.3, "x") | move(1.15, 1.5, -0.6)
+house_shell = decal(house_body, plate, "black")
+counterweight_block = side(polygon(-1.4,1.15, -2.0,1.8, -2.0,2.08, -1.4,2.08), 2.3) | paint(body_paint)
+counterweight = decal(counterweight_block, box(2.4, 1.2, 0.12) | move(0, 1.7, -2.0), hazard)   # stripes on the rear face only
+cab_shell = box(0.9, 1.35, 1.25, round=0.08) | move(-0.72, 2.35, 0.4) | paint(body_paint)
+glazing = (box(0.7, 0.85, 0.3) | move(-0.72, 2.55, 1.02)) + (box(0.3, 0.85, 0.9) | move(-1.17, 2.55, 0.45))
+cab_box = decal(cab_shell, glazing, "#27384f")
+beacon = (cylinder(0.08, 0.08) | move(-0.72, 3.05, 0.1) | paint("charcoal"))
+  + (sphere(0.07) | move(-0.72, 3.1, 0.1) | paint(material("#ffb030", glow=1.2)))
+hood = box(1.0, 0.4, 1.4, round=0.08) | move(0.6, 2.35, -0.7) | paint(body_paint)
+stack = cylinder(0.08, 0.55) | move(0.85, 2.7, -1.0) | paint("iron")
+pedestal = side(polygon(0.4,1.15, 1.05,1.15, 1.4,1.55, 1.4,2.1, 0.4,2.1), 1.1) | move(xb, 0, 0) | paint(body_paint)
+rail = tube(0.035, [-1.02, 2.15, -0.3, -1.02, 2.6, -0.3, -1.02, 2.6, -1.4, -0.1, 2.6, -1.4, -0.1, 2.15, -1.4])
+  + tube(0.035, [-1.02, 2.15, -0.85, -1.02, 2.6, -0.85])
+rails = rail | paint("iron")
+house_parts = skirt + house_shell + counterweight + cab_box + beacon + hood + stack + pedestal + rails
+
+# ---- bucket (built at its pin, teeth along +z, mouth up; then turned to E3) ----
+# side profile: lip, floor, a round heel and back, closed across the mouth
+heel = [1.05, -0.35, 1.05, -0.47]
+for a in range(-90, -271, -15) {
+  heel = heel + [0.3 + 0.45 * cos(a), -0.05 + 0.45 * sin(a)]
+}
+bucket_side = polygon(heel)
+mouth = rect(1.0, 0.3) | rotate(-45) | move(0.675, 0.025)
+bucket_wall = bucket_side - (offset(bucket_side, -0.08) + mouth)
+bucket_plates = side(bucket_side, 0.14) | move(-0.43, 0, 0) | array(2, 0.86)
+lip_bar = box(0.9, 0.24, 0.27) | move(0, -0.43, 0.885)          # a solid cutting edge the teeth root into
+bucket_lug = box(0.36, 0.7, 0.35, round=0.03) | move(0, 0.5, 0.15)
+bucket_hinge = cylinder(0.2, 1.1) | rotate(z=90)
+bucket_shell = (side(bucket_wall, 0.84) + bucket_plates + lip_bar + bucket_lug + bucket_hinge) | paint("iron")
+tooth = loft(rect(0.12, 0.12), rect(0.05, 0.08), 0.32) | rotate(x=90) | move(0, -0.45, 1.12)
+teeth = tooth | move(-0.36, 0, 0) | array(4, 0.24) | paint("steel")
+bucket_shape = (bucket_shell + teeth) | rotate(x = -E3) | move(xb, P3[0], P3[1])
+bucket_ram = dist(A3, turn(B3, P3, k))            # pin to pin now; must stay above the barrel's 1.35
+bucket_rod = rod(xb, B3, turn(A3, P3, -k), 0.06, bucket_ram - 1.35 + 0.3)
+bucket = joint(bucket_shape + bucket_rod, "bucket", xb, P3[0], P3[1])
+
+# ---- stick (a tapered beam from 0.85 behind its pin to 2.2 ahead) ----
+stick_beam = side(polygon(-0.85,-0.22, 2.2,-0.22, 2.2,0.12, 0.25,0.36, -0.85,0.28), 0.42)
+  | rotate(x = -E2) | move(xb, P2[0], P2[1]) | paint(body_paint)
+stick_bracket = box(0.6, 0.3, 0.5, round=0.03) | move(0, 0.35, 0.4) | rotate(x = -E2) | move(xb, P2[0], P2[1]) | paint(body_paint)
+stick_bosses = (boss(xb, P2, 0.26, 0.5) + boss(xb, P3, 0.28, 0.6) + boss(xb, A3, 0.25, 0.56)) | paint(body_paint)
+bucket_barrel = barrel(xb, A3, turn(B3, P3, k), 0.11, 1.35)
+stick_ram = dist(A2, turn(B2, P2, s))             # must stay above the barrel's 0.95
+stick_rod = rod(xb, B2, turn(A2, P2, -s), 0.07, stick_ram - 0.95 + 0.3)
+stick = joint(stick_beam + stick_bracket + stick_bosses + stick_rod + bucket_barrel + bucket, "stick", xb, P2[0], P2[1])
+
+# ---- boom (a bowed beam swept along a bezier from the foot pin to the tip pin) ----
+boom_path = bezier([xb, P1[0], P1[1],
+  xb, local(P1, E1 + 15, 0, 1.1)[0], local(P1, E1 + 15, 0, 1.1)[1],
+  xb, local(P2, E1 - 15, 0, -1.1)[0], local(P2, E1 - 15, 0, -1.1)[1],
+  xb, P2[0], P2[1]])
+boom_beam = sweep(rect(0.5, 0.62), boom_path) | paint(body_paint)
+boom_bracket = box(0.62, 0.4, 0.5, round=0.03) | move(0, 0.5, 1.5) | rotate(x = -E1) | move(xb, P1[0], P1[1]) | paint(body_paint)
+boom_bosses = (boss(xb, P1, 0.45, 0.8) + boss(xb, P2, 0.4, 0.7) + boss(xb, A2, 0.23, 0.62)) | paint(body_paint)
+boom_lug = box(1.4, 0.36, 0.3, round=0.03) | rotate(x = -E1) | move(xb, B1[0], B1[1]) | paint(body_paint)
+boom_pin = cylinder(0.06, 1.6) | rotate(z=90) | move(xb, B1[0], B1[1]) | paint("iron")
+stick_barrel = barrel(xb, A2, turn(B2, P2, s), 0.13, 0.95)
+boom_ram = dist(A1, turn(B1, P1, b))              # must stay above the barrels' 1.1
+boom_rods = rod(xb - 0.6, B1, turn(A1, P1, -b), 0.06, boom_ram - 1.1 + 0.3)
+  + rod(xb + 0.6, B1, turn(A1, P1, -b), 0.06, boom_ram - 1.1 + 0.3)
+boom = joint(boom_beam + boom_bracket + boom_bosses + boom_lug + boom_pin + boom_rods + stick_barrel + stick, "boom", xb, P1[0], P1[1])
+boom_barrels = barrel(xb - 0.6, A1, turn(B1, P1, b), 0.11, 1.1) + barrel(xb + 0.6, A1, turn(B1, P1, b), 0.11, 1.1)
+house = joint(house_parts + boom_barrels + boom, "house", 0, 1.1, 0)
+
+excavator = tracks + frame + slew + house
+
+# ---- poses: yaw about y; b, s, k turn boom, stick and bucket about x, positive lowers.
+# Each angle is relative to its parent: the stick's world elevation is E2 - b - s, the bucket's E3 - b - s - k.
+def arm_pose(name, yaw, b, s, k) = pose(name, house=[0, yaw, 0], boom=[b, 0, 0], stick=[s, 0, 0], bucket=[k, 0, 0])
+pose("rest")
+arm_pose("transport", 0, -15, 22, 43)     # boom 65, stick -67, bucket -150 in the world: curled for the road
+arm_pose("reach", 0, 30, -65, -5)         # boom 20, stick -25, bucket -60
+arm_pose("dig", 30, 25, -25, 10)          # boom 25, stick -60, bucket -115, slewed 30
+animation("cycle", ["rest", "transport", "reach", "dig", "rest"], seconds=6)
+
+show excavator

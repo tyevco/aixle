@@ -5,16 +5,18 @@
  * report says which steps ended up in the output.
  */
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
-import { BUILTIN_MAP, CONSTANTS, toMaterial } from "./builtins.js";
+import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, toMaterial } from "./builtins.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import type { Shape3 } from "../sdf/types.js";
-import { isCurve, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { isEmpty, type Shape3 } from "../sdf/types.js";
+import { isCurve, isMaterial, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus"]);
+const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
+const dimsLabel = (b: { min: number[]; max: number[] }): string => [0, 1, 2].map((k) => fmt3(b.max[k] - b.min[k])).join(" × ");
 
 export class RuntimeError extends Error {
   constructor(message: string, readonly line: number) {
@@ -99,11 +101,15 @@ class Scope {
 }
 
 export function evaluate(program: Program, options: EvalOptions = {}): Evaluation {
+  // angle(name) reads the pose being evaluated.
+  CURRENT_ANGLES.clear();
+  for (const [name, v] of Object.entries(options.jointAngles ?? {})) CURRENT_ANGLES.set(name, v);
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
   const settings: Settings = {};
   const warnings: string[] = [];
+  const shadowed = new Set<string>();
   let shown: { names: string[]; shapes: Shape3[]; scene: boolean } | undefined;
   const poses: Pose[] = [];
   const animations: Animation[] = [];
@@ -127,6 +133,15 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return e.value;
       case "list":
         return e.items.map((it) => evalExpr(it, scope));
+      case "index": {
+        const target = evalExpr(e.target, scope);
+        const i = evalExpr(e.index, scope);
+        if (!Array.isArray(target)) throw new RuntimeError(`[...] indexes a list, not a ${typeName(target)}`, e.line);
+        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number`, e.line);
+        const k = i < 0 ? target.length + i : i;
+        if (k < 0 || k >= target.length) throw new RuntimeError(`index ${i} is outside the list, which has ${target.length} item${target.length === 1 ? "" : "s"}`, e.line);
+        return target[k];
+      }
       case "ident": {
         const v = scope.get(e.name);
         if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
@@ -163,7 +178,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       switch (op) {
         case "+": return union([a, b]);
         case "-": return difference(a, b);
-        case "&": return intersect(a, b);
+        case "&": {
+          const r = intersect(a, b);
+          // An intersection that removes everything is usually a precedence slip (`a | move(...) & b | move(...)`),
+          // and nothing downstream will say so: the part is simply not there (measured on a crate of lemons).
+          if (isEmpty(r.bounds) && !isEmpty(a.bounds) && !isEmpty(b.bounds))
+            warnings.push(`line ${line}: '&' removed everything: the two shapes do not overlap (${dimsLabel(a.bounds)} at ${a.bounds.min.map(fmt3).join(", ")} and ${dimsLabel(b.bounds)} at ${b.bounds.min.map(fmt3).join(", ")}). '|' binds tighter than '&', so check the parentheses.`);
+          return r;
+        }
       }
     }
     if (isShape2(a) && isShape2(b)) {
@@ -263,6 +285,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const user = scope.get(callee);
     if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
+    // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
+    // reaches the builtin, and the program says so once (round 4 asked; a name alone, never called, is fine).
+    if (builtin && user !== undefined && !shadowed.has(callee)) {
+      shadowed.add(callee);
+      warnings.push(`line ${line}: ${callee}(...) calls the builtin, but '${callee}' is also a step in this program; rename the step so the two do not read as one.`);
+    }
     if (!builtin) {
       if (user !== undefined) throw new RuntimeError(`'${callee}' is a ${typeName(user)}, not a function`, line);
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
@@ -406,7 +434,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "assign": {
         const collecting = topLevel && reads === undefined;
         if (collecting) reads = new Set();
-        const value = evalExpr(stmt.value, scope);
+        let value = evalExpr(stmt.value, scope);
+        // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
+        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
+        if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
+          value = { ...value, name: stmt.name };
         scope.set(stmt.name, value);
         if (topLevel) {
           const prev = steps.get(stmt.name);

@@ -227,7 +227,19 @@ class Parser {
     return args;
   }
 
+  /** A primary followed by any number of `[i]` indexes: `angle("boom")[0]`, `pts[len(pts) - 1]`. */
   private primary(): Expr {
+    let e = this.atom();
+    while (this.atOp("[")) {
+      const t = this.next();
+      const index = this.expr();
+      this.expectOp("]");
+      e = { type: "index", target: e, index, line: t.line };
+    }
+    return e;
+  }
+
+  private atom(): Expr {
     const t = this.peek();
     if (t.type === "num") { this.next(); return { type: "num", value: Number(t.value), line: t.line }; }
     if (t.type === "str") { this.next(); return { type: "str", value: t.value, line: t.line }; }

@@ -75,6 +75,7 @@ npx aixle doc                        # the reference, to stdout
 | `turntable.png` | eight views around the model |
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
 | `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |
+| `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
 | `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
 | `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |

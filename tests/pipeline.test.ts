@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, diff, foldThinWarnings, QUICK, run, thinWarnings, tightBounds } from "../src/pipeline.js";
+import { cellFor, check, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -173,7 +173,7 @@ describe("rigs, features and overhangs", () => {
       expect(table.report).toMatch(/Overhangs \| \d+% of the surface faces down/);
       const cube = run("m = box(2)", "cube.aix", dir, { ...QUICK, grid: 16 });
       expect(cube.physics?.overhang ?? 1).toBe(0);
-      expect(cube.report).toMatch(/Overhangs \| none/);
+      expect(cube.report).toMatch(/Overhangs \| 0\.0% of the surface faces down more than 45° above the floor \|/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -222,6 +222,88 @@ describe("extents and close-ups", () => {
       // The sheet's cell is the knob's box over 32 cells, far finer than the slab's 10 units over 32.
       expect(r.files).toContain("sheet.png");
       expect(r.timings.focus).toBeDefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("extents that cannot clip", () => {
+  it("keeps a plate thinner than any sampling pass whole, and a decal region out of the geometry", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A 0.12-thick disc under a ball: a coarse pass once found only its middle (measured: 1.8 of 4.4 wide).
+      const r = run("pad = cylinder(2.2, 0.12)\nball = sphere(1) | move(0, 1, 0)\nm = pad + ball", "plate.aix", dir, { ...QUICK, grid: 40 });
+      expect(r.report).toMatch(/Surface extent \| x -2\.[12]\d*\.\.2\.[12]/);
+      const ev = check('eye = sphere(1)\nspot = box(0.4, 0.4, 0.03) | move(0, 0, 1)\nm = decal(eye, spot, "black")');
+      expect(geometrySteps(ev).has("spot")).toBe(false);
+      expect(geometrySteps(ev).has("eye")).toBe(true);
+      expect(thinWarnings(ev, 0.05, 40)).toHaveLength(0);
+      // The decal is a skin: at the surface it answers black, deep inside the base shows.
+      const m = ev.output!;
+      expect(m.hit(0, 0, 1).mat.name).toBe("black");
+      expect(m.hit(0, 0, 0.5).mat.name).not.toBe("black");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("round-3 findings", () => {
+  it("tells a cavity from a loose piece and a small part from a speck", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A hollow closed box: one piece with one cavity, no loose-piece warning.
+      const r = run("m = box(2, 2, 2) | shell(0.2)", "hollow.aix", dir, { ...QUICK, grid: 32 });
+      expect(r.warnings.join()).not.toMatch(/separate pieces/);
+      expect(r.report).toMatch(/\| Cavities \| volume/);
+      expect(r.report).toMatch(/\| Pieces \| 1 \|/);
+      // A small star floating above a post is a loose piece named by its step, not a speck.
+      const r2 = run("post = cylinder(0.08, 1) | move(0, 0.5, 0)\nstar = extrude(star(5, 0.3, 0.13), 0.08) | move(0, 1.3, 0)\nm = post + star", "star.aix", dir, { ...QUICK, grid: 48 });
+      expect(r2.warnings.join()).toMatch(/separate pieces.*'star'/);
+      expect(r2.warnings.join()).not.toMatch(/speck/);
+      // A lug built at the origin and moved into place, inside a posed joint, is named by the lug: the innermost step,
+      // found by walking the tree with each transform's inverse (round 4: the arm's union was named instead).
+      const rig = "lug = sphere(0.2)\narm = box(0.3, 2, 0.3) | move(0, 1, 0)\nboom = arm + (lug | move(0, 2.6, 0))\nrig = joint(boom, \"hinge\", 0, 0, 0)\nbase = box(2, 0.3, 2)\nm = base + rig";
+      const r3 = run(rig, "rig.aix", dir, { ...QUICK, grid: 48, poses: false });
+      expect(r3.warnings.join()).toMatch(/separate pieces.*'lug'/);
+      expect(r3.warnings.join()).not.toMatch(/'arm'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("warns about an empty intersection, a painted-plus-unpainted union, and letter counters under a cell", () => {
+    const ev = check("a = box(1)\nb = box(1) | move(5, 0, 0)\nm = a & b | move(0, 1, 0)");
+    expect(ev.warnings.join()).toMatch(/line 3: '&' removed everything/);
+    const lid = check('lid = cone(1, 0.5, 0.3) + ellipsoid(0.5, 0.2, 0.5) | paint("gold")');
+    expect(paintWarnings(lid).join()).toMatch(/'lid' \(line 1\) joins painted and unpainted parts/);
+    expect(paintWarnings(check('lid = (cone(1, 0.5, 0.3) + ellipsoid(0.5, 0.2, 0.5)) | paint("gold")'))).toHaveLength(0);
+    const small = check('t = extrude(text("Best in Show", 0.12, weight=0.05), 0.1)\nbase = box(5, 0.2, 5)\nm = t + base');
+    expect(thinWarnings(small, 0.04, 128).join()).toMatch(/'t' \(line 1\) has (gaps \(a letter's counters, the space between letters, a slot\) only|lettering whose gaps .* close up)/);
+    expect(thinWarnings(check('t = extrude(text("Best in Show", 0.4, weight=0.06), 0.1)'), 0.02, 128)).toHaveLength(0);
+  });
+  it("angle() reads the pose being evaluated, and numbers print whole", () => {
+    const src = 'arm = box(0.2, 2, 0.2) | move(0, 1, 0)\nj = joint(arm, "hinge", 0, 0, 0)\na = angle("hinge")[0]\nshow j';
+    expect(check(src).steps.find((s) => s.name === "a")!.value).toBe(0);
+    expect(check(src, "rig.aix", undefined, { hinge: [30, 0, 0] }).steps.find((s) => s.name === "a")!.value).toBe(30);
+  });
+});
+
+describe("printing", () => {
+  it("writes a binary STL of the shown model and hollow() leaves no enclosed cavity", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("m = box(2, 2, 2) | hollow(0.2, 0, -1, 0)", "print.aix", dir, { ...QUICK, grid: 32, obj: true });
+      expect(r.files).toContain("model.stl");
+      const stl = readFileSync(join(dir, "model.stl"));
+      const count = stl.readUInt32LE(80);
+      expect(count).toBe(r.mesh!.indices.length / 3);
+      expect(stl.length).toBe(84 + count * 50);
+      // The drain joins the void to the outside: one surface, no cavity, and the wall is there.
+      expect(r.report).toMatch(/\| Cavities \| none \|/);
+      expect(r.evaluation.output!.dist(0, 0, 0)).toBeGreaterThan(0.5);
+      expect(r.evaluation.output!.dist(0.9, 0.5, 0)).toBeLessThan(0);
+      expect(r.evaluation.output!.dist(0, -0.9, 0)).toBeGreaterThan(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

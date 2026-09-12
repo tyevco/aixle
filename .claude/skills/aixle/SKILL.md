@@ -23,12 +23,18 @@ Reference: `docs/reference.md` (every function, generated from the code),
    origin, then `rotate`, then `move` into place. Paint parts before
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
-   size, every warning, in a second. Sizes that look wrong are wrong.
+   size (profiles and numbers too), every warning, in a second. Sizes
+   that look wrong are wrong. A `surface` line under a step is the true
+   extent of a turned box; with `--pose`, a `posed` line is where a step
+   ends up once the joints above it have turned.
 4. **`npx aixle render model.aix --quick`** while iterating (the sheet in
    a second or two), then read `out/model/sheet.png`. Drop `--quick` for
    the full render: read `slices.png` if anything is hollow or nested,
    `steps.png` if a part is missing or misplaced; `report.md` has the
-   numbers, including whether the model stands and is in one piece.
+   numbers, including whether the model stands and is in one piece; a
+   quick sheet that dropped thin steps says so and does not judge the
+   pieces. `--focus step` is a close-up meshed at its own finer cell,
+   where the step is in the pose shown, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side.
 5. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
@@ -63,7 +69,7 @@ bezier(points)  curve(points)   tube(r, c)  sweep(profile, c)   text("Ab", 1, fa
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
-height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)                          # read sizes to place parts
+height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 

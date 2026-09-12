@@ -14,10 +14,15 @@ import type { Mesh } from "./mesh.js";
 
 export interface Piece {
   triangles: number;
+  /** Signed: negative for a closed shell whose normals point inward, which is a cavity inside another piece. */
   volume: number;
   /** Lowest y of the piece. */
   bottom: number;
   centre: [number, number, number];
+  /** Longest side of the piece's box, to tell a small real part from a sliver. */
+  size: number;
+  /** True for an inward-facing shell: an enclosed void, not a loose part. */
+  cavity: boolean;
 }
 
 export interface Physics {
@@ -120,10 +125,23 @@ export function analyse(mesh: Mesh, cellSize: number): Physics {
   for (const tris of groups.values()) {
     const cv = centroidAndVolume(mesh, tris);
     let bottom = Infinity;
-    for (const t of tris) for (let k = 0; k < 3; k++) bottom = Math.min(bottom, p[ix[t * 3 + k] * 3 + 1]);
-    pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre });
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const t of tris)
+      for (let k = 0; k < 3; k++) {
+        const o = ix[t * 3 + k] * 3;
+        for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[o + a]); hi[a] = Math.max(hi[a], p[o + a]); }
+      }
+    bottom = lo[1];
+    // The main body's winding gives a positive volume; a shell wound the other way is a void inside something.
+    pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre, size: Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), cavity: false });
   }
+  // A piece with no volume is a stray triangle or a flat sliver, not a part; naming it as a loose piece sent an agent
+  // looking for something that is not there (round 4). It is dropped unless it is all there is.
+  const solid = pieces.filter((pc) => pc.volume !== 0);
+  if (solid.length) pieces.length = 0, pieces.push(...solid);
   pieces.sort((a, b) => Math.abs(b.volume) - Math.abs(a.volume));
+  const sign = pieces.length ? Math.sign(pieces[0].volume) || 1 : 1;
+  for (const pc of pieces) pc.cavity = Math.sign(pc.volume) === -sign && pc.volume !== 0;
   // Overhangs: area of faces whose normal points down more than 45 degrees, other than the faces resting on the floor.
   let area = 0, down = 0;
   for (let t = 0; t < ix.length; t += 3) {

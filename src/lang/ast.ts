@@ -8,8 +8,10 @@ export interface Unary { type: "unary"; op: "-"; arg: Expr; line: number }
 export interface Binary { type: "binary"; op: "+" | "-" | "*" | "/" | "%" | "^" | "&"; left: Expr; right: Expr; line: number }
 export interface Arg { name?: string; value: Expr }
 export interface Call { type: "call"; callee: string; args: Arg[]; line: number }
+/** `list[i]`: one item of a list, 0-based; negative counts from the end. */
+export interface Index { type: "index"; target: Expr; index: Expr; line: number }
 
-export type Expr = Num | Str | Ident | List | Unary | Binary | Call;
+export type Expr = Num | Str | Ident | List | Unary | Binary | Call | Index;
 
 export interface Assign { type: "assign"; name: string; value: Expr; line: number }
 export interface Def { type: "def"; name: string; params: { name: string; default?: Expr }[]; body: Expr; line: number }

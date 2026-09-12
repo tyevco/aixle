@@ -1,0 +1,48 @@
+# An award trophy, about 5 units tall, front on +z.
+# A two-step marble base with a silver nameplate engraved in two serif lines,
+# a twisted fluted silver stem, a gold loving cup with raised lettering wrapped
+# round its rim band, two silver strap handles swept along exact curves,
+# a gold lid and a star finial.
+set grid 240
+set light_azimuth -30
+set light_elevation 50
+set azimuth 20
+
+# Base: two steps, marble at a smaller feature size than the preset's 1.2.
+step1 = box(3.4, 0.6, 3.4, round=0.03) | move(0, 0.3, 0) | paint(material("marble", scale=0.5))
+step2 = box(2.4, 0.3, 2.4, round=0.03) | move(0, 0.75, 0) | paint(material("marble", scale=0.5))
+base = step1 + step2
+
+# Nameplate on the lower step's front face (z = 1.7): 0.16 thick, 0.02 into the stone.
+plate = extrude(rect(2.7, 0.46, round=0.05), 0.16, "z") | move(0, 0.3, 1.76) | paint("silver")
+# Two serif lines, extruded 0.16 and centred on the plate's front (z = 1.84): cut 0.08 deep.
+line1 = extrude(text("CHAMPION", 0.18, weight=0.05, align="center", face="serif"), 0.16, "z") | move(0, 0.34, 1.84)
+line2 = extrude(text("BEST IN SHOW 2026", 0.13, weight=0.045, align="center", face="serif"), 0.16, "z") | move(0, 0.14, 1.84)
+nameplate = plate - (line1 + line2)
+
+# Stem: a fluted column (an eight-point star profile) twisted 50 degrees per unit.
+foot = cylinder(0.5, 0.12, round=0.03) | move(0, 0.95, 0) | paint("silver")
+stem = extrude(star(8, 0.3, 0.22), 1.3) | twist(50) | move(0, 1.65, 0) | paint("silver")
+collar = cylinder(0.4, 0.1, round=0.03) | move(0, 2.33, 0) | paint("silver")
+knop = sphere(0.28) | move(0, 2.55, 0) | paint("silver")
+
+# Cup: a revolved profile with a vertical band near the rim for the lettering;
+# the wall is 0.13 thick, the bowl 0.28 thick at the bottom.
+bowl = polygon(0,0, 0.4,0, 0.55,0.1, 0.7,0.45, 0.95,1.0, 1.15,1.3, 1.15,1.7, 1.02,1.7, 1.02,1.3, 0.84,1.0, 0.6,0.5, 0.45,0.28, 0,0.28)
+cup = revolve(bowl) | move(0, 2.7, 0) | paint("gold")
+
+# Rim text: standing lettering wrapped round the band (radius 1.15), 0.08 thick so it stands 0.05 proud.
+rim_text = extrude(text("AWARD OF EXCELLENCE", 0.16, weight=0.055, align="center"), 0.08, "z") | wrap(1.18) | move(0, 4.1, 0) | paint("gold")
+
+# Handles: a flat strap swept along an exact curve from the bowl out and up into the rim band, mirrored.
+handle_path = curve([0.55,3.2,0, 1.35,3.35,0, 1.7,3.85,0, 1.4,4.3,0, 1.05,4.2,0])
+handle = sweep(ellipse(0.14, 0.09), handle_path) | paint("silver")
+handles = mirror(handle, "x")
+
+# Lid and star finial.
+lid = ((cone(1.2, 0.8, 0.22) | move(0, 4.5, 0)) + (ellipsoid(0.8, 0.28, 0.8) | move(0, 4.61, 0))) | paint("gold")
+post = cylinder(0.08, 0.42) | move(0, 4.86, 0) | paint("gold")
+finial = extrude(star(5, 0.3, 0.13), 0.08, "z") | move(0, 5.15, 0) | paint("gold")
+
+trophy = base + nameplate + foot + stem + collar + knop + cup + rim_text + handles + lid + post + finial
+show trophy

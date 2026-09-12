@@ -541,3 +541,61 @@ describe("material axis and glow", () => {
     expect(preset("gold")!.glow).toBe(0);
   });
 });
+
+describe("round-4 findings", () => {
+  it("an intersection keeps the first shape's material on the faces the second cut", () => {
+    const a = O.paint(P.box(2, 2, 2), preset("red")!);
+    const b = O.paint(O.move(P.box(2, 2, 2), 1, 0, 0), preset("blue")!);
+    // On b's face at x = 2? No: the intersection's face at x = 1 is a's interior cut by b, so it is red.
+    expect(O.intersect(a, b).hit(0.01, 0, 0).mat.name).toBe("red");
+    expect(O.intersect(a, b).hit(0.99, 0, 0).mat.name).toBe("red");
+  });
+  it("surfacePoint slides to the surface, and placedBounds carries a box through a turned joint", () => {
+    const s = O.surfacePoint(P.sphere(1), 0, 3, 0);
+    expect(s[1]).toBeCloseTo(1, 4);
+    // From inside a box the nearest face is the closest one: z = 1 from (5, 0.2, 0.3).
+    const p = O.surfacePoint(O.move(P.box(2, 2, 2), 5, 0, 0), 5, 0.2, 0.3);
+    expect(p[2]).toBeCloseTo(1, 3);
+    expect(p[0]).toBeCloseTo(5, 3);
+    const lug = P.sphere(0.2);
+    const boom = O.union([O.move(P.box(0.3, 2, 0.3), 0, 1, 0), O.move(lug, 0, 2.6, 0)]);
+    const j = O.joint(boom, "hinge", 0, 0, 0, [0, 0, 90]);
+    const placed = O.placedBounds(j, lug, lug.bounds)!;
+    // Turned 90 degrees about z at the origin, the lug at y 2.6 lands at x -2.6.
+    expect(placed.min[0]).toBeCloseTo(-2.8, 5);
+    expect(placed.max[0]).toBeCloseTo(-2.4, 5);
+    expect(placed.min[1]).toBeCloseTo(-0.2, 5);
+    expect(O.hasLooseBounds(j)).toBe(true);
+    expect(O.hasLooseBounds(boom)).toBe(false);
+    // The inverse of every transform and the joint lands where the child was.
+    const u = j.unwarp!(-2.6, 0, 0);
+    expect(u[0]).toBeCloseTo(0, 5);
+    expect(u[1]).toBeCloseTo(2.6, 5);
+  });
+  it("a sweep's box allows for the mitres at sharp joins", () => {
+    const straight = W.sweep(S.circle(0.3), [[0, 0, 0], [2, 0, 0]]);
+    const bent = W.sweep(S.circle(0.3), [[0, 0, 0], [2, 0, 0], [2, 2, 0]]);
+    // The reach is the profile box's corner, 0.3 * sqrt 2 for a circle of 0.3.
+    expect(straight.bounds.max[0]).toBeCloseTo(2 + 0.3 * Math.SQRT2, 5);
+    expect(bent.bounds.max[0]).toBeGreaterThan(straight.bounds.max[0]);
+    // The mitre's outer corner is inside the box.
+    const corner = 2 + 0.3;
+    expect(bent.bounds.max[0]).toBeGreaterThanOrEqual(corner);
+    expect(bent.bounds.min[1]).toBeLessThanOrEqual(-0.3);
+  });
+});
+
+describe("letter spacing as a gap", () => {
+  it("counts the space between neighbouring letters, so tight serif lettering warns before it meshes open", () => {
+    // The trophy's rim text: size 0.15, weight 0.04, spacing 0.025, where two letters' strokes are a third of the
+    // render's 0.018 cell apart; with room between the letters the counters are the narrowest gap again.
+    const tight = textProfile("AWARD OF EXCELLENCE", 0.15, 0.04, 0.025);
+    const loose = textProfile("AWARD", 0.15, 0.04, 0.08, 0, "serif");
+    expect(tight.gap!).toBeLessThan(0.018 / 3);
+    // With room between the letters the counters are the narrowest gap again: 2.8 grid units less the stroke.
+    expect(loose.gap!).toBeCloseTo(2.8 * 0.025 - 0.04, 6);
+    // A single letter has no neighbour: its gap is its counters alone; so is a bold title whose letters overlap.
+    expect(textProfile("A", 0.15, 0.04, 0.025, 0, "serif").gap!).toBeCloseTo(2.8 * 0.025 - 0.04, 6);
+    expect(textProfile("AIXLE", 1.3, 0.22).gap!).toBeCloseTo(2.8 * (1.3 / 6) - 0.22, 6);
+  });
+});

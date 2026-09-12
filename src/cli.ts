@@ -4,17 +4,18 @@
  *   aixle check  <file.aix>
  *   aixle doc    [--write FILE]
  */
-import { surfaceBottom } from "./sdf/ops.js";
+import { hasLooseBounds, placedBounds, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, foldThinWarnings, QUICK, run, thinWarnings } from "./pipeline.js";
+import { cellFor, check, diff, foldThinWarnings, paintWarnings, QUICK, run, thinWarnings } from "./pipeline.js";
 import { watch } from "node:fs";
-import { isEmpty } from "./sdf/types.js";
+import { isEmpty, isEmpty2, type Bounds } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
-import { isShape3 } from "./lang/values.js";
+import { isShape2, isShape3 } from "./lang/values.js";
 
-const short = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
+// Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
+const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 function usage(): never {
   console.error(
@@ -23,7 +24,7 @@ function usage(): never {
       "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
       "                          [--beauty [--beauty-size N]] [--soft] [--texture N | --no-texture]",
-      "                          [--azimuth DEG] [--elevation DEG] [--focus NAME] [--pose NAME]",
+      "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix> [--pose NAME]   parse and evaluate; print sizes and warnings, render nothing",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
@@ -81,25 +82,49 @@ function main(argv: string[]): number {
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
+      const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
       for (const st of ev.steps) {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
         if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
+        if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
+        // A 2D profile has a box too, and a part built from one is invisible until it is extruded (round 4 asked).
+        if (isShape2(st.value)) {
+          const b = st.value.bounds;
+          console.log(`${st.name.padEnd(18)} ${isEmpty2(b) ? "profile, empty" : `profile ${short(b.max[0] - b.min[0])} × ${short(b.max[1] - b.min[1])}`.padEnd(20) + ` x ${short(b.min[0])}..${short(b.max[0])}  y ${short(b.min[1])}..${short(b.max[1])}`}`);
+          continue;
+        }
         if (!isShape3(st.value)) continue;
         const used = ev.used.has(st.name) ? "" : "   (not in output)";
         const b = st.value.bounds;
-        console.log(`${st.name.padEnd(18)} ${isEmpty(b) ? "empty" : `${dimsLabel(b).padEnd(20)} ${span(b)}`}${used}`);
+        console.log(`${st.name.padEnd(18)} ${isEmpty(b) ? "empty" : spanBox(b)}${used}`);
+        if (isEmpty(b)) continue;
+        // A box after a rotation, a warp or a posed joint is the box of a turned box: measure the surface itself
+        // and print that when it is tighter (measured: a boom's box read 5.9 tall for a 5.2 surface).
+        let own = b;
+        if (hasLooseBounds(st.value)) {
+          const e = surfaceExtent(st.value, 24);
+          const tighter = [0, 1, 2].some((k) => (e.max[k] - e.min[k]) < (b.max[k] - b.min[k]) * 0.95);
+          if (!isEmpty(e) && tighter) { own = e; console.log(`${"  surface".padEnd(18)} ${spanBox(e)}`); }
+        }
+        // In a pose, where the step ends up once the joints above it have turned (its surface extent carried
+        // through them, so still a box, but of the surface rather than of a box).
+        if (pose && ev.output) {
+          const placed = placedBounds(ev.output, st.value, own);
+          if (placed && [0, 1, 2].some((k) => Math.abs(placed.min[k] - b.min[k]) > 1e-6 || Math.abs(placed.max[k] - b.max[k]) > 1e-6))
+            console.log(`${"  posed".padEnd(18)} ${spanBox(placed)}`);
+        }
       }
       if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
       const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
-      if (cellSize > 0) console.log(`grid ${grid}: cell ${short(cellSize)} units`);
+      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units`);
       if (ev.output && !isEmpty(ev.output.bounds)) {
         // The surface's lowest point, not the bounds': the note a render would make, without the render.
         const bottom = surfaceBottom(ev.output);
         if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
       }
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : [])];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev)];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       return 0;
@@ -172,6 +197,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       sharp: opts.soft ? false : undefined,
       texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,
       azimuth: typeof opts.azimuth === "string" ? Number(opts.azimuth) : undefined,
+      zoom: typeof opts.zoom === "string" ? Number(opts.zoom) : undefined,
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
       focus: typeof opts.focus === "string" ? opts.focus : undefined,
       pose: typeof opts.pose === "string" ? opts.pose : undefined,
