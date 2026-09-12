@@ -267,7 +267,10 @@ distances you compute are there to read.
 
 ## Materials
 
-`decal(shape, region, m)` paints only the surface inside `region`, adding
+`hollow(shape, wall, x, y, z)` is `shell` with a drain hole at the point,
+for printing: the void is open, so it is not counted as a cavity and
+resin or support can escape; `model.stl` is written next to the OBJ and
+GLB, the model as shown. `decal(shape, region, m)` paints only the surface inside `region`, adding
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
 a jar; `region` is any shape. A decal is a skin: the cross-sections show
 the base material underneath, and a step used only as a region is not

@@ -314,6 +314,15 @@ Grow (r > 0) or shrink (r < 0) the surface by r.
     offset(shape, r) -> shape
     offset(profile, r) -> shape2
 
+### hollow
+
+Hollow for printing: a shell `wall` thick with a drain hole of radius r (default the wall) cut through it at the drain point, usually on the bottom, so the void is open and resin or support can escape. hollow(cup, 0.1, 0, 0, 0) drains a model standing on y = 0 through its floor.
+
+    hollow(shape, wall, x, y, z, r=?) -> shape
+
+- `x`: the drain point
+- `r`: drain radius
+
 ### shell
 
 Hollow the shape leaving a wall t thick inside its surface. Subtract something to open it up. check warns when t is under a grid cell.

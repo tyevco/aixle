@@ -31,6 +31,7 @@ export default defineConfig({
           { text: "Building a model: the agent's loop", link: "/docs/agent-guide" },
           { text: "Reference", link: "/docs/reference" },
           { text: "Design", link: "/docs/design" },
+          { text: "Roadmap", link: "/docs/roadmap" },
         ],
       },
       { text: "Pictures", items: [{ text: "Gallery", link: "/docs/gallery" }] },

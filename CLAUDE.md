@@ -7,7 +7,9 @@ Guidance for agents working in this repo.
 Aixle is a procedural 3D modelling language for language models, and the
 tool that turns a program into pictures and meshes. Read `README.md` for the
 shape of it, `docs/language.md` for the language, `docs/agent-guide.md` for
-how to use it to build a model, `docs/design.md` for why it is built this way.
+how to use it to build a model, `docs/design.md` for why it is built this way,
+`docs/roadmap.md` for what is proposed next and what each proposal must
+prototype first.
 
 Layers, each pure and under test:
 

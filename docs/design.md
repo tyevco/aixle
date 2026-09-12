@@ -294,5 +294,8 @@ once. It exists for people; an agent verifies from the PNGs.
 
 ## What is not here yet
 
-- Sweeps along true curves rather than fine polylines.
-- Lowercase and accented glyphs; a second, serif face.
+Proposals for what comes next, each with what must be prototyped first,
+are in `roadmap.md`: anchors that move with a part, a full PBR bake from
+the field, `use` for libraries of parts, printing (STL, hollowing, a print
+report), smooth 2D profiles, `assert`, image textures, lights and cameras
+in the language, callouts on the views, and `aixle explain`.

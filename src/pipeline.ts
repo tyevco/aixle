@@ -12,6 +12,7 @@ import { meshField } from "./mesh/meshSdf.js";
 import { box, primitive } from "./sdf/primitives.js";
 import { eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
+import { toStl } from "./export/stl.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import { allJoints, intersect, move, surfaceExtent } from "./sdf/ops.js";
 import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
@@ -511,6 +512,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const { obj, mtl } = toObjScene(hierarchy, name, "model.mtl", hierarchy.atlas ? "model.png" : undefined);
         write("model.obj", obj);
         write("model.mtl", mtl);
+        // The STL is the model as shown, posed if a pose is set: what a printer would print.
+        write("model.stl", toStl(mesh!, name));
       }
       if (opts.glb !== false) {
         const glb = toGlbScene(hierarchy, name, glbAnimations);
@@ -652,7 +655,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "slices.png": "cross-sections through the centre on each axis",
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
     "turntable.png": "eight views around the model",
-    "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
+    "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
     "poses.png": "every pose, rest first",
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",

@@ -9,7 +9,7 @@
 import { fbm3 } from "../core/noise.js";
 import { apply, length2, rad, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
 import { DEFAULT_MATERIAL } from "./materials.js";
-import { primitive } from "./primitives.js";
+import { primitive, cylinder } from "./primitives.js";
 import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import { smax, smin } from "./shapes2d.js";
 import { boundsCenter, boundsCorners, boundsSize, boundsDistance, boundsFromPoints, boundsGrow, boundsIntersect, boundsUnion, EMPTY_BOUNDS, FAR, isEmpty, type Bounds, type Hit, type JointState, type Material, type Placement, type Shape3 } from "./types.js";
@@ -270,6 +270,18 @@ export function shell(s: Shape3, t: number): Shape3 {
     feature: s.feature === undefined ? t : Math.min(s.feature, t),
     gap: s.gap,
   };
+}
+
+/**
+ * Hollow for printing: a shell with a drain hole of radius `r` cut through
+ * the wall at the drain point (on the bottom, usually), so resin or
+ * support can escape and the void is not an enclosed cavity.
+ */
+export function hollow(s: Shape3, wall: number, dx: number, dy: number, dz: number, r = wall): Shape3 {
+  const shelled = shell(s, wall);
+  const hole = move(cylinder(r, wall * 6), dx, dy, dz);
+  const out = difference(shelled, hole);
+  return out;
 }
 
 /** Twist about y by `degPerUnit` degrees for each unit of height. */

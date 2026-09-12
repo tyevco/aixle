@@ -237,6 +237,8 @@ export const BUILTINS: Builtin[] = [
   def("offset", "Modifiers", "Grow (r > 0) or shrink (r < 0) the surface by r.",
     ov([shape(), num("r")], "shape", (a) => O.offset(s3(a[0]), n(a[1]))),
     ov([shape2(), num("r")], "shape2", (a) => S.offset2(s2(a[0]), n(a[1])))),
+  def("hollow", "Modifiers", "Hollow for printing: a shell `wall` thick with a drain hole of radius r (default the wall) cut through it at the drain point, usually on the bottom, so the void is open and resin or support can escape. hollow(cup, 0.1, 0, 0, 0) drains a model standing on y = 0 through its floor.",
+    ov([shape(), num("wall"), num("x", "the drain point"), num("y"), num("z"), num("r", "drain radius", NaN)], "shape", (a) => O.hollow(s3(a[0]), n(a[1]), n(a[2]), n(a[3]), n(a[4]), Number.isNaN(n(a[5])) ? n(a[1]) : n(a[5])))),
   def("shell", "Modifiers", "Hollow the shape leaving a wall t thick inside its surface. Subtract something to open it up. check warns when t is under a grid cell.",
     ov([shape(), num("t", "wall thickness")], "shape", (a) => O.shell(s3(a[0]), n(a[1]))),
     ov([shape2(), num("t")], "shape2", (a) => S.shell2(s2(a[0]), n(a[1])))),

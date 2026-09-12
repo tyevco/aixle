@@ -282,3 +282,24 @@ describe("round-3 findings", () => {
     expect(check(src, "rig.aix", undefined, { hinge: [30, 0, 0] }).steps.find((s) => s.name === "a")!.value).toBe(30);
   });
 });
+
+describe("printing", () => {
+  it("writes a binary STL of the shown model and hollow() leaves no enclosed cavity", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("m = box(2, 2, 2) | hollow(0.2, 0, -1, 0)", "print.aix", dir, { ...QUICK, grid: 32, obj: true });
+      expect(r.files).toContain("model.stl");
+      const stl = readFileSync(join(dir, "model.stl"));
+      const count = stl.readUInt32LE(80);
+      expect(count).toBe(r.mesh!.indices.length / 3);
+      expect(stl.length).toBe(84 + count * 50);
+      // The drain joins the void to the outside: one surface, no cavity, and the wall is there.
+      expect(r.report).toMatch(/\| Cavities \| none \|/);
+      expect(r.evaluation.output!.dist(0, 0, 0)).toBeGreaterThan(0.5);
+      expect(r.evaluation.output!.dist(0.9, 0.5, 0)).toBeLessThan(0);
+      expect(r.evaluation.output!.dist(0, -0.9, 0)).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
