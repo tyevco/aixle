@@ -105,6 +105,7 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
       inner: [round],
       feature: round.feature,
       gap: round.gap,
+      gapWhat: round.gapWhat,
     };
   }
   const n = segs.length;

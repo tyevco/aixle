@@ -160,6 +160,14 @@ A fluted vase: a lathe profile revolved around y, sixteen flutes cut from
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/vase.aix) · <a href="/aixle/viewers/vase.html" target="_blank" rel="noopener">viewer</a>
 
+### windmill
+
+A windmill, placed with anchors instead of arithmetic: the cap sits on
+
+![windmill, beauty render](../examples/renders/windmill_beauty.png) ![windmill, contact sheet](../examples/renders/windmill.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/windmill.aix) · <a href="/aixle/viewers/windmill.html" target="_blank" rel="noopener">viewer</a>
+
 ## Dogfooding
 
 Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).
@@ -283,3 +291,83 @@ round 4: An award trophy, about 6.3 units tall, front on +z, one solid piece for
 ![round-4_trophy, beauty render](../dogfood/renders/round-4_trophy_beauty.png) ![round-4_trophy, contact sheet](../dogfood/renders/round-4_trophy.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-4/trophy.aix) · <a href="/aixle/viewers/round-4_trophy.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-4/trophy.report.md)
+
+### round-5_bicycle
+
+round 5: A bicycle as a product picture. Faces +x, drive side towards +z (the viewer
+
+![round-5_bicycle, beauty render](../dogfood/renders/round-5_bicycle_beauty.png) ![round-5_bicycle, contact sheet](../dogfood/renders/round-5_bicycle.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/bicycle.aix) · <a href="/aixle/viewers/round-5_bicycle.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/bicycle.report.md)
+
+### round-5_clock
+
+round 5: A grandfather clock, about 6 units tall, front on +z.
+
+![round-5_clock, beauty render](../dogfood/renders/round-5_clock_beauty.png) ![round-5_clock, contact sheet](../dogfood/renders/round-5_clock.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/clock.aix) · <a href="/aixle/viewers/round-5_clock.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/clock.report.md)
+
+### round-5_sailboat
+
+round 5: A sailing dinghy on a cradle, about 5 units long. Bow is +z. The cradle
+
+![round-5_sailboat, beauty render](../dogfood/renders/round-5_sailboat_beauty.png) ![round-5_sailboat, contact sheet](../dogfood/renders/round-5_sailboat.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat.aix) · <a href="/aixle/viewers/round-5_sailboat.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/sailboat.report.md)
+
+### round-5_sailboat_probe_dark
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_dark, beauty render](../dogfood/renders/round-5_sailboat_probe_dark_beauty.png) ![round-5_sailboat_probe_dark, contact sheet](../dogfood/renders/round-5_sailboat_probe_dark.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_dark.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_dark.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_decal
+
+round 5: Probe: which decal wins where two regions overlap?
+
+![round-5_sailboat_probe_decal, beauty render](../dogfood/renders/round-5_sailboat_probe_decal_beauty.png) ![round-5_sailboat_probe_decal, contact sheet](../dogfood/renders/round-5_sailboat_probe_decal.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_decal.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_decal.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_main
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_main, beauty render](../dogfood/renders/round-5_sailboat_probe_main_beauty.png) ![round-5_sailboat_probe_main, contact sheet](../dogfood/renders/round-5_sailboat_probe_main.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_main2
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_main2, beauty render](../dogfood/renders/round-5_sailboat_probe_main2_beauty.png) ![round-5_sailboat_probe_main2, contact sheet](../dogfood/renders/round-5_sailboat_probe_main2.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main2.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main2.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_sharp
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_sharp, beauty render](../dogfood/renders/round-5_sailboat_probe_sharp_beauty.png) ![round-5_sailboat_probe_sharp, contact sheet](../dogfood/renders/round-5_sailboat_probe_sharp.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_sharp.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_sharp.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_well
+
+round 5: Probe: why does a decal region that contains a well's floor not paint it?
+
+![round-5_sailboat_probe_well, beauty render](../dogfood/renders/round-5_sailboat_probe_well_beauty.png) ![round-5_sailboat_probe_well, contact sheet](../dogfood/renders/round-5_sailboat_probe_well.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_well.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_well.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_treehouse
+
+round 5: A treehouse: a rough-barked tree with four branches and a blended canopy,
+
+![round-5_treehouse, beauty render](../dogfood/renders/round-5_treehouse_beauty.png) ![round-5_treehouse, contact sheet](../dogfood/renders/round-5_treehouse.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/treehouse.aix) · <a href="/aixle/viewers/round-5_treehouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/treehouse.report.md)

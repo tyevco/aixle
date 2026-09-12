@@ -73,7 +73,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
 
   // Prime with the mesh: view depth per pixel.
   const prime = createTarget(size, size, 0);
-  renderMesh(mesh, cam, prime, { background: 0, outline: false });
+  renderMesh(mesh, cam, prime, { background: 0, outline: false, solidGlass: true });
   const f = size / 2 / Math.tan(((cam.fov ?? 30) * Math.PI) / 360);
 
   const rayDir = (px: number, py: number): Vec3 => {

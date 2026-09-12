@@ -292,10 +292,34 @@ glyph was rendered and read to check it.
 server, and loads three.js from a CDN, so it needs a network connection
 once. It exists for people; an agent verifies from the PNGs.
 
+## Anchors
+
+Every dogfooding round spent most of its iterations on placement
+arithmetic, so a shape can carry named points. `anchor()` is a wrapper
+node holding the point in the part's own frame; nothing else in the tree
+knows about anchors. `anchorsOf()` walks down from a node and carries
+each child's anchors up through the node's forward map (`warp`), which
+every rigid transform, twist, bend, wrap and joint provides (the joint's
+is the pose's turn about the pivot), so a point is wherever its part
+ended up, in whatever pose. A union merges its parts' anchors, first
+part winning a name; a cut keeps the first shape's; a placed set keeps
+none. The free anchors (`top`, `centre`, ...) are read from the node's
+box on demand, so they cost nothing and every shape has them. `attach`
+is `move` by the difference of two anchors; the interpreter has no idea
+it is anything else.
+
+## Explain
+
+`aixle explain` is the first thing to run on a program someone else
+wrote: the evaluation records which steps each step read, so the tree
+from the output down is a printer over that record, each node with its
+own source line, size, paint state, joint and anchors. It reads the
+program's structure without rendering anything, which round 4's agents
+spent their first renders working out.
+
 ## What is not here yet
 
 Proposals for what comes next, each with what must be prototyped first,
-are in `roadmap.md`: anchors that move with a part, a full PBR bake from
-the field, `use` for libraries of parts, printing (STL, hollowing, a print
-report), smooth 2D profiles, `assert`, image textures, lights and cameras
-in the language, callouts on the views, and `aixle explain`.
+are in `roadmap.md`: a full PBR bake from the field, `use` for libraries
+of parts, a print report, smooth 2D profiles, `assert`, image textures,
+lights and cameras in the language, and callouts on the views.

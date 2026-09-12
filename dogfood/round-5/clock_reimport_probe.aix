@@ -1,0 +1,4 @@
+# Probe: re-import the exported GLB and compare its size and pieces with the source.
+set grid 256
+back = import("../out/clock/model.glb", resolution=160)
+show back

@@ -25,5 +25,5 @@ scroll = sweep(rect(0.16, 0.2), curl) | paint("brass")
 scroll_l = scroll | rotate(y=-90) | move(-3.25, 0, -0.5)
 scroll_r = scroll | rotate(y=-90) | move(3.25, 0, -0.5)
 
-model = body + engraved + scroll_l + scroll_r | ground()
+model = (body + engraved + scroll_l + scroll_r) | ground()
 show model

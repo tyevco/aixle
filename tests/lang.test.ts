@@ -245,3 +245,74 @@ describe("round-4 findings in the language", () => {
     expect(p[1]).toBeCloseTo(2, 4);
   });
 });
+
+describe("anchors", () => {
+  it("carry through moves, rotations, warps and posed joints, and attach() places by them", () => {
+    const src = [
+      'post = cylinder(0.08, 1) | anchor("top", 0, 0.5, 0) | move(0, 0.5, 0)',
+      'arm = box(1, 0.2, 0.2) | anchor("root", -0.5, 0, 0) | anchor("tip", 0.5, 0, 0)',
+      'arm2 = arm | rotate(z=90) | attach("root", post, "top")',
+      'p = at(arm2, "tip")',
+      'lamp = sphere(0.15) | attach("bottom", arm2, "tip")',
+      'j = joint(arm2 + lamp, "swing", 0, 1, 0)',
+      'q = at(j, "tip")',
+      'bar = box(2, 0.1, 0.1) | anchor("end", 1, 0, 0) | bend(45)',
+      'e = at(bar, "end")',
+      'm = post + j',
+      'pose("up", swing=[0, 0, -90])',
+    ].join("\n");
+    const ev = run(src);
+    const p = ev.steps.find((s) => s.name === "p")!.value as number[];
+    expect(p[0]).toBeCloseTo(0, 6);
+    expect(p[1]).toBeCloseTo(2, 6);
+    const lamp = ev.steps.find((s) => s.name === "lamp")!.value as Shape3;
+    expect(lamp.bounds.min[1]).toBeCloseTo(2, 6);
+    // In the pose the joint turns the arm about (0, 1, 0), so the tip swings out to x = 1.
+    const posed = evaluate(parse(src), { jointAngles: { swing: [0, 0, -90] } });
+    const q = posed.steps.find((s) => s.name === "q")!.value as number[];
+    expect(q[0]).toBeCloseTo(1, 6);
+    expect(q[1]).toBeCloseTo(1, 6);
+    // A bent bar's end rides the arc: 45 degrees per unit over one unit, radius 57.3 / 45.
+    const e = ev.steps.find((s) => s.name === "e")!.value as number[];
+    const R = 1 / (Math.PI / 4);
+    expect(e[0]).toBeCloseTo(R * Math.sin(Math.PI / 4), 6);
+    expect(e[1]).toBeCloseTo(R - R * Math.cos(Math.PI / 4), 6);
+    // Free anchors come from the box; a missing name lists what there is.
+    expect(() => run('a = box(1)\np = at(a, "nose")')).toThrow(/no anchor "nose".*top, bottom/);
+  });
+});
+
+describe("joints about an axis", () => {
+  it("turns about the given axis by one angle, and a pose gives a number", () => {
+    const src = [
+      "fork = box(0.2, 2, 0.2) | move(0, -1, 0)",
+      'steer = joint(fork, "steer", 0, 0, 0, axis=[cos(72), sin(72), 0])',
+      "m = box(1, 0.2, 0.2) | move(0, 1, 0) + steer",
+      'pose("turned", steer=25)',
+    ].join("\n");
+    const ev = run(src);
+    expect(ev.warnings).toEqual([]);
+    expect(ev.poses[0].angles.steer).toEqual([25, 0, 0]);
+    // Turned 90 about the axis through the origin: a point on the fork's bottom (0, -2, 0) sweeps about the raked axis.
+    const posed = evaluate(parse(src), { jointAngles: { steer: [90, 0, 0] } });
+    const j = posed.steps.find((s) => s.name === "steer")!.value as Shape3;
+    const p = j.warp!(0, -2, 0);
+    const ax = Math.cos(Math.PI * 0.4), ay = Math.sin(Math.PI * 0.4);
+    // Rotation about the axis keeps the component along it: dot(p, axis) is unchanged.
+    expect(p[0] * ax + p[1] * ay).toBeCloseTo(-2 * ay, 6);
+    expect(Math.hypot(p[0], p[1], p[2])).toBeCloseTo(2, 6);
+    expect(p[2]).not.toBeCloseTo(0, 3);
+    // A triple on an axis joint, or a number on a plain joint, is named.
+    expect(run(src.replace("steer=25", "steer=[25, 0, 5]")).warnings.join()).toMatch(/turns about its axis, so it takes one angle/);
+    expect(run('a = joint(box(1), "hinge", 0, 0, 0)\nm = a\npose("p", hinge=25)').warnings.join()).toMatch(/has no axis=, so it takes \[x, y, z\]/);
+  });
+});
+
+describe("a transform on the right of a union", () => {
+  it("warns when a named step is moved alone after '+', not when a fresh primitive is placed that way", () => {
+    expect(run("a = box(1)\nb = box(1)\nm = a + b | move(0, 2, 0)").warnings.join()).toMatch(/line 3: '\+ \.\.\. \| move\(\.\.\.\)' applies move to the right side only/);
+    expect(run("a = box(1)\nb = box(1)\nm = (a + b) | move(0, 2, 0)").warnings).toEqual([]);
+    expect(run("a = box(1)\nm = a + sphere(0.3) | move(0, 2, 0)").warnings).toEqual([]);
+    expect(run("a = box(1)\nb = box(1)\nm = a + (b | move(0, 2, 0))").warnings).toEqual([]);
+  });
+});

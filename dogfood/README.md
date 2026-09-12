@@ -32,6 +32,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 4 | Excavator, inherited | [`round-4/excavator.aix`](round-4/excavator.aix) | [report](round-4/excavator.report.md) | six cylinder joints replaced by `angle()`, a real bucket, one open edge left; `--focus` in a pose framed the rest position and `check` hid profiles, both fixed |
 | 4 | Market stall, inherited | [`round-4/market.aix`](round-4/market.aix) | [report](round-4/market.report.md) | one piece from two, overhangs down, fruit-on-fruit contacts left; a zero-volume piece and a quick pass's pieces count were noise, both fixed |
 | 4 | Trophy, inherited | [`round-4/trophy.aix`](round-4/trophy.aix) | [report](round-4/trophy.report.md) | overhangs 8% to 1%, cup filled for the slicer; rim lettering never watertight, which was the space between its letters, now warned |
+| 5 | Grandfather clock | [`round-5/clock.aix`](round-5/clock.aix) | [report](round-5/clock.report.md) | watertight, one piece, 4.5% overhang in 15 renders; the gap warning did not say which gap and glass hid the pendulum on every sheet, both fixed |
+| 5 | Treehouse scene | [`round-5/treehouse.aix`](round-5/treehouse.aix) | [report](round-5/treehouse.report.md) | four objects, one piece, in 11 renders; open edges blamed on a branch's parent and zero-volume voids called cavities, both fixed |
+| 5 | Bicycle | [`round-5/bicycle.aix`](round-5/bicycle.aix) | [report](round-5/bicycle.report.md) | 76 steps of tubes between named points, a raked steering pose; the watertight row pointed inside a hub and the raked axis needed an Euler triple from a script, both fixed |
+| 5 | Sailing dinghy | [`round-5/sailboat.aix`](round-5/sailboat.aix) | [report](round-5/sailboat.report.md) | lofted hull, bellied sails, six rigging lines fitting to fitting by anchors; a white sail read as absent for nine renders and the loft doc was wrong, both fixed |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -66,6 +70,18 @@ edges were read as acute stroke junctions, and a smooth minimum across
 the strokes was tried and changed nothing (29 edges to 30); the edges
 were neighbouring letters whose strokes came within a third of a cell of
 each other, which the letter spacing now reports as a gap.
+
+Round 5 was four new subjects (a grandfather clock, a treehouse scene, a
+bicycle, a sailing dinghy) chosen because each needs parts placed
+against parts, to measure whether fresh agents reach for the anchors
+built after round 4 without being told. Two of four did: the dinghy's
+rigging runs fitting to fitting by `at()` and `anchor()` and its
+mainsheet follows the boom's pose, and the bicycle used nested point
+lists for every tube; the clock and the treehouse used none, and did
+not miss them. The rest of what they found was the tool's, answered
+below. The dinghy's `sailboat_probe_A.aix` to `_G.aix` were whole
+copies of the model at different grids and are not kept; its named
+probes are.
 
 ## What each round changed
 
@@ -130,6 +146,29 @@ materials named after their step; the overhang row always a number;
 figures; docs for `loft`'s frame, the side-profile flip, the `angle()`
 cylinder pattern, contact versus overlap, the thin threshold, and the
 outline a cross-section draws just behind its plane.
+
+**Round 5** (new subjects, anchors available): `joint(..., axis=)`
+turns about one axis and a pose gives it one number; open edges are
+placed at an edge on the model with the steps whose surfaces meet
+there, "with itself" when one step's surfaces cross, a plane note when
+they all lie on a sample plane, and a tally per step; the lettering
+warning names the gap (the counter of a, the space between A and W);
+glass on the sheets, pose sheets and strips is a screen door so what
+is behind it shows; the quick pass steps its grid up on a model of thin
+parts and judges neither pieces nor footprint when it dropped any;
+attribution ranks by closeness first; `check --pose` measures a step's
+surface through the joints' inverses; a parser warning when a named
+step is transformed alone on the right of `+`; the views' grounds
+darker and matte highlights softer so a white part lit face-on is not
+the background; a move above a joint carried into the export's nodes
+and a rotation above one reported; an import sampled coarser than the
+render warns with the resolution to match; specks dropped from the
+pieces and cavities rows; the beauty camera on the surface extent;
+`surface()` with backtracking; the loft doc corrected (centred, as it
+always was); docs for decal order, wrap and bend landing points, tubes
+meeting at a point, the watertight thickness, `ground()` in a scene, a
+tapered smoothed tube's joins, and the key light not reaching an
+interior.
 
 ## Running a round
 

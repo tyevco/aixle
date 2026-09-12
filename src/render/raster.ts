@@ -22,6 +22,8 @@ export interface RenderOptions {
   outline?: boolean;
   /** Ignore per-vertex materials and show everything in this colour (for the steps sheet). */
   flatColor?: Vec3;
+  /** Draw glass solid rather than as a screen door: for a depth pass that primes rays, which must not see holes. */
+  solidGlass?: boolean;
 }
 
 export interface RenderTarget {
@@ -64,7 +66,9 @@ export function shade(n: Vec3, base: Vec3, metal: number, rough: number, glow = 
   const nh = Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl);
   const gloss = 1 - rough;
   const specPower = 4 + gloss * gloss * 120;
-  const spec = Math.pow(nh, specPower) * (0.08 + gloss * 0.6) * (0.5 + nl);
+  // A matte surface gets little highlight, so cloth and plaster lit face-on stay their own colour rather than
+  // saturating to white (the same sail).
+  const spec = Math.pow(nh, specPower) * (0.08 + gloss * 0.6) * (0.5 + nl) * (0.35 + 0.65 * gloss);
   const rim = rl * rl * 0.12 * (1 - rough * 0.5);
   const sr = metal > 0 ? base[0] * (0.4 + 0.6 * metal) + (1 - metal) : 1;
   const sg = metal > 0 ? base[1] * (0.4 + 0.6 * metal) + (1 - metal) : 1;
@@ -98,9 +102,15 @@ export function renderMesh(mesh: Mesh, cam: Camera, target: RenderTarget, opts: 
   const local = mesh.local;
   const flat = opts.flatColor;
   const persp = cam.fov !== undefined;
+  // Glass on the sheets: a material that transmits is drawn on every other pixel (a screen door), so what is behind
+  // it shows through the checker and a pendulum behind a glazed door is on the pose sheet and the animation strip
+  // (measured: both showed a grey pane and a clock in which nothing moved). No sorting or blending needed.
+  const seeThrough = mesh.materials.map((m) => m.transmit > 0.3);
+  const anyGlass = seeThrough.some(Boolean) && !flat && !opts.solidGlass;
   for (let t = 0; t < ix.length; t += 3) {
     const a = ix[t], b = ix[t + 1], c = ix[t + 2];
     if (!visible[a] || !visible[b] || !visible[c]) continue;
+    const glass = anyGlass && seeThrough[mesh.materialIndex[a]];
     const ax = sx[a], ay = sy[a], bx = sx[b], by = sy[b], cx = sx[c], cy = sy[c];
     const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
     if (area === 0) continue;
@@ -119,6 +129,7 @@ export function renderMesh(mesh: Mesh, cam: Camera, target: RenderTarget, opts: 
         let w1 = ((cx - xx) * (ay - yy) - (cy - yy) * (ax - xx)) * invArea;
         let w2 = 1 - w0 - w1;
         if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+        if (glass && ((px + py) & 1)) continue;
         // Perspective-correct weights; an orthographic camera has invW = 1 and linear depth.
         const pw0 = w0 * wa, pw1 = w1 * wb, pw2 = w2 * wc;
         const psum = pw0 + pw1 + pw2;

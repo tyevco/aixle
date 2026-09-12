@@ -1,0 +1,6 @@
+# Probe: re-import the exported GLB and compare its size and pieces with the source.
+set grid 200
+set azimuth 35
+set elevation 14
+back = import("../out/bicycle/model.glb", resolution=200)
+show back

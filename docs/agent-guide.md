@@ -9,8 +9,11 @@ the inside is cut open.
 1. **Plan in words first.** What is it, how big, which way does it face,
    what are its parts. Decide the unit. Decide the front is +z.
 2. **Write `model.aix`** part by part, one named step per line. Build each
-   part at the origin, then `rotate`, then `move` into place. Paint parts
-   before joining them. End with `show model`.
+   part at the origin, then `rotate`, then `move` into place, or better,
+   `anchor` the points where parts meet and `attach` them: `seat |
+   attach("bottom", legs, "top")` needs no arithmetic and survives a
+   change to the legs. `at(part, "name")` is a point for a `tube` between
+   two parts. Paint parts before joining them. End with `show model`.
 3. **`npx aixle check model.aix`.** Fixes syntax and type errors in a
    second, prints each step's size and every warning. Sizes that look wrong
    here are wrong.
@@ -26,6 +29,7 @@ the inside is cut open.
 
 ```
 npx aixle check model.aix                  sizes and warnings, no pictures (--pose NAME: in that pose)
+npx aixle explain model.aix                the program as a tree from the output down: each step's source line, size, material, anchors; read this first on a program you did not write
 npx aixle render model.aix --quick         the sheet only, small grid, fast; --watch re-renders on save
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)

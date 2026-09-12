@@ -1,0 +1,132 @@
+# A bicycle as a product picture. Faces +x, drive side towards +z (the viewer
+# in the front view). Geometry is written in metres and scaled by s so a
+# real bike's proportions carry over; the whole is about 4 units long.
+# Two joints: "steer" at the head tube (fork, bars, stem and front wheel
+# turn together, about the tilted head axis) and "rear" at the rear axle.
+set grid 300
+set azimuth 35
+set elevation 14
+
+s = 2.4
+def P(x, y, z=0) = [x * s, y * s, z * s]
+
+# --- key points (metres), origin under the bottom bracket -----------------
+bb   = P(0, 0.27)          # bottom bracket
+ra   = P(-0.41, 0.342)     # rear axle
+fa   = P(0.61, 0.342)      # front axle (0.02 forward of a real rake: the tyre cleared the down tube by under a cell)
+st   = P(-0.161, 0.796)    # seat tube top (73 degrees)
+ht   = P(0.39, 0.82)       # head tube top, on the steering axis
+hc   = P(0.433, 0.687)     # head tube bottom / fork crown, on the axis (72 degrees)
+hmid = P(0.4115, 0.7535)   # middle of the head tube: the steering pivot
+
+paint_frame = material("#c62b2b", rough=0.3)
+
+# --- frame: round tubes between the points ---------------------------------
+top_tube  = tube(0.014 * s, [st, ht]) | paint(paint_frame)
+down_tube = tube(0.0175 * s, [hc, bb]) | paint(paint_frame)
+seat_tube = tube(0.014 * s, [bb, st]) | paint(paint_frame)
+head_tube = tube(0.021 * s, [P(0.386, 0.832), P(0.437, 0.675)], cap="flat") | paint(paint_frame)
+bb_shell  = cylinder(0.022 * s, 0.09 * s) | rotate(x=90) | move(bb[0], bb[1], bb[2]) | paint(paint_frame)
+chainstay = tube(0.011 * s, [P(0, 0.27, 0.032), P(-0.41, 0.342, 0.06)]) | paint(paint_frame)
+seatstay  = tube(0.011 * s, [P(-0.158, 0.785, 0), P(-0.41, 0.342, 0.06)]) | paint(paint_frame)
+dropout   = box(0.05 * s, 0.032 * s, 0.01 * s, round=0.004 * s) | move(ra[0], ra[1], 0.062 * s) | paint(paint_frame)
+rear_tri  = (chainstay + seatstay + dropout) | mirror("z")
+frame = top_tube + down_tube + seat_tube + head_tube + bb_shell + rear_tri
+
+# --- a wheel, built at the origin in the xy plane, axle along z -------------
+tyre = torus(0.315 * s, 0.028 * s) | rotate(x=90) | paint("rubber")
+rim  = torus(0.295 * s, 0.014 * s) | rotate(x=90) | paint("silver")
+hub  = cylinder(0.035 * s, 0.09 * s) | rotate(x=90) | paint("chrome")
+axle = cylinder(0.010 * s, 0.15 * s) | rotate(x=90) | paint("chrome")
+spoke_r = tube(0.010 * s, [P(0.02, 0, 0.025), P(0.29, 0, 0)], cap="flat") | paint("chrome")
+spoke_l = spoke_r | flip("z") | rotate(z=22.5)
+spokes = (spoke_r + spoke_l) | ring(8, 0, axis="z")
+valve = cylinder(0.008 * s, 0.035 * s) | move(0, -0.28 * s, 0) | paint("chrome")
+reflector = box(0.02 * s, 0.05 * s, 0.014 * s) | move(0.18 * s, 0, 0.017 * s) | rotate(z=45) | paint(material("#ff8c1a", rough=0.2))
+wheel = tyre + rim + hub + axle + spokes + valve + reflector
+
+front_wheel = wheel | move(fa[0], fa[1], fa[2])
+
+# --- fork, steerer, stem, bars: everything that turns with the steering -----
+crown = box(0.05 * s, 0.03 * s, 0.13 * s, round=0.008 * s) | move(hc[0], hc[1] - 0.01 * s, 0) | paint(paint_frame)
+blade = tube(0.012 * s, [P(0.435, 0.68, 0.05), P(0.50, 0.5, 0.06), P(0.61, 0.342, 0.06)], smooth=6) | paint(paint_frame)
+blades = blade | mirror("z")
+steerer = tube(0.014 * s, [P(0.433, 0.687), P(0.405, 0.87)], cap="flat") | paint("chrome")
+stem = tube(0.014 * s, [P(0.405, 0.86), P(0.49, 0.89)]) | paint("chrome")
+stem_cap = cylinder(0.02 * s, 0.03 * s) | rotate(z=-18) | move(0.405 * s, 0.875 * s, 0) | paint("chrome")
+bar = tube(0.011 * s, [P(0.46, 0.89, -0.30), P(0.49, 0.89, -0.12), P(0.49, 0.89, 0.12), P(0.46, 0.89, 0.30)], smooth=4) | paint("chrome")
+grip = cylinder(0.017 * s, 0.13 * s, round=0.005 * s) | rotate(x=90) | move(0.463 * s, 0.89 * s, 0.24 * s) | rotate(y=-6) | mirror("z") | paint("rubber")
+front_wheel_j = joint(front_wheel, "front", fa[0], fa[1], fa[2])
+steering = crown + blades + steerer + stem + stem_cap + bar + grip + front_wheel_j
+steer = joint(steering, "steer", hmid[0], hmid[1], hmid[2])
+
+# --- saddle on its post ----------------------------------------------------
+seat_post = tube(0.013 * s, [P(-0.15, 0.76), P(-0.212, 0.965)], cap="flat") | paint("chrome")
+saddle_rear = ellipsoid(0.085 * s, 0.017 * s, 0.078 * s) | move(-0.245 * s, 0.99 * s, 0)
+saddle_nose = ellipsoid(0.145 * s, 0.014 * s, 0.026 * s) | move(-0.165 * s, 0.988 * s, 0)
+saddle = union(saddle_rear, saddle_nose, k=0.06 * s) | paint(material("leather", scale=0.03))
+saddle_rail = tube(0.008 * s, [P(-0.30, 0.975, 0), P(-0.21, 0.97, 0), P(-0.12, 0.985, 0)]) | paint("chrome")
+
+# --- crank, pedals, chainring ----------------------------------------------
+crank_arm = box(0.17 * s, 0.028 * s, 0.014 * s, round=0.005 * s) | move(0.085 * s, 0, 0)
+pedal_axle = cylinder(0.010 * s, 0.05 * s) | rotate(x=90) | move(0.17 * s, 0, 0.03 * s)
+pedal = box(0.06 * s, 0.02 * s, 0.09 * s, round=0.006 * s) | move(0.17 * s, 0, 0.07 * s) | paint("rubber")
+crank_one = ((crank_arm + pedal_axle) | paint("chrome")) + pedal
+crank_r = crank_one | move(0, 0, 0.075 * s) | rotate(z=-35)
+crank_l = crank_one | move(0, 0, 0.075 * s) | flip("z") | rotate(z=145)
+teeth_n = 26
+ring_p = circle(0.098 * s)
+tooth = rect(0.014 * s, 0.024 * s, round=0.003 * s) | move(0, 0.104 * s)
+for i in range(teeth_n) {
+  ring_p = ring_p + (tooth | rotate(i * 360 / teeth_n))
+}
+ring_p = ring_p - circle(0.03 * s)
+for i in range(5) {
+  ring_p = ring_p - (circle(0.022 * s) | move(0.06 * s, 0) | rotate(i * 72))
+}
+chainring = extrude(ring_p, 0.01 * s, "z") | move(0, 0, 0.05 * s) | paint("steel")
+spindle = cylinder(0.012 * s, 0.18 * s) | rotate(x=90) | paint("chrome")
+crankset = (crank_r + crank_l + chainring + spindle) | move(bb[0], bb[1], 0)
+
+# --- rear cog and chain: a tube round the two sprockets' pitch circles ---------
+cog_p = circle(0.05 * s)
+cog_tooth = rect(0.012 * s, 0.02 * s, round=0.003 * s) | move(0, 0.056 * s)
+for i in range(16) {
+  cog_p = cog_p + (cog_tooth | rotate(i * 22.5))
+}
+cog = extrude(cog_p, 0.01 * s, "z") | move(0, 0, 0.055 * s) | paint("steel")
+freewheel = cylinder(0.025 * s, 0.05 * s) | rotate(x=90) | move(0, 0, 0.055 * s) | paint("steel")
+r1 = 0.104 * s
+r2 = 0.055 * s
+d = sqrt((ra[0] - bb[0]) ^ 2 + (ra[1] - bb[1]) ^ 2)
+phi = atan(ra[1] - bb[1], ra[0] - bb[0])
+beta = acos((r1 - r2) / d)
+top_a = phi - beta               # outward normal of the upper run
+bot_a = phi + beta               # and of the lower run
+chain_z = 0.055 * s
+chain_pts = []
+for i in range(21) {
+  a = top_a - i * (top_a - bot_a + 360) / 20
+  chain_pts = chain_pts + [bb[0] + r1 * cos(a), bb[1] + r1 * sin(a), chain_z]
+}
+for i in range(17) {
+  a = bot_a - i * (bot_a - top_a) / 16
+  chain_pts = chain_pts + [ra[0] + r2 * cos(a), ra[1] + r2 * sin(a), chain_z]
+}
+chain_pts = chain_pts + [bb[0] + r1 * cos(top_a), bb[1] + r1 * sin(top_a), chain_z]
+chain = tube(0.013 * s, chain_pts) | paint("iron")
+
+# --- a centre stand so the bike stands on its own ----------------------------
+stand_leg = tube(0.011 * s, [P(-0.08, 0.28, 0.03), P(-0.19, 0.02, 0.16)], cap="flat") | paint("iron")
+stand_foot = box(0.05 * s, 0.02 * s, 0.03 * s, round=0.004 * s) | move(-0.19 * s, 0.01 * s, 0.16 * s) | paint("rubber")
+stand_pivot = cylinder(0.014 * s, 0.09 * s) | rotate(x=90) | move(-0.08 * s, 0.28 * s, 0) | paint("iron")
+stand = (stand_leg + stand_foot) | mirror("z") + stand_pivot
+
+rear_wheel  = (wheel + freewheel + cog) | move(ra[0], ra[1], ra[2])
+rear_wheel_j = joint(rear_wheel, "rear", ra[0], ra[1], ra[2])
+
+bike = frame + rear_wheel_j + steer + seat_post + saddle + saddle_rail + crankset + chain + stand
+pose("turned", steer=[8.2, 23.7, 1.72])          # 25 degrees about the 72-degree head axis
+pose("rolling", rear=[0, 0, 90], front=[0, 0, 90])
+animation("roll", ["rest", "rolling"], seconds=1)
+show bike

@@ -7,7 +7,7 @@
  * hundred parts cheap to extract.
  */
 import { fbm3 } from "../core/noise.js";
-import { apply, length2, rad, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
+import { apply, length2, rad, rotAxis, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
 import { DEFAULT_MATERIAL } from "./materials.js";
 import { primitive, cylinder } from "./primitives.js";
 import { buildSpatialIndex, cellsFor } from "./spatial.js";
@@ -79,6 +79,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       inner: live,
       feature: minFeature(live),
     gap: minGap(live),
+    gapWhat: minGapWhat(live),
     };
   }
   return {
@@ -106,6 +107,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     inner: live,
     feature: minFeature(live),
     gap: minGap(live),
+    gapWhat: minGapWhat(live),
   };
 }
 
@@ -114,6 +116,12 @@ function minGap(shapes: Shape3[]): number | undefined {
   let g: number | undefined;
   for (const s of shapes) if (s.gap !== undefined && (g === undefined || s.gap < g)) g = s.gap;
   return g;
+}
+
+function minGapWhat(shapes: Shape3[]): string | undefined {
+  let g: number | undefined, what: string | undefined;
+  for (const s of shapes) if (s.gap !== undefined && (g === undefined || s.gap < g)) { g = s.gap; what = s.gapWhat; }
+  return what;
 }
 
 /** The smallest known feature among shapes, or undefined when none carries one. */
@@ -140,6 +148,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     cut: true,
     feature: a.feature,
     gap: a.gap,
+    gapWhat: a.gapWhat,
   };
 }
 
@@ -161,6 +170,7 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     cut: true,
     feature: a.feature,
     gap: a.gap,
+    gapWhat: a.gapWhat,
   };
 }
 
@@ -181,6 +191,7 @@ export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {
     warp: (x, y, z) => [x + dx, y + dy, z + dz],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -203,6 +214,7 @@ export function rotateBy(s: Shape3, m: Mat3): Shape3 {
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -235,6 +247,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     warp: (x, y, z) => [x * sx, y * sy, z * sz],
     feature: s.feature === undefined ? undefined : s.feature * m,
     gap: s.gap === undefined ? undefined : s.gap * m,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -263,6 +276,7 @@ export function offset(s: Shape3, r: number): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -278,6 +292,7 @@ export function shell(s: Shape3, t: number): Shape3 {
     inner: [s],
     feature: s.feature === undefined ? t : Math.min(s.feature, t),
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -315,9 +330,11 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     cost: s.cost,
     inner: [s],
     unwarp: warp,
+    warp: (x, y, z) => { const a = k * y, c = Math.cos(a), sn = Math.sin(a); return [c * x - sn * z, y, sn * x + c * z]; },
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -363,6 +380,11 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     const a = Math.atan2(dx * sg, dy * sg);
     return [a * R, R - Math.hypot(dx, dy) * sg, z];
   };
+  // Forward: a point at (u, v) in the flat shape rides the arc at angle u / R, radius R - v from the centre.
+  const warp = (u: number, v: number, w: number): Vec3 => {
+    const a = u / R, rho = (R - v) * sg;
+    return [rho * Math.sin(a) * sg, R - rho * Math.cos(a) * sg, w];
+  };
   return {
     kind: "shape3",
     dist: (x, y, z) => { const p = unwarp(x, y, z); return d(p[0], p[1], p[2]); },
@@ -371,9 +393,11 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     cost: s.cost,
     inner: [s],
     unwarp,
+    warp,
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -407,6 +431,7 @@ export function wrap(s: Shape3, r: number): Shape3 {
     }
   }
   const unwarp = (x: number, y: number, z: number): Vec3 => [Math.atan2(x, z) * r, y, Math.hypot(x, z) - r];
+  const warp = (u: number, v: number, w: number): Vec3 => [(r + w) * Math.sin(u / r), v, (r + w) * Math.cos(u / r)];
   return {
     kind: "shape3",
     dist: (x, y, z) => { const p = unwarp(x, y, z); return d(p[0], p[1], p[2]); },
@@ -415,9 +440,11 @@ export function wrap(s: Shape3, r: number): Shape3 {
     cost: s.cost,
     inner: [s],
     unwarp,
+    warp,
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -443,6 +470,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -577,6 +605,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
     painted: true,
   };
 }
@@ -605,6 +634,7 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -621,11 +651,14 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
  * subtree reads as empty, which is how a parent's own geometry is meshed
  * without the parts that hang off it.
  */
-export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0]): Shape3 {
-  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false };
-  const turned = angles[0] === 0 && angles[1] === 0 && angles[2] === 0 ? child : move(rotate(move(child, -px, -py, -pz), angles[0], angles[1], angles[2]), px, py, pz);
+export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0], axis?: Vec3): Shape3 {
+  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false, axis };
+  // About one axis when given (a steering column raked 18 degrees is one number, not an Euler triple worked out
+  // elsewhere: round 5), else x, then y, then z.
+  const m = axis ? rotAxis(axis, angles[0]) : rotXYZ(angles[0], angles[1], angles[2]);
+  const still = axis ? angles[0] === 0 : angles[0] === 0 && angles[1] === 0 && angles[2] === 0;
+  const turned = still ? child : move(rotateBy(move(child, -px, -py, -pz), m), px, py, pz);
   const d = turned.dist, h = turned.hit;
-  const m = rotXYZ(angles[0], angles[1], angles[2]);
   const [a, b, c, e, f, g, i, j, l] = transpose(m);
   return {
     kind: "shape3",
@@ -647,6 +680,7 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
     joint: state,
     feature: child.feature,
     gap: child.gap,
+    gapWhat: child.gapWhat,
   };
 }
 
@@ -661,19 +695,100 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
 export function surfacePoint(s: Shape3, x: number, y: number, z: number): Vec3 {
   let px = x, py = y, pz = z;
   const e = 1e-4;
-  for (let i = 0; i < 12; i++) {
-    const d = s.dist(px, py, pz);
-    if (Math.abs(d) < 1e-6) break;
+  let d = s.dist(px, py, pz);
+  // Each step moves against the gradient by the distance; a field that is only a bound (a loft, a blend) can
+  // overshoot, so a step that does not bring the distance down is halved and retried (measured: a loft's field
+  // left a cradle post's foot 0.07 off the hull panel).
+  for (let i = 0; i < 40 && Math.abs(d) > 1e-7; i++) {
     let gx = s.dist(px + e, py, pz) - s.dist(px - e, py, pz);
     let gy = s.dist(px, py + e, pz) - s.dist(px, py - e, pz);
     let gz = s.dist(px, py, pz + e) - s.dist(px, py, pz - e);
     const len = Math.hypot(gx, gy, gz);
     if (len < 1e-12) break;
     gx /= len; gy /= len; gz /= len;
-    px -= d * gx; py -= d * gy; pz -= d * gz;
+    let step = d;
+    let moved = false;
+    for (let k = 0; k < 6; k++) {
+      const nx = px - step * gx, ny = py - step * gy, nz = pz - step * gz;
+      const nd = s.dist(nx, ny, nz);
+      if (Math.abs(nd) < Math.abs(d)) { px = nx; py = ny; pz = nz; d = nd; moved = true; break; }
+      step *= 0.5;
+    }
+    if (!moved) break;
   }
   return [px, py, pz];
 }
+
+// --- anchors -----------------------------------------------------------------
+
+/**
+ * Name a point on a shape, in the shape's own frame. Every transform, warp
+ * and posed joint above it carries the point along (anchorsOf walks the
+ * tree with each node's forward map), so a part's anchors are where the
+ * part is, and at() reads them after any number of moves. What every
+ * dogfooding round did by hand: a hand at (0.5, 2.22, 0.38), a rod's end
+ * from sin and cos, a star 0.1 above its post.
+ */
+export function anchor(s: Shape3, name: string, x: number, y: number, z: number): Shape3 {
+  return {
+    kind: "shape3",
+    dist: s.dist,
+    hit: s.hit,
+    bounds: s.bounds,
+    cost: s.cost,
+    inner: [s],
+    anchors: { ...anchorsOf(s), [name]: [x, y, z] },
+    feature: s.feature,
+    gap: s.gap,
+    gapWhat: s.gapWhat,
+  };
+}
+
+/**
+ * The named anchors of a shape in its own frame: its own, or its
+ * children's carried through the node's forward map. A union takes every
+ * part's (the first part wins a name), a cut keeps the first shape's, a
+ * placed set keeps none (there are many copies). A twist, bend or wrap
+ * carries anchors along the warp, so the tip of a bent bar is the bent
+ * tip. The result is cached on the node.
+ */
+export function anchorsOf(s: Shape3): Record<string, Vec3> {
+  if (s.anchors) return s.anchors;
+  let out: Record<string, Vec3> = {};
+  if (s.instanced) out = {};
+  else if (s.cut && s.inner?.length) out = { ...anchorsOf(s.inner[0]) };
+  else {
+    const kids = s.parts ?? s.inner ?? [];
+    for (const k of kids) for (const [name, p] of Object.entries(anchorsOf(k))) if (!(name in out)) out[name] = s.warp ? s.warp(p[0], p[1], p[2]) : p;
+  }
+  s.anchors = out;
+  return out;
+}
+
+/**
+ * The world point of an anchor: a named one, or one of the free ones every
+ * shape has from its box (centre, top, bottom, front, back, left, right,
+ * the box's face centres). Undefined for a name the shape does not have.
+ */
+export function anchorAt(s: Shape3, name: string): Vec3 | undefined {
+  const named = anchorsOf(s)[name];
+  if (named) return named;
+  if (isEmpty(s.bounds)) return undefined;
+  const c = boundsCenter(s.bounds), b = s.bounds;
+  switch (name) {
+    case "centre": case "center": return c;
+    case "top": return [c[0], b.max[1], c[2]];
+    case "bottom": return [c[0], b.min[1], c[2]];
+    case "front": return [c[0], c[1], b.max[2]];
+    case "back": return [c[0], c[1], b.min[2]];
+    case "right": return [b.max[0], c[1], c[2]];
+    case "left": return [b.min[0], c[1], c[2]];
+  }
+  return undefined;
+}
+
+/** The free anchor names every shape answers to, for messages. */
+export const FREE_ANCHORS = ["centre", "top", "bottom", "front", "back", "left", "right"];
 
 /** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
 export function hasLooseBounds(s: Shape3): boolean {
@@ -697,6 +812,15 @@ export function hasLooseBounds(s: Shape3): boolean {
  * no forward map.
  */
 export function placedBounds(root: Shape3, target: Shape3, own: Bounds): Bounds | undefined {
+  const maps = placementChain(root, target);
+  if (!maps) return undefined;
+  let pts = boundsCorners(own);
+  for (let k = maps.length - 1; k >= 0; k--) pts = pts.map((p) => maps[k].warp!(p[0], p[1], p[2]));
+  return boundsFromPoints(pts);
+}
+
+/** The transforms and joints on the path from `root` down to `target`, outermost first; undefined when not under the root or a map is one-way. */
+function placementChain(root: Shape3, target: Shape3): Shape3[] | undefined {
   const chain: Shape3[] = [];
   const seen = new Set<Shape3>();
   const find = (n: Shape3): boolean => {
@@ -711,10 +835,32 @@ export function placedBounds(root: Shape3, target: Shape3, own: Bounds): Bounds 
   };
   if (!find(root)) return undefined;
   const maps = chain.filter((n) => n.unwarp || n.warp);
-  if (maps.some((n) => !n.warp)) return undefined;
-  let pts = boundsCorners(own);
-  for (let k = maps.length - 1; k >= 0; k--) pts = pts.map((p) => maps[k].warp!(p[0], p[1], p[2]));
-  return boundsFromPoints(pts);
+  return maps.some((n) => !n.warp || !n.unwarp) ? undefined : maps;
+}
+
+/**
+ * The shape as it ends up under `root`: its field read through the inverses
+ * of every transform and posed joint above it, so its surface can be
+ * measured where the pose put it (round 5: a turned front wheel's posed
+ * box was the box of a turned box, and whether it touched the floor was
+ * not readable from it). Undefined when there is nothing between them.
+ */
+export function placedShape(root: Shape3, target: Shape3): Shape3 | undefined {
+  const maps = placementChain(root, target);
+  if (!maps || !maps.length) return undefined;
+  const d = target.dist;
+  const back = (x: number, y: number, z: number): Vec3 => {
+    let p: Vec3 = [x, y, z];
+    for (const m of maps) p = m.unwarp!(p[0], p[1], p[2]);
+    return p;
+  };
+  return {
+    kind: "shape3",
+    dist: (x, y, z) => { const p = back(x, y, z); return d(p[0], p[1], p[2]); },
+    hit: (x, y, z) => { const p = back(x, y, z); return target.hit(p[0], p[1], p[2]); },
+    bounds: placedBounds(root, target, target.bounds) ?? target.bounds,
+    cost: target.cost,
+  };
 }
 
 /** The joints anywhere inside a shape, outermost first, without descending into a joint's child. */

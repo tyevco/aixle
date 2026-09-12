@@ -1,0 +1,118 @@
+# A treehouse: a rough-barked tree with four branches and a blended canopy,
+# a plank platform resting in the branches with a post-and-rail railing,
+# a hut with a gable roof, a door and a window, a ladder down the front
+# (+z), a rope swing off the +x branch, and a brass lantern under the
+# platform's front edge. Units are metres; the tree is about 10 tall.
+set grid 200
+set light_azimuth 40
+set light_elevation 50
+set ambient 1.6
+set zoom 1.3
+
+# --- materials ---
+bark = material("#5c4028", "noise", "#3a2716", scale=0.2, rough=0.95)
+leaf = material("#4c8a36", "noise", "#2f5e22", scale=0.35, rough=0.95)
+plank = material("#9a8c74", "wood", "#6a5d4a", scale=0.3, rough=0.9, axis="x")
+roofwood = material("#6f5a44", "wood", "#4c3c2c", scale=0.25, rough=0.9, axis="z")
+rope = material("#c9ab7a", "stripes", "#957a52", scale=0.05, rough=0.9)
+siding = material("#9a8c74", "stripes", "#7c6f5a", scale=0.2, rough=0.9)      # clapboard: bands stacked up the wall
+
+# --- tree: a trunk, three curved branches that reach out through the deck
+# and up into the canopy, and a longer, flatter branch on +x for the swing ---
+deck_y = 4.7
+trunk = cone(0.75, 0.4, 7) | move(0, 3.5, 0)
+# a branch in the x/y plane, leaving the trunk at y0, then turned `az` about y (0 is +x, 90 is -z)
+def branch(az, y0) = tube(0.3, curve([0, y0, 0, 1.0, y0 + 0.5, 0, 1.7, y0 + 1.6, 0, 2.4, y0 + 3.0, 0]), taper=0.4) | rotate(y=az)
+branches = branch(300, 3.6) + branch(60, 3.6) + branch(150, 3.7)
+# the swing branch leaves the trunk above the deck and clears the +x railing
+swing_branch = tube(0.34, curve([0, 5.2, 0, 1.6, 5.7, 0, 2.8, 6.3, 0, 4.0, 6.8, 0]), taper=0.45)
+wood = union(trunk, branches, swing_branch, k=0.25) | displace(0.05, 0.35, 3) | paint(bark)
+blob = sphere(1)
+canopy = union(
+  blob | scale(1.7) | move(0, 8.3, 0),
+  blob | scale(1.3) | move(1.3, 7.7, -2.0),
+  blob | scale(1.3) | move(1.3, 7.7, 2.0),
+  blob | scale(1.3) | move(-2.1, 7.8, -1.2),
+  blob | scale(1.25) | move(-1.7, 8.5, 1.3),
+  blob | scale(1.2) | move(2.8, 7.7, -0.3),
+  blob | scale(1.1) | move(0, 9.0, 0),
+  k = 0.7
+)
+leaves = canopy | displace(0.12, 0.45, 7) | paint(leaf)
+below = box(4, 1, 4) | move(0, -0.5, 0)
+tree = union(wood, leaves, k=0.3) - below     # a flat base exactly on y = 0, so the deck and the tree agree
+
+# --- platform: planks along x with gaps, a collar plank round the trunk, joists under ---
+plank_one = box(4.8, 0.16, 0.4) | paint(plank)
+clearance = branches | offset(0.2)              # the planks are cut clear of the branches that pass through them
+deck = (plank_one | array(10, 0, 0, 0.48) | move(0, deck_y - 0.08, -2.16)) - clearance
+collar = cylinder(0.85, 0.16) | move(0, deck_y - 0.08, 0) | paint(plank)
+joist = box(0.12, 0.2, 4.8) | paint(plank)
+joists = (joist | array(3, 1.9, 0, 0)) | move(-1.9, deck_y - 0.13, 0)
+
+# --- railing: posts on the edges, two rails, a gap at the front for the ladder ---
+post = box(0.1, 1.0, 0.1) | move(0, deck_y + 0.44, 0) | paint(plank)
+posts = empty()
+for x in [-2.35, -1.2, 0, 1.2, 2.35] {
+  posts = posts + (post | move(x, 0, -2.35)) + (post | move(x, 0, 2.35))
+  posts = posts + (post | move(-2.35, 0, x)) + (post | move(2.35, 0, x))
+}
+rail_x = box(4.8, 0.08, 0.08) | paint(plank)
+rail_z = box(0.08, 0.08, 4.8) | paint(plank)
+front_rail = box(1.7, 0.08, 0.08) | paint(plank)
+rails = empty()
+for y in [deck_y + 0.45, deck_y + 0.85] {
+  rails = rails + (rail_x | move(0, y, -2.35))
+  rails = rails + (rail_z | move(-2.35, y, 0)) + (rail_z | move(2.35, y, 0))
+  rails = rails + (front_rail | move(-1.55, y, 2.35)) + (front_rail | move(1.55, y, 2.35))
+}
+railing = posts + rails
+
+# --- hut at the front-left: hollow walls, door on the front (+z), window on +x, gable roof ---
+hut_x = -1.5
+hut_z = 1.1
+wall_box = box(1.6, 1.66, 1.6) | move(hut_x, deck_y + 0.77, hut_z)
+inner = box(1.4, 1.7, 1.4) | move(hut_x, deck_y + 0.85, hut_z)
+walls = (wall_box - inner) | paint(siding)
+door_cut = box(0.55, 1.15, 0.4) | move(hut_x + 0.3, deck_y + 0.575, hut_z + 0.8)
+window_cut = box(0.4, 0.45, 0.45) | move(hut_x + 0.8, deck_y + 1.0, hut_z - 0.15)
+hut_body = walls - door_cut - window_cut
+mullion = (box(0.07, 0.5, 0.08) + box(0.07, 0.08, 0.5)) | move(hut_x + 0.8, deck_y + 1.0, hut_z - 0.15) | paint("#e8e0d0")
+roof = extrude(polygon(-1.0, 0, 1.0, 0, 0, 0.75), 2.0, "x") | move(hut_x, deck_y + 1.52, hut_z) | paint(roofwood)
+hut = hut_body + mullion + roof
+
+# --- lantern under the front-right edge of the deck ---
+lan_x = 1.9
+lan_z = 2.2
+hook = tube(0.04, [lan_x, deck_y - 0.1, lan_z, lan_x, deck_y - 0.45, lan_z]) | paint("iron")
+ring_top = torus(0.08, 0.035) | rotate(x=90) | move(lan_x, deck_y - 0.5, lan_z) | paint("brass")
+lan_cap = cone(0.16, 0.05, 0.12) | move(lan_x, deck_y - 0.62, lan_z) | paint("brass")
+lan_glass = cylinder(0.12, 0.3) | move(lan_x, deck_y - 0.83, lan_z) | paint("amber")
+lan_flame = sphere(0.07) | move(lan_x, deck_y - 0.83, lan_z) | paint(material("#ffd070", glow=2))
+lan_base = cylinder(0.14, 0.08) | move(lan_x, deck_y - 1.0, lan_z) | paint("brass")
+lantern = hook + ring_top + lan_cap + lan_glass + lan_flame + lan_base
+
+house = deck + collar + joists + railing + hut + lantern
+
+# --- ladder from the ground to the platform's front edge ---
+foot_z = 4.5
+top_z = 2.3
+top_y = deck_y + 0.1
+rail = tube(0.06, [-0.35, 0.06, foot_z, -0.35, top_y, top_z]) | paint(plank)
+ladder = rail + (rail | move(0.7, 0, 0))
+for i in range(10) {
+  t = (i + 0.5) / 10
+  ry = lerp(0.06, top_y, t)
+  rz = lerp(foot_z, top_z, t)
+  ladder = ladder + (tube(0.04, [-0.35, ry, rz, 0.35, ry, rz], cap="flat") | paint(plank))
+}
+
+# --- rope swing off the +x branch ---
+sw_x = 3.4
+sw_top = height(wood, sw_x, 0.1) - 0.13     # inside the branch, below its top surface
+seat_y = 1.5
+seat = box(0.8, 0.08, 0.3) | move(sw_x, seat_y, 0) | paint(plank)
+rope_one = tube(0.045, [sw_x, seat_y, 0.1, sw_x, sw_top, 0.1], cap="flat") | paint(rope)
+swing = seat + rope_one + (rope_one | move(0, 0, -0.2))
+
+scene tree, house, ladder, swing

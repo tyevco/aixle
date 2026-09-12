@@ -196,7 +196,7 @@ export const BUILTINS: Builtin[] = [
       (a) => W.splinePath(W.toPoints(nums(a[0]), "spline"), n(a[1])))),
   def("arc", "Paths", "A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).",
     ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16)], "list", (a) => W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
-  def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them.",
+  def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them; centred on y = 0 like extrude (from -h/2 to h/2), each profile laid flat with its y along -z.",
     ov([shape2("a"), shape2("b"), num("h")], "shape", (a) => W.loft(s2(a[0]), s2(a[1]), n(a[2])))),
 
   // --- booleans ---
@@ -312,6 +312,22 @@ export const BUILTINS: Builtin[] = [
         if (out.length > 100000) throw new Error("range(): more than 100000 values");
       }
       return out;
+    })),
+  // --- anchors ---
+  def("anchor", "Anchors", "Name a point on a shape, in the shape's own frame: anchor(post, \"top\", 0, 1, 0). Every move, rotate, scale, warp and posed joint above it carries the point along, so at() reads it wherever the part ends up, and a union keeps every part's anchors (the first part wins a repeated name).",
+    ov([shape(), str("name"), num("x"), num("y"), num("z")], "shape", (a) => O.anchor(s3(a[0]), a[1] as string, n(a[2]), n(a[3]), n(a[4])))),
+  def("at", "Anchors", "The world point of a shape's anchor as [x, y, z]: one named with anchor(), or a free one every shape has from its box: centre, top, bottom, front, back, left, right (the box's face centres). In a pose, a point inside a joint is where the pose put it.",
+    ov([shape(), str("name")], "list", (a) => {
+      const p = O.anchorAt(s3(a[0]), a[1] as string);
+      if (!p) throw new Error(`at(): no anchor "${a[1]}"; this shape has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
+      return [p[0], p[1], p[2]];
+    })),
+  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it.",
+    ov([shape("part"), str("anchor", "the part's anchor"), shape("target"), str("targetAnchor", "the target's anchor")], "shape", (a) => {
+      const from = O.anchorAt(s3(a[0]), a[1] as string), to = O.anchorAt(s3(a[2]), a[3] as string);
+      if (!from) throw new Error(`attach(): the part has no anchor "${a[1]}"; it has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
+      if (!to) throw new Error(`attach(): the target has no anchor "${a[3]}"; it has ${Object.keys(O.anchorsOf(s3(a[2]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
+      return O.move(s3(a[0]), to[0] - from[0], to[1] - from[1], to[2] - from[2]);
     })),
   def("surface", "Queries", "The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.",
     ov([shape(), num("x"), num("y"), num("z")], "list", (a) => { const p = O.surfacePoint(s3(a[0]), n(a[1]), n(a[2]), n(a[3])); return [p[0], p[1], p[2]]; })),

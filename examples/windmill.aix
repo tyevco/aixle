@@ -1,0 +1,37 @@
+# A windmill, placed with anchors instead of arithmetic: the cap sits on
+# the tower's top, the hub on the cap's nose, the sails on the hub, and
+# the door on the tower's front, each by attach(). The sails are a joint
+# so the poses turn them; at() reads the hub wherever the cap puts it.
+set grid 160
+set azimuth 30
+set elevation 18
+
+# Tower: a tapered drum, its top named for the cap.
+tower = cone(1.6, 1.1, 6) | anchor("crown", 0, 3, 0) | anchor("doorway", 0, -3, 1.58) | move(0, 3, 0) | paint("brick")
+
+# Cap: a dome with a nose pointing +z, and the hub's centre named on it.
+dome = sphere(1.3) & box(3, 1.4, 3) | move(0, 0.4, 0)
+nose = cylinder(0.32, 1.4) | rotate(x=90) | move(0, 0.55, 0.9)
+cap = (dome + nose) | anchor("seat", 0, -0.3, 0) | anchor("hub", 0, 0.55, 1.6) | paint("oak")
+cap_on = cap | attach("seat", tower, "crown")
+
+# Sails: four lattice blades around a hub, built flat on the xy plane facing +z.
+holes = box(0.34, 0.12, 0.3) | rotate(y=90) | array(6, 0.46, 0, 0) | move(0.75, 0, 0) | array(3, 0, 0.2, 0) | move(0, -0.2, 0)
+blade = (box(3.0, 0.72, 0.08) - holes) | move(1.9, 0, 0) | paint("cream")
+spar = box(3.6, 0.14, 0.14) | move(1.8, 0, 0) | paint("oak")
+arm = blade + spar
+sails = cylinder(0.3, 0.3) | rotate(x=90) | paint("iron")
+for i in range(4) { sails = sails + (arm | rotate(z=90 * i)) }
+hub_pt = at(cap_on, "hub")
+sails_on = sails | move(hub_pt[0], hub_pt[1], hub_pt[2] + 0.1)
+rotor = joint(sails_on, "rotor", hub_pt[0], hub_pt[1], hub_pt[2])
+
+# Door and a step, on the front of the tower.
+door = box(0.8, 1.6, 0.3) | anchor("sill", 0, -0.8, 0) | paint("walnut")
+door_on = door | attach("sill", tower, "doorway")
+step = box(1.2, 0.2, 0.7) | attach("top", door_on, "bottom") | paint("stone")
+
+windmill = (tower + cap_on + rotor + door_on + step) | ground()
+pose("quarter", rotor=[0, 0, 45])
+animation("turn", ["rest", "quarter"], seconds=1.5)
+show windmill

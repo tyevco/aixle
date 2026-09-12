@@ -20,7 +20,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    what are its parts. Pick a unit and keep the whole model within about
    1 to 20 units.
 2. **Write `model.aix`**, one part per named line. Build each part at the
-   origin, then `rotate`, then `move` into place. Paint parts before
+   origin, then `rotate`, then `move` into place; where two parts meet,
+   `anchor` the meeting points and `attach` one to the other instead of
+   computing the move (`lamp | attach("bottom", arm, "tip")`), and use
+   `at(part, "name")` as the end of a `tube`. Paint parts before
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
    size (profiles and numbers too), every warning, in a second. Sizes
@@ -36,6 +39,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    pieces. `--focus step` is a close-up meshed at its own finer cell,
    where the step is in the pose shown, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side.
+   On a program you did not write, `npx aixle explain model.aix` first: the
+   tree from the output down, each step with its source line, size,
+   material and anchors, so you know which step feeds which before you
+   render anything.
 5. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
    `--beauty` for the presentation picture.

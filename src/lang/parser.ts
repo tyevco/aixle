@@ -27,6 +27,8 @@ const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set"]);
 class Parser {
   private pos = 0;
 
+  private readonly warnings: string[] = [];
+
   constructor(private readonly tokens: Token[]) {}
 
   parseProgram(): Program {
@@ -36,7 +38,7 @@ class Parser {
       body.push(this.statement());
       this.endStatement();
     }
-    return { body };
+    return { body, warnings: this.warnings };
   }
 
   private peek(offset = 0): Token {
@@ -149,6 +151,11 @@ class Parser {
     while (this.atOp("+") || this.atOp("-")) {
       const t = this.next();
       const right = this.intersection();
+      // `a + b | move(...)` moves b alone, since '|' binds tighter than '+'. The paint case has a runtime warning
+      // (a beige lid); a transform has no visible sign but a part that is not where it was meant to be (round 5: a
+      // pedal moved without its crank). Parentheses on the right side mean it was meant.
+      if (right.type === "call" && right.piped && !right.grouped && PLACING.has(right.callee) && pipeBase(right).type === "ident")
+        this.warnings.push(`line ${t.line}: '${t.value} ... | ${right.callee}(...)' applies ${right.callee} to the right side only, since '|' binds tighter than '${t.value}'; wrap the union in parentheses, (a ${t.value} b) | ${right.callee}(...), if the whole should move`);
       left = { type: "binary", op: t.value as "+" | "-", left, right, line: t.line };
     }
     return left;
@@ -199,7 +206,7 @@ class Parser {
       const callee = this.expectIdent("a function name after '|'").value;
       const args: Arg[] = [{ value: left }];
       if (this.atOp("(")) args.push(...this.args(callee));
-      left = { type: "call", callee, args, line: t.line };
+      left = { type: "call", callee, args, line: t.line, piped: true };
     }
     return left;
   }
@@ -253,6 +260,7 @@ class Parser {
       this.next();
       const e = this.expr();
       this.expectOp(")");
+      if (e.type === "call") e.grouped = true;
       return e;
     }
     if (t.type === "op" && t.value === "[") {
@@ -269,6 +277,17 @@ class Parser {
     throw new SyntaxError(`expected a value but found ${describe(t)}`, t.line);
   }
 }
+
+/** The leftmost value of a pipeline: `b` in `b | rotate(...) | move(...)`. A named step there, moved alone after a
+ * '+', is the mistake; a fresh primitive (`+ sphere(0.2) | move(...)`) is the ordinary way to place one. */
+function pipeBase(e: Expr): Expr {
+  let cur: Expr = e;
+  while (cur.type === "call" && cur.piped && cur.args.length) cur = cur.args[0].value;
+  return cur;
+}
+
+/** Transforms and placements whose result on the right of '+' alone is rarely meant. */
+const PLACING = new Set(["move", "rotate", "scale", "flip", "mirror", "ground", "center", "attach", "twist", "bend", "wrap"]);
 
 function describe(t: Token): string {
   if (t.type === "eof") return "end of file";

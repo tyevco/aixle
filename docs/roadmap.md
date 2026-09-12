@@ -7,40 +7,15 @@ first). They are ordered by how much they would change what an agent can
 make, judged from three rounds of dogfooding. Items move out of here into
 `design.md` when they are built.
 
-## 1. Anchors: name points on a part, and they move with it
+## 1. Anchors: built
 
-**Why.** Every dogfooding round spent most of its iterations on placement
-arithmetic: a hand computed at `(0.5, 2.22, 0.38)`, a cylinder rod's end
-worked out with `sin` and `cos`, a star floated 0.1 above its post. The
-program has the numbers but not the meaning, so an inherited program
-reads as a wall of coordinates.
-
-**What.** A shape can carry named points, and every transform carries
-them along:
-
-```
-post = cylinder(0.08, 1) | anchor("top", 0, 1, 0)
-arm = box(1, 0.2, 0.2) | anchor("root", -0.5, 0, 0) | anchor("tip", 0.5, 0, 0)
-arm2 = arm | rotate(z=30) | attach("root", post, "top")     # root lands on the post's top
-p = at(arm2, "tip")                                          # a world point, [x, y, z]
-rod = tube(0.05, [at(base, "pin"), at(arm2, "tip")])
-```
-
-`attach(part, anchor, target, targetAnchor)` is a `move`; `at()` returns
-a list. Primitives get free anchors (`top`, `bottom`, `centre`, the six
-face centres), so `box(...) | attach("bottom", table, "top")` needs no
-numbers at all. Joints keep their anchors, and `at()` in a pose returns
-the posed point, which makes a hydraulic cylinder one line with no
-trigonometry.
-
-**How.** `anchors?: Record<string, Vec3>` on `Shape3`, mapped by `move`,
-`rotateBy`, `scale`, `joint` (turned by the pose) and kept by wrappers;
-unions merge their parts' anchors (a duplicate name warns). `check`
-prints a step's anchors after its box.
-
-**Must prototype.** Whether an agent reaches for `attach` unprompted once
-the skill shows it (one dogfood round); how a union should resolve two
-parts that both define `top`.
+`anchor`, `at` and `attach` are in the language (see `language.md` and
+the anchors section of `design.md`); every transform, warp and joint
+carries them, unions merge them with the first part winning a name, and
+`check` prints them. Round 5 measured it: two agents of four reached
+for them unprompted (a dinghy's rigging fitting to fitting, with the
+mainsheet following the boom's pose), two built a clock and a treehouse
+without them and did not miss them. Nobody hit the first-part-wins rule.
 
 ## 2. PBR textures baked from the field
 
@@ -232,23 +207,15 @@ visible triangles, pushed apart so they do not overlap.
 **Must prototype.** Whether the labels are readable at 512 pixels on a
 fifty-step scene.
 
-## 10. `aixle explain`: an outline of an inherited program
+## 10. `aixle explain`: built
 
-**Why.** Round 4 asked agents to take over programs written by others.
-`check` prints steps and boxes; what a reader wants is the tree: which
-steps feed which, which are transforms of which, what the output is
-built from, with sizes and materials.
-
-**What.** `aixle explain model.aix` prints an indented tree from the
-output down (`model = body + lid + handles`, then each), each line with
-its size, material state and line number; `--json` for tools.
-
-**How.** The evaluation already records every step's dependencies and
-the shape tree; this is a printer over them. Round 4's `check` already
-prints profiles, numbers, lists, surface extents and posed placement;
-the tree is the part that is missing.
-
-**Must prototype.** Nothing.
+`aixle explain model.aix [--pose NAME]` prints the tree from the output
+down (each scene object as a root): every step with its line, its own
+source line, size, joint, copies, paint state and anchors, children in
+the order the line reads them, numbers after shapes, a step already
+printed as "(see above)", and the steps not in the output at the end.
+It is a printer over the dependencies the evaluation records. Not built:
+`--json`, which waits for a tool that wants it.
 
 ## Smaller, worth doing when passing
 
