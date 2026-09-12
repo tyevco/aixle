@@ -13,7 +13,8 @@ import * as O from "../sdf/ops.js";
 import * as P from "../sdf/primitives.js";
 import * as S from "../sdf/shapes2d.js";
 import * as W from "../sdf/sweeps.js";
-import type { Material, PatternKind, Shape2, Shape3 } from "../sdf/types.js";
+import { textProfile, textWidth } from "../sdf/font.js";
+import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
 const num = (name: string, doc?: string, def?: number): Param => (def === undefined ? { name, type: "number", doc } : { name, type: "number", default: def, doc });
@@ -56,7 +57,7 @@ function makeMaterial(args: Value[]): Material {
   const c2text = args[2] as string;
   const color2 = c2text === "" ? undefined : parseColor(c2text);
   if (c2text !== "" && !color2) throw new Error(`material(): "${c2text}" is not a colour`);
-  return customMaterial({ color, color2, pattern: pattern as PatternKind, scale: n(args[3]), metal: n(args[4]), rough: n(args[5]), seed: n(args[6]) });
+  return customMaterial({ color, color2, pattern: pattern as PatternKind, scale: n(args[3]), metal: n(args[4]), rough: n(args[5]), seed: n(args[6]), transmit: n(args[7]) });
 }
 
 function hexOf(r: number, g: number, b: number): string {
@@ -115,6 +116,16 @@ export const BUILTINS: Builtin[] = [
     ov([{ name: "points", type: "list" }], "shape2", (a) => S.polygon((a[0] as Value[]).map((v) => n(v)))),
     ov([{ name: "coords", type: "number", rest: true }], "shape2", (_a, rest) => S.polygon(rest.map((v) => n(v))))),
 
+  def("text", "2D profiles", "Lettering as a 2D profile from a single-stroke font (A-Z, 0-9, punctuation; lowercase folds up), laid out from x = 0 on the baseline y = 0. `size` is the cap height, `weight` the stroke width; `align` is \"left\", \"center\" or \"right\". Extrude it for a sign, subtract it for engraving.",
+    ov([str("text"), num("size", "cap height", 1), num("weight", "stroke width", 0.15), str("align", "", "left"), num("spacing", "extra gap between letters", 0)], "shape2",
+      (a) => {
+        const t = a[0] as string, size = n(a[1]), spacing = n(a[4]);
+        const w = textWidth(t, size, spacing);
+        const align = a[3] as string;
+        const shift = align === "center" ? -w / 2 : align === "right" ? -w : 0;
+        return S.move2(textProfile(t, size, n(a[2]), spacing), shift, 0);
+      })),
+
   // --- 2D to 3D ---
   def("extrude", "2D to 3D", "Thicken a profile to height h. Axis y (default) lays the profile flat, its y towards -z; z makes it face +z; x makes it face +x.",
     ov([shape2(), num("h"), axis("axis", "", "y")], "shape", (a) => S.extrude(s2(a[0]), n(a[1]), a[2] as S.ExtrudeAxis))),
@@ -122,12 +133,16 @@ export const BUILTINS: Builtin[] = [
     ov([shape2(), num("offset", "", 0)], "shape", (a) => S.revolve(s2(a[0]), n(a[1])))),
 
   // --- paths ---
-  def("tube", "Paths", "A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty).",
-    ov([num("r"), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0)], "shape",
-      (a) => W.tube(W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "tube"), n(a[2])), n(a[0])))),
-  def("sweep", "Paths", "A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path.",
-    ov([shape2(), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0)], "shape",
-      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "sweep"), n(a[2]))))),
+  def("tube", "Paths", "A round tube of radius r along a path of x, y, z points, joins rounded. `smooth` > 0 curves the path through the points (8 is plenty); `taper` is the radius at the end relative to the start.",
+    ov([num("r"), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0), num("taper", "end radius / start radius", 1)], "shape",
+      (a) => W.tube(W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "tube"), n(a[2])), n(a[0]), n(a[3])))),
+  def("sweep", "Paths", "A 2D profile carried along a path of x, y, z points: its x runs across the path, its y up. `smooth` curves the path; `twist` turns the profile by that many degrees over the whole path; `taper` scales it to that factor by the end.",
+    ov([shape2(), { name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("smooth", "", 0), num("twist", "degrees over the path", 0), num("taper", "end scale", 1)], "shape",
+      (a) => W.sweep(s2(a[0]), W.smoothPath(W.toPoints((a[1] as Value[]).map((v) => n(v)), "sweep"), n(a[2])), n(a[3]), n(a[4])))),
+  def("helix", "Paths", "A path list for a helix of radius r rising h over `turns` turns around y, for tube() or sweep().",
+    ov([num("r"), num("h"), num("turns"), num("per_turn", "points per turn", 16)], "list", (a) => W.helixPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
+  def("arc", "Paths", "A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).",
+    ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16)], "list", (a) => W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
   def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them.",
     ov([shape2("a"), shape2("b"), num("h")], "shape", (a) => W.loft(s2(a[0]), s2(a[1]), n(a[2])))),
 
@@ -188,11 +203,27 @@ export const BUILTINS: Builtin[] = [
   def("ring", "Repetition", "`count` copies evenly around `axis` (default y), each first pushed out to `radius` along +x.",
     ov([shape(), num("count"), num("radius", "", 0), axis("axis", "", "y")], "shape", (a) => O.ring(s3(a[0]), n(a[1]), n(a[2]), a[3] as O.Axis))),
 
+  // --- assembly ---
+  def("place", "Assembly", "Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optionally x, y, z, yaw, scale with `fields=5`. Rendered as a union; exported once with a node per copy.",
+    ov([shape(), { name: "placements", type: "list", doc: "[x,y,z,yaw, x,y,z,yaw, ...]" }, num("fields", "4 for x,y,z,yaw or 5 to add a scale", 4)], "shape",
+      (a) => {
+        const list = (a[1] as Value[]).map((v) => {
+          if (typeof v !== "number") throw new Error("placements must be numbers");
+          return v;
+        });
+        const f = n(a[2]);
+        if (f !== 4 && f !== 5) throw new Error("fields must be 4 or 5");
+        if (list.length === 0 || list.length % f !== 0) throw new Error(`placements need groups of ${f} numbers, got ${list.length}`);
+        const placements: Placement[] = [];
+        for (let i = 0; i < list.length; i += f) placements.push({ x: list[i], y: list[i + 1], z: list[i + 2], yaw: list[i + 3], scale: f === 5 ? list[i + 4] : 1 });
+        return O.place(s3(a[0]), placements);
+      })),
+
   // --- materials ---
   def("paint", "Materials", "Give the whole shape a material: a preset name, a colour (\"#rrggbb\" or a name), or material(...). Paint parts before combining them to keep several materials.",
     ov([shape(), mat()], "shape", (a) => O.paint(s3(a[0]), a[1] as Material))),
-  def("material", "Materials", "A custom material. Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1.",
-    ov([str("color"), str("pattern", "", "solid"), str("color2", "second colour for two-tone patterns", ""), num("scale", "", 1), num("metal", "", 0), num("rough", "", 0.6), num("seed", "", 0)], "material", makeMaterial)),
+  def("material", "Materials", "A custom material. Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass.",
+    ov([str("color"), str("pattern", "", "solid"), str("color2", "second colour for two-tone patterns", ""), num("scale", "", 1), num("metal", "", 0), num("rough", "", 0.6), num("seed", "", 0), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", 0)], "material", makeMaterial)),
   def("rgb", "Materials", "A colour string from red, green, blue in 0..255.", ov([num("r"), num("g"), num("b")], "string", (a) => hexOf(n(a[0]), n(a[1]), n(a[2])))),
   def("hsl", "Materials", "A colour string from hue in degrees, saturation and lightness in 0..1.", ov([num("h"), num("s"), num("l")], "string", (a) => hslToHex(n(a[0]), n(a[1]), n(a[2])))),
 

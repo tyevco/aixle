@@ -13,13 +13,15 @@ Layers, each pure and under test:
 
 | Directory | What |
 | --- | --- |
-| `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, materials |
+| `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, the stroke font, materials |
 | `src/lang/` | the `.aix` language: lexer, parser, interpreter, and the builtin registry that is also the reference |
-| `src/mesh/` | surface nets with dual contouring, mesh measures |
-| `src/export/` | OBJ+MTL and GLB writers, the self-contained viewer page |
+| `src/mesh/` | surface nets with dual contouring, mesh measures, a mesh sampled to a field for imports |
+| `src/import/` | OBJ and GLB readers (positions and triangles only) |
+| `src/export/` | the texture atlas baker, the scene node tree (`hierarchy.ts`), OBJ+MTL and GLB writers with animations, the self-contained viewer page |
 | `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-marched beauty render |
 | `src/pipeline.ts`, `src/cli.ts` | one run from source to a folder; the command line over it |
 | `tools/examples.ts` | renders `examples/*.aix` into `examples/renders/` |
+| `.claude/skills/aixle/` | the modelling loop as a Claude Code skill; keep it in step with `docs/agent-guide.md` |
 
 ## Hard rules
 
@@ -66,7 +68,10 @@ npm run build         compile to dist/ for the bin
 - A modifier: `src/sdf/ops.ts`; both `dist` and `hit`; bounds; a test that
   the sign is right near the axis and the bounds contain the result.
 - A material preset: `PRESET_LIST` in `src/sdf/materials.ts`; a pattern is a
-  case in `albedo()`.
+  case in `albedo()`. Patterns reach the exports through the atlas baker,
+  which calls the same `albedo()`, so nothing else needs to change.
+- A glyph: strokes on the 4 by 6 grid in `src/sdf/font.ts`, then render a
+  plate of every glyph and read it.
 - A view or sheet: `src/render/views.ts`, with the caption baked in, and a
   size assertion in `tests/render.test.ts`.
 - An example: `examples/<name>.aix`, then `npm run examples -- <name>`, then

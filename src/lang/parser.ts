@@ -5,6 +5,7 @@
  *   statement := 'def' NAME '(' params ')' '=' expr
  *              | 'for' NAME 'in' expr '{' statement* '}'
  *              | 'show' expr (',' expr)*
+ *              | 'scene' expr (',' expr)*
  *              | 'set' NAME expr
  *              | NAME '=' expr
  *              | expr
@@ -21,7 +22,7 @@
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token } from "./lexer.js";
 
-const KEYWORDS = new Set(["def", "for", "in", "show", "set"]);
+const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set"]);
 
 class Parser {
   private pos = 0;
@@ -72,6 +73,8 @@ class Parser {
 
   private statement(): Stmt {
     const t = this.peek();
+    if (t.type === "ident" && KEYWORDS.has(t.value) && this.peek(1).type === "op" && this.peek(1).value === "=")
+      throw new SyntaxError(`'${t.value}' is a keyword and cannot be a name; call it ${t.value}_ or something else`, t.line);
     if (t.type === "ident" && t.value === "def") return this.def();
     if (t.type === "ident" && t.value === "for") return this.for();
     if (t.type === "ident" && t.value === "show") {
@@ -79,6 +82,12 @@ class Parser {
       const values = [this.expr()];
       while (this.atOp(",")) { this.next(); values.push(this.expr()); }
       return { type: "show", values, line: t.line };
+    }
+    if (t.type === "ident" && t.value === "scene") {
+      this.next();
+      const values = [this.expr()];
+      while (this.atOp(",")) { this.next(); values.push(this.expr()); }
+      return { type: "scene", values, line: t.line };
     }
     if (t.type === "ident" && t.value === "set") {
       this.next();

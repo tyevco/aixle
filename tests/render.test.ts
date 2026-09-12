@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
-import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel } from "../src/render/views.js";
+import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
 import { preset } from "../src/sdf/materials.js";
 import { Canvas } from "../src/render/canvas.js";
@@ -73,6 +73,9 @@ describe("views", () => {
     // The centre of every slice of a sphere is inside: filled, not background.
     for (let i = 0; i < 3; i++) expect(slices.get(4 + i * 84 + 40, 30 + 4 + 40)).not.toBe(INK.view);
     const steps = renderSteps([{ name: "a", shape: sphere, used: true, line: 1 }, { name: "b", shape: O.empty3(), used: false, line: 2 }], 60, 16);
+    const meshed = meshSteps([{ name: "a", shape: sphere, used: true, line: 1 }, { name: "big", shape: O.scale(sphere, 100, 100, 100), used: true, line: 2 }], 0.05, 40);
+    expect(meshed[0].coarse).toBe(false);
+    expect(meshed[1].coarse).toBe(true);
     expect(steps.width).toBe(2 * 66 + 6);
     const tt = renderTurntable(mesh, info, 40, 4);
     expect(tt.width).toBe(4 * 44 + 4);

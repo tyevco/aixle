@@ -6,7 +6,7 @@
  */
 import type { Bounds } from "../sdf/types.js";
 
-export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles: number): string {
+export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles: number, animations: string[] = []): string {
   const b64 = glb.toString("base64");
   const size = [bounds.max[0] - bounds.min[0], bounds.max[1] - bounds.min[1], bounds.max[2] - bounds.min[2]];
   const dims = size.map((v) => v.toFixed(2)).join(" × ");
@@ -33,7 +33,7 @@ export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles:
 <body>
 <div id="bar"><b>${escapeHtml(name)}</b><span>${dims} units · ${triangles} triangles</span>
   <button data-view="persp">Perspective</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-view="top">Top</button>
-  <button id="wire">Wireframe</button><button id="grid">Grid</button><span>drag to orbit · wheel to zoom · right-drag to pan</span></div>
+  <button id="wire">Wireframe</button><button id="grid">Grid</button>${animations.map((a, i) => `<button data-anim="${i}">▶ ${escapeHtml(a)}</button>`).join("")}<span>drag to orbit · wheel to zoom · right-drag to pan</span></div>
 <div id="err">three.js could not be loaded from the CDN; this page needs a network connection the first time.</div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
@@ -73,12 +73,23 @@ const grid = new THREE.GridHelper(step * 40, 40, 0xbfbbb0, 0xd8d5cc);
 grid.position.y = floorY + radius * 0.001; scene.add(grid);
 const axes = new THREE.AxesHelper(radius * 0.5); axes.position.y = floorY; scene.add(axes);
 const bytes = Uint8Array.from(atob(GLB), (c) => c.charCodeAt(0));
-let model;
+let model, mixer, clips = [], action;
+const clock = new THREE.Clock();
 new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
   model = gltf.scene;
-  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.material.vertexColors = true; } });
+  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.material.map) o.material.vertexColors = true; } });
   scene.add(model);
+  clips = gltf.animations || [];
+  mixer = new THREE.AnimationMixer(model);
 });
+document.querySelectorAll("[data-anim]").forEach((b) => b.addEventListener("click", () => {
+  const clip = clips[Number(b.dataset.anim)];
+  if (!clip || !mixer) return;
+  if (action && action.getClip() === clip && action.isRunning()) { action.stop(); action = null; return; }
+  if (action) action.stop();
+  action = mixer.clipAction(clip);
+  action.reset().play();
+}));
 function view(name) {
   const d = radius / Math.sin(THREE.MathUtils.degToRad(15)) * 1.1;
   const p = { persp: [Math.sin(0.61) * Math.cos(0.44), Math.sin(0.44), Math.cos(0.61) * Math.cos(0.44)], front: [0, 0, 1], right: [1, 0, 0], top: [0, 1, 0.0001] }[name];
@@ -91,7 +102,7 @@ document.getElementById("wire").addEventListener("click", () => model?.traverse(
 document.getElementById("grid").addEventListener("click", () => { grid.visible = !grid.visible; axes.visible = grid.visible; });
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 view("persp");
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); if (mixer) mixer.update(clock.getDelta()); renderer.render(scene, camera); });
 </script>
 </body>
 </html>

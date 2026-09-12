@@ -6,7 +6,7 @@
  */
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, toMaterial } from "./builtins.js";
-import { union } from "../sdf/ops.js";
+import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -34,9 +34,41 @@ export interface Settings {
   [key: string]: number | string | undefined;
 }
 
+export interface EvalOptions {
+  /** Resolve `import("file")` to a shape; the pipeline reads the file. Absent means imports are an error. */
+  resolveImport?: (path: string, opts: { resolution: number }) => Shape3;
+  /** Angles per joint name for this evaluation: a pose. Joints not named are at rest. */
+  jointAngles?: Record<string, [number, number, number]>;
+}
+
+export interface SceneObject {
+  name: string;
+  shape: Shape3;
+}
+
+export interface Pose {
+  name: string;
+  /** Joint name to degrees about x, y, z. */
+  angles: Record<string, [number, number, number]>;
+  line: number;
+}
+
+export interface Animation {
+  name: string;
+  /** Pose names in order; keyframes evenly spaced over `seconds`. */
+  poses: string[];
+  seconds: number;
+  loop: boolean;
+  line: number;
+}
+
 export interface Evaluation {
   /** The shape to output, or undefined when the program made no 3D shape. */
   output?: Shape3;
+  /** The named objects of a `scene`, or the single output as one object. */
+  objects: SceneObject[];
+  poses: Pose[];
+  animations: Animation[];
   /** What the output was called: the shown name(s), or the last assignment. */
   outputName: string;
   /** Names the output depends on, transitively (itself included). */
@@ -63,13 +95,15 @@ class Scope {
   }
 }
 
-export function evaluate(program: Program): Evaluation {
+export function evaluate(program: Program, options: EvalOptions = {}): Evaluation {
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
   const settings: Settings = {};
   const warnings: string[] = [];
-  let shown: { names: string[]; shapes: Shape3[] } | undefined;
+  let shown: { names: string[]; shapes: Shape3[]; scene: boolean } | undefined;
+  const poses: Pose[] = [];
+  const animations: Animation[] = [];
   let lastShape: { name: string } | undefined;
   let depth = 0;
   let loops = 0;
@@ -141,7 +175,88 @@ export function evaluate(program: Program): Evaluation {
     throw new RuntimeError(`'${op}' does not apply to a ${typeName(a)} and a ${typeName(b)}`, line);
   }
 
+  function callImport(args: Arg[], scope: Scope, line: number): Value {
+    const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    const path = values.find((v) => !v.name)?.value ?? values.find((v) => v.name === "path")?.value;
+    if (typeof path !== "string") throw new RuntimeError(`import(): the first argument is the file path, a string`, line);
+    const res = values.find((v) => v.name === "resolution")?.value ?? 96;
+    const size = values.find((v) => v.name === "size")?.value;
+    if (typeof res !== "number") throw new RuntimeError(`import(): resolution must be a number`, line);
+    if (size !== undefined && typeof size !== "number") throw new RuntimeError(`import(): size must be a number`, line);
+    if (!options.resolveImport) throw new RuntimeError(`import(): files cannot be imported here`, line);
+    let shape: Shape3;
+    try {
+      shape = options.resolveImport(path, { resolution: res });
+    } catch (err) {
+      throw new RuntimeError(`import("${path}"): ${(err as Error).message}`, line);
+    }
+    if (size !== undefined) {
+      const b = shape.bounds;
+      const longest = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
+      if (longest > 0) {
+        const f = size / longest;
+        shape = scaleShape(shape, f, f, f);
+      }
+    }
+    return shape;
+  }
+
+  function callPose(args: Arg[], scope: Scope, line: number): Value {
+    const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    const nameArg = values.find((v) => !v.name);
+    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`pose(): the first argument is the pose's name, a string; then joint = [x, y, z] degrees per joint`, line);
+    const angles: Record<string, [number, number, number]> = {};
+    for (const v of values) {
+      if (!v.name) continue;
+      const a = v.value;
+      if (!Array.isArray(a) || a.length !== 3 || a.some((n) => typeof n !== "number"))
+        throw new RuntimeError(`pose("${nameArg.value}"): ${v.name} must be [x, y, z] degrees`, line);
+      angles[v.name] = [a[0] as number, a[1] as number, a[2] as number];
+    }
+    const existing = poses.findIndex((p) => p.name === nameArg.value);
+    const pose: Pose = { name: nameArg.value, angles, line };
+    if (existing >= 0) poses[existing] = pose; else poses.push(pose);
+    return nameArg.value;
+  }
+
+  function callAnimation(args: Arg[], scope: Scope, line: number): Value {
+    const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    const positional = values.filter((v) => !v.name).map((v) => v.value);
+    const name = positional[0];
+    const list = positional[1] ?? values.find((v) => v.name === "poses")?.value;
+    if (typeof name !== "string" || !Array.isArray(list) || list.some((p) => typeof p !== "string"))
+      throw new RuntimeError(`animation(): animation(name, [pose, pose, ...], seconds=1, loop=1)`, line);
+    const seconds = values.find((v) => v.name === "seconds")?.value ?? positional[2] ?? 1;
+    const loop = values.find((v) => v.name === "loop")?.value ?? 1;
+    if (typeof seconds !== "number" || typeof loop !== "number") throw new RuntimeError(`animation(): seconds and loop must be numbers`, line);
+    const anim: Animation = { name, poses: list as string[], seconds, loop: loop !== 0, line };
+    const existing = animations.findIndex((a) => a.name === name);
+    if (existing >= 0) animations[existing] = anim; else animations.push(anim);
+    return name;
+  }
+
+  function callJoint(args: Arg[], scope: Scope, line: number): Value {
+    const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    const order = ["part", "name", "x", "y", "z"];
+    const got: Record<string, Value | undefined> = {};
+    let pos = 0;
+    for (const v of values) {
+      if (v.name) { if (!order.includes(v.name)) throw new RuntimeError(`joint(): no parameter named '${v.name}'`, line); got[v.name] = v.value; }
+      else { if (pos >= order.length) throw new RuntimeError(`joint(): too many arguments`, line); got[order[pos++]] = v.value; }
+    }
+    const part = got.part, name = got.name;
+    if (!isShape3(part as Value)) throw new RuntimeError(`joint(): the first argument is the part, a 3D shape\nusage:\n  joint(part, name, x, y, z) -> shape`, line);
+    if (typeof name !== "string") throw new RuntimeError(`joint(): name must be a string`, line);
+    for (const k of ["x", "y", "z"]) if (typeof got[k] !== "number") throw new RuntimeError(`joint("${name}"): missing '${k}', the pivot in world units`, line);
+    const a = options.jointAngles?.[name] ?? [0, 0, 0];
+    return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, a);
+  }
+
   function call(callee: string, args: Arg[], scope: Scope, line: number): Value {
+    if (callee === "import") return callImport(args, scope, line);
+    if (callee === "joint") return callJoint(args, scope, line);
+    if (callee === "pose") return callPose(args, scope, line);
+    if (callee === "animation") return callAnimation(args, scope, line);
     const user = scope.get(callee);
     if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
@@ -311,19 +426,20 @@ export function evaluate(program: Program): Evaluation {
         }
         return;
       }
-      case "show": {
+      case "show":
+      case "scene": {
         const names: string[] = [];
         const shapes: Shape3[] = [];
         reads = new Set();
-        for (const e of stmt.values) {
+        stmt.values.forEach((e, i) => {
           const v = evalExpr(e, scope);
-          if (!isShape3(v)) throw new RuntimeError(`show needs a 3D shape, got a ${typeName(v)}`, stmt.line);
+          if (!isShape3(v)) throw new RuntimeError(`${stmt.type} needs a 3D shape, got a ${typeName(v)}`, stmt.line);
           shapes.push(v);
-          names.push(e.type === "ident" ? e.name : "model");
-        }
+          names.push(e.type === "ident" ? e.name : stmt.type === "scene" ? `object_${i + 1}` : "model");
+        });
         const showReads = reads;
         reads = undefined;
-        shown = { names, shapes };
+        shown = { names, shapes, scene: stmt.type === "scene" };
         showDeps = showReads;
         return;
       }
@@ -346,15 +462,28 @@ export function evaluate(program: Program): Evaluation {
 
   let output: Shape3 | undefined;
   let outputName = "model";
+  let objects: SceneObject[] = [];
   const roots = new Set<string>();
   if (shown) {
     output = shown.shapes.length === 1 ? shown.shapes[0] : union(shown.shapes);
-    outputName = shown.names.length === 1 ? shown.names[0] : shown.names.join("+");
+    outputName = shown.scene ? "scene" : shown.names.length === 1 ? shown.names[0] : shown.names.join("+");
+    objects = shown.scene ? shown.names.map((name, i) => ({ name, shape: shown!.shapes[i] })) : [{ name: outputName, shape: output }];
     for (const d of showDeps) roots.add(d);
   } else if (lastShape) {
     output = steps.get(lastShape.name)!.value as Shape3;
     outputName = lastShape.name;
+    objects = [{ name: outputName, shape: output }];
     roots.add(lastShape.name);
+  }
+  // Poses and animations must name real joints and poses.
+  if (output) {
+    const jointNames = new Set(allJoints(output).map((j) => j.joint!.name));
+    for (const p of poses)
+      for (const j of Object.keys(p.angles))
+        if (!jointNames.has(j)) warnings.push(`pose "${p.name}" (line ${p.line}) sets joint "${j}", which is not in the output${jointNames.size ? `; joints: ${[...jointNames].join(", ")}` : ""}`);
+    for (const a of animations)
+      for (const pn of a.poses)
+        if (!poses.some((p) => p.name === pn)) warnings.push(`animation "${a.name}" (line ${a.line}) uses pose "${pn}", which is not defined`);
   }
   const used = new Set<string>();
   const stack = [...roots];
@@ -370,7 +499,7 @@ export function evaluate(program: Program): Evaluation {
     if (isShape3(st.value) && !used.has(st.name) && output)
       warnings.push(`'${st.name}' (line ${st.line}) is not part of the output; add it to the model or remove it`);
 
-  return { output, outputName, used, steps: stepList, settings, warnings };
+  return { output, outputName, objects, poses, animations, used, steps: stepList, settings, warnings };
 }
 
 export function signature(name: string, ov: Overload): string {

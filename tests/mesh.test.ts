@@ -5,7 +5,9 @@ import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { isWatertight, meshBounds, meshVolume, triangleCount } from "../src/mesh/mesh.js";
 import { toObj } from "../src/export/obj.js";
 import { toGlb } from "../src/export/glb.js";
-import { preset } from "../src/sdf/materials.js";
+import { albedo, preset } from "../src/sdf/materials.js";
+import { bakeAtlas } from "../src/export/atlas.js";
+import { materialFromString } from "../src/sdf/materials.js";
 
 describe("surface nets", () => {
   const sphere = surfaceNets(P.sphere(1), { resolution: 48 });
@@ -99,5 +101,55 @@ describe("exports", () => {
     expect(json.accessors[0].count).toBe(mesh.positions.length / 3);
     expect(json.accessors[0].min).toHaveLength(3);
     expect(glb.length % 4).toBe(0);
+  });
+});
+
+describe("texture atlas", () => {
+  const checker = materialFromString("checker")!;
+  const shape = O.union([O.paint(P.box(2, 2, 2), checker), O.paint(O.move(P.sphere(0.6), 2.5, 0, 0), preset("red")!)]);
+  const mesh = surfaceNets(shape, { resolution: 24 }).mesh;
+  const atlas = bakeAtlas(mesh, { size: 256, padding: 2 });
+  it("splits vertices per chart and keeps every triangle", () => {
+    expect(atlas.mesh.indices.length).toBe(mesh.indices.length);
+    expect(atlas.mesh.positions.length / 3).toBeGreaterThan(mesh.positions.length / 3);
+    expect(atlas.uv.length).toBe((atlas.mesh.positions.length / 3) * 2);
+    expect(atlas.charts).toBeGreaterThanOrEqual(6);
+    for (let i = 0; i < atlas.uv.length; i++) {
+      expect(atlas.uv[i]).toBeGreaterThanOrEqual(0);
+      expect(atlas.uv[i]).toBeLessThanOrEqual(1);
+    }
+  });
+  it("bakes the pattern: the texel under a triangle's centroid matches albedo at that point", () => {
+    const { mesh: m, uv, image } = atlas;
+    let checked = 0, agree = 0;
+    for (let t = 0; t < m.indices.length; t += 3 * 7) {
+      const a = m.indices[t], b = m.indices[t + 1], c = m.indices[t + 2];
+      const lx = (m.local[a * 3] + m.local[b * 3] + m.local[c * 3]) / 3;
+      const ly = (m.local[a * 3 + 1] + m.local[b * 3 + 1] + m.local[c * 3 + 1]) / 3;
+      const lz = (m.local[a * 3 + 2] + m.local[b * 3 + 2] + m.local[c * 3 + 2]) / 3;
+      const mat = m.materials[m.materialIndex[a]];
+      const want = albedo(mat, lx, ly, lz);
+      const u = (uv[a * 2] + uv[b * 2] + uv[c * 2]) / 3, v = (uv[a * 2 + 1] + uv[b * 2 + 1] + uv[c * 2 + 1]) / 3;
+      const px = image.get(Math.floor(u * image.width), Math.floor(v * image.height));
+      const got = [((px >> 16) & 255) / 255, ((px >> 8) & 255) / 255, (px & 255) / 255];
+      checked++;
+      if (Math.abs(got[0] - want[0]) < 0.05 && Math.abs(got[1] - want[1]) < 0.05 && Math.abs(got[2] - want[2]) < 0.05) agree++;
+    }
+    expect(checked).toBeGreaterThan(20);
+    // A centroid can sit on a checker boundary; nearly all must agree.
+    expect(agree / checked).toBeGreaterThan(0.9);
+  });
+  it("writes UVs and the texture into the GLB and OBJ", () => {
+    const glb = toGlb(atlas.mesh, "t", { uv: atlas.uv, png: atlas.image.toPng() });
+    const jsonLen = glb.readUInt32LE(12);
+    const json = JSON.parse(glb.toString("utf8", 20, 20 + jsonLen));
+    expect(json.meshes[0].primitives[0].attributes.TEXCOORD_0).toBeDefined();
+    expect(json.meshes[0].primitives[0].attributes.COLOR_0).toBeUndefined();
+    expect(json.images[0].mimeType).toBe("image/png");
+    expect(json.materials[0].pbrMetallicRoughness.baseColorTexture.index).toBe(0);
+    const { obj, mtl } = toObj(atlas.mesh, "t", "t.mtl", atlas.uv, "t.png");
+    expect((obj.match(/^vt /gm) ?? []).length).toBe(atlas.uv.length / 2);
+    expect(obj).toMatch(/^f \d+\/\d+\/\d+ /m);
+    expect(mtl).toMatch(/map_Kd t.png/);
   });
 });

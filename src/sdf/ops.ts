@@ -8,11 +8,14 @@
  */
 import { fbm3 } from "../core/noise.js";
 import { apply, length2, rad, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
+import { DEFAULT_MATERIAL } from "./materials.js";
 import { primitive } from "./primitives.js";
+import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import { smax, smin } from "./shapes2d.js";
 import {
   boundsCenter,
   boundsCorners,
+  boundsSize,
   boundsDistance,
   boundsFromPoints,
   boundsGrow,
@@ -23,7 +26,9 @@ import {
   isEmpty,
   type Bounds,
   type Hit,
+  type JointState,
   type Material,
+  type Placement,
   type Shape3,
 } from "./types.js";
 
@@ -60,9 +65,15 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
   };
   const cost = live.reduce((c, s) => c + s.cost, 0);
   if (k <= 0) {
+    // Many parts: a grid over their boxes, so a query touches only the parts near it.
+    const size = boundsSize(bounds);
+    const margin = Math.max(size[0], size[1], size[2]) * 0.1;
+    const index = n > 12 ? buildSpatialIndex(n, bmin, bmax, { min: bounds.min.map((v) => v - margin), max: bounds.max.map((v) => v + margin) }, cellsFor(n)) : undefined;
+    const piece = (i: number, x: number, y: number, z: number): number => fns[i](x, y, z);
     return {
       kind: "shape3",
       dist: (x, y, z) => {
+        if (index) return index.min(x, y, z, piece, boxDist, FAR);
         let best = FAR;
         for (let i = 0; i < n; i++) {
           if (boxDist(i, x, y, z) >= best) continue;
@@ -83,6 +94,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       bounds,
       cost,
       parts: live,
+      inner: live,
     };
   }
   return {
@@ -107,6 +119,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     },
     bounds,
     cost,
+    inner: live,
   };
 }
 
@@ -123,6 +136,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     },
     bounds: a.bounds,
     cost: a.cost + b.cost,
+    inner: [a, b],
   };
 }
 
@@ -138,6 +152,7 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     },
     bounds: boundsIntersect(a.bounds, b.bounds),
     cost: a.cost + b.cost,
+    inner: [a, b],
   };
 }
 
@@ -152,6 +167,7 @@ export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {
     hit: (x, y, z) => h(x - dx, y - dy, z - dz),
     bounds: isEmpty(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy, b.min[2] + dz], max: [b.max[0] + dx, b.max[1] + dy, b.max[2] + dz] },
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -167,6 +183,7 @@ export function rotateBy(s: Shape3, m: Mat3): Shape3 {
     hit: (x, y, z) => h(a * x + b * y + c * z, e * x + f * y + g * z, i * x + j * y + l * z),
     bounds,
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -193,6 +210,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     },
     bounds,
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -218,6 +236,7 @@ export function offset(s: Shape3, r: number): Shape3 {
     hit: (x, y, z) => { const q = h(x, y, z); return { ...q, d: q.d - r }; },
     bounds: boundsGrow(s.bounds, Math.max(r, 0)),
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -230,6 +249,7 @@ export function shell(s: Shape3, t: number): Shape3 {
     hit: (x, y, z) => { const q = h(x, y, z); return { ...q, d: Math.max(q.d, -q.d - t) }; },
     bounds: s.bounds,
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -253,6 +273,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     hit: (x, y, z) => { const p = warp(x, y, z); return h(p[0], p[1], p[2]); },
     bounds,
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -276,6 +297,7 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     hit: (x, y, z) => { const p = warp(x, y, z); return h(p[0], p[1], p[2]); },
     bounds,
     cost: s.cost,
+    inner: [s],
   };
 }
 
@@ -298,6 +320,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     hit: (x, y, z) => { const q = h(x, y, z); return { ...q, d: apply(q.d, x, y, z) }; },
     bounds: boundsGrow(s.bounds, Math.abs(amp)),
     cost: s.cost + 8,
+    inner: [s],
   };
 }
 
@@ -355,5 +378,78 @@ export function paint(s: Shape3, m: Material): Shape3 {
     hit: (x, y, z) => ({ d: d(x, y, z), mat: m, lx: x, ly: y, lz: z }),
     bounds: s.bounds,
     cost: s.cost,
+    inner: [s],
   };
+}
+
+// --- joints and instances ---------------------------------------------------
+
+/**
+ * A joint: `child` turned about `pivot` by `angles` (degrees about x, then
+ * y, then z). A pose is applied by evaluating the program again with the
+ * angles for each joint, so the joint is a plain rotation with exact
+ * bounds; nested joints inside `child` are already turned by their own
+ * angles when the parent is built, so they follow it. Declare a joint once
+ * the part is in place (the pivot is a world point) and combine it with
+ * `+` and `paint` afterwards, not `move`. While `hidden`, the whole
+ * subtree reads as empty, which is how a parent's own geometry is meshed
+ * without the parts that hang off it.
+ */
+export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0]): Shape3 {
+  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false };
+  const turned = angles[0] === 0 && angles[1] === 0 && angles[2] === 0 ? child : move(rotate(move(child, -px, -py, -pz), angles[0], angles[1], angles[2]), px, py, pz);
+  const d = turned.dist, h = turned.hit;
+  return {
+    kind: "shape3",
+    dist: (x, y, z) => (state.hidden ? FAR : d(x, y, z)),
+    hit: (x, y, z) => (state.hidden ? { d: FAR, mat: DEFAULT_MATERIAL, lx: x, ly: y, lz: z } : h(x, y, z)),
+    bounds: turned.bounds,
+    cost: child.cost,
+    inner: [child],
+    joint: state,
+  };
+}
+
+/** The joints anywhere inside a shape, outermost first, without descending into a joint's child. */
+export function findJoints(s: Shape3): Shape3[] {
+  const out: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const walk = (n: Shape3) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (n.joint) { out.push(n); return; }
+    for (const i of n.inner ?? []) walk(i);
+  };
+  walk(s);
+  return out;
+}
+
+/** Every joint in the tree, including nested ones. */
+export function allJoints(s: Shape3): Shape3[] {
+  const out: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const walk = (n: Shape3) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (n.joint) out.push(n);
+    for (const i of n.inner ?? []) walk(i);
+  };
+  walk(s);
+  return out;
+}
+
+/**
+ * Copies of `base` at each placement (position, yaw about y, uniform
+ * scale). For rendering it is the union of the copies; the exporters emit
+ * the base once and a node per placement.
+ */
+export function place(base: Shape3, placements: Placement[]): Shape3 {
+  const copies = placements.map((p) => {
+    let s = base;
+    if (p.scale !== 1) s = scale(s, p.scale, p.scale, p.scale);
+    if (p.yaw !== 0) s = rotate(s, 0, p.yaw, 0);
+    return move(s, p.x, p.y, p.z);
+  });
+  const u = union(copies);
+  return { ...u, instanced: { base, placements } };
 }

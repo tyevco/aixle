@@ -1,0 +1,13 @@
+# A rock garden from an imported mesh: assets/rock.obj was itself made
+# with Aixle (a roughened ellipsoid, exported at a coarse grid). Once
+# imported it is a shape like any other: scaled, placed in a ring, cut
+# flat, blended and painted. The imported field is sampled at
+# `resolution` cells on its longest side.
+rock = import("assets/rock.obj", size=2, resolution=64) | paint("granite")
+big = rock | scale(1.4) | move(0, 0, 0)
+ring_of_rocks = rock | rotate(y=35) | ring(5, 2.6)
+flat = (rock | scale(1.2, 0.5, 1.2) | move(2.2, 0, 1.6)) - (box(8, 2, 8) | move(0, 1.35, 0))
+moss = (sphere(0.7) | scale(1, 0.45, 1) | move(-2.4, 0.1, 1.2)) | paint("grass")
+pad = cylinder(4.6, 0.12) | move(0, 0.06, 0) | paint("sand")
+garden = (pad + big + ring_of_rocks + (flat | paint("stone")) + moss) | ground()
+show garden

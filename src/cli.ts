@@ -17,7 +17,8 @@ function usage(): never {
     [
       "usage:",
       "  aixle render <file.aix> [--out DIR] [--grid N] [--size N] [--views persp,front,right,top]",
-      "                          [--beauty [--beauty-size N]] [--soft]",
+      "                          [--beauty [--beauty-size N]] [--soft] [--texture N | --no-texture]",
+      "                          [--azimuth DEG] [--elevation DEG]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix>        parse and evaluate; print sizes and warnings, render nothing",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
@@ -65,7 +66,7 @@ function main(argv: string[]): number {
   }
   if (cmd === "check") {
     try {
-      const ev = check(source);
+      const ev = check(source, file, (l) => console.log(l));
       for (const st of ev.steps) {
         if (!isShape3(st.value)) continue;
         const used = ev.used.has(st.name) ? "" : "   (not in output)";
@@ -96,6 +97,9 @@ function main(argv: string[]): number {
       beauty: opts.beauty === true,
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       sharp: opts.soft ? false : undefined,
+      texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,
+      azimuth: typeof opts.azimuth === "string" ? Number(opts.azimuth) : undefined,
+      elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
       log: (l) => console.log(l),
     });
     console.log(`wrote ${result.files.length} files to ${outDir}`);

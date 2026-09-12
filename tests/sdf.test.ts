@@ -3,6 +3,7 @@ import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
 import * as W from "../src/sdf/sweeps.js";
+import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
 import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
 import { albedo, materialFromString, preset } from "../src/sdf/materials.js";
 
@@ -50,7 +51,7 @@ describe("booleans", () => {
       expect(u.dist(p[0], p[1], p[2])).toBeCloseTo(Math.min(a.dist(p[0], p[1], p[2]), b.dist(p[0], p[1], p[2])), 9);
     }
   });
-  it("many-part unions cull without changing the result", () => {
+  it("many-part unions cull without changing the result near the surface, and never overestimate", () => {
     const parts = Array.from({ length: 40 }, (_, i) => O.move(P.box(0.5, 0.5, 0.5), i * 0.7, 0, 0));
     const u = O.union(parts);
     for (let x = -1; x < 30; x += 0.37) {
@@ -240,5 +241,100 @@ describe("paths", () => {
   });
   it("rejects a malformed point list with a count", () => {
     expect(() => W.toPoints([1, 2, 3, 4], "tube")).toThrow(/triples.*got 4/);
+  });
+});
+
+describe("twist, taper and path builders", () => {
+  it("taper shrinks a tube's radius along its length", () => {
+    const t = W.tube([[0, 0, 0], [4, 0, 0]], 0.5, 0.5);
+    expect(t.dist(0.2, 0.5, 0)).toBeCloseTo(0, 1);
+    expect(t.dist(3.8, 0.5, 0)).toBeGreaterThan(0.2);
+    expect(t.dist(3.8, 0.25, 0)).toBeCloseTo(0, 1);
+    expect(t.dist(2, 0, 0)).toBeLessThan(-0.3);
+  });
+  it("twist turns a swept profile by the end of the path", () => {
+    // A flat bar (wide in x across the path, thin in y) swept along z, twisted 90 degrees.
+    const bar = S.rect(1, 0.2);
+    const straight = W.sweep(bar, [[0, 0, 0], [0, 0, 4]]);
+    const twisted = W.sweep(bar, [[0, 0, 0], [0, 0, 4]], 90);
+    expect(straight.dist(0.4, 0, 3.9)).toBeLessThan(0);
+    expect(straight.dist(0, 0.4, 3.9)).toBeGreaterThan(0);
+    expect(twisted.dist(0.4, 0, 3.9)).toBeGreaterThan(0);
+    expect(twisted.dist(0, 0.4, 3.9)).toBeLessThan(0);
+    expect(twisted.dist(0.4, 0, 0.05)).toBeLessThan(0);
+  });
+  it("taper scales a swept profile", () => {
+    const horn = W.sweep(S.circle(0.5), [[0, 0, 0], [0, 4, 0]], 0, 0.2);
+    expect(horn.dist(0.45, 0.1, 0)).toBeLessThan(0);
+    expect(horn.dist(0.45, 3.9, 0)).toBeGreaterThan(0);
+    expect(horn.dist(0.05, 3.9, 0)).toBeLessThan(0);
+  });
+  it("helix and arc paths are closed lists of triples", () => {
+    const h = W.helixPath(1, 2, 3, 8);
+    expect(h.length % 3).toBe(0);
+    expect(h.length / 3).toBe(25);
+    expect(h[0]).toBeCloseTo(1);
+    expect(h[h.length - 2]).toBeCloseTo(2);
+    const a = W.arcPath(2, 0, 90, 4);
+    expect(a.length / 3).toBe(5);
+    expect(a[2]).toBeCloseTo(2);
+    expect(a[12]).toBeCloseTo(2);
+    expect(Math.abs(a[14])).toBeLessThan(1e-9);
+  });
+});
+
+describe("text", () => {
+  it("covers letters, digits and punctuation", () => {
+    for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,-+!?:'/&()#*=") expect(FONT_GLYPHS.has(ch), ch).toBe(true);
+  });
+  it("is a profile on the baseline with a stroke width, laid out left to right", () => {
+    const t = textProfile("I", 6, 1);
+    expect(t.dist(1.2, 3)).toBeCloseTo(-0.5);
+    expect(t.dist(1.2, -2)).toBeGreaterThan(0);
+    expect(t.bounds.min[1]).toBeCloseTo(-0.5);
+    expect(t.bounds.max[1]).toBeCloseTo(6.5);
+    const two = textProfile("II", 6, 1);
+    expect(two.bounds.max[0]).toBeGreaterThan(t.bounds.max[0] + 2);
+    expect(textWidth("II", 6)).toBeGreaterThan(textWidth("I", 6));
+    expect(textProfile("", 1).dist(0, 0)).toBeGreaterThan(1e5);
+  });
+  it("folds lowercase up and draws a ? for the unknown", () => {
+    expect(textProfile("a", 6, 1).dist(2, 2.4)).toBeCloseTo(textProfile("A", 6, 1).dist(2, 2.4));
+    expect(textProfile("~", 6, 1).bounds.max[0]).toBeGreaterThan(3);
+  });
+});
+
+describe("spatial index", () => {
+  it("a large union with the grid gives exactly the plain minimum, inside and outside its bounds", () => {
+    const parts: ReturnType<typeof P.sphere>[] = [];
+    for (let i = 0; i < 40; i++) parts.push(O.move(P.box(0.4, 0.4, 0.4), Math.sin(i) * 3, (i % 5) * 0.8, Math.cos(i) * 3));
+    const u = O.union(parts);
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (let k = 0; k < 400; k++) {
+      const x = rnd() * 12 - 6, y = rnd() * 8 - 2, z = rnd() * 12 - 6;
+      const naive = Math.min(...parts.map((p) => p.dist(x, y, z)));
+      const got = u.dist(x, y, z);
+      expect(got).toBeCloseTo(naive, 9);
+    }
+  });
+  it("a long tube and sweep agree with their unindexed forms near the surface", () => {
+    const pts = W.toPoints(W.helixPath(1, 2, 3, 12), "t");
+    const t = W.tube(pts, 0.15);
+    const short = pts.slice(0, 5); // fewer than the index threshold
+    const ref = W.tube(short, 0.15);
+    const naive = (x: number, y: number, z: number) => {
+      let best = Infinity;
+      for (let i = 0; i + 1 < pts.length; i++) best = Math.min(best, W.tube([pts[i], pts[i + 1]], 0.15).dist(x, y, z));
+      return best;
+    };
+    for (let k = 0; k < 60; k++) {
+      const x = Math.sin(k * 1.7) * 2, y = -0.5 + k * 0.05, z = Math.cos(k * 2.3) * 2;
+      expect(t.dist(x, y, z)).toBeCloseTo(naive(x, y, z), 9);
+    }
+    expect(t.dist(1.12, 0.1, 0)).toBeLessThanOrEqual(ref.dist(1.12, 0.1, 0) + 1e-9);
+    const sw = W.sweep(S.circle(0.15), pts);
+    expect(sw.dist(1, 0, 0)).toBeLessThan(0);
+    expect(sw.dist(1.3, 0, 0)).toBeGreaterThan(0.1);
   });
 });

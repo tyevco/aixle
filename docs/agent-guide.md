@@ -51,7 +51,9 @@ the inside is cut open.
 
 When the model is right, `npx aixle render model.aix --beauty` adds
 `beauty.png`, the field ray-marched with shadows, for showing rather than
-checking; `viewer.html` next to it orbits the mesh in a browser.
+checking; `viewer.html` next to it orbits the mesh in a browser, and
+`model.glb` carries the materials as a baked texture (`model.png`), so it
+looks the same wherever it is loaded.
 
 ## Style that renders well
 

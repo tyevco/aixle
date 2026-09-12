@@ -28,6 +28,38 @@ export function referenceMarkdown(): string {
       out.push("");
     }
   }
+  out.push(
+    "## Files",
+    "",
+    "### import",
+    "",
+    "An existing mesh as a shape: `import(\"part.obj\")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so.",
+    "",
+    "    import(path, size=?, resolution=96) -> shape",
+    "",
+  );
+  out.push(
+    "## Poses and animation",
+    "",
+    "### joint",
+    "",
+    "Make a part turn about a pivot under poses: `joint(part, \"elbow\", x, y, z)` with the pivot in world units, declared once the part is in place; combine it with `+` and `paint` afterwards, not `move`. Nested joints turn with their parent. Exports get a node per joint and glTF animations from animation().",
+    "",
+    "    joint(part, name, x, y, z) -> shape",
+    "",
+    "### pose",
+    "",
+    "Name a set of joint angles: `pose(\"wave\", shoulder=[0, 0, 70], elbow=[0, 0, 40])`, degrees about x, y, z per joint. Joints not named stay at rest. Every pose is drawn on `poses.png`; `set pose wave` makes the sheet and exports show it.",
+    "",
+    "    pose(name, joint=[x, y, z], ...) -> string",
+    "",
+    "### animation",
+    "",
+    "A glTF animation from poses: `animation(\"wave\", [\"rest\", \"wave\", \"rest\"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. A rest pose is any pose with no angles, or the name \"rest\". Each animation gets a frame strip `anim_<name>.png`.",
+    "",
+    "    animation(name, poses, seconds=1, loop=1) -> string",
+    "",
+  );
   out.push("## Material presets", "", "Use any of these by name in `paint()`. A colour name (`\"red\"`) or hex (`\"#c8342a\"`) also works.", "");
   out.push("| Name | Pattern | Look |", "| --- | --- | --- |");
   for (const m of PRESETS.values()) {

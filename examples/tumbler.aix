@@ -1,0 +1,13 @@
+# A glass tumbler with a drink and a straw, for the beauty render's glass: the
+# "glass" and "amber" presets transmit, so the ray marcher refracts through
+# the wall, tints by the drink it passes through, and lets the light reach
+# the floor; a large light softens the shadows and depth of field blurs
+# what is off the focus plane. The other outputs treat glass as opaque.
+set light_size 2.5
+set dof 0.8
+wall = polygon(0,0, 1.35,0, 1.55,3.6, 1.35,3.6, 1.2,0.25, 0,0.25)
+glass = revolve(wall) | paint("glass")
+drink = revolve(polygon(0,0, 1.2,0, 1.32,2.4, 0,2.4)) | move(0, 0.26, 0) | paint("amber")
+straw = cylinder(0.09, 4.4) | rotate(z=-12) | move(0.5, 2.3, 0.2) | paint("stripes")
+tumbler = (glass + drink + straw) | ground()
+show tumbler

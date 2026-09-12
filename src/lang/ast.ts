@@ -15,10 +15,11 @@ export interface Assign { type: "assign"; name: string; value: Expr; line: numbe
 export interface Def { type: "def"; name: string; params: { name: string; default?: Expr }[]; body: Expr; line: number }
 export interface For { type: "for"; name: string; iterable: Expr; body: Stmt[]; line: number }
 export interface Show { type: "show"; values: Expr[]; line: number }
+export interface Scene { type: "scene"; values: Expr[]; line: number }
 export interface Set { type: "set"; key: string; value: Expr; line: number }
 export interface ExprStmt { type: "expr"; value: Expr; line: number }
 
-export type Stmt = Assign | Def | For | Show | Set | ExprStmt;
+export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt;
 
 export interface Program {
   body: Stmt[];
