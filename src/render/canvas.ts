@@ -8,6 +8,27 @@ export const rgb = (r: number, g: number, b: number): Color => (clamp8(r) << 16)
 export const rgbf = (r: number, g: number, b: number): Color => rgb(r * 255, g * 255, b * 255);
 const clamp8 = (v: number): number => Math.max(0, Math.min(255, Math.round(v)));
 
+/**
+ * A 0..1 colour quantised to 8 bits with a dither: a slow gradient (the
+ * beauty render's sky, a cylinder's shading, a marble's veins in the
+ * atlas) otherwise steps from one level to the next in bands a dozen
+ * pixels wide. Interleaved gradient noise per pixel, deterministic in x
+ * and y, so renders stay byte for byte reproducible; a triangular
+ * distribution of one level's width, which breaks a band into grain the
+ * eye does not resolve and shifts no colour on average.
+ */
+export function rgbDithered(r: number, g: number, b: number, x: number, y: number): Color {
+  const n1 = ign(x, y), n2 = ign(x + 37, y + 91);
+  const d = n1 + n2 - 1;
+  return rgb(r * 255 + d, g * 255 + d, b * 255 + d);
+}
+
+/** Interleaved gradient noise (Jimenez): a pixel-stable value in [0, 1) with a blue-ish spectrum, no allocation. */
+function ign(x: number, y: number): number {
+  const v = 52.9829189 * ((0.06711056 * x + 0.00583715 * y) % 1);
+  return v - Math.floor(v);
+}
+
 export function mixColor(a: Color, b: Color, t: number): Color {
   const l = (x: number, y: number) => x + (y - x) * t;
   return rgb(l((a >> 16) & 255, (b >> 16) & 255), l((a >> 8) & 255, (b >> 8) & 255), l(a & 255, b & 255));

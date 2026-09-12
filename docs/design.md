@@ -186,6 +186,19 @@ radius grows with distance from the focus plane through the model's
 centre, weighted so a sharp foreground does not smear across a blurred
 background.
 
+## Noise and dither
+
+The procedural patterns and `displace` run on gradient (Perlin) noise:
+value noise, which they used first, has its random values at the
+lattice points, so its blotches sit on a grid and read as patches on a
+skin and bands in a marble's veins, at the coarse atlas above all.
+Gradient noise has nothing to show at the lattice. Every computed colour
+is quantised to 8 bits through a dither (interleaved gradient noise per
+pixel, a triangular distribution one level wide), in the beauty render,
+the sheets and the atlas, so a slow gradient becomes fine grain rather
+than bands a dozen pixels wide; it is a function of the pixel position,
+so renders stay reproducible byte for byte.
+
 ## Materials without UVs, and the atlas that bakes them anyway
 
 A material is a colour, a second colour, and a procedural pattern evaluated

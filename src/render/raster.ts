@@ -13,7 +13,7 @@
 import type { Vec3 } from "../core/vec.js";
 import { albedo } from "../sdf/materials.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { Canvas, rgbf, type Color } from "./canvas.js";
+import { Canvas, rgbf, type Color, rgbDithered } from "./canvas.js";
 import { project, toView, toViewDir, type Camera } from "./camera.js";
 
 export interface RenderOptions {
@@ -155,7 +155,7 @@ export function renderMesh(mesh: Mesh, cam: Camera, target: RenderTarget, opts: 
           base = albedo(mat, lx, ly, lz);
         }
         const col = shade([nx, ny, nz], base, flat ? 0 : mat.metal, flat ? 0.6 : mat.rough, flat ? 0 : mat.glow);
-        canvas.set(px, py, rgbf(col[0], col[1], col[2]));
+        canvas.set(px, py, rgbDithered(col[0], col[1], col[2], px, py));
       }
     }
   }
