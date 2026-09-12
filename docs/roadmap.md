@@ -12,9 +12,10 @@ make, judged from three rounds of dogfooding. Items move out of here into
 `anchor`, `at` and `attach` are in the language (see `language.md` and
 the anchors section of `design.md`); every transform, warp and joint
 carries them, unions merge them with the first part winning a name, and
-`check` prints them. What round 5 must measure: whether an agent reaches
-for `attach` unprompted once the skill shows it, and whether the
-first-part-wins rule for a repeated name ever surprises one.
+`check` prints them. Round 5 measured it: two agents of four reached
+for them unprompted (a dinghy's rigging fitting to fitting, with the
+mainsheet following the boom's pose), two built a clock and a treehouse
+without them and did not miss them. Nobody hit the first-part-wins rule.
 
 ## 2. PBR textures baked from the field
 

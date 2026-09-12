@@ -695,16 +695,26 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
 export function surfacePoint(s: Shape3, x: number, y: number, z: number): Vec3 {
   let px = x, py = y, pz = z;
   const e = 1e-4;
-  for (let i = 0; i < 12; i++) {
-    const d = s.dist(px, py, pz);
-    if (Math.abs(d) < 1e-6) break;
+  let d = s.dist(px, py, pz);
+  // Each step moves against the gradient by the distance; a field that is only a bound (a loft, a blend) can
+  // overshoot, so a step that does not bring the distance down is halved and retried (measured: a loft's field
+  // left a cradle post's foot 0.07 off the hull panel).
+  for (let i = 0; i < 40 && Math.abs(d) > 1e-7; i++) {
     let gx = s.dist(px + e, py, pz) - s.dist(px - e, py, pz);
     let gy = s.dist(px, py + e, pz) - s.dist(px, py - e, pz);
     let gz = s.dist(px, py, pz + e) - s.dist(px, py, pz - e);
     const len = Math.hypot(gx, gy, gz);
     if (len < 1e-12) break;
     gx /= len; gy /= len; gz /= len;
-    px -= d * gx; py -= d * gy; pz -= d * gz;
+    let step = d;
+    let moved = false;
+    for (let k = 0; k < 6; k++) {
+      const nx = px - step * gx, ny = py - step * gy, nz = pz - step * gz;
+      const nd = s.dist(nx, ny, nz);
+      if (Math.abs(nd) < Math.abs(d)) { px = nx; py = ny; pz = nz; d = nd; moved = true; break; }
+      step *= 0.5;
+    }
+    if (!moved) break;
   }
   return [px, py, pz];
 }

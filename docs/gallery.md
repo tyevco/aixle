@@ -308,6 +308,62 @@ round 5: A grandfather clock, about 6 units tall, front on +z.
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/clock.aix) · <a href="/aixle/viewers/round-5_clock.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/clock.report.md)
 
+### round-5_sailboat
+
+round 5: A sailing dinghy on a cradle, about 5 units long. Bow is +z. The cradle
+
+![round-5_sailboat, beauty render](../dogfood/renders/round-5_sailboat_beauty.png) ![round-5_sailboat, contact sheet](../dogfood/renders/round-5_sailboat.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat.aix) · <a href="/aixle/viewers/round-5_sailboat.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/sailboat.report.md)
+
+### round-5_sailboat_probe_dark
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_dark, beauty render](../dogfood/renders/round-5_sailboat_probe_dark_beauty.png) ![round-5_sailboat_probe_dark, contact sheet](../dogfood/renders/round-5_sailboat_probe_dark.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_dark.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_dark.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_decal
+
+round 5: Probe: which decal wins where two regions overlap?
+
+![round-5_sailboat_probe_decal, beauty render](../dogfood/renders/round-5_sailboat_probe_decal_beauty.png) ![round-5_sailboat_probe_decal, contact sheet](../dogfood/renders/round-5_sailboat_probe_decal.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_decal.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_decal.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_main
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_main, beauty render](../dogfood/renders/round-5_sailboat_probe_main_beauty.png) ![round-5_sailboat_probe_main, contact sheet](../dogfood/renders/round-5_sailboat_probe_main.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_main2
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_main2, beauty render](../dogfood/renders/round-5_sailboat_probe_main2_beauty.png) ![round-5_sailboat_probe_main2, contact sheet](../dogfood/renders/round-5_sailboat_probe_main2.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main2.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main2.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_sharp
+
+round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+
+![round-5_sailboat_probe_sharp, beauty render](../dogfood/renders/round-5_sailboat_probe_sharp_beauty.png) ![round-5_sailboat_probe_sharp, contact sheet](../dogfood/renders/round-5_sailboat_probe_sharp.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_sharp.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_sharp.html" target="_blank" rel="noopener">viewer</a>
+
+### round-5_sailboat_probe_well
+
+round 5: Probe: why does a decal region that contains a well's floor not paint it?
+
+![round-5_sailboat_probe_well, beauty render](../dogfood/renders/round-5_sailboat_probe_well_beauty.png) ![round-5_sailboat_probe_well, contact sheet](../dogfood/renders/round-5_sailboat_probe_well.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_well.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_well.html" target="_blank" rel="noopener">viewer</a>
+
 ### round-5_treehouse
 
 round 5: A treehouse: a rough-barked tree with four branches and a blended canopy,

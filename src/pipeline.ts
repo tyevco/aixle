@@ -642,6 +642,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (opts.obj !== false || opts.glb !== false) {
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
       const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, texture: textureSize > 0 ? Math.max(64, textureSize) : 0 }));
+      warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
       if (hierarchy.atlas) write("model.png", hierarchy.atlas.toPng());

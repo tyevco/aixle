@@ -1,0 +1,5 @@
+# Re-import the shipped GLB and check what survived: size, pieces, the
+# joints' parts in place. size= is left off so the units are compared.
+set grid 256
+back = import("../out/sailboat/model.glb", resolution=200)
+show back

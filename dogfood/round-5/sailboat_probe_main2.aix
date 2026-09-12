@@ -1,0 +1,174 @@
+# A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
+# the whole thing grounded at the end. Length about 5.
+set grid 256
+set azimuth 35
+set elevation 18
+
+# ---------- materials ----------
+topside = material("#1e4d8f", rough=0.25)
+boot = material("#f4f4f2", rough=0.3)
+antifoul = material("#b3382c", rough=0.6)
+deckpaint = material("#efe6cf", rough=0.7)
+cockpitpaint = material("#d8cfb8", rough=0.7)
+varnish = material("oak", rough=0.25)
+sailcloth = material("#f6f2e6", rough=0.8)
+spar = material("silver", rough=0.5)
+foil = material("#e8e4dc", rough=0.4)
+
+# ---------- hull ----------
+# Stations as z, half-beam pairs, stern to bow; the last is the tip.
+keel_st = [-2.25, 0.05, -2.0, 0.1, -1.4, 0.15, -0.7, 0.17, 0, 0.17, 0.7, 0.15, 1.2, 0.1, 1.5, 0.05]
+keel_tip = 1.75
+chine_st = [-2.35, 0.42, -2.0, 0.56, -1.4, 0.68, -0.7, 0.75, 0, 0.76, 0.7, 0.7, 1.4, 0.52, 1.9, 0.28, 2.15, 0.1]
+chine_tip = 2.25
+sheer_st = [-2.4, 0.55, -2.0, 0.72, -1.4, 0.88, -0.7, 0.98, 0, 1.0, 0.7, 0.95, 1.4, 0.78, 2.0, 0.45, 2.35, 0.18]
+sheer_tip = 2.5
+
+# A profile lies with its y along -z when lofted, so profile y = -z.
+keel_pts = []
+n = len(keel_st) / 2
+for i in range(n) { keel_pts = keel_pts + [keel_st[2 * i + 1], -keel_st[2 * i]] }
+keel_pts = keel_pts + [0, -keel_tip]
+for i in range(n) { j = n - 1 - i
+  keel_pts = keel_pts + [-keel_st[2 * j + 1], -keel_st[2 * j]] }
+keel_p = polygon(keel_pts)
+
+chine_pts = []
+n = len(chine_st) / 2
+for i in range(n) { chine_pts = chine_pts + [chine_st[2 * i + 1], -chine_st[2 * i]] }
+chine_pts = chine_pts + [0, -chine_tip]
+for i in range(n) { j = n - 1 - i
+  chine_pts = chine_pts + [-chine_st[2 * j + 1], -chine_st[2 * j]] }
+chine_p = polygon(chine_pts)
+
+sheer_pts = []
+n = len(sheer_st) / 2
+for i in range(n) { sheer_pts = sheer_pts + [sheer_st[2 * i + 1], -sheer_st[2 * i]] }
+sheer_pts = sheer_pts + [0, -sheer_tip]
+for i in range(n) { j = n - 1 - i
+  sheer_pts = sheer_pts + [-sheer_st[2 * j + 1], -sheer_st[2 * j]] }
+sheer_p = polygon(sheer_pts)
+
+chine_y = 0.3
+loft_top = 1.1
+# loft() is centred on y = 0 (check showed -0.15..0.15), so lift each by half.
+lower_hull = loft(keel_p, chine_p, chine_y) | move(0, chine_y / 2, 0)
+upper_hull = loft(chine_p, sheer_p, loft_top - chine_y) | move(0, (chine_y + loft_top) / 2, 0)
+hull_block = lower_hull + upper_hull
+
+# Sheer: cut the top with a big cylinder lying along x, so the deck
+# curves up towards bow and stern. sheer(z) is the deck height.
+sheer_r = 11
+sheer_mid = 0.8
+def sheer(z) = sheer_mid + sheer_r - sqrt(sheer_r * sheer_r - z * z)
+sheer_cutter = cylinder(sheer_r, 6) | rotate(z=90) | move(0, sheer_mid + sheer_r, 0)
+# Rocker: keep only what is inside a cylinder resting on y = 0, so the
+# keel line rises towards both ends.
+rocker_r = 12
+rocker_keep = cylinder(rocker_r, 6) | rotate(z=90) | move(0, rocker_r, 0)
+hull_shaped = (hull_block - sheer_cutter) & rocker_keep
+
+# Cockpit: a rounded trapezoid well, wider forward, floor at y = 0.35.
+cockpit_floor = 0.35
+cockpit_plan = polygon(-0.58, -0.3, 0.58, -0.3, 0.42, 1.7, -0.42, 1.7) | round(0.1)
+cockpit_cut = extrude(cockpit_plan, 1.2) | move(0, cockpit_floor + 0.6, 0)
+hull_cut = hull_shaped - cockpit_cut
+
+# Paint: topsides, then the deck, boot-top, antifouling, and the well.
+waterline = 0.42
+deck_region = cylinder(sheer_r + 0.03, 6.2) | rotate(z=90) | move(0, sheer_mid + sheer_r, 0)
+boot_region = box(8, 0.1, 8) | move(0, waterline + 0.05, 0)
+bottom_region = box(8, 2, 8) | move(0, waterline - 1, 0)
+well_region = extrude(cockpit_plan | offset(0.03), 1.26) | move(0, cockpit_floor + 0.6, 0)
+# The innermost decal wins where regions overlap (the well's floor is under
+# the waterline), so the well goes first.
+hull = hull_cut | paint(topside) | decal(well_region, cockpitpaint) | decal(deck_region, deckpaint)
+  | decal(bottom_region, antifoul) | decal(boot_region, boot)
+
+# Gunwale: a rubbing strake along the deck edge, found on the surface.
+gw_st = [-2.0, 0.7, -1.5, 0.84, -1.0, 0.9, -0.5, 0.92, 0, 0.9, 0.5, 0.88, 1.0, 0.8, 1.5, 0.65, 2.0, 0.42, 2.3, 0.2]
+gw_pts = []
+gn = len(gw_st) / 2
+q0 = surface(hull_cut, 0.65, sheer(-2.4) + 0.1, -2.5)
+gw_pts = gw_pts + q0
+for i in range(gn) { gw_pts = gw_pts + surface(hull_cut, gw_st[2 * i + 1] + 0.1, sheer(gw_st[2 * i]) + 0.1, gw_st[2 * i]) }
+gw_pts = gw_pts + surface(hull_cut, 0, sheer(2.5) + 0.1, 2.6)
+for i in range(gn) { j = gn - 1 - i
+  gw_pts = gw_pts + surface(hull_cut, -gw_st[2 * j + 1] - 0.1, sheer(gw_st[2 * j]) + 0.1, gw_st[2 * j]) }
+q1 = surface(hull_cut, -0.65, sheer(-2.4) + 0.1, -2.5)
+gw_pts = gw_pts + q1 + q0
+gunwale = tube(0.05, gw_pts, smooth=2) | paint(varnish)
+
+# Thwart across the cockpit, centreboard under the keel.
+thwart = box(1.2, 0.06, 0.3) | move(0, 0.62, -0.7) | paint(varnish)
+centreboard = box(0.08, 1.3, 0.8, round=0.03) | move(0, -0.25, 0.1) | paint(foil)
+mast_z = 0.6
+mast_step = cylinder(0.1, 0.12) | move(0, sheer(mast_z) + 0.02, mast_z) | paint("steel")
+
+# ---------- deck fittings (the rigging ends on these) ----------
+stem_fitting = box(0.12, 0.1, 0.2) | move(0, sheer(2.38) + 0.03, 2.38) | paint("steel")
+quarter_p = cylinder(0.04, 0.3) | move(-0.46, 1.1, -2.3) | paint("steel")
+quarter_s = cylinder(0.04, 0.3) | move(0.46, 1.1, -2.3) | paint("steel")
+fairlead = box(0.1, 0.06, 0.12) | move(-0.72, sheer(-0.1) + 0.02, -0.1) | paint("steel")
+
+# ---------- mast ----------
+masthead_y = sheer(mast_z) + 5.0
+mast = cylinder(0.06, masthead_y - 0.7) | move(0, (masthead_y + 0.7) / 2, mast_z) | paint(spar)
+masthead = sphere(0.08) | move(0, masthead_y, mast_z) | paint("steel")
+gooseneck_y = sheer(mast_z) + 0.75
+gooseneck = cylinder(0.09, 0.12) | move(0, gooseneck_y, mast_z) | paint("steel")
+
+# ---------- boom and mainsail (a joint at the gooseneck) ----------
+boom_len = 2.0
+boom = tube(0.045, [0, gooseneck_y, mast_z, 0, gooseneck_y, mast_z - boom_len], cap="flat") | paint(varnish)
+boom_end = sphere(0.06) | anchor("end", 0, 0, 0) | move(0, gooseneck_y, mast_z - boom_len) | paint("steel")
+
+# The sail is drawn flat in x/y with the luff vertical at x = +half,
+# the foot from x = +half to -half; wrap() gives it a belly, rotate(y=-90)
+# turns it to lie along z with the belly to -x (port), the move puts the
+# luff back on the mast axis.
+main_head_y = masthead_y - 0.12
+main_r = 2.5
+mh = boom_len / 2
+main_pts = [mh, gooseneck_y, -mh, gooseneck_y]
+leech_dx = 2 * mh
+leech_dy = main_head_y - gooseneck_y
+leech_len = sqrt(leech_dx * leech_dx + leech_dy * leech_dy)
+for t in [0.2, 0.4, 0.6, 0.8] {
+  main_pts = main_pts + [-mh + t * leech_dx - 0.12 * sin(180 * t) * leech_dy / leech_len,
+                         gooseneck_y + t * leech_dy + 0.12 * sin(180 * t) * leech_dx / leech_len] }
+main_pts = main_pts + [mh, main_head_y]
+main_flat = extrude(polygon(main_pts), 0.05, "z")
+main_luff_deg = mh / main_r * 57.2958
+mainsail = main_flat | wrap(main_r) | rotate(y=-90)
+  | move(main_r * cos(main_luff_deg), 0, -main_r * sin(main_luff_deg) + mast_z) | paint(sailcloth)
+boom_rig = joint(boom + boom_end + mainsail, "boom", 0, gooseneck_y, mast_z)
+
+# ---------- jib ----------
+# Luff along the forestay from the stem fitting to the masthead; drawn
+# with the luff vertical, bellied, then tilted by the forestay's rake.
+tack = at(stem_fitting, "centre")
+head = at(masthead, "centre")
+fs_dy = head[1] - tack[1]
+fs_dz = head[2] - tack[2]
+fs_len = sqrt(fs_dy * fs_dy + fs_dz * fs_dz)
+rake = atan(-fs_dz, fs_dy)
+jib_luff = 0.78 * fs_len
+# clew target in the world, expressed along (u) and across (v) the luff
+clew_y = 1.3
+clew_z = 0.75
+cu = (clew_y - tack[1]) * cos(rake) + (tack[2] - clew_z) * sin(rake)
+cv = -(clew_y - tack[1]) * sin(rake) + (tack[2] - clew_z) * cos(rake)
+jh = cv / 2
+jib_r = 2
+jib_flat = extrude(polygon(jh, 0, -jh, cu, jh, jib_luff), 0.05, "z")
+jib_luff_deg = jh / jib_r * 57.2958
+jib = jib_flat | wrap(jib_r) | rotate(y=-90)
+  | move(jib_r * cos(jib_luff_deg), 0, -jib_r * sin(jib_luff_deg))
+  | rotate(x=-rake) | move(tack[0], tack[1], tack[2]) | paint(sailcloth)
+
+# Probe: does the mainsail mesh outside a joint, and beside the jib?
+set grid 192
+with_joint = mast + masthead + gooseneck + boom_rig + jib
+no_joint = mast + masthead + gooseneck + boom + boom_end + mainsail + jib
+show no_joint

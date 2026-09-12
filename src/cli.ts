@@ -103,7 +103,7 @@ function main(argv: string[]): number {
         // and print that when it is tighter (measured: a boom's box read 5.9 tall for a 5.2 surface).
         let own = b;
         if (hasLooseBounds(st.value)) {
-          const e = surfaceExtent(st.value, 24);
+          const e = surfaceExtent(st.value, 48);
           const tighter = [0, 1, 2].some((k) => (e.max[k] - e.min[k]) < (b.max[k] - b.min[k]) * 0.95);
           if (!isEmpty(e) && tighter) { own = e; console.log(`${"  surface".padEnd(18)} ${spanBox(e)}`); }
         }
@@ -114,7 +114,7 @@ function main(argv: string[]): number {
         // through the joints' inverses, so a turned wheel's posed line says whether it still touches the floor.
         if (pose && ev.output) {
           const placedS = placedShape(ev.output, st.value);
-          const placed = placedS ? surfaceExtent(placedS, 24) : undefined;
+          const placed = placedS ? surfaceExtent(placedS, 48) : undefined;
           if (placed && !isEmpty(placed) && [0, 1, 2].some((k) => Math.abs(placed.min[k] - own.min[k]) > 1e-6 || Math.abs(placed.max[k] - own.max[k]) > 1e-6))
             console.log(`${"  posed".padEnd(18)} ${spanBox(placed)}`);
         }

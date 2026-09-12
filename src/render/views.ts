@@ -19,10 +19,12 @@ import { createTarget, renderLine, renderMesh, type RenderTarget } from "./raste
 
 export const INK = {
   page: 0xf4f2ee,
-  view: 0xeceae4,
-  viewPersp: 0xe4e6ea,
-  grid: 0xd8d5cc,
-  gridMajor: 0xbfbbb0,
+  // The views' grounds sit well below white, so a white or ivory part lit face-on is not the background's value
+  // (measured: a sail in cream cloth read as absent on a sheet, and cost its author nine renders).
+  view: 0xe0ddd6,
+  viewPersp: 0xd6d9df,
+  grid: 0xcdc9bf,
+  gridMajor: 0xb3afa4,
   axisX: 0xc8342a,
   axisY: 0x3f9a45,
   axisZ: 0x2f66c4,

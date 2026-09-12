@@ -66,7 +66,9 @@ export function shade(n: Vec3, base: Vec3, metal: number, rough: number, glow = 
   const nh = Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl);
   const gloss = 1 - rough;
   const specPower = 4 + gloss * gloss * 120;
-  const spec = Math.pow(nh, specPower) * (0.08 + gloss * 0.6) * (0.5 + nl);
+  // A matte surface gets little highlight, so cloth and plaster lit face-on stay their own colour rather than
+  // saturating to white (the same sail).
+  const spec = Math.pow(nh, specPower) * (0.08 + gloss * 0.6) * (0.5 + nl) * (0.35 + 0.65 * gloss);
   const rim = rl * rl * 0.12 * (1 - rough * 0.5);
   const sr = metal > 0 ? base[0] * (0.4 + 0.6 * metal) + (1 - metal) : 1;
   const sg = metal > 0 ? base[1] * (0.4 + 0.6 * metal) + (1 - metal) : 1;

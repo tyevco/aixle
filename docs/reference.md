@@ -212,7 +212,7 @@ A path list for an arc of radius r on the ground plane from `from` to `to` degre
 
 ### loft
 
-A solid h tall that is profile a at the bottom and profile b at the top, blending between them.
+A solid h tall that is profile a at the bottom and profile b at the top, blending between them; centred on y = 0 like extrude (from -h/2 to h/2), each profile laid flat with its y along -z.
 
     loft(a, b, h) -> shape
 

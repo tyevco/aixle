@@ -1,0 +1,13 @@
+# Probe: why does a decal region that contains a well's floor not paint it?
+# a: box regions, low first then the well.  b: the reverse.
+# c: the well region as an extruded, rounded, offset polygon (as in the boat).
+blk = box(2, 1, 2) | move(0, 0.5, 0)
+well = box(1, 1, 1) | move(0, 0.9, 0)
+cut = blk - well
+w_box = box(1.06, 1.06, 1.06) | move(0, 0.9, 0)
+w_poly = extrude(polygon(-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5) | round(0.1) | offset(0.03), 1.06) | move(0, 0.9, 0)
+low = box(8, 0.5, 8) | move(0, 0.25, 0)
+a = cut | paint("blue") | decal(low, "red") | decal(w_box, "green") | move(-2.5, 0, 0)
+b = cut | paint("blue") | decal(w_box, "green") | decal(low, "red")
+c = cut | paint("blue") | decal(low, "red") | decal(w_poly, "green") | move(2.5, 0, 0)
+show a, b, c

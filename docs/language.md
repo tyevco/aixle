@@ -124,7 +124,8 @@ carries the point along, so the point is where the part is. `at(shape,
 "b")` moves `part` so its anchor `a` lands on the target's anchor `b`:
 a placement with no numbers. Every shape also answers to the free
 anchors `centre`, `top`, `bottom`, `front`, `back`, `left` and `right`
-(its box's face centres), so `lamp | attach("bottom", arm, "tip")` sets a
+(its box's face centres, so `centre` of a boom is the middle of its
+box, not its end: anchor the end), so `lamp | attach("bottom", arm, "tip")` sets a
 lamp on the end of an arm. Rotate a part first, then attach it; the
 anchors turn with it. A union keeps every part's anchors (the first part
 wins a repeated name), a cut keeps the first shape's, and `check` prints
@@ -182,9 +183,12 @@ points with rounded joins and hemispherical ends that reach `r` past
 each end point (`cap="flat"` cuts them flat at the points); `sweep(profile, [points])` carries a 2D profile
 along them (its x across the path, its y as near world up as the path
 allows; on a vertical run, y points to -z); `loft(a, b, h)` blends from
-profile `a` at y = 0 to `b` at y = `h`, each laid flat like `extrude`
-(its x along x, its y along -z), so `loft(rect(1.5, 1.9), rect(2, 2.5),
-0.5)` is a skirt 0.5 tall whose second dimension runs along z. Both path
+profile `a` at the bottom to `b` at the top over height `h`, centred on
+y = 0 like `extrude` (so from y = -h/2 to +h/2; an earlier version of
+this page said 0 to h, and a hull was built on that until `check` said
+otherwise), each laid flat (its x along x, its y along -z), so
+`loft(rect(1.5, 1.9), rect(2, 2.5), 0.5)` is a skirt 0.5 tall whose
+second dimension runs along z. Both path
 functions take `smooth=n` to curve the path through the points; a handle is
 four points and `smooth=6`. A hollow spout is one tube minus a thinner one
 on the same path. `taper=` scales the end relative to the start (a horn,
@@ -245,7 +249,11 @@ front, and depth z riding at radius `r + z`. Both are exact, so the box
 `extrude(text("CHAMPION", 0.2, align="center"), 0.06, "z") | wrap(1.3) |
 move(0, 4.3, 0)`; it spans `57.3 × width / r` degrees of the cylinder, so
 keep that under the angle between the handles; a curved bench seat is a
-box bent by a few degrees.
+box bent by a few degrees. Where a point lands: `wrap(r)` takes `(x, y,
+z)` to `((r + z) sin(x / r), y, (r + z) cos(x / r))`, and `bend`'s arc
+is `(R - y) sin(x / R)` across and `R - (R - y) cos(x / R)` up, so an
+edge that must stay on an axis (a sail's luff on its mast) is placed
+from those, or anchored and read with `at()` after the warp.
 
 **Import**: `import("part.obj")` or a `.glb`, relative to the program's
 folder, makes an existing mesh a shape: it is sampled into a distance
@@ -396,7 +404,11 @@ dark room); `set dof 1` adds depth of field there, blurring away from the
 model's centre; the camera fits the model's box corners with a small
 margin, and `set zoom 1.2` brings it closer, up to the point where the
 box would touch the frame's edge and no further, so a zoom never crops
-(`--zoom` on the command line). A material with `glow=1` gives off its own light in every
+(`--zoom` on the command line). Several `decal`s on one shape are read
+in order and the last one wins where regions overlap; a region should
+reach a cell or two past the surface it means to paint, since a coarse
+mesh's vertices stray out of a region that ends exactly at the surface
+(measured: a cockpit floor read as antifouling on a quick sheet). A material with `glow=1` gives off its own light in every
 render, unshadowed: a flame, a lamp, a screen. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
@@ -443,7 +455,9 @@ joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the
 joints above it have turned, since a part built at rest and turned by a
-joint keeps its rest box. `aixle render`
+joint keeps its rest box. Both lines come from rays marched in from the
+box's faces, so a plate thinner than the rays' spacing can slip between
+them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
 also writes the warnings into `report.md` and counts them on the sheet's title bar.
 Warnings cover: a shape computed but never assigned; a step that is not part
 of the output; an empty output (a difference that removed everything, an
@@ -451,7 +465,8 @@ intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
 still catch it, below it they may not; between 1.2 and 2 cells a tube
 or a wall meshes but often not watertight, and the report names such
-parts when the mesh has open edges), including a `shell` wall, a
+parts when the mesh has open edges; a rigging line wants about three
+cells across to be clean, measured on a dinghy), including a `shell` wall, a
 `tube`, a `sweep` profile or a `text` stroke inside a thick part (those
 carry their own thickness, since a bounding box cannot see it); a
 lettering counter or a slot under a cell (under half a cell it closes,
@@ -513,6 +528,17 @@ under).
   grid, and meshes as an open edge there (measured: a clock's hands);
   `check` cannot see it, since a tip has no thickness to report. Blunt
   a tip to a cell's width, as a real hand or blade is.
+- Two tubes meeting at one point (two shrouds at a masthead), or a line
+  leaving a sheet at its corner, cross in a wedge thinner than any cell:
+  give them a fitting to meet in (a tang, a sphere, a boss).
+- `surface(shape, x, y, z)` slides to the nearest surface from the guess
+  along the field, so a guess far from the face you mean can land on a
+  nearer one (a keel rather than a bottom panel); guess within the part's
+  thickness of the face, and on a `loft` or a blend, whose field is a
+  bound rather than a distance, expect it close rather than exact.
+- A `move` above a `joint` (`(boat + cradle) | ground()`) is carried into
+  the export's joint nodes; a rotation or a scale above one cannot be,
+  and the render warns: rotate or scale the part before the joint.
 - Two thin parts that must stay separate (a clock's two hands, a lid
   and its rim) cannot overlap by a cell as the contact rule says: leave
   a gap of a cell or two between them and bridge it with a hub or a

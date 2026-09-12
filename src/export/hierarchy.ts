@@ -12,7 +12,7 @@
  * atlas: they are merged for baking and split again with their UVs.
  */
 import type { Vec3 } from "../core/vec.js";
-import { allJoints, findJoints } from "../sdf/ops.js";
+import { allJoints, findJoints, move as moveShape } from "../sdf/ops.js";
 import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
@@ -42,6 +42,8 @@ export interface SceneHierarchy {
   atlas?: AtlasResult["image"];
   atlasCharts?: number;
   triangles: number;
+  /** Things the export could not carry, for the report: a rotation or a scale above a joint. */
+  notes: string[];
 }
 
 export interface HierarchyOptions {
@@ -71,24 +73,55 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
   const meshes: Mesh[] = [];
   const addMesh = (m: Mesh): number => { meshes.push(m); return meshes.length - 1; };
   const roots: SceneNode[] = [];
+  const notes: string[] = [];
 
-  const jointNode = (j: Shape3, parentOrigin: Vec3): SceneNode => {
+  // A joint is declared at a world pivot, but a move above it (`(boat + cradle) | ground()`) carries the joint's
+  // part elsewhere while the pivot stays in the program's numbers: the node and its mesh follow the move (measured:
+  // a grounded boat's rudder and boom nodes sat a unit below its hull in the GLB). Only translations are carried;
+  // a rotation or a scale above a joint would also turn its axis, which the node cannot express, so it is reported.
+  const jointNode = (j: Shape3, parentOrigin: Vec3, offset: Vec3): SceneNode => {
     const st = j.joint!;
     const nested = findJoints(st.child);
     for (const n of nested) n.joint!.hidden = true;
-    const own = extract(st.child, opts);
+    const child = offset[0] === 0 && offset[1] === 0 && offset[2] === 0 ? st.child : moveShape(st.child, offset[0], offset[1], offset[2]);
+    const own = extract(child, opts);
     for (const n of nested) n.joint!.hidden = false;
+    const pivot: Vec3 = [st.pivot[0] + offset[0], st.pivot[1] + offset[1], st.pivot[2] + offset[2]];
     const node: SceneNode = {
       name: st.name,
-      mesh: triangleCount(own) ? addMesh(shifted(own, st.pivot)) : -1,
-      translation: [st.pivot[0] - parentOrigin[0], st.pivot[1] - parentOrigin[1], st.pivot[2] - parentOrigin[2]],
+      mesh: triangleCount(own) ? addMesh(shifted(own, pivot)) : -1,
+      translation: [pivot[0] - parentOrigin[0], pivot[1] - parentOrigin[1], pivot[2] - parentOrigin[2]],
       yaw: 0,
       scale: 1,
       joint: st.name,
-      children: nested.map((n) => jointNode(n, st.pivot)),
-      origin: st.pivot,
+      children: nested.map((n) => jointNode(n, pivot, offset)),
+      origin: pivot,
     };
     return node;
+  };
+  /** The translation the transforms between a root and a joint add up to, and whether any of them is not a plain move. */
+  const offsetTo = (root: Shape3, j: Shape3): { offset: Vec3; rigid: boolean } => {
+    const chain: Shape3[] = [];
+    const seen = new Set<Shape3>();
+    const find = (n: Shape3): boolean => {
+      if (n === j) return true;
+      if (seen.has(n) || n.joint) return false;
+      seen.add(n);
+      chain.push(n);
+      for (const k of n.parts ?? n.inner ?? []) if (find(k)) return true;
+      chain.pop();
+      return false;
+    };
+    if (!find(root)) return { offset: [0, 0, 0], rigid: true };
+    let rigid = true;
+    let p: Vec3 = [0, 0, 0], q: Vec3 = [1, 2, 3];
+    for (let k = chain.length - 1; k >= 0; k--) {
+      const w = chain[k].warp;
+      if (!w) continue;
+      p = w(p[0], p[1], p[2]); q = w(q[0], q[1], q[2]);
+    }
+    if (Math.abs(q[0] - p[0] - 1) > 1e-6 || Math.abs(q[1] - p[1] - 2) > 1e-6 || Math.abs(q[2] - p[2] - 3) > 1e-6) rigid = false;
+    return { offset: p, rigid };
   };
 
   for (const obj of objects) {
@@ -129,13 +162,17 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       yaw: 0,
       scale: 1,
       origin: [0, 0, 0],
-      children: findJoints(obj.shape).map((j) => jointNode(j, [0, 0, 0])),
+      children: findJoints(obj.shape).map((j) => {
+        const { offset, rigid } = offsetTo(obj.shape, j);
+        if (!rigid) notes.push(`joint "${j.joint!.name}" sits under a rotation or a scale, which the export's joint node cannot carry: the GLB places it as if that transform were a move. Rotate or scale the part before the joint, not after.`);
+        return jointNode(j, [0, 0, 0], offset);
+      }),
     });
   }
 
   let triangles = 0;
   for (const m of meshes) triangles += triangleCount(m);
-  const out: SceneHierarchy = { roots, meshes, triangles };
+  const out: SceneHierarchy = { roots, meshes, triangles, notes };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);
     const baked = bakeAtlas(merged, { size: opts.texture });

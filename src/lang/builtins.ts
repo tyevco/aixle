@@ -196,7 +196,7 @@ export const BUILTINS: Builtin[] = [
       (a) => W.splinePath(W.toPoints(nums(a[0]), "spline"), n(a[1])))),
   def("arc", "Paths", "A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).",
     ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16)], "list", (a) => W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
-  def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them.",
+  def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them; centred on y = 0 like extrude (from -h/2 to h/2), each profile laid flat with its y along -z.",
     ov([shape2("a"), shape2("b"), num("h")], "shape", (a) => W.loft(s2(a[0]), s2(a[1]), n(a[2])))),
 
   // --- booleans ---

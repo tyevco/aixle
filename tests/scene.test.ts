@@ -168,3 +168,26 @@ describe("pipeline with a scene", () => {
     }
   });
 });
+
+describe("a move above a joint", () => {
+  it("carries the joint's node and mesh with it in the export", async () => {
+    const { buildHierarchy } = await import("../src/export/hierarchy.js");
+    const { evaluate } = await import("../src/lang/interpreter.js");
+    const { parse } = await import("../src/lang/parser.js");
+    const src = 'blade = box(0.2, 1, 0.2) | move(0, -0.5, 0)\nhelm = joint(blade, "helm", 0, 0, 2)\nhull = box(2, 0.5, 4)\nboat = (hull + helm) | move(0, 1, 0)\nshow boat';
+    const ev = evaluate(parse(src));
+    const h = buildHierarchy(ev.objects, { cellSize: 0.05, texture: 0 });
+    const node = h.roots[0].children[0];
+    expect(node.joint).toBe("helm");
+    expect(node.translation[1]).toBeCloseTo(1, 6);
+    expect(h.notes).toEqual([]);
+    // The blade's mesh is relative to the moved pivot: it hangs below it, not a unit lower still.
+    const m = h.meshes[node.mesh];
+    let minY = Infinity, maxY = -Infinity;
+    for (let i = 1; i < m.positions.length; i += 3) { minY = Math.min(minY, m.positions[i]); maxY = Math.max(maxY, m.positions[i]); }
+    expect(minY).toBeCloseTo(-1, 1);
+    expect(maxY).toBeCloseTo(0, 1);
+    const turned = evaluate(parse(src.replace("| move(0, 1, 0)", "| rotate(y=90)")));
+    expect(buildHierarchy(turned.objects, { cellSize: 0.05, texture: 0 }).notes.join()).toMatch(/joint "helm" sits under a rotation/);
+  });
+});
