@@ -95,10 +95,12 @@ circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("H
 extrude(profile, h)  revolve(profile, angle=180)  loft(a, b, h)                          # to solids
 tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, taper=1)   # along a path
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # point lists
+bezier(points)  curve(points)  tube(r, c)  sweep(profile, c)  text("Ab", 1, face="serif")  # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
-set light_size 2   set dof 1   set azimuth 60   paint("glass")                           # beauty render
+set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render
+decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stripes", axis="x")  # surface paint
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
@@ -114,7 +116,7 @@ materials.
 
 ## Examples
 
-[`examples/`](examples/) has sixteen models exercising the language, each
+[`examples/`](examples/) has eighteen models exercising the language, each
 with its sheet, slices, steps and beauty render under
 [`examples/renders/`](examples/renders/): a mug, a fluted vase from a
 revolved profile, a teapot with a tube spout and a swept handle, a desk
@@ -124,8 +126,10 @@ from an imported mesh, a robot arm with three joints and a waving
 animation, a fenced plot with placed panels and trees, a table with
 parametric chairs, a brick tower, a pair of gears from 2D profiles, a
 spiral staircase from a loop, a robot with per-part materials, a tree
-with smooth blends and displacement, and a glass tumbler for refraction
-and depth of field.
+with smooth blends and displacement, a glass tumbler for refraction and
+depth of field, a medal with text on an arc and a partial revolve, and a
+desk nameplate with serif lettering engraved in brass and scrolls swept
+along exact Bezier curves.
 
 | | | |
 | --- | --- | --- |
@@ -133,6 +137,7 @@ and depth of field.
 | ![vase](examples/renders/vase_beauty.png) | ![lamp](examples/renders/lamp_beauty.png) | ![tower](examples/renders/tower_beauty.png) |
 | ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) | ![table](examples/renders/table_beauty.png) |
 | ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) | ![garden](examples/renders/garden_beauty.png) |
+| ![medal](examples/renders/medal_beauty.png) | ![nameplate](examples/renders/nameplate_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
 | ![arm](examples/renders/arm_beauty.png) | ![fence](examples/renders/fence_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
 
 ## How it works

@@ -242,6 +242,50 @@ corrugated. `smooth=` matters on tight bends because each piece is straight. `lo
 profiles' distances linearly along the height: sign-exact, approximate in
 between, and enough for shades, hulls and tapered handles.
 
+## Exact curves
+
+A polyline sweep is exact per segment and mitred at the joins; a spline
+densified to a few degrees per piece hides the facets but a close-up still
+finds them. `bezier` and `curve` carry a chain of cubic segments and every
+distance query finds the nearest point on the true curve (a coarse scan,
+then Newton on the dot product with the tangent, all in scalars) and
+measures the profile in the normal plane there, which is the plane the
+profile lies in. A tube along it is exact; a sweep is exact wherever the
+curve's radius exceeds the profile's reach. The frame is rotation
+minimising (double reflection at build time, re-orthogonalised against
+the exact tangent at the query), so a rectangle swept round a bend does
+not roll.
+
+## Extents before extraction, and close-ups
+
+The bounding box sets the cell size, and a box is loose whenever a joint
+turns (the box of a turned box), a union blends, or a difference cuts;
+measured on a posed excavator, the box was twice the surface and cost a
+third of the resolution. So extraction runs twice: a coarse pass finds
+the surface's extent, and the fine pass is laid over that box. A focused
+render goes further: the model is clipped to the focused step's extent
+and re-extracted at that box's own cell, so a small part is drawn with
+its own detail rather than the scene's, and the slices and the beauty
+render are framed on it too. Focus is a close-up, not a reframing.
+
+## Lighting a metal, lighting a lamp
+
+A metal is mostly what it reflects, and a fixed sky is not enough for
+gold to read as gold: the beauty render bounces one ray off a metal
+surface into the scene (the model, the floor, the backdrop), blurred
+towards the plain sky by roughness, and tints it by the metal's colour.
+The key light can be placed (`set light_azimuth`, `set light_elevation`),
+the ambient light scaled, and a material can glow, which is added
+unshadowed so a flame inside a lantern is a flame.
+
+## The serif face
+
+Serifs are added by rule, not drawn: a slab across every free end of a
+stroke that stops on a guide line and is not running along it. Junctions
+(a crossbar meeting a stem) and curved terminals get none. That gives the
+sans skeleton a second voice at no authoring cost, and the plate of every
+glyph was rendered and read to check it.
+
 ## The viewer
 
 `viewer.html` embeds the GLB as base64 so it opens from disk with no

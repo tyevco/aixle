@@ -381,7 +381,8 @@ export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseV
   const gutter = 6, bar = 30;
   const out = new Canvas(cols * (thumb + gutter) + gutter, bar + rows * (thumb + gutter) + gutter, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
-  drawText(out, 10, 8, `POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${jointNames.join(", ")}`, INK.barText, 2);
+  const listed = jointNames.length > 6 ? `${jointNames.slice(0, 6).join(", ")}, ...` : jointNames.join(", ");
+  drawText(out, 10, 8, `POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${listed}`, INK.barText, 2);
   const meshes = all.map((p) => poseMesh(shapeAt, p.angles, cellSize));
   const framing = framingFor(meshes);
   all.forEach((p, i) => {

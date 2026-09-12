@@ -51,6 +51,8 @@ function make(name: string, partial: Partial<Material> & { color: Vec3 }): Mater
     rough: partial.rough ?? 0.6,
     transmit: partial.transmit ?? 0,
     seed: partial.seed ?? 0,
+    axis: partial.axis ?? "y",
+    glow: partial.glow ?? 0,
   };
 }
 
@@ -124,6 +126,8 @@ export function customMaterial(opts: {
   rough?: number;
   transmit?: number;
   seed?: number;
+  axis?: "x" | "y" | "z";
+  glow?: number;
   name?: string;
 }): Material {
   return make(opts.name ?? "custom", {
@@ -135,6 +139,8 @@ export function customMaterial(opts: {
     rough: opts.rough,
     transmit: opts.transmit,
     seed: opts.seed,
+    axis: opts.axis,
+    glow: opts.glow,
   });
 }
 
@@ -142,9 +148,16 @@ const darken = (c: Vec3, f: number): Vec3 => [c[0] * f, c[1] * f, c[2] * f];
 const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const frac = (v: number): number => v - Math.floor(v);
 
-/** The surface colour of `m` at a point in the painted part's frame. */
+/**
+ * The surface colour of `m` at a point in the painted part's frame. The
+ * pattern's own frame has its axis along y: stripes are bands stacked
+ * along it, wood rings go round it, brick courses and tile rows are
+ * perpendicular to it. `axis` swaps world x or z into that role.
+ */
 export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
   const s = m.scale > 0 ? m.scale : 1;
+  if (m.axis === "x") { const t = x; x = y; y = t; }
+  else if (m.axis === "z") { const t = z; z = y; y = t; }
   switch (m.pattern) {
     case "solid":
       return m.color;

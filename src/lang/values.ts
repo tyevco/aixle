@@ -1,6 +1,7 @@
 /** Runtime values and the shape of a builtin's signature (which also generates the reference). */
 import type { Expr } from "./ast.js";
 import type { Material, Shape2, Shape3 } from "../sdf/types.js";
+import { isCurve, type Curve } from "../sdf/curves.js";
 
 export interface UserFn {
   kind: "fn";
@@ -9,9 +10,9 @@ export interface UserFn {
   body: Expr;
 }
 
-export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn;
+export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn | Curve;
 
-export type ParamType = "number" | "string" | "shape" | "shape2" | "anyshape" | "material" | "list" | "axis" | "any";
+export type ParamType = "number" | "string" | "shape" | "shape2" | "anyshape" | "material" | "list" | "curve" | "axis" | "any";
 
 export interface Param {
   name: string;
@@ -25,7 +26,7 @@ export interface Param {
 
 export interface Overload {
   params: Param[];
-  returns: "number" | "string" | "shape" | "shape2" | "material" | "list" | "any";
+  returns: "number" | "string" | "shape" | "shape2" | "material" | "list" | "curve" | "any";
   impl: (args: Value[], rest: Value[]) => Value;
 }
 
@@ -44,6 +45,7 @@ export function typeName(v: Value): string {
   if (kind === "shape3") return "shape";
   if (kind === "shape2") return "shape2";
   if (kind === "fn") return "function";
+  if (kind === "curve") return "curve";
   return "material";
 }
 
@@ -52,3 +54,4 @@ export const isShape2 = (v: Value): v is Shape2 => typeof v === "object" && !Arr
 export const isMaterial = (v: Value): v is Material =>
   typeof v === "object" && !Array.isArray(v) && (v as Material).pattern !== undefined;
 export const isUserFn = (v: Value): v is UserFn => typeof v === "object" && !Array.isArray(v) && (v as UserFn).kind === "fn";
+export { isCurve };

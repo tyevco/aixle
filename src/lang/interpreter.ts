@@ -11,7 +11,7 @@ import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
 import type { Shape3 } from "../sdf/types.js";
-import { isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { isCurve, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus"]);
@@ -376,6 +376,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "shape2": return isShape2(v) ? ok(v) : error(`expected a 2D profile, got ${describe(v)}`);
       case "anyshape": return isShape3(v) || isShape2(v) ? ok(v) : error(`expected a shape, got ${describe(v)}`);
       case "list": return Array.isArray(v) ? ok(v) : error(`expected a list, got ${describe(v)}`);
+      case "curve": return isCurve(v) ? ok(v) : error(`expected a curve (bezier() or curve()), got ${describe(v)}`);
       case "axis":
         return typeof v === "string" && ["x", "y", "z"].includes(v) ? ok(v) : error(`expected "x", "y" or "z", got ${describe(v)}`);
       case "material":

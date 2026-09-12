@@ -32,9 +32,15 @@ export interface BeautyOptions {
   lightSize?: number;
   /** Depth of field: 0 off; 1 blurs a plane one model-size away by about 1% of the image. */
   dof?: number;
+  /** Where the key light comes from, in degrees: azimuth about y (0 is +z, the front; 90 is +x) and elevation above the floor. Default -40 and 55. */
+  lightAzimuth?: number;
+  lightElevation?: number;
+  /** Multiplier on the sky and ground light, 1 by default: 2 lifts a shaded interior, 0.5 is a dark room. */
+  ambient?: number;
 }
 
-const LIGHT: Vec3 = normalize([-0.55, 0.9, 0.65]);
+/** The default key light: upper left, from the front. */
+const DEFAULT_LIGHT: Vec3 = normalize([-0.55, 0.9, 0.65]);
 const SKY: Vec3 = [0.78, 0.83, 0.9];
 const GROUND: Vec3 = [0.93, 0.92, 0.9];
 const FLOOR: Vec3 = [0.88, 0.87, 0.85];
@@ -48,6 +54,14 @@ interface Sample {
 
 export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: BeautyOptions): Canvas {
   const size = opts.size;
+  const LIGHT: Vec3 =
+    opts.lightAzimuth === undefined && opts.lightElevation === undefined
+      ? DEFAULT_LIGHT
+      : (() => {
+          const az = ((opts.lightAzimuth ?? -40) * Math.PI) / 180, el = ((opts.lightElevation ?? 55) * Math.PI) / 180;
+          return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
+        })();
+  const ambient = Math.max(0, opts.ambient ?? 1);
   const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25);
   const cell = Math.max(opts.cellSize, 1e-4);
   const floorY = Math.min(0, bounds.min[1]);
@@ -120,15 +134,15 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     return Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
   };
 
-  const shadePoint = (p: Vec3, n: Vec3, base: Vec3, metal: number, rough: number, view: Vec3): Vec3 => {
+  const shadePoint = (p: Vec3, n: Vec3, base: Vec3, metal: number, rough: number, view: Vec3, depth = 0, glow = 0): Vec3 => {
     const nl = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
     const sh = nl > 0 ? shadow([p[0] + n[0] * cell, p[1] + n[1] * cell, p[2] + n[2] * cell]) : 1;
     const ao = occlusion(p, n);
     const hemi = 0.5 + 0.5 * n[1];
     const amb: Vec3 = [
-      (GROUND[0] + (SKY[0] - GROUND[0]) * hemi) * 0.42 * ao,
-      (GROUND[1] + (SKY[1] - GROUND[1]) * hemi) * 0.42 * ao,
-      (GROUND[2] + (SKY[2] - GROUND[2]) * hemi) * 0.42 * ao,
+      (GROUND[0] + (SKY[0] - GROUND[0]) * hemi) * 0.42 * ao * ambient,
+      (GROUND[1] + (SKY[1] - GROUND[1]) * hemi) * 0.42 * ao * ambient,
+      (GROUND[2] + (SKY[2] - GROUND[2]) * hemi) * 0.42 * ao * ambient,
     ];
     const diff = nl * sh * 0.85 * (1 - metal * 0.6);
     // Blinn highlight.
@@ -139,10 +153,27 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     const spec = Math.pow(nh, 4 + gloss * gloss * 160) * (0.05 + gloss * 0.7) * sh * (0.4 + nl);
     const fres = Math.pow(1 - Math.max(0, -(n[0] * view[0] + n[1] * view[1] + n[2] * view[2])), 4) * 0.08 * ao;
     const tint = (c: number) => (metal > 0 ? c * (0.3 + 0.7 * metal) + (1 - metal) : 1);
+    // A metal is mostly what it reflects: the environment along the mirrored view ray, tinted by its own colour.
+    // One bounce only (measured: gold and silver read as olive and charcoal without it), and blurred by roughness
+    // towards the plain sky/ground average so a matte metal does not mirror.
+    let refl: Vec3 = [0, 0, 0];
+    if (metal > 0.02 && depth === 0) {
+      const r = reflect(view, n);
+      const seen = seeThrough([p[0] + n[0] * cell * 2, p[1] + n[1] * cell * 2, p[2] + n[2] * cell * 2], r, depth + 1);
+      const soft = backdrop(r);
+      const g = gloss * gloss;
+      const strength = metal * (0.35 + 0.45 * gloss) * ao;
+      refl = [
+        (seen[0] * g + soft[0] * (1 - g)) * strength,
+        (seen[1] * g + soft[1] * (1 - g)) * strength,
+        (seen[2] * g + soft[2] * (1 - g)) * strength,
+      ];
+    }
+    // Glow: light the surface gives off, unshadowed; a flame reads as a flame inside a dark lantern.
     return [
-      Math.min(1, base[0] * (amb[0] + diff) + spec * tint(base[0]) + fres * SKY[0]),
-      Math.min(1, base[1] * (amb[1] + diff) + spec * tint(base[1]) + fres * SKY[1]),
-      Math.min(1, base[2] * (amb[2] + diff) + spec * tint(base[2]) + fres * SKY[2]),
+      Math.min(1, base[0] * (amb[0] + diff + refl[0] + glow) + spec * tint(base[0]) + fres * SKY[0]),
+      Math.min(1, base[1] * (amb[1] + diff + refl[1] + glow) + spec * tint(base[1]) + fres * SKY[1]),
+      Math.min(1, base[2] * (amb[2] + diff + refl[2] + glow) + spec * tint(base[2]) + fres * SKY[2]),
     ];
   };
 
@@ -197,7 +228,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     return [d[0] - k * n[0], d[1] - k * n[1], d[2] - k * n[2]];
   };
   /** What a ray sees after leaving a glass surface: another opaque surface (shaded, no further glass), the floor, or the sky. */
-  const seeThrough = (from: Vec3, dir: Vec3): Vec3 => {
+  const seeThrough = (from: Vec3, dir: Vec3, depth = 1): Vec3 => {
     const t = march(from, dir, true, reach * 2);
     if (t > 0) {
       const p: Vec3 = [from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t];
@@ -210,7 +241,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
         const tr = h.mat.transmit;
         return [bd[0] * (base[0] * tr + (1 - tr)), bd[1] * (base[1] * tr + (1 - tr)), bd[2] * (base[2] * tr + (1 - tr))];
       }
-      return shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir);
+      return shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir, depth, h.mat.glow);
     }
     if (dir[1] < -1e-6) {
       const tf = (floorY - from[1]) / dir[1];
@@ -277,7 +308,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const n = gradient(p[0], p[1], p[2]);
       const h = shape.hit(p[0], p[1], p[2]);
       const base = albedo(h.mat, h.lx, h.ly, h.lz);
-      const color = h.mat.transmit > 0 ? shadeGlass(p, n, h.mat, base, dir) : shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir);
+      const color = h.mat.transmit > 0 ? shadeGlass(p, n, h.mat, base, dir) : shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir, 0, h.mat.glow);
       return { color, depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat) };
     }
     // Floor or sky.

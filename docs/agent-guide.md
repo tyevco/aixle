@@ -30,8 +30,12 @@ npx aixle render model.aix --quick         the sheet only, small grid, fast; --w
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
-npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows
+npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
+npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds: the way to try materials
+npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
+npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
+npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
 ```
 
@@ -75,6 +79,15 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | a shell wall, a tube or lettering is broken or gone, though the part is thick | the wall, tube radius or stroke weight is under a grid cell | `check` says which step and what grid; thicken it or raise the grid |
 | a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
+| the eyes, mouth or a label need geometry you do not want | a painted sphere bulges, a painted tube sticks out | `decal(shape, region, material)` paints the surface inside a region and adds nothing |
+| a material boundary speckles in the views | two painted surfaces nearly coincide, so each vertex picks either | give them a clear angle, or one shape with a `decal`; the beauty render is unaffected |
+| a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |
+| "watertight: no" with edges you cannot find | two surfaces pass through one cell | the report says where the edges are and which steps hold them |
+| letters or a label need to go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)`; `bend(deg)` curves about z instead |
+| stripes run the wrong way, or a pattern is missing on a thin sheet | patterns are stacked along the material's axis (y) in the paint frame | `material(..., axis="x")`, or paint the part standing and then lay it down |
+| the counter under the awning is black, the flame is a dark blob | the key light is fixed at the upper left and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |
+| gold looks olive, silver looks charcoal | a metal is mostly what it reflects, and the sheet has no environment | judge metals in the beauty render, which reflects the sky, ground and the model itself |
+| "separate pieces" but everything looks joined | a part stops a hair short of its neighbour | the warning names the loose piece's volume, centre and step; overlap by a little |
 | a rig's part swings about the wrong point | the joint's pivot is not where the part turns | give `joint` the world point of the hinge, after the part is moved into place |
 | `set pose reach` shows the rest pose | the pose is not named that | the warning lists the poses that exist |
 
@@ -107,7 +120,9 @@ exports are at rest and carry the joints and animations.
   coincident faces are fine for the geometry but look like seams.
 - `round=` on boxes and cylinders, or `union(..., k=)` for organic joins;
   chamfer nothing by hand.
-- Give the model a floor: `| ground()` last.
+- `| ground()` when the lowest point should touch the floor. It reads the
+  surface itself, so a blend or a cut that leaves the bounding box loose
+  does not lift the model; a base already on y = 0 does not need it.
 - Keep the whole model within about 1 to 20 units; the grid resolution is
   relative to the longest side, so a giant scene loses small detail.
 - Name steps for what they are (`lid`, `left_arm`, `stair_3`), since the

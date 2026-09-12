@@ -22,7 +22,7 @@
  * cubic. Detail thinner than a cell is lost, so a report line says what the
  * cell size was.
  */
-import { boundsGrow, boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
+import { boundsGrow, boundsSize, isEmpty, type Material, type Shape3, type Bounds } from "../sdf/types.js";
 import type { Mesh } from "./mesh.js";
 
 export interface NetsOptions {
@@ -33,6 +33,8 @@ export interface NetsOptions {
   maxCells?: number;
   /** Place vertices by the tangent-plane fit (dual contouring). Default true. */
   sharp?: boolean;
+  /** Extract over this box instead of the shape's bounds: a tighter box found from a coarse pass, or a close-up region. */
+  bounds?: Bounds;
 }
 
 export interface NetsResult {
@@ -59,13 +61,14 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
     samples: 0,
     nanSamples: 0,
   });
-  if (isEmpty(shape.bounds)) return empty();
-  const size = boundsSize(shape.bounds);
+  const box = opts.bounds ?? shape.bounds;
+  if (isEmpty(box)) return empty();
+  const size = boundsSize(box);
   const longest = Math.max(size[0], size[1], size[2]);
   if (!(longest > 0)) return empty();
   const margin = opts.margin ?? 2;
   const cell = longest / opts.resolution;
-  const grown = boundsGrow(shape.bounds, cell * margin);
+  const grown = boundsGrow(box, cell * margin);
   const maxCells = opts.maxCells ?? 512;
   const nx = Math.min(maxCells, Math.ceil((grown.max[0] - grown.min[0]) / cell));
   const ny = Math.min(maxCells, Math.ceil((grown.max[1] - grown.min[1]) / cell));

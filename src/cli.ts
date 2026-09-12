@@ -4,10 +4,11 @@
  *   aixle check  <file.aix>
  *   aixle doc    [--write FILE]
  */
+import { surfaceBottom } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, QUICK, run, thinWarnings } from "./pipeline.js";
+import { cellFor, check, diff, foldThinWarnings, QUICK, run, thinWarnings } from "./pipeline.js";
 import { watch } from "node:fs";
 import { isEmpty } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
@@ -20,6 +21,7 @@ function usage(): never {
     [
       "usage:",
       "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
+      "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
       "                          [--beauty [--beauty-size N]] [--soft] [--texture N | --no-texture]",
       "                          [--azimuth DEG] [--elevation DEG] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
@@ -80,6 +82,8 @@ function main(argv: string[]): number {
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       for (const st of ev.steps) {
+        // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
+        if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
         if (!isShape3(st.value)) continue;
         const used = ev.used.has(st.name) ? "" : "   (not in output)";
         const b = st.value.bounds;
@@ -89,7 +93,15 @@ function main(argv: string[]): number {
       else console.log("output: none");
       const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
       if (cellSize > 0) console.log(`grid ${grid}: cell ${short(cellSize)} units`);
-      for (const w of [...ev.warnings, ...(cellSize > 0 ? thinWarnings(ev, cellSize, grid) : [])]) console.log(`warning: ${w}`);
+      if (ev.output && !isEmpty(ev.output.bounds)) {
+        // The surface's lowest point, not the bounds': the note a render would make, without the render.
+        const bottom = surfaceBottom(ev.output);
+        if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
+        else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
+      }
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : [])];
+      for (const w of warnings) console.log(`warning: ${w}`);
+      if (warnings.length === 0) console.log("no warnings");
       return 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);
@@ -149,6 +161,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       size: typeof opts.size === "string" ? Number(opts.size) : undefined,
       views: typeof opts.views === "string" ? opts.views.split(",") : undefined,
       steps: opts["no-steps"] ? false : undefined,
+      poses: opts["no-poses"] ? false : undefined,
       slices: opts["no-slices"] ? false : undefined,
       turntable: opts["no-turntable"] ? false : undefined,
       obj: opts["no-export"] ? false : undefined,

@@ -59,16 +59,18 @@ circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("Abc
 extrude(profile, h)  revolve(profile, angle=360)  loft(a, b, h)                          # 2D to 3D
 tube(r, [x,y,z, ...], smooth=6, taper=1)  sweep(profile, [x,y,z, ...], smooth=6, twist=0, taper=1)
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # path lists
+bezier(points)  curve(points)   tube(r, c)  sweep(profile, c)   text("Ab", 1, face="serif") # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)                          # read sizes to place parts
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
+set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)
-  | twist(deg) | bend(deg) | displace(amp, size) | array(n, dx, dy, dz) | grid(nx, nz, dx, dz)
-  | ring(n, radius) | ground() | center() | paint("wood")
+  | twist(deg) | bend(deg) | wrap(r) | displace(amp, size) | array(n, dx, dy, dz) | grid(nx, nz, dx, dz)
+  | ring(n, radius) | ground() | center() | paint("wood") | decal(region, "black")
 ```
 
 y is up, angles are degrees, primitives are centred on the origin and stand
@@ -126,6 +128,11 @@ show arm
 | a shell wall, tube or lettering is broken though the part is thick | its wall, radius or stroke weight is under a cell | `check` names the step and the grid to set; thicken it or raise the grid |
 | a small part is a few pixels on the sheet | the whole model sets the framing | `--focus name` or `set focus name` |
 | stone or wood reads as flat colour | the pattern is larger than the part | `material("granite", scale=0.3)` |
+| eyes, a mouth or a label bulge out of the surface | painted geometry | `decal(shape, region, material)` paints a region of the surface, adds nothing |
+| a limb has no knee | one rotated capsule | `tube(r, [hip, knee])` then `tube(r, [knee, ankle])` |
+| a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
+| stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
+| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty` is a few seconds) |
 | a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
 
 ## Style that renders well

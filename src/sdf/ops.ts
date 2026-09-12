@@ -12,25 +12,7 @@ import { DEFAULT_MATERIAL } from "./materials.js";
 import { primitive } from "./primitives.js";
 import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import { smax, smin } from "./shapes2d.js";
-import {
-  boundsCenter,
-  boundsCorners,
-  boundsSize,
-  boundsDistance,
-  boundsFromPoints,
-  boundsGrow,
-  boundsIntersect,
-  boundsUnion,
-  EMPTY_BOUNDS,
-  FAR,
-  isEmpty,
-  type Bounds,
-  type Hit,
-  type JointState,
-  type Material,
-  type Placement,
-  type Shape3,
-} from "./types.js";
+import { boundsCenter, boundsCorners, boundsSize, boundsDistance, boundsFromPoints, boundsGrow, boundsIntersect, boundsUnion, EMPTY_BOUNDS, FAR, isEmpty, type Bounds, type Hit, type JointState, type Material, type Placement, type Shape3 } from "./types.js";
 
 export function empty3(): Shape3 {
   return primitive(() => FAR, EMPTY_BOUNDS, 0);
@@ -294,24 +276,93 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
   };
 }
 
-/** Bend about z: the shape curves upward by `degPerUnit` degrees for each unit along x. */
+/**
+ * Bend about z: the shape's x axis becomes an arc of a circle of radius
+ * R = 1 / k (k in radians per unit) centred at (0, R), so the shape curves
+ * upward by `degPerUnit` degrees for each unit along x; a point at height y
+ * rides at radius R - y. Exact (an isometry along the arc, a mild stretch
+ * across it), so a bent bar's box can be computed from its corners and
+ * `check` can place it. Negative degrees bend downward. Earlier this was a
+ * rotate-by-x warp with no circle to reason about (measured: an agent could
+ * not find where bent text had gone).
+ */
 export function bend(s: Shape3, degPerUnit: number): Shape3 {
+  if (degPerUnit === 0) return s;
   const k = rad(degPerUnit);
+  const R = 1 / k;
   const d = s.dist, h = s.hit;
   const b = s.bounds;
   let bounds = b;
   if (!isEmpty(b)) {
-    const r = Math.max(...boundsCorners(b).map((c) => length2(c[0], c[1])));
-    bounds = { min: [-r, -r, b.min[2]], max: [r, r, b.max[2]] };
+    // Sample the box's outline along x at both y extremes and take the mapped hull, grown a little for the arc between samples.
+    bounds = EMPTY_BOUNDS;
+    const n = 64;
+    const pts: Vec3[] = [];
+    for (let i = 0; i <= n; i++) {
+      const x = b.min[0] + ((b.max[0] - b.min[0]) * i) / n;
+      const a = k * x;
+      for (const y of [b.min[1], b.max[1]]) {
+        const r = R - y;
+        for (const z of [b.min[2], b.max[2]]) pts.push([r * Math.sin(a), R - r * Math.cos(a), z]);
+      }
+    }
+    bounds = boundsFromPoints(pts);
+    const step = (k * (b.max[0] - b.min[0])) / n;
+    bounds = boundsGrow(bounds, Math.max(Math.abs(R - b.min[1]), Math.abs(R - b.max[1])) * (1 - Math.cos(step / 2)) + 1e-9);
   }
-  const warp = (x: number, y: number, z: number): Vec3 => {
-    const a = k * x, c = Math.cos(a), sn = Math.sin(a);
-    return [c * x - sn * y, sn * x + c * y, z];
+  // Inverse: the angle of the point about the circle's centre gives x, its distance from the centre gives y.
+  // Measured from the point to the centre; with a negative R the centre is below and the angle is read the other way.
+  const sg = Math.sign(R);
+  const unwarp = (x: number, y: number, z: number): Vec3 => {
+    const dx = x, dy = R - y;
+    const a = Math.atan2(dx * sg, dy * sg);
+    return [a * R, R - Math.hypot(dx, dy) * sg, z];
   };
   return {
     kind: "shape3",
-    dist: (x, y, z) => { const p = warp(x, y, z); return d(p[0], p[1], p[2]); },
-    hit: (x, y, z) => { const p = warp(x, y, z); return h(p[0], p[1], p[2]); },
+    dist: (x, y, z) => { const p = unwarp(x, y, z); return d(p[0], p[1], p[2]); },
+    hit: (x, y, z) => { const p = unwarp(x, y, z); return h(p[0], p[1], p[2]); },
+    bounds,
+    cost: s.cost,
+    inner: [s],
+    feature: s.feature,
+  };
+}
+
+/**
+ * Wrap around y: the shape's x axis becomes the circumference of a cylinder
+ * of radius `r` about y, its +z face outward, x = 0 landing on +z and
+ * positive x going towards +x (reading left to right when seen from the
+ * front). A point at depth z rides at radius r + z. Standing lettering
+ * (extrude(text, h, "z")) wrapped this way is a label round a jar or a
+ * name round a cup's rim: the request that every agent made by hand.
+ */
+export function wrap(s: Shape3, r: number): Shape3 {
+  const d = s.dist, h = s.hit;
+  const b = s.bounds;
+  let bounds = b;
+  if (!isEmpty(b)) {
+    const outer = r + Math.max(b.max[2], 0) + 1e-9;
+    const span = Math.abs(b.max[0] - b.min[0]) / r;
+    if (span >= Math.PI * 2 - 1e-6) bounds = { min: [-outer, b.min[1], -outer], max: [outer, b.max[1], outer] };
+    else {
+      const pts: Vec3[] = [];
+      const n = 64;
+      for (let i = 0; i <= n; i++) {
+        const a = (b.min[0] + ((b.max[0] - b.min[0]) * i) / n) / r;
+        for (const z of [b.min[2], b.max[2]]) {
+          const rr = r + z;
+          for (const y of [b.min[1], b.max[1]]) pts.push([rr * Math.sin(a), y, rr * Math.cos(a)]);
+        }
+      }
+      bounds = boundsGrow(boundsFromPoints(pts), outer * (1 - Math.cos(span / n / 2)) + 1e-9);
+    }
+  }
+  const unwarp = (x: number, y: number, z: number): Vec3 => [Math.atan2(x, z) * r, y, Math.hypot(x, z) - r];
+  return {
+    kind: "shape3",
+    dist: (x, y, z) => { const p = unwarp(x, y, z); return d(p[0], p[1], p[2]); },
+    hit: (x, y, z) => { const p = unwarp(x, y, z); return h(p[0], p[1], p[2]); },
     bounds,
     cost: s.cost,
     inner: [s],
@@ -374,9 +425,53 @@ export function ring(s: Shape3, count: number, radius = 0, axis: Axis = "y"): Sh
 // --- placement helpers -------------------------------------------------------
 
 /** Move so the lowest point sits on y = 0. */
+/**
+ * The lowest y of the surface itself, found by rays marched upward from
+ * under the bounds on a grid, the best one refined. Bounds are boxes: a
+ * smooth union pads them by its blend and a difference keeps the box of
+ * what it cut away, and ground() by bounds once lifted a frog whose shins
+ * reached the pad by a tenth of a unit (measured). Returns the bounds'
+ * bottom when no ray hits, which happens only for a shape thinner than the
+ * ray spacing everywhere.
+ */
+export function surfaceBottom(s: Shape3, rays = 48): number {
+  const b = s.bounds;
+  if (isEmpty(b)) return 0;
+  const size = boundsSize(b);
+  const eps = Math.max(1e-7, Math.max(size[0], size[1], size[2]) * 2e-5);
+  const start = b.min[1] - eps * 4, stop = b.max[1] + eps;
+  const d = s.dist;
+  const march = (x: number, z: number): number => {
+    let y = start;
+    for (let i = 0; i < 200 && y <= stop; i++) {
+      const v = d(x, y, z);
+      if (v < eps) return y;
+      y += v;
+    }
+    return Infinity;
+  };
+  let best = Infinity, bi = 0, bj = 0;
+  for (let i = 0; i < rays; i++)
+    for (let j = 0; j < rays; j++) {
+      const y = march(b.min[0] + ((i + 0.5) / rays) * size[0], b.min[2] + ((j + 0.5) / rays) * size[2]);
+      if (y < best) { best = y; bi = i; bj = j; }
+    }
+  if (best === Infinity) return b.min[1];
+  // Refine within one ray spacing of the best ray.
+  const sx = size[0] / rays, sz = size[2] / rays;
+  const cx = b.min[0] + (bi + 0.5) * sx, cz = b.min[2] + (bj + 0.5) * sz;
+  for (let i = -6; i <= 6; i++)
+    for (let j = -6; j <= 6; j++) {
+      const y = march(cx + (i / 6) * sx, cz + (j / 6) * sz);
+      if (y < best) best = y;
+    }
+  return best;
+}
+
+/** Move the shape so the lowest point of its surface rests on y = 0 (the surface, not the bounds: see surfaceBottom). */
 export function ground(s: Shape3): Shape3 {
   if (isEmpty(s.bounds)) return s;
-  return move(s, 0, -s.bounds.min[1], 0);
+  return move(s, 0, -surfaceBottom(s), 0);
 }
 
 /** Move so the bounding box is centred on the origin. */
@@ -398,6 +493,25 @@ export function paint(s: Shape3, m: Material): Shape3 {
     bounds: s.bounds,
     cost: s.cost,
     inner: [s],
+    feature: s.feature,
+  };
+}
+
+/**
+ * Paint only the part of the surface that lies inside `region`: a pupil on
+ * an eye, a mouth, a label, a stripe, with no geometry added. The shape is
+ * unchanged; the material query answers `m` where the region's distance is
+ * negative.
+ */
+export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
+  const d = s.dist, h = s.hit, rd = region.dist;
+  return {
+    kind: "shape3",
+    dist: d,
+    hit: (x, y, z) => (rd(x, y, z) <= 0 ? { d: d(x, y, z), mat: m, lx: x, ly: y, lz: z } : h(x, y, z)),
+    bounds: s.bounds,
+    cost: s.cost + region.cost,
+    inner: [s, region],
     feature: s.feature,
   };
 }

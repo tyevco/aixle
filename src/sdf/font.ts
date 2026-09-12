@@ -96,8 +96,78 @@ const G: Record<string, Glyph> = {
 
 export const FONT_GLYPHS: ReadonlyMap<string, Glyph> = new Map(Object.entries(G));
 
-function glyph(ch: string): Glyph {
-  return G[ch] ?? G[ch.toUpperCase()] ?? G[ch.toLowerCase()] ?? G["?"];
+export type Face = "sans" | "serif";
+
+/** Extra room between glyphs, on the grid: serifs reach past a glyph's stems, so the serif face is set wider. */
+const GAP: Record<Face, number> = { sans: 0.8, serif: 1.6 };
+
+/** Half the length of a serif, on the grid. */
+const SERIF = 0.55;
+/** A guide line the free end of a stroke must sit on to get a serif: baseline, x-height, cap height, descender. */
+const GUIDES = [0, 4, 6, -2];
+
+/**
+ * The serif face is the sans skeleton with slab serifs added by rule: a
+ * short horizontal bar across every free end of a stroke that stops on a
+ * guide line (the baseline, the x-height, the cap height, the descender)
+ * and is not itself running horizontally. An end that meets another stroke
+ * (a crossbar on a stem, the top of an A) is a junction, not a free end,
+ * and gets none. Curved terminals stop between the guides and get none
+ * either, which is what a serif face does. Measured rather than assumed:
+ * the plate of every glyph was rendered and read.
+ */
+function serifs(g: Glyph): number[][] {
+  const out: number[][] = [];
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.05;
+  const onGuide = (y: number) => GUIDES.some((gy) => near(y, gy));
+  // Distance from a point to a segment, for the junction test.
+  const segDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number): number => {
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    let t = l2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+  };
+  const touchesOther = (px: number, py: number, own: number, ownEnd: number): boolean => {
+    for (let s = 0; s < g.strokes.length; s++) {
+      const st = g.strokes[s];
+      for (let i = 0; i + 3 < st.length; i += 2) {
+        // Skip the segment this end belongs to.
+        if (s === own && (ownEnd === 0 ? i === 0 : i + 4 >= st.length)) continue;
+        if (segDist(px, py, st[i], st[i + 1], st[i + 2], st[i + 3]) < 0.15) return true;
+      }
+    }
+    return false;
+  };
+  g.strokes.forEach((st, s) => {
+    if (st.length < 4) return;
+    const ends: [number, number, number, number, number][] = [
+      [st[0], st[1], st[2], st[3], 0],
+      [st[st.length - 2], st[st.length - 1], st[st.length - 4], st[st.length - 3], 1],
+    ];
+    for (const [px, py, qx, qy, which] of ends) {
+      const dx = qx - px, dy = qy - py;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.3) continue; // a dot
+      if (Math.abs(dy) < Math.abs(dx) * 0.6) continue; // running horizontally: a bar's end, no bar across it
+      if (!onGuide(py)) continue;
+      if (touchesOther(px, py, s, which)) continue;
+      out.push([px - SERIF, py, px + SERIF, py]);
+    }
+  });
+  return out;
+}
+
+const SERIF_CACHE = new Map<string, Glyph>();
+
+function glyph(ch: string, face: Face = "sans"): Glyph {
+  const base = G[ch] ?? G[ch.toUpperCase()] ?? G[ch.toLowerCase()] ?? G["?"];
+  if (face !== "serif") return base;
+  let s = SERIF_CACHE.get(ch);
+  if (!s) {
+    s = { strokes: [...base.strokes, ...serifs(base)], width: base.width };
+    SERIF_CACHE.set(ch, s);
+  }
+  return s;
 }
 
 /**
@@ -113,7 +183,7 @@ function glyph(ch: string): Glyph {
  * the text centred at the top (arc > 0) or the bottom (arc < 0) and
  * reading left to right; long strokes are split so they follow the curve.
  */
-export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, arc = 0): Shape2 {
+export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, arc = 0, face: Face = "sans"): Shape2 {
   const scale = size / 6;
   const half = weight / 2;
   // Segments in world units.
@@ -126,8 +196,9 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
       max: [Math.max(bounds.max[0], x + half), Math.max(bounds.max[1], y + half)],
     };
   };
+  const gap = GAP[face];
   for (const ch of text) {
-    const g = glyph(ch);
+    const g = glyph(ch, face);
     for (const st of g.strokes) {
       if (st.length === 2) {
         const x = cursor + st[0] * scale, y = st[1] * scale;
@@ -143,12 +214,12 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
         grow(x1, y1);
       }
     }
-    cursor += (g.width + 0.8) * scale + spacing;
+    cursor += (g.width + gap) * scale + spacing;
   }
   if (seg.length === 0) return shape2(() => 1e6, EMPTY_BOUNDS2, 0);
   if (arc !== 0) {
     // Bend: x along the baseline becomes an angle, y a radius; split each stroke into short pieces first.
-    const total = cursor - 0.8 * scale - spacing;
+    const total = cursor - gap * scale - spacing;
     const r = Math.abs(arc), sign = Math.sign(arc);
     const bent: number[] = [];
     bounds = EMPTY_BOUNDS2;
@@ -193,9 +264,10 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
 }
 
 /** The advance width of `text` at `size`, for centring. */
-export function textWidth(text: string, size = 1, spacing = 0): number {
+export function textWidth(text: string, size = 1, spacing = 0, face: Face = "sans"): number {
   const scale = size / 6;
+  const gap = GAP[face];
   let w = 0;
-  for (const ch of text) w += (glyph(ch).width + 0.8) * scale + spacing;
-  return Math.max(0, w - 0.8 * scale - spacing);
+  for (const ch of text) w += (glyph(ch, face).width + gap) * scale + spacing;
+  return Math.max(0, w - gap * scale - spacing);
 }

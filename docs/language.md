@@ -52,6 +52,20 @@ for i in range(12) {
 `for` iterates a list: `range(n)`, `range(a, b)`, `range(a, b, step)`, or a
 literal like `[0.5, 1, 2]`.
 
+`for` also runs over any list, including one of strings, and a name
+assigned inside the loop keeps its value between iterations, so a counter
+is `i = i + 1`; `len(list)` is its length.
+
+```
+letters = ["C", "H", "A", "M", "P"]
+word = empty()
+i = 0
+for c in letters {
+  word = word + (extrude(text(c, 0.2), 0.05, "z") | move(i * 0.3, 0, 0))
+  i = i + 1
+}
+```
+
 ## Values
 
 | Kind | Made by | Combines with |
@@ -154,16 +168,39 @@ from y = 0 to `h`, an arc lies on y = 0; move the result afterwards);
 more than three degrees, so the sweep shows no facets. Any list of
 numbers works, including one built in a loop.
 
+**Exact curves**: `bezier([x,y,z, ...])` takes cubic Bezier control
+points (an anchor, then two handles and an anchor per piece: 4, 7, 10, ...
+points) and `curve([x,y,z, ...])` passes through its points with the same
+shape `spline` draws; either goes to `tube(r, c)` or `sweep(profile, c,
+twist=, taper=)` in place of the point list. The surface is then the true
+offset of the curve, found by the nearest point on it for every sample,
+so a scroll or a handle has no facets at any grid; the cost per piece is
+about that of a spline's. A `spline` is still fine for anything gentle.
+
 **Text**: `text("Aixle", size=1, weight=0.15, align="center")` is a 2D
 profile from a built-in single-stroke font (upper and lower case, digits,
-punctuation), laid out on the baseline. Extrude it for raised lettering,
+punctuation), laid out on the baseline. `face="serif"` adds slab serifs
+to the same letters and sets them a little wider, for a nameplate or a
+title; the default face is `"sans"`. Extrude it for raised lettering,
 subtract an extrusion for engraving. `size` is the cap height, `weight`
 the stroke width; keep `weight` above a grid cell or so (`check` warns
 when it is not). The profile's box reaches half the weight past the
 strokes, so the lettering stands `size` plus `weight` tall. `arc=r` bends the
 text onto a circle of radius `r` centred on the origin, reading over the
 top (or under the bottom with a negative radius): a coin's rim, a label
-round a jar once revolved... or extruded and wrapped by hand.
+round a jar: extrude the text standing (`extrude(t, 0.1, "z")`) and
+`wrap(r)` it round the jar's radius (see below).
+
+**Bending and wrapping**: `bend(shape, degrees)` bends about z: the
+shape's x axis becomes an arc of a circle of radius `57.3 / degrees`
+centred at `(0, R)`, curving up by that many degrees per unit along x
+(negative bends down), and a point at height y rides at radius `R - y`.
+`wrap(shape, r)` bends about y instead: x goes round a cylinder of
+radius `r`, with x = 0 landing on +z and reading left to right from the
+front, and depth z riding at radius `r + z`. Both are exact, so the box
+`check` prints is the bent shape's. A name round a cup's rim is
+`extrude(text("CHAMPION", 0.2, align="center"), 0.06, "z") | wrap(1.3) |
+move(0, 4.3, 0)`; a curved bench seat is a box bent by a few degrees.
 
 **Import**: `import("part.obj")` or a `.glb`, relative to the program's
 folder, makes an existing mesh a shape: it is sampled into a distance
@@ -199,10 +236,25 @@ matters at full size with `set pose`.
 
 A pose is applied by evaluating the program again with the angles, so
 anything computed from a joint's shape (its bounds, a `ground()`) follows
-the pose.
+the pose, and so does any number you compute from the angles: a member
+between two moving bodies (a hydraulic cylinder, a strut) is a
+`tube(r, [a, b])` whose end points you work out from the pose's angles
+with `sin` and `cos`, rebuilt for every pose. `pose(...)` may be called
+from a `def`, so a set of poses with a shared shape is one `def` and a
+line per pose. `check` prints number steps as well as shapes, so the
+distances you compute are there to read.
 
 ## Materials
 
+`decal(shape, region, m)` paints only the surface inside `region`, adding
+no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
+a jar; `region` is any shape. Patterns are laid out in the frame the part is painted in, along the
+material's `axis` (y unless given): `stripes` are bands stacked along it
+(`scale` wide), `wood` rings go round it with the grain along it, `brick`
+courses and `tiles` rows lie across it, `checker` and `dots` are cubic.
+So stripes on a flat awning need either `material("red", "stripes",
+"cream", scale=0.5, axis="x")` or the sheet painted standing and then
+laid down; a rotation after painting turns the pattern with the part.
 `paint(shape, m)` gives the whole shape one material; `m` is a preset name
 (`"wood"`, `"brass"`, `"marble"`, see the reference), a colour (`"red"`,
 `"#40e0ff"`), or `material(color, pattern, color2, scale, metal, rough)`.
@@ -228,20 +280,29 @@ with the part: paint, then `move`.
 ## Settings
 
 `set light_size 2.5` widens the key light in the beauty render (softer
-shadows; 0.5 is a lamp), `set dof 1` adds depth of field there, blurring
-away from the model's centre. A material with `transmit` (the `glass`,
+shadows; 0.5 is a lamp); `set light_azimuth -40` and `set light_elevation
+55` place it (azimuth about y, 0 from the front, 90 from +x; these are
+the defaults, upper left, fixed in the world, not the camera); `set
+ambient 2` lifts the sky and ground light for a shaded interior (0.5 is a
+dark room); `set dof 1` adds depth of field there, blurring away from the
+model's centre. A material with `glow=1` gives off its own light in every
+render, unshadowed: a flame, a lamp, a screen. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
 else. Glass shows what is behind it, not what is inside it: a lamp
 unioned into a solid glass drum is part of one solid and only tints the
 light, so make a lantern hollow (`shell`, or a tube minus a thinner one)
-and put the lamp in the air inside. `set focus name` frames every view on
-one step or object (`--focus` on the command line): the way to check a
-small part of a large scene. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
+and put the lamp in the air inside. `set focus name` makes a close-up
+of one step or object (`--focus` on the command line): every view is
+framed on it, the model is clipped to that frame and re-extracted at the
+frame's own cell so a lantern in a market is drawn with a lantern's
+detail, the slices cut through it, and the beauty render is framed on it.
+`--out DIR` puts a render somewhere other than `out/<name>/`, so a focus
+render does not overwrite the main one. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
 and `--elevation` override). `set grid N` sets the extraction resolution (cells along the longest side,
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
-of a view. `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
+of a view and of the beauty render (`--beauty-size` overrides the latter). `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
 cross-section plane; a scene's default cut goes through its first
 object, so list the one to cut first. `set beauty 1` always writes the ray-marched
 `beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
@@ -280,6 +341,11 @@ under).
   (`CELL 0.03`); raise `--grid` for fine work, at a cubic cost. Edges and
   corners are exact (the vertex placement fits the tangent planes), so a
   box is a box at any grid; only features smaller than a cell go.
+- Bounds are boxes and can be loose: a smooth `union(k=)` pads them by the
+  blend, a `difference` keeps the left side's box, `twist` and `bend` swing
+  a corner's radius. `check` prints bounds; the render's "Surface extent"
+  row and `ground()` read the surface itself (rays from below), so they
+  are not fooled.
 - Non-uniform `scale`, `twist`, `bend` and `displace` distort distances; the
   surface is still right, but a `round` or smooth blend applied *after* them
   is approximate.

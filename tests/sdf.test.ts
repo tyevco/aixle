@@ -3,9 +3,10 @@ import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
 import * as W from "../src/sdf/sweeps.js";
+import * as C from "../src/sdf/curves.js";
 import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
 import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
-import { albedo, materialFromString, preset } from "../src/sdf/materials.js";
+import { albedo, customMaterial, materialFromString, preset } from "../src/sdf/materials.js";
 
 describe("primitives", () => {
   it("measure distance from their surface, negative inside", () => {
@@ -404,5 +405,139 @@ describe("feature size", () => {
     expect(O.difference(wall, P.sphere(0.5)).feature).toBeCloseTo(0.1);
     expect(O.paint(wall, preset("wood")!).feature).toBeCloseTo(0.1);
     expect(P.box(1, 1, 1).feature).toBeUndefined();
+  });
+});
+
+describe("curves", () => {
+  it("a tube along a straight bezier is a capsule and along an arc is the arc's offset", () => {
+    const straight = C.bezierCurve([[0, 0, 0], [1, 0, 0], [3, 0, 0], [4, 0, 0]]);
+    const t = C.tubeCurve(straight, 0.5);
+    expect(t.dist(2, 0.5, 0)).toBeCloseTo(0, 5);
+    expect(t.dist(4.5, 0, 0)).toBeCloseTo(0, 5);
+    expect(t.dist(2, 2, 0)).toBeCloseTo(1.5, 5);
+    expect(straight.total).toBeCloseTo(4, 4);
+    // A quarter circle of radius 2 from the standard handle length: a Bezier is within 6e-4 of the circle.
+    const k = 0.5523 * 2;
+    const arc = C.bezierCurve([[2, 0, 0], [2, 0, k], [k, 0, 2], [0, 0, 2]]);
+    const at = C.tubeCurve(arc, 0.3);
+    for (const a of [0.2, 0.7, 1.2]) {
+      expect(Math.abs(at.dist(2 * Math.cos(a), 0, 2 * Math.sin(a)) + 0.3)).toBeLessThan(6e-4);
+      expect(Math.abs(at.dist(3 * Math.cos(a), 0, 3 * Math.sin(a)) - 0.7)).toBeLessThan(6e-4);
+    }
+    expect(arc.total).toBeCloseTo(Math.PI, 3);
+    expect(at.feature).toBeCloseTo(0.6);
+    const flat = C.tubeCurve(straight, 0.5, 1, "flat");
+    expect(flat.dist(4.2, 0, 0)).toBeCloseTo(0.2, 5);
+    expect(flat.dist(3.8, 0, 0)).toBeLessThan(0);
+  });
+  it("a sweep along a curve keeps the profile's x across and y up, and cuts the ends flat", () => {
+    const straight = C.bezierCurve([[0, 0, 0], [1, 0, 0], [3, 0, 0], [4, 0, 0]]);
+    const sw = C.sweepCurve(S.rect(1, 0.4), straight);
+    expect(sw.dist(2, 0, 0)).toBeCloseTo(-0.2, 5);
+    expect(sw.dist(2, 0.2, 0)).toBeCloseTo(0, 5);
+    expect(sw.dist(2, 0, 0.5)).toBeCloseTo(0, 5);
+    expect(sw.dist(5, 0, 0)).toBeCloseTo(1, 5);
+    expect(sw.feature).toBeCloseTo(0.4);
+    // Through points: the curve passes through them, and the bounds contain the tube.
+    const c = C.curveThrough([[0, 0, 0], [1, 1, 0], [2, 0, 0]]);
+    expect(c.segments).toBe(2);
+    const ct = C.tubeCurve(c, 0.1);
+    expect(ct.dist(1, 1, 0)).toBeCloseTo(-0.1, 4);
+    expect(ct.dist(0, 0, 0)).toBeCloseTo(-0.1, 4);
+    const b = ct.bounds;
+    for (const p of C.curvePoints(c, 8)) for (let k = 0; k < 3; k++) { expect(p[k]).toBeGreaterThanOrEqual(b.min[k]); expect(p[k]).toBeLessThanOrEqual(b.max[k]); }
+    expect(() => C.bezierCurve([[0, 0, 0], [1, 0, 0]])).toThrow(/4, 7, 10/);
+  });
+});
+
+describe("serif face", () => {
+  it("adds slab serifs at free stem ends only, and sets the text wider", () => {
+    // H at size 6 (grid units): the left stem's foot is at (0, 0); a serif reaches 0.55 either side.
+    const sans = textProfile("H", 6, 0.15), serif = textProfile("H", 6, 0.15, 0, 0, "serif");
+    expect(sans.dist(0.45, 0)).toBeGreaterThan(0.3);
+    expect(serif.dist(0.45, 0)).toBeLessThan(0);
+    // The crossbar meets the stems: no serif at its ends.
+    expect(serif.dist(0.5, 3.2 + 0.4)).toBeGreaterThan(0.3);
+    // A curved terminal (C) stops between the guides and gets none.
+    const c = textProfile("C", 6, 0.15, 0, 0, "serif");
+    expect(c.dist(3.6 + 0.4, 1)).toBeGreaterThan(0.3);
+    expect(textWidth("HH", 6, 0, "serif")).toBeGreaterThan(textWidth("HH", 6));
+    expect(serif.feature).toBeCloseTo(0.15);
+  });
+});
+
+describe("ground on the surface", () => {
+  it("rests the surface on y = 0 when a blend or a cut leaves the bounds loose", () => {
+    // A smooth union pads the bounds by its blend; the surface still starts at the sphere's bottom.
+    const blended = O.union([P.sphere(1), O.move(P.sphere(0.5), 0, 1.2, 0)], 0.3);
+    expect(blended.bounds.min[1]).toBeLessThan(-1.01);
+    expect(O.surfaceBottom(blended)).toBeCloseTo(-1, 2);
+    const g = O.ground(blended);
+    expect(g.dist(0, 0, 0)).toBeCloseTo(0, 2);
+    // A difference keeps the left side's box: the surface of a ball cut in half starts at the cut.
+    const half = O.difference(P.sphere(1), O.move(P.box(4, 4, 4), 0, -2, 0));
+    expect(O.surfaceBottom(half)).toBeCloseTo(0, 2);
+    expect(O.ground(P.box(2, 2, 2)).bounds.min[1]).toBeCloseTo(0, 6);
+  });
+  it("decal paints the surface inside a region and nothing else, adding no geometry", () => {
+    const eye = O.paint(P.sphere(1), preset("plastic")!);
+    const pupil = O.decal(eye, O.move(P.sphere(0.4), 0, 0, 1), preset("rubber")!);
+    expect(pupil.dist(0, 0, 1)).toBeCloseTo(0, 6);
+    expect(pupil.hit(0, 0, 1).mat.name).toBe("rubber");
+    expect(pupil.hit(0, 1, 0).mat.name).toBe("plastic");
+    expect(pupil.bounds).toEqual(eye.bounds);
+  });
+});
+
+describe("bend and wrap", () => {
+  it("bend puts x on a circle of radius 1/k centred at (0, R), with a box to match", () => {
+    // A bar 2 long, 0.2 thick, bent 90 degrees per unit: R = 57.3 / 90 = 0.6366; its end at x = 1 lands at angle 90°.
+    const bar = P.box(2, 0.2, 0.2);
+    const bent = O.bend(bar, 90);
+    const R = 180 / Math.PI / 90;
+    expect(bent.dist(0, 0, 0)).toBeCloseTo(-0.1, 5); // the middle stays put
+    // x = 0.9 is 0.9 / R radians round the centre (0, R); the bar's end at x = 1 is a quarter turn.
+    const a = 0.9 / R;
+    expect(bent.dist(R * Math.sin(a), R - R * Math.cos(a), 0)).toBeCloseTo(-0.1, 5);
+    expect(bent.dist(-R * Math.sin(a), R - R * Math.cos(a), 0)).toBeCloseTo(-0.1, 5);
+    expect(bent.dist(R, R, 0)).toBeCloseTo(0, 5);
+    expect(bent.dist(0, 2 * R, 0)).toBeGreaterThan(0.2); // the far side of the circle is empty
+    // The ends reach angle 90°, where the outer edge sits at x = R + 0.1 and y = R.
+    expect(bent.bounds.max[1]).toBeGreaterThanOrEqual(R - 1e-6);
+    expect(bent.bounds.max[1]).toBeLessThan(R + 0.05);
+    expect(bent.bounds.max[0]).toBeGreaterThanOrEqual(R + 0.1 - 1e-6);
+    expect(bent.bounds.max[0]).toBeLessThan(R + 0.2);
+    expect(O.bend(bar, -90).dist(R * Math.sin(a), -(R - R * Math.cos(a)), 0)).toBeCloseTo(-0.1, 5);
+  });
+  it("wrap puts x round a cylinder about y, x = 0 on +z, depth outward", () => {
+    // A bar along x, 0.2 deep in z from -0.1 to 0.1, wrapped on radius 2: its middle sits at (0, 0, 2).
+    const bar = P.box(3, 0.4, 0.2);
+    const w = O.wrap(bar, 2);
+    expect(w.dist(0, 0, 2)).toBeCloseTo(-0.1, 5);
+    expect(w.dist(0, 0, 2.15)).toBeCloseTo(0.05, 5);
+    // x = 1.4 (just short of the bar's end at 1.5) is at angle 0.7 rad towards +x; past the end is empty.
+    const a = 1.4 / 2;
+    expect(w.dist(2 * Math.sin(a), 0, 2 * Math.cos(a))).toBeLessThan(0);
+    expect(w.dist(2 * Math.sin(0.75), 0, 2 * Math.cos(0.75))).toBeCloseTo(0, 5);
+    expect(w.dist(2 * Math.sin(a + 0.2), 0, 2 * Math.cos(a + 0.2))).toBeGreaterThan(0);
+    expect(w.dist(0, 0, -2)).toBeGreaterThan(1);
+    const b = w.bounds;
+    expect(b.max[2]).toBeGreaterThanOrEqual(2.1 - 1e-6);
+    expect(b.min[2]).toBeLessThan(1.6);
+    expect(b.max[0]).toBeLessThan(2.2);
+  });
+});
+
+describe("material axis and glow", () => {
+  it("stacks stripes along the material's axis and carries glow", () => {
+    const y = customMaterial({ color: [1, 0, 0], color2: [0, 0, 1], pattern: "stripes", scale: 1 });
+    const x = customMaterial({ color: [1, 0, 0], color2: [0, 0, 1], pattern: "stripes", scale: 1, axis: "x" });
+    // Default: bands change with y; with axis x they change with x.
+    expect(albedo(y, 0.5, 0.5, 0)).toEqual(albedo(y, 5.5, 0.5, 0));
+    expect(albedo(y, 0.5, 0.5, 0)).not.toEqual(albedo(y, 0.5, 1.5, 0));
+    expect(albedo(x, 0.5, 0.5, 0)).toEqual(albedo(x, 0.5, 5.5, 0));
+    expect(albedo(x, 0.5, 0.5, 0)).not.toEqual(albedo(x, 1.5, 0.5, 0));
+    expect(customMaterial({ color: [1, 1, 1], glow: 1.5 }).glow).toBe(1.5);
+    expect(preset("gold")!.glow).toBe(0);
   });
 });
