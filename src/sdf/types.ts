@@ -90,6 +90,8 @@ export interface Shape3 {
   feature?: number;
   /** The narrowest gap the shape is known to contain (a letter's counters, a slot), in model units: closes up under a cell. */
   gap?: number;
+  /** What the narrowest gap is, for the warning: "the counter of 'A'", "the space between F and A". */
+  gapWhat?: string;
   /** Set by paint() and decal(): the whole shape has a material of its own. Read structurally by the paint check. */
   painted?: boolean;
   /** Set by move, rotate and scale: below this node the shapes are in another frame, so they are not where they end up. */
@@ -141,6 +143,8 @@ export interface Shape2 {
   feature?: number;
   /** The narrowest gap the profile is known to contain; see Shape3.gap. */
   gap?: number;
+  /** What that gap is; see Shape3.gapWhat. */
+  gapWhat?: string;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

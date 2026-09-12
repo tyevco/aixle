@@ -405,8 +405,9 @@ vertex colours instead).
 
 ## The fast loop
 
-`aixle render model.aix --quick` renders the sheet only, at a small grid,
-in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
+`aixle render model.aix --quick` renders the sheet only, at a small grid
+(stepped up, to 128 at most, on a model whose parts are mostly thinner
+than the small grid's cell), in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
 detail thinner than its cell, and the sheet says which steps it dropped.
@@ -464,6 +465,10 @@ under).
   a corner's radius. `check` prints bounds; the render's "Surface extent"
   row and `ground()` read the surface itself (rays from below), so they
   are not fooled.
+- The sheet, the views, the pose sheets and the animation strips draw
+  glass (a material with `transmit`) on every other pixel, so what is
+  behind it shows through a checker: a pendulum behind a glazed door is
+  on the strip. The beauty render refracts it properly.
 - The sheet and the views colour the mesh per vertex, so a pattern or a
   decal near the cell size looks blocky there (a 0.07 speckle at a 0.03
   cell reads as camouflage); the beauty render and the baked atlas sample
@@ -477,6 +482,21 @@ under).
   points; `curve` and `bezier` are exact.
 - `a & b` and `a - b` keep a's material on every face, including the
   faces b made; paint the result to colour a cut face differently.
+- A polygon's sharp tip is thinner than a cell near the point, at any
+  grid, and meshes as an open edge there (measured: a clock's hands);
+  `check` cannot see it, since a tip has no thickness to report. Blunt
+  a tip to a cell's width, as a real hand or blade is.
+- Two thin parts that must stay separate (a clock's two hands, a lid
+  and its rim) cannot overlap by a cell as the contact rule says: leave
+  a gap of a cell or two between them and bridge it with a hub or a
+  post, or they mesh as one part with open edges where they touch.
+- The key light comes from above (elevation 55 by default) and does not
+  reach far into an opening: an interior behind a door or a window is
+  dark unless `set light_elevation` brings the light down, `set ambient`
+  lifts the fill, or a `decal` gives the inner walls a lighter colour.
+- A preset with overrides (`material("glass", transmit=0.95)`) is listed
+  in the report as the preset's name with a star, `glass*`, unless it is
+  assigned to a name, which it then takes.
 - A cross-section draws the surface's outline a cell or so behind the cut
   plane as a thin line, so a plate just behind the plane shows as a dashed
   line across an opening that is open. Move the slice (`set slice_x`) or

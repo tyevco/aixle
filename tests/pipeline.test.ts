@@ -279,7 +279,8 @@ describe("round-3 findings", () => {
     expect(paintWarnings(lid).join()).toMatch(/'lid' \(line 1\) joins painted and unpainted parts/);
     expect(paintWarnings(check('lid = (cone(1, 0.5, 0.3) + ellipsoid(0.5, 0.2, 0.5)) | paint("gold")'))).toHaveLength(0);
     const small = check('t = extrude(text("Best in Show", 0.12, weight=0.05), 0.1)\nbase = box(5, 0.2, 5)\nm = t + base');
-    expect(thinWarnings(small, 0.04, 128).join()).toMatch(/'t' \(line 1\) has (gaps \(a letter's counters, the space between letters, a slot\) only|lettering whose gaps .* close up)/);
+    // The warning names the gap: the counter of a lowercase letter here, since the letters are spaced.
+    expect(thinWarnings(small, 0.04, 128).join()).toMatch(/'t' \(line 1\): the counter of e \(the gap inside the letter\) (is only|closes up)/);
     expect(thinWarnings(check('t = extrude(text("Best in Show", 0.4, weight=0.06), 0.1)'), 0.02, 128)).toHaveLength(0);
   });
   it("angle() reads the pose being evaluated, and numbers print whole", () => {

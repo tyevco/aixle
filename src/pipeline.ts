@@ -148,12 +148,15 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
       const gkey = Math.round(g * 1e6) + 0.5;
       if (!reportedFeatures.has(gkey)) {
         reportedFeatures.add(gkey);
+        const what = st.value.gapWhat ?? "a gap (a letter's counters, the space between letters, a slot)";
+        const between = /space between/.test(what);
+        const fix = between ? "more spacing= or a lighter weight" : "a larger size or a lighter weight (under a quarter of the size for lowercase), or capitals";
         out.push(
           g <= 0
-            ? `'${st.name}' (line ${st.line}) has lettering whose gaps (the counters inside e, a, o, or the space between letters) close up at this weight: use a weight under a quarter of the size, more spacing=, or capitals.`
+            ? `'${st.name}' (line ${st.line}): ${what} closes up at this weight. Use ${fix}.`
             : g < cellSize * 0.5
-              ? `'${st.name}' (line ${st.line}) has gaps (a letter's counters, the space between letters, a slot) only ${fmt(g)} wide, ${fmt(g / cellSize)} of the ${fmt(cellSize)} cell: they close up in the mesh. Use a larger size, a lighter weight or more spacing=, or raise the grid (set grid ${gridFor(g)}).`
-              : `'${st.name}' (line ${st.line}) has gaps (a letter's counters, the space between letters, a slot) ${fmt(g)} wide, ${(g / cellSize).toFixed(2)} of the ${fmt(cellSize)} cell: the mesh there may not be watertight. For a print or a clean GLB use a larger size, a lighter weight or more spacing=, or raise the grid (set grid ${gridFor(g)}).`,
+              ? `'${st.name}' (line ${st.line}): ${what} is only ${fmt(g)} wide, ${fmt(g / cellSize)} of the ${fmt(cellSize)} cell, and closes up in the mesh. Use ${fix}, or raise the grid (set grid ${gridFor(g)}).`
+              : `'${st.name}' (line ${st.line}): ${what} is ${fmt(g)} wide, ${(g / cellSize).toFixed(2)} of the ${fmt(cellSize)} cell, so the mesh there may not be watertight. For a print or a clean GLB use ${fix}, or raise the grid (set grid ${gridFor(g)}).`,
         );
       }
     }
@@ -204,19 +207,22 @@ export function geometrySteps(evaluation: Evaluation): Set<string> {
  * stretches a step of `tol`. Smallest box first, so the most specific
  * name comes first.
  */
-function stepsNear(evaluation: Evaluation, c: [number, number, number], tol: number, limit = 2): string[] {
+export function stepsNear(evaluation: Evaluation, c: [number, number, number], tol: number, limit = 2): string[] {
   const names = new Map<Shape3, string>();
   for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
   const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
-  // Every named shape within reach, with its depth in the tree and whether it is innermost: innermost names first, then the nearest ancestors.
-  const found = new Map<string, { depth: number; leaf: boolean }>();
+  // Every named shape within reach, with how close its surface passes, its depth in the tree and whether it is
+  // innermost: the closest first (by the cell, so a hand's tip a fifth of a cell from a recess wall names both, not
+  // a dial a whole cell away: measured on a clock), then innermost, then the nearest ancestors.
+  const found = new Map<string, { d: number; depth: number; leaf: boolean }>();
   let budget = 20000;
   // Returns whether a named step at or below `n` was within reach of the point.
   const walk = (n: Shape3, x: number, y: number, z: number, t: number, depth: number): boolean => {
     if (--budget < 0 || isEmpty(n.bounds)) return false;
     const b = n.bounds;
     if (x < b.min[0] - t || x > b.max[0] + t || y < b.min[1] - t || y > b.max[1] + t || z < b.min[2] - t || z > b.max[2] + t) return false;
-    if (Math.abs(n.dist(x, y, z)) > t) return false;
+    const dn = Math.abs(n.dist(x, y, z));
+    if (dn > t) return false;
     let cx = x, cy = y, cz = z, ct = t;
     if (n.unwarp) {
       const q = n.unwarp(x, y, z);
@@ -233,12 +239,13 @@ function stepsNear(evaluation: Evaluation, c: [number, number, number], tol: num
     const name = names.get(n);
     if (name === undefined) return below;
     const prev = found.get(name);
-    found.set(name, { depth: Math.max(depth, prev?.depth ?? 0), leaf: !below || (prev?.leaf ?? false) });
+    found.set(name, { d: Math.min(dn / t, prev?.d ?? Infinity), depth: Math.max(depth, prev?.depth ?? 0), leaf: !below || (prev?.leaf ?? false) });
     return true;
   };
   for (const r of roots) walk(r, c[0], c[1], c[2], tol, 0);
+  const bucket = (v: number) => Math.round(v * 3);
   return [...found.entries()]
-    .sort((a, b) => Number(b[1].leaf) - Number(a[1].leaf) || b[1].depth - a[1].depth)
+    .sort((a, b) => bucket(a[1].d) - bucket(b[1].d) || Number(b[1].leaf) - Number(a[1].leaf) || b[1].depth - a[1].depth)
     .slice(0, limit)
     .map(([name]) => `'${name}'`);
 }
@@ -414,9 +421,21 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let closeUpNote: string | undefined;
   if (shownPose && !shownAngles && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
   const shapeAt: ShapeAt = (angles) => evaluate(program, { resolveImport: resolver, jointAngles: angles }).output;
-  const grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
+  let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
   const size = Math.max(64, Math.round(opts.size ?? (evaluation.settings.size as number | undefined) ?? 512));
   const output = evaluation.output;
+  // A quick pass on a model made of thin parts (a clock with a pane, hands, a rod and mouldings) drops half its
+  // steps at the quick grid and shows nothing worth judging (measured: 20 of 41 steps). It steps the grid up, to
+  // 128 at most, until fewer than a quarter of the geometry steps are thinner than the cell; still a few seconds.
+  if (opts.quick && output && !isEmpty(output.bounds)) {
+    const geometry = geometrySteps(evaluation).size || 1;
+    const longest = Math.max(...boundsSize(output.bounds));
+    for (const g of [grid, 96, 128]) {
+      if (g < grid) continue;
+      grid = g;
+      if (thinWarnings(evaluation, longest / g, g).length <= geometry / 4) break;
+    }
+  }
   // Joints and poses: the sheet shows `set pose` (rest by default); exports are always at rest.
   const joints = output ? allJoints(output) : [];
   const jointNames = joints.map((j) => j.joint!.name);

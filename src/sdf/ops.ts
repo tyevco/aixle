@@ -79,6 +79,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       inner: live,
       feature: minFeature(live),
     gap: minGap(live),
+    gapWhat: minGapWhat(live),
     };
   }
   return {
@@ -106,6 +107,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     inner: live,
     feature: minFeature(live),
     gap: minGap(live),
+    gapWhat: minGapWhat(live),
   };
 }
 
@@ -114,6 +116,12 @@ function minGap(shapes: Shape3[]): number | undefined {
   let g: number | undefined;
   for (const s of shapes) if (s.gap !== undefined && (g === undefined || s.gap < g)) g = s.gap;
   return g;
+}
+
+function minGapWhat(shapes: Shape3[]): string | undefined {
+  let g: number | undefined, what: string | undefined;
+  for (const s of shapes) if (s.gap !== undefined && (g === undefined || s.gap < g)) { g = s.gap; what = s.gapWhat; }
+  return what;
 }
 
 /** The smallest known feature among shapes, or undefined when none carries one. */
@@ -140,6 +148,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     cut: true,
     feature: a.feature,
     gap: a.gap,
+    gapWhat: a.gapWhat,
   };
 }
 
@@ -161,6 +170,7 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     cut: true,
     feature: a.feature,
     gap: a.gap,
+    gapWhat: a.gapWhat,
   };
 }
 
@@ -181,6 +191,7 @@ export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {
     warp: (x, y, z) => [x + dx, y + dy, z + dz],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -203,6 +214,7 @@ export function rotateBy(s: Shape3, m: Mat3): Shape3 {
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -235,6 +247,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     warp: (x, y, z) => [x * sx, y * sy, z * sz],
     feature: s.feature === undefined ? undefined : s.feature * m,
     gap: s.gap === undefined ? undefined : s.gap * m,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -263,6 +276,7 @@ export function offset(s: Shape3, r: number): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -278,6 +292,7 @@ export function shell(s: Shape3, t: number): Shape3 {
     inner: [s],
     feature: s.feature === undefined ? t : Math.min(s.feature, t),
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -319,6 +334,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -381,6 +397,7 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -427,6 +444,7 @@ export function wrap(s: Shape3, r: number): Shape3 {
     loose: true,
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -452,6 +470,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -586,6 +605,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
     painted: true,
   };
 }
@@ -614,6 +634,7 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
     inner: [s],
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
@@ -656,6 +677,7 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
     joint: state,
     feature: child.feature,
     gap: child.gap,
+    gapWhat: child.gapWhat,
   };
 }
 
@@ -705,6 +727,7 @@ export function anchor(s: Shape3, name: string, x: number, y: number, z: number)
     anchors: { ...anchorsOf(s), [name]: [x, y, z] },
     feature: s.feature,
     gap: s.gap,
+    gapWhat: s.gapWhat,
   };
 }
 
