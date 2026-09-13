@@ -416,7 +416,9 @@ the base material underneath, and a step used only as a region is not
 geometry, so it gets no thin-part warning and is never named as a loose
 piece. Patterns are laid out in the frame the part is painted in, along the
 material's `axis` (y unless given): `stripes` are bands stacked along it
-(`scale` wide), `wood` rings go round it with the grain along it, `brick`
+(`scale` wide), `wood` is boards laid side by side across it with the
+grain running along it (lines a `scale` apart that drift, boards two and
+a half scales wide with a dark seam between), `brick`
 courses and `tiles` rows lie across it, `checker` and `dots` are cubic.
 So stripes on a flat awning need either `material("red", "stripes",
 "cream", scale=0.5, axis="x")` or the sheet painted standing and then
@@ -426,8 +428,8 @@ laid down; a rotation after painting turns the pattern with the part.
 `"#40e0ff"`), or `material(color, pattern, color2, scale, metal, rough)`.
 A preset at another feature size is `material("granite", scale=0.4)`:
 start from the preset, change only what is given. Pattern sizes are in
-model units (the reference lists each preset's), so a 0.25-unit wood
-ring suits a table leg and a 20-unit floor wants `scale=2`.
+model units (the reference lists each preset's), so wood grain 0.25
+apart suits a table and a 20-unit floor wants `scale=2`.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
 tiles, dots. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 

@@ -196,6 +196,14 @@ describe("materials", () => {
     expect(albedo(c, 0.6, 0.1, 0.1)).toEqual(c.color2);
     const w = materialFromString("wood")!;
     expect(albedo(w, 0.3, 0.2, 0.1)).toEqual(albedo(w, 0.3, 0.2, 0.1));
+    // Wood is boards 2.5 scales wide across x with a dark seam between them, darker than the board's middle at any
+    // height along the grain (rings before this: a table top read as a bullseye).
+    const seam = albedo(w, w.scale * 2.5, 0.7, 0.2), middle = albedo(w, w.scale * 1.25, 0.7, 0.2);
+    expect(seam[0] + seam[1] + seam[2]).toBeLessThan(middle[0] + middle[1] + middle[2]);
+    // The grain runs along y: the colour a whole scale along the axis is far closer than one across it.
+    const at = albedo(w, 0.31, 0.2, 0.1), along = albedo(w, 0.31, 0.2 + w.scale * 0.5, 0.1), across = albedo(w, 0.31 + w.scale * 0.5, 0.2, 0.1);
+    const d = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+    expect(d(at, along)).toBeLessThan(d(at, across));
   });
 });
 

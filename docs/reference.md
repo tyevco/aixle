@@ -461,7 +461,7 @@ Paint only the part of the surface inside `region`, adding no geometry: a pupil 
 
 ### material
 
-A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
+A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
     material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?) -> material
 
