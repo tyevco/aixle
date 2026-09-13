@@ -1,0 +1,4 @@
+# Re-import probe: the exported GLB back in as a shape, to compare size and pieces.
+set grid 320
+back = import("../out/chess/model.glb", resolution=320)
+show back

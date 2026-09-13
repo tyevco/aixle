@@ -70,7 +70,7 @@ function basis(eye: Vec3, target: Vec3, upHint: Vec3): { right: Vec3; up: Vec3; 
 }
 
 /** A perspective camera looking at `bounds` from azimuth/elevation (degrees), framed to fit. */
-export function perspective(bounds: Bounds, width: number, height: number, azimuth = 35, elevation = 25, fov = 30, zoom = 1): Camera {
+export function perspective(bounds: Bounds, width: number, height: number, azimuth = 35, elevation = 25, fov = 30, zoom = 1, points?: Float32Array): Camera {
   const c = boundsCenter(bounds);
   const size = boundsSize(bounds);
   const radius = Math.max(0.5 * Math.hypot(size[0], size[1], size[2]), 1e-3);
@@ -88,10 +88,22 @@ export function perspective(bounds: Bounds, width: number, height: number, azimu
   // round 4 asked for the corners). Two passes settle it, since moving the eye changes the projection a little.
   let dist = radius / Math.sin(Math.min(vfov, hfov) / 2);
   const tx = Math.tan(hfov / 2), ty = Math.tan(vfov / 2);
-  const corners = boundsCorners(bounds);
+  // The model's own points when there is a mesh (every 8th vertex is plenty), else the box's corners: a long
+  // model seen on the diagonal has its box corners in empty air, and fitting them left a bridge in 60% of its
+  // frame with no zoom able to reach past (measured).
+  const corners: Vec3[] = points && points.length >= 24 ? [] : boundsCorners(bounds);
+  const stride = points ? Math.max(1, Math.floor(points.length / 3 / 4096)) * 3 : 3;
   for (let pass = 0; pass < 3; pass++) {
     const { eye, right, up, forward } = place(dist);
     let extent = 0;
+    const fit = (px: number, py: number, pz: number) => {
+      const vx = px - eye[0], vy = py - eye[1], vz = pz - eye[2];
+      const depth = Math.max(1e-6, vx * forward[0] + vy * forward[1] + vz * forward[2]);
+      const sx = (vx * right[0] + vy * right[1] + vz * right[2]) / (depth * tx);
+      const sy = (vx * up[0] + vy * up[1] + vz * up[2]) / (depth * ty);
+      extent = Math.max(extent, Math.abs(sx), Math.abs(sy));
+    };
+    if (corners.length === 0) for (let i = 0; i < points!.length; i += stride) fit(points![i], points![i + 1], points![i + 2]);
     for (const p of corners) {
       const vx = p[0] - eye[0], vy = p[1] - eye[1], vz = p[2] - eye[2];
       const depth = Math.max(1e-6, vx * forward[0] + vy * forward[1] + vz * forward[2]);

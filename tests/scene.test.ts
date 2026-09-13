@@ -191,3 +191,29 @@ describe("a move above a joint", () => {
     expect(buildHierarchy(turned.objects, { cellSize: 0.05, texture: 0 }).notes.join()).toMatch(/joint "helm" sits under a rotation/);
   });
 });
+
+describe("placed sets inside an object", () => {
+  it("keep their per-copy nodes when joined to other parts with +, and focus can frame one copy", async () => {
+    const { buildHierarchy } = await import("../src/export/hierarchy.js");
+    const { evaluate } = await import("../src/lang/interpreter.js");
+    const { parse } = await import("../src/lang/parser.js");
+    const src = "pawn = cylinder(0.2, 0.5) | move(0, 0.25, 0)\npawns = place(pawn, [-1,0,0,0, 0,0,0,0, 1,0,0,0])\nboard = box(4, 0.2, 4) | move(0, -0.1, 0)\narmy = board + pawns\nshow army";
+    const ev = evaluate(parse(src));
+    const { isShape3 } = await import("../src/lang/values.js");
+    const names = new Map<import("../src/sdf/types.js").Shape3, string>();
+    for (const st of ev.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
+    const h = buildHierarchy(ev.objects, { cellSize: 0.05, texture: 0, names });
+    const root = h.roots[0];
+    const set = root.children.find((c) => c.name === "pawns")!;
+    expect(set).toBeDefined();
+    expect(set.children.map((c) => c.name)).toEqual(["pawns_1", "pawns_2", "pawns_3"]);
+    expect(set.children[2].translation[0]).toBe(1);
+    // The board's own mesh is the board alone: nothing near a pawn's top.
+    const own = h.meshes[root.mesh];
+    let maxY = -Infinity;
+    for (let i = 1; i < own.positions.length; i += 3) maxY = Math.max(maxY, own.positions[i]);
+    expect(maxY).toBeLessThan(0.1);
+    // One mesh for the three copies.
+    expect(new Set(set.children.map((c) => c.mesh)).size).toBe(1);
+  });
+});

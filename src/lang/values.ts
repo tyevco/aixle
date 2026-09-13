@@ -8,6 +8,8 @@ export interface UserFn {
   name: string;
   params: { name: string; default?: Expr }[];
   body: Expr;
+  /** The top-level scope of the program or library that defined it, so a library's def sees its own helpers, not the caller's names. Opaque here; the interpreter owns it. */
+  closure?: unknown;
 }
 
 export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn | Curve;

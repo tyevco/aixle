@@ -151,7 +151,7 @@ const frac = (v: number): number => v - Math.floor(v);
 /**
  * The surface colour of `m` at a point in the painted part's frame. The
  * pattern's own frame has its axis along y: stripes are bands stacked
- * along it, wood rings go round it, brick courses and tile rows are
+ * along it, wood is boards laid across it with the grain along it, brick courses and tile rows are
  * perpendicular to it. `axis` swaps world x or z into that role.
  */
 export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
@@ -168,12 +168,23 @@ export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
     case "stripes":
       return Math.floor(y / s) & 1 ? m.color2 : m.color;
     case "wood": {
-      // Growth rings around the part's y axis, wobbled by noise; fine grain along y.
-      const r = Math.sqrt(x * x + z * z);
-      const wobble = noise3(x * 0.7, y * 0.15, z * 0.7, m.seed) * 1.6;
-      const ring = frac(r / s + wobble);
-      const grain = noise3(x * 6, y * 0.6, z * 6, m.seed + 7) * 0.25;
-      const t = Math.min(1, Math.pow(ring, 2.2) + grain);
+      // Flat-sawn boards side by side across x, their grain running along y (and along a horizontal face): straight
+      // lines a scale apart that drift, each board with its own figure and a dark seam at its edge. Rings round the
+      // axis before this: a top read as a bullseye and every face as bands, when most wooden things are planks
+      // (measured on the dining table and the workshop bench). The lines lean a little through the thickness (z)
+      // so an edge face shows grain too, not one flat colour.
+      const bw = s * 2.5;
+      const board = Math.floor(x / bw);
+      const bx = x - board * bw;
+      const figure = white3(board, 0, 0, m.seed) * 7;
+      const lean = 0.25 + (white3(board, 1, 0, m.seed) - 0.5) * 0.1;
+      const drift = (noise3(x / s * 0.35, y / s * 0.09, z / s * 0.35, m.seed + board) - 0.5) * 1.8;
+      const g = frac((bx + z * lean) / s + figure + drift);
+      // Late wood is a thin dark line in a wide light band, softened so it does not read as a stripe.
+      const band = Math.pow(1 - Math.abs(g - 0.5) * 2, 4);
+      const fleck = (noise3(x / s * 7, y / s * 0.9, z / s * 7, m.seed + 7) - 0.5) * 0.3;
+      const seam = Math.min(bx, bw - bx) < s * 0.1 ? 0.5 : 0;
+      const t = Math.max(0, Math.min(1, band * 0.75 + 0.1 + fleck + seam));
       return lerp3(m.color, m.color2, t);
     }
     case "marble": {

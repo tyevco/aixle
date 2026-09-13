@@ -36,6 +36,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 5 | Treehouse scene | [`round-5/treehouse.aix`](round-5/treehouse.aix) | [report](round-5/treehouse.report.md) | four objects, one piece, in 11 renders; open edges blamed on a branch's parent and zero-volume voids called cavities, both fixed |
 | 5 | Bicycle | [`round-5/bicycle.aix`](round-5/bicycle.aix) | [report](round-5/bicycle.report.md) | 76 steps of tubes between named points, a raked steering pose; the watertight row pointed inside a hub and the raked axis needed an Euler triple from a script, both fixed |
 | 5 | Sailing dinghy | [`round-5/sailboat.aix`](round-5/sailboat.aix) | [report](round-5/sailboat.report.md) | lofted hull, bellied sails, six rigging lines fitting to fitting by anchors; a white sail read as absent for nine renders and the loft doc was wrong, both fixed |
+| 6 | Chess set | [`round-6/chess.aix`](round-6/chess.aix) | [report](round-6/chess.report.md) | thirty-two pieces from the agent's own library in 16 renders; placed copies lost their nodes under `+` and a scene's report judged the fused union, both fixed |
+| 6 | Footbridge | [`round-6/footbridge.aix`](round-6/footbridge.aix) | [report](round-6/footbridge.report.md) | two Warren trusses with bolted gussets, watertight, in ten renders; the beauty camera left a diagonal model small and a re-import's plank edge lay on a sample plane, both fixed |
+| 6 | Café terrace | [`round-6/terrace.aix`](round-6/terrace.aix) | [report](round-6/terrace.report.md) | a terrace with the shipped plants, one piece, in 15 renders; open edges came with a where but no why (equal-radius crossings, a curve bent tighter than its tube), now said at the step or in the guide |
+| 6 | Playground | [`round-6/playground.aix`](round-6/playground.aix) | [report](round-6/playground.report.md) | seven objects and two rigs from the shipped libraries in 13 renders; the shipped chain was never watertight and a bench's slats under the scene's cell drew no warning, both fixed |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -82,6 +86,22 @@ not miss them. The rest of what they found was the tool's, answered
 below. The dinghy's `sailboat_probe_A.aix` to `_G.aix` were whole
 copies of the model at different grids and are not kept; its named
 probes are.
+
+Round 6 was four new subjects (a chess set, a footbridge, a café
+terrace, a playground) with `use` and the three shipped libraries
+available, to measure whether fresh agents reach for libraries. Three
+of four did: the chess set wrote its own piece library and used it, the
+terrace took its plants from `std/plants`, the playground its bench, bin
+and chain from `std/furniture` and `std/hardware`; the footbridge used
+none and did not miss them. What the libraries cost was the round's
+finding: a shipped chain whose hooked links touched tangentially and was
+never watertight, a bench whose slats were thinner than the scene's
+cell with no warning, a bush twice the size its comment said. A
+check-time contact audit (two faces within a cell of each other, a cap
+through a face) was tried from the steps' boxes and dropped: it fired on
+nearly every model. The chess agent's export-node probe is kept as
+`chess_nodes_probe.aix` (the report calls it `chess_probe_nodes.aix`)
+so the render set skips it like the other probes.
 
 ## What each round changed
 
@@ -169,6 +189,27 @@ always was); docs for decal order, wrap and bend landing points, tubes
 meeting at a point, the watertight thickness, `ground()` in a scene, a
 tapered smoothed tube's joins, and the key light not reaching an
 interior.
+
+**Round 6** (new subjects, libraries available): a placed set keeps
+its per-copy nodes under `+`, inside a joint and as an object, and can
+be hidden; a scene's report judges each object on its own, with
+`--focus name_3` for one copy; a cut that removes almost nothing warns;
+the beauty camera and the perspective views fit the model's points
+rather than its box; the sample lattice starts off the model's box so a
+round coordinate misses the sample planes; the thin warning names the
+thickness that clears the cell; a box's thinnest side and a cylinder's
+diameter or height carry into any union, so a library part's slats and
+rods are judged against the scene's cell; the std chain rebuilt as
+square-wire links that overlap, with its length per link in its
+comment, and the plants the size their comments say; open edges placed
+exposed-first and said to be in one step "alone" or "twice, as 'a'
+and 'b'" rather than "with itself", with every cluster in
+`report.json`; a `curve()` bent tighter than its tube says so at the
+step; the quick pass drops an import sampled finer than its cell rather
+than judging its pieces; `aixle doc lib.aix` for a library; docs for
+the STL and the report following the pose, the converse of the contact
+rule, equal-radius crossings, a tube ending inside a thin plate, the
+shallow wedge, and what a re-import costs.
 
 ## Running a round
 

@@ -99,6 +99,7 @@ tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, ta
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # point lists
 bezier(points)  curve(points)  tube(r, c)  sweep(profile, c)  text("Ab", 1, face="serif")  # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
+use "std/furniture" as f   f.chair(seat=0.45)   use "parts/mine.aix"   mine.bracket(0.2)   # libraries of defs
 anchor(part, "tip", x, y, z)   at(part, "tip")   lamp | attach("bottom", arm, "tip")     # placement by name
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
@@ -108,7 +109,7 @@ decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stri
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
   | round(r) | shell(t) | twist(deg) | bend(deg) | displace(amp, size)
-  | array(n, dx, dy, dz) | grid(nx, nz, dx, dz) | ring(n, radius)
+  | array(n, dx, dy, dz) | grid(nx, nz, dx, dz) | ring(n, radius, axis="y")
   | ground() | center() | paint("wood")
 ```
 

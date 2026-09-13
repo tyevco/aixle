@@ -316,3 +316,45 @@ describe("a transform on the right of a union", () => {
     expect(run("a = box(1)\nb = box(1)\nm = a + (b | move(0, 2, 0))").warnings).toEqual([]);
   });
 });
+
+describe("use: libraries", () => {
+  const libs: Record<string, string> = {
+    "parts/hardware.aix": [
+      "zinc = material(\"#b8bcc2\", metal=0.9)",
+      "head_h = 0.07",
+      "def head(r) = prism(6, r * 1.15, head_h)",
+      "def bolt(r=0.1, len=0.6) = (head(r) + (cylinder(r / 2, len) | move(0, -len / 2, 0))) | paint(zinc)",
+      "plate = bolt()",
+      "show plate",
+    ].join("\n"),
+    "parts/nested.aix": 'use "hardware.aix" as hw\ndef two() = hw.bolt() + (hw.bolt() | move(1, 0, 0))',
+  };
+  const resolve = (path: string, from?: string) => {
+    const key = from && !path.startsWith("std/") ? `${from.replace(/[^/]*$/, "")}${path}` : path;
+    const source = libs[key];
+    if (!source) throw new Error(`cannot read ${key}`);
+    return { source, file: key };
+  };
+  const ev = (src: string) => evaluate(parse(src), { resolveModule: resolve });
+  it("brings a library's defs and constants under a prefix, keeps its shapes to itself, and scopes its defs to its own names", () => {
+    const e = ev('use "parts/hardware.aix"\nb = hardware.bolt(0.1, 0.5)\nm = b | paint(hardware.zinc)\nh = hardware.head_h');
+    expect(e.warnings).toEqual([]);
+    expect(e.modules).toEqual([{ prefix: "hardware", path: "parts/hardware.aix", names: ["zinc", "head_h", "head", "bolt"] }]);
+    // prism is centred on y, so the head reaches half its height above the origin.
+    expect((e.steps.find((s) => s.name === "b")!.value as Shape3).bounds.max[1]).toBeCloseTo(0.035, 6);
+    expect(e.steps.find((s) => s.name === "h")!.value).toBe(0.07);
+    // The library's plate is not a step of the program, and head_h inside bolt() came from the library, not from here.
+    expect(e.steps.map((s) => s.name)).not.toContain("plate");
+    const shadowed = ev('head_h = 5\nuse "parts/hardware.aix"\nb = hardware.bolt()');
+    expect((shadowed.steps.find((s) => s.name === "b")!.value as Shape3).bounds.max[1]).toBeCloseTo(0.035, 6);
+  });
+  it("takes an alias, resolves a library's own uses beside it, and names what is missing", () => {
+    const e = ev('use "parts/nested.aix" as n\nm = n.two()');
+    expect(e.warnings).toEqual([]);
+    expect((e.steps.find((s) => s.name === "m")!.value as Shape3).bounds.max[0]).toBeCloseTo(1.115, 3);
+    expect(() => ev('use "parts/hardware.aix"\nm = hardware.nut()')).toThrow(/has no 'nut'; it has zinc, head_h, head, bolt/);
+    expect(() => ev('m = hardware.bolt()')).toThrow(/'hardware' is not a used library/);
+    expect(() => ev('use "parts/missing.aix"')).toThrow(/cannot read parts\/missing.aix/);
+    expect(() => ev('use "parts/hardware.aix"\nuse "parts/nested.aix" as hardware')).toThrow(/already a used library/);
+  });
+});

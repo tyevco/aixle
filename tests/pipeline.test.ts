@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds } from "../src/pipeline.js";
+import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -143,8 +143,8 @@ describe("rigs, features and overhangs", () => {
     const ev = check('cup = shell(cylinder(1, 2), 0.01) - (cylinder(0.8, 1) | move(0, 1.5, 0))\nlabel = extrude(text("Hi", 0.5, weight=0.02), 0.2) | rotate(x=90) | move(0, 1, 1)\nm = cup + label');
     const { grid, cellSize } = cellFor(ev);
     const w = thinWarnings(ev, cellSize, grid);
-    expect(w.join("\n")).toMatch(/'cup' \(line 1\) has a wall, tube \(at its thin end, if tapered\) or stroke only 0.01 thick/);
-    expect(w.join("\n")).toMatch(/'label' \(line 2\) has a wall, tube \(at its thin end, if tapered\) or stroke only 0.02 thick/);
+    expect(w.join("\n")).toMatch(/'cup' \(line 1\) has a part \(a wall, slat, rod, tube at its thin end, or stroke\) only 0.01 thick/);
+    expect(w.join("\n")).toMatch(/'label' \(line 2\) has a part \(a wall, slat, rod, tube at its thin end, or stroke\) only 0.02 thick/);
     // 'm' carries both features but introduced neither, so it is not reported again.
     expect(w.filter((x) => x.startsWith("'m'"))).toHaveLength(0);
     expect(thinWarnings(check("cup = shell(cylinder(1, 2), 0.2)"), cellSize, grid)).toHaveLength(0);
@@ -305,6 +305,45 @@ describe("printing", () => {
       expect(r.evaluation.output!.dist(0, 0, 0)).toBeGreaterThan(0.5);
       expect(r.evaluation.output!.dist(0.9, 0.5, 0)).toBeLessThan(0);
       expect(r.evaluation.output!.dist(0, -0.9, 0)).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("round-6 findings", () => {
+  it("warns about a cut that removes almost nothing, but not about a trim under the floor", () => {
+    const tangent = check("mitre = ellipsoid(0.08, 0.12, 0.08) | move(0, 0.4, 0)\nslot = box(0.3, 0.06, 0.014) | rotate(x=-35) | move(0, 0.36, 0.1)\nbishop = mitre - slot");
+    expect(cutWarnings(tangent, 0.0125).join()).toMatch(/'bishop' \(line 3\): the cut removes nothing the samples could find/);
+    const slot = check("mitre = ellipsoid(0.08, 0.12, 0.08) | move(0, 0.4, 0)\nslot = box(0.3, 0.06, 0.03) | rotate(x=-35) | move(0, 0.36, 0.03)\nbishop = mitre - slot");
+    expect(cutWarnings(slot, 0.0125)).toEqual([]);
+    const trim = check("trunk = sphere(1) | displace(0.1, 0.5)\nbelow = box(4, 1, 4) | move(0, -1.4, 0)\ntree = trunk - below");
+    expect(cutWarnings(trim, 0.03)).toEqual([]);
+  });
+  it("a slat or a rod inside a union is judged against the cell, and a curve bent tighter than its tube is noted", () => {
+    const bench = check("bench = (box(1, 0.03, 0.1) | move(0, 0.5, 0)) + box(0.1, 0.5, 0.1)");
+    expect(thinWarnings(bench, 0.04, 128).join()).toMatch(/'bench' \(line 1\) has a part \(a wall, slat, rod, tube at its thin end, or stroke\) only 0.03 thick/);
+    const posts = check("posts = box(0.1, 0.5, 0.1) + (cylinder(0.05, 0.5) | move(0.3, 0, 0))");
+    expect(thinWarnings(posts, 0.04, 128)).toEqual([]);
+    const hoop = check("hoop = tube(0.03, curve([0,0,0, 0.1,0,0, 0.1,0.1,0, 0,0.1,0]))");
+    expect(thinWarnings(hoop, 0.01, 128).join()).toMatch(/'hoop' \(line 1\): its curve bends to a radius of [\d.]+, tighter than the tube's 0.03/);
+  });
+  it("open edges in one step are 'alone', or 'twice' when two placements of it cross", () => {
+    const cluster = (at: [number, number, number], count: number) => ({ centre: at, at, box: { min: [at[0] - 0.01, at[1] - 0.1, at[2] - 0.1] as [number, number, number], max: [at[0] + 0.01, at[1] + 0.1, at[2] + 0.1] as [number, number, number] }, count });
+    const w = (at: [number, number, number]) => ({ ok: false, holes: 4, nonManifold: 0, note: "no: 4 open edges.", where: cluster(at, 4).box, clusters: [cluster(at, 4)] });
+    const rod = check("rod = cylinder(0.1, 2)");
+    expect(watertightNote(w([0.1, 0, 0]), rod, 0.02)).toMatch(/4 at \(0.1, 0, 0\) in 'rod' alone/);
+    const boards = check("panel = box(1, 0.1, 1)\na = panel | move(0, 0.02, 0)\nb = panel | rotate(x=90)\nboth = a + b");
+    const edges: { at: [number, number, number]; count: number; steps: string[] }[] = [];
+    expect(watertightNote(w([0.5, 0, 0]), boards, 0.02, edges)).toMatch(/in 'panel' twice, as 'a' and 'b'/);
+    expect(edges).toEqual([{ at: [0.5, 0, 0], count: 4, steps: ["panel"] }]);
+  });
+  it("a scene's report judges each object on its own", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("board = box(2, 0.2, 2) | move(0, -0.1, 0)\npawn = cylinder(0.15, 0.4) | move(0, 0.2, 0)\npawns = place(pawn, [-0.5,0,0,0, 0.5,0,0,0])\nscene board, pawns", "set.aix", dir, { grid: 40, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false });
+      expect(r.report).toMatch(/\| board \| yes \| 1 \| yes/);
+      expect(r.report).toMatch(/\| pawns \(each of 2 copies\) \| yes \| 1 \| yes/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -1,0 +1,4 @@
+# Probe: re-import the exported footbridge GLB and compare it with the source.
+set grid 400
+back = import("../out/footbridge/model.glb", resolution=400)
+show back

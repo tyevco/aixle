@@ -1,0 +1,6 @@
+# Probe: re-import the terrace GLB and compare it with the program's own output.
+# The scene is 8 units across, so resolution=320 gives a 0.025 sampling cell,
+# the render's own; anything thinner than ~1.2 of that is gone.
+set grid 320
+back = import("../out/terrace/model.glb", resolution=320)
+show back

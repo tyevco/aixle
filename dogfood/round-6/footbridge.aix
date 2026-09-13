@@ -1,0 +1,96 @@
+# A steel truss footbridge over a stream: two Warren trusses of box
+# members with bolted gusset plates at every node, a plank deck on cross
+# beams, handrails on the truss verticals, concrete abutments on a small
+# grassy base with the stream cut through it, and a lamp post at one end.
+# Units are metres. The span runs along x; the front truss is on +z.
+set grid 400
+set size 768
+set azimuth 30
+set elevation 20
+set zoom 2
+
+# --- dimensions -------------------------------------------------------
+span = 8
+bay = span / 6
+rise = 1.2                      # bottom chord centre to top chord centre
+m = 0.12                        # chord and vertical cross-section
+zt = 0.85                       # truss plane (chord centre) from the middle
+yb = 0.66                       # bottom chord centre
+yt = yb + rise                  # top chord centre
+diag_len = sqrt((bay / 2) ^ 2 + rise ^ 2)
+diag_ang = atan(bay / 2, rise)  # from vertical
+
+# --- materials --------------------------------------------------------
+painted = material("#2f6b4f", metal=0.25, rough=0.45)
+galv = material("#b4b9bf", "speckle", "#8f959b", scale=0.04, metal=0.75, rough=0.5)
+timber = material("oak", scale=0.12, axis="z")
+
+# --- one truss, built in the plane z = 0 ------------------------------
+bottom_chord = box(span, m, m) | move(0, yb, 0)
+top_chord = box(span, m, m) | move(0, yt, 0)
+diag_up = box(0.1, diag_len, m) | rotate(z=-diag_ang) | move(-span / 2 + bay / 4, yb + rise / 2, 0)
+diag_down = box(0.1, diag_len, m) | rotate(z=diag_ang) | move(-span / 2 + 3 * bay / 4, yb + rise / 2, 0)
+diagonals = array(diag_up, 6, bay) + array(diag_down, 6, bay)
+vertical = box(0.08, rise, m) | move(-span / 2, yb + rise / 2, 0)
+verticals = array(vertical, 7, bay)
+frame = (bottom_chord + top_chord + diagonals + verticals) | paint(painted)
+
+# gusset plates: a trapezoid hugging the chord and the two diagonals,
+# on both faces of the truss, with a ring of eight hex bolt heads
+plate_t = 0.05
+plate_lo = extrude(polygon(-0.27, -0.11, 0.27, -0.11, 0.22, 0.31, -0.22, 0.31) | round(0.03), plate_t, "z")
+plate_hi = plate_lo | flip("y")
+bolt = prism(6, 0.035, 0.05) | rotate(x=90) | move(0, 0, 0.015)
+bolts_lo = ring(bolt, 8, 0.135, axis="z") | move(0, 0.1, plate_t / 2 - 0.01)
+bolts_hi = ring(bolt, 8, 0.135, axis="z") | move(0, -0.1, plate_t / 2 - 0.01)
+gusset_lo = plate_lo + bolts_lo
+gusset_hi = plate_hi + bolts_hi
+face_z = m / 2 + plate_t / 2 - 0.02        # plate centre, sunk 0.02 into the member
+gussets_outer = array(gusset_lo | move(-span / 2, yb, face_z), 7, bay)
+  + array(gusset_hi | move(-span / 2 + bay / 2, yt, face_z), 6, bay)
+# inside, the bottom-node plates are behind the deck, so they carry no bolts
+gussets_inner = array(plate_lo | move(-span / 2, yb, -face_z), 7, bay)
+  + array(gusset_hi | flip("z") | move(-span / 2 + bay / 2, yt, -face_z), 6, bay)
+gussets = (gussets_outer + gussets_inner) | paint(galv)
+
+# handrail: a round rail on short brackets inboard of the verticals
+rail_y = yb + 0.9
+bracket = box(0.07, 0.06, 0.2) | move(-span / 2, rail_y, -0.13)
+rail = tube(0.03, [-span / 2 - 0.05, rail_y, -0.2, span / 2 + 0.05, rail_y, -0.2], cap="flat")
+handrail = (rail + array(bracket, 7, bay)) | paint(painted)
+
+truss = (frame + gussets + handrail) | move(0, 0, zt)
+trusses = mirror(truss, "z")
+
+# --- deck -------------------------------------------------------------
+cross_beam = box(0.1, m, 2 * zt + 0.12) | move(-span / 2, yb, 0) | paint(painted)
+cross_beams = array(cross_beam, 7, bay)
+plank = box(0.2, 0.05, 2 * zt + 0.02) | move(0, yb + m / 2 - 0.005, 0) | paint(timber)
+deck = array(plank | move(-3.84, 0, 0), 33, 0.24)
+
+# --- abutments and the ground -----------------------------------------
+abut_x = span / 2 + 0.35
+abutment = box(1.3, 0.45, 2.7, round=0.02) | move(0, 0.40, 0) | paint("concrete")
+abutments = mirror(abutment | move(abut_x, 0, 0), "x")
+bank = box(span + 2.6, 0.25, 3.4) | move(0, 0.125, 0) | paint("grass")
+channel = box(span - 1.4, 0.3, 4) | move(0, 0.25, 0)
+water = box(span - 1.4, 0.1, 3.4) | move(0, 0.12, 0) | paint("water")
+ground_base = (bank - channel) + water
+
+# --- lamp post at the +x end -----------------------------------------
+lamp_x = abut_x
+lamp_z = zt + 0.32
+post = cylinder(0.05, 2.2) | move(0, 0.6 + 1.1, 0)
+foot = cylinder(0.12, 0.08) | move(0, 0.64, 0)
+collar = cylinder(0.07, 0.1) | move(0, 2.7, 0)
+hood = cone(0.22, 0.05, 0.2) | move(0, 3.0, 0)
+finial = sphere(0.04) | move(0, 3.1, 0)
+lamp_metal = (post + foot + collar + hood + finial) | paint(material("#2a2d30", metal=0.4, rough=0.5))
+bulb = sphere(0.13) | move(0, 2.8, 0) | paint(material("#ffe2a8", glow=1.2))
+lamp = (lamp_metal + bulb) | move(lamp_x, 0, lamp_z)
+
+# one gusset named in place, so --focus gusset_one can frame a close-up
+gusset_one = gusset_lo | move(-span / 2 + bay, yb, zt + face_z) | paint(galv)
+
+bridge = trusses + cross_beams + deck + abutments + ground_base + lamp + gusset_one
+show bridge

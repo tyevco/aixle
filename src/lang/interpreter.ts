@@ -6,6 +6,7 @@
  */
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, toMaterial } from "./builtins.js";
+import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
@@ -42,8 +43,24 @@ export interface Settings {
 export interface EvalOptions {
   /** Resolve `import("file")` to a shape; the pipeline reads the file. Absent means imports are an error. */
   resolveImport?: (path: string, opts: { resolution: number }) => Shape3;
+  /**
+   * Resolve `use "path"` to a library's source: `from` is the file of the program doing the using (undefined for
+   * the main program), so a library's own uses resolve beside it. Returns the source and an id for the file, which
+   * is passed back as `from` for that library's uses. Absent means libraries cannot be used here.
+   */
+  resolveModule?: (path: string, from?: string) => { source: string; file: string };
+  /** The file this program was read from, passed to resolveModule as `from`. */
+  moduleFrom?: string;
   /** Angles per joint name for this evaluation: a pose. Joints not named are at rest. */
   jointAngles?: Record<string, [number, number, number]>;
+}
+
+/** A library brought in by `use`: what a program can call from it. */
+export interface UsedModule {
+  prefix: string;
+  path: string;
+  /** The exported names: defs and constants (materials, numbers, strings, lists); a library's shapes are its own. */
+  names: string[];
 }
 
 export interface SceneObject {
@@ -79,6 +96,10 @@ export interface Evaluation {
   /** Names the output depends on, transitively (itself included). */
   used: Set<string>;
   steps: Step[];
+  /** The libraries this program uses, in order. */
+  modules: UsedModule[];
+  /** The program's own top-level defs, in order: what it exports when used as a library. */
+  defs: UserFn[];
   settings: Settings;
   warnings: string[];
 }
@@ -88,7 +109,12 @@ const MAX_DEPTH = 64;
 
 class Scope {
   private vars = new Map<string, Value>();
+  /** On a root scope: the libraries its program used, so a library's defs reach the library's own uses. */
+  modules?: Map<string, { path: string; exports: Map<string, Value> }>;
   constructor(private readonly parent?: Scope) {}
+  root(): Scope {
+    return this.parent ? this.parent.root() : this;
+  }
   get(name: string): Value | undefined {
     return this.vars.has(name) ? this.vars.get(name) : this.parent?.get(name);
   }
@@ -118,6 +144,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let lastShape: { name: string } | undefined;
   let depth = 0;
   let loops = 0;
+  /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
+  const modules = new Map<string, { path: string; exports: Map<string, Value> }>();
+  global.modules = modules;
+  const moduleList: UsedModule[] = [];
   /** Names read while evaluating the current top-level statement. */
   let reads: Set<string> | undefined;
 
@@ -145,6 +175,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return target[k];
       }
       case "ident": {
+        if (e.name.includes(".")) return fromModule(e.name, e.line, scope);
         const v = scope.get(e.name);
         if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
         reads?.add(e.name);
@@ -288,7 +319,30 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, a, axis);
   }
 
+  /** `prefix.name` from a used library: its def or constant, with the message naming what the library has. */
+  function fromModule(dotted: string, line: number, scope: Scope): Value {
+    const dot = dotted.indexOf(".");
+    const prefix = dotted.slice(0, dot), name = dotted.slice(dot + 1);
+    // Resolved against the libraries of the program the code was written in: a library's def, called from a
+    // program that used it under another name, still finds the library's own uses.
+    const table = scope.root().modules ?? modules;
+    const mod = table.get(prefix);
+    if (!mod) {
+      const known = [...table.keys()];
+      throw new RuntimeError(`'${prefix}' is not a used library${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${prefix}.aix" or use "std/${prefix}" first`, line);
+    }
+    const v = mod.exports.get(name);
+    if (v === undefined) throw new RuntimeError(`'${mod.path}' has no '${name}'; it has ${[...mod.exports.keys()].join(", ") || "nothing exported"}`, line);
+    reads?.add(dotted);
+    return v;
+  }
+
   function call(callee: string, args: Arg[], scope: Scope, line: number): Value {
+    if (callee.includes(".")) {
+      const v = fromModule(callee, line, scope);
+      if (!isUserFn(v)) throw new RuntimeError(`'${callee}' is a ${typeName(v)}, not a function`, line);
+      return callUser(v, args, scope, line);
+    }
     if (callee === "import") return callImport(args, scope, line);
     if (callee === "joint") return callJoint(args, scope, line);
     if (callee === "pose") return callPose(args, scope, line);
@@ -312,7 +366,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   function callUser(fn: UserFn, args: Arg[], scope: Scope, line: number): Value {
     if (depth >= MAX_DEPTH) throw new RuntimeError(`'${fn.name}' recursed more than ${MAX_DEPTH} deep`, line);
-    const local = new Scope(global);
+    const local = new Scope((fn.closure as Scope | undefined) ?? global);
     const positional = args.filter((a) => !a.name);
     const named = args.filter((a) => a.name);
     if (positional.length > fn.params.length)
@@ -467,8 +521,37 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "def":
-        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body });
+        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, closure: global });
         return;
+      case "use": {
+        if (!topLevel) throw new RuntimeError(`use belongs at the top of the program, not inside a loop`, stmt.line);
+        if (!options.resolveModule) throw new RuntimeError(`use "${stmt.path}": libraries cannot be used here`, stmt.line);
+        const prefix = stmt.alias ?? stmt.path.replace(/\.aix$/, "").replace(/^.*\//, "");
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(prefix)) throw new RuntimeError(`use "${stmt.path}": '${prefix}' is not a name; give the library one with as`, stmt.line);
+        if (modules.has(prefix)) throw new RuntimeError(`use "${stmt.path}": '${prefix}' is already a used library; give this one another name with as`, stmt.line);
+        if (BUILTIN_MAP.has(prefix) || global.has(prefix)) warnings.push(`line ${stmt.line}: library '${prefix}' has the same name as a ${BUILTIN_MAP.has(prefix) ? "builtin" : "step"}; ${prefix}.name still reaches the library, but read it as such`);
+        let resolved: { source: string; file: string };
+        try {
+          resolved = options.resolveModule(stmt.path, options.moduleFrom);
+        } catch (err) {
+          throw new RuntimeError(`use "${stmt.path}": ${(err as Error).message}`, stmt.line);
+        }
+        // The library runs on its own, in its own scope, with its own uses resolved beside it; its defs keep that
+        // scope as their closure, so a library def sees its helpers and constants and nothing of the caller's.
+        let lib: Evaluation;
+        try {
+          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointAngles: options.jointAngles });
+        } catch (err) {
+          throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
+        }
+        for (const [name, v] of Object.entries(options.jointAngles ?? {})) CURRENT_ANGLES.set(name, v);
+        const exports = new Map<string, Value>();
+        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
+        for (const d of lib.defs) exports.set(d.name, d);
+        modules.set(prefix, { path: stmt.path, exports });
+        moduleList.push({ prefix, path: stmt.path, names: [...exports.keys()] });
+        return;
+      }
       case "for": {
         const iterable = evalExpr(stmt.iterable, scope);
         if (!Array.isArray(iterable)) throw new RuntimeError(`'for' needs a list (use range(n)), got a ${typeName(iterable)}`, stmt.line);
@@ -561,7 +644,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (isShape3(st.value) && !used.has(st.name) && output)
       warnings.push(`'${st.name}' (line ${st.line}) is not part of the output; add it to the model or remove it`);
 
-  return { output, outputName, objects, poses, animations, used, steps: stepList, settings, warnings };
+  const defs: UserFn[] = [];
+  for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
+  return { output, outputName, objects, poses, animations, used, steps: stepList, settings, warnings, modules: moduleList, defs };
 }
 
 export function signature(name: string, ov: Overload): string {

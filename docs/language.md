@@ -263,11 +263,52 @@ longest side to that many units. Closed meshes work; an open mesh has no
 inside, and `check` says so. Positions and triangles only: the mesh's
 materials are not read, and `resolution` is the sampling of the import,
 separate from the render grid. Sampling a large mesh takes tens of
-seconds, and `check` and `render` each do it. The import's own detail is limited by its
+seconds, and minutes for a scene at resolution 300, and `check` and
+`render` each do it. A mesh of overlapping closed shells (the tool's own
+GLB of a scene, where objects are sunk into each other) imports as one
+solid: the sign is the winding count of crossings, not their parity. The import's own detail is limited by its
 resolution: anything in the mesh thinner than about 1.2 of its sampling
 cell is gone whatever the render grid, and `check` warns with the
 `resolution=` that matches the render's cell when the import's is
 coarser, so a fine mesh wants `resolution=160` or so.
+
+## Libraries
+
+`use "parts/hardware.aix"` brings a library's defs and constants in
+under a prefix, `hardware.hex_bolt(0.1, 0.6)`; `use "std/furniture" as
+f` picks the name, and `std/` is the set shipped with the tool:
+`std/hardware` (bolts, nuts, washers, screws, chains, handles),
+`std/furniture` (a table, a chair, a stool, a bench, a shelf) and
+`std/plants` (a potted plant, a bush, a tree, grass). A path is relative
+to the program using it, `.aix` may be left off, and `aixle doc
+std/furniture.aix` prints what a library offers: each def with its
+parameters and defaults and the comment above it. Every shipped part is
+built at the origin standing on y = 0, facing +z, so it is placed with
+`move` or `attach` like anything else:
+
+```
+use "std/furniture" as f
+use "std/hardware"
+desk = f.table(1.6, 0.8, 0.75)
+bolt = hardware.hex_bolt(0.05, 0.3)
+corner = bolt | move(0.7, 0.75, 0.3)
+model = desk + corner + (f.chair() | move(0, 0, 0.7))
+```
+
+A library runs on its own: its defs see the library's own helpers and
+constants (and its own `use`s), never the caller's names, so a library
+cannot be broken by what a program calls things; its shapes stay its
+own (a library's `show` is its preview when rendered by itself, and
+costs the caller nothing); its materials and numbers are exported with
+its defs. To write one, put `def`s in a file with a comment line above
+each, a comment block at the top saying the conventions (where the
+origin is, which way is front, what the units are), and a `show` of a
+plate of every part so `aixle render` on the file is its test. `check`
+lists what a program uses and `explain` ends with it. A part's slats,
+rods and walls carry their thickness into the scene, so `check` warns
+when a used part has a member thinner than the scene's cell (a bench's
+0.03 slats under a 0.039 cell), at the step that placed it; the fix is
+the scene's grid, or a bigger part.
 
 ## Scenes, joints and poses
 
@@ -276,7 +317,14 @@ sheet shows them together, and the GLB has a node per object (the OBJ a
 group). `place(shape, [x,y,z,yaw, x,y,z,yaw, ...])` puts copies of a shape
 at each position and yaw (degrees about y; `fields=5` adds a scale per
 copy): the render is the union, the export is one mesh with a node per
-copy, so a forest costs one tree.
+copy, so a forest costs one tree. A placed set keeps its copies' nodes
+wherever it sits: joined to a board with `+`, inside a joint's part, or
+as a scene object of its own (round 6: joined by `+`, an army became one
+mesh). `--focus pawns_3` frames the third copy of a placed set on its
+own. A scene's report has, under Assembly, a row per object (a placed
+set once, for its base): watertight, pieces, stands, overhangs, since
+the rows above are for the fused union, in which thirty-two pieces
+resting on their board are one piece.
 
 `ground()` moves one shape, so in a `scene` it moves that object alone
 and the others stay where their numbers put them: ground the whole
@@ -301,7 +349,9 @@ animation on `anim_<name>.png`, and the GLB carries the joints as nodes
 with the animations as glTF channels, which the viewer page plays. `set
 pose reach` (or `--pose reach` on the command line) makes the sheet, the
 views, the slices and the beauty render show that pose, and `check --pose
-reach` prints every step's size in it; exports are always at rest. The
+reach` prints every step's size in it. The report and the STL describe
+the model as shown, posed if a pose is set; the GLB and the OBJ are
+always at rest, with the joints as nodes. The
 thumbnails on `poses.png` are meshed coarsely, so judge a pose that
 matters at full size with `set pose`.
 
@@ -366,7 +416,9 @@ the base material underneath, and a step used only as a region is not
 geometry, so it gets no thin-part warning and is never named as a loose
 piece. Patterns are laid out in the frame the part is painted in, along the
 material's `axis` (y unless given): `stripes` are bands stacked along it
-(`scale` wide), `wood` rings go round it with the grain along it, `brick`
+(`scale` wide), `wood` is boards laid side by side across it with the
+grain running along it (lines a `scale` apart that drift, boards two and
+a half scales wide with a dark seam between), `brick`
 courses and `tiles` rows lie across it, `checker` and `dots` are cubic.
 So stripes on a flat awning need either `material("red", "stripes",
 "cream", scale=0.5, axis="x")` or the sheet painted standing and then
@@ -376,8 +428,8 @@ laid down; a rotation after painting turns the pattern with the part.
 `"#40e0ff"`), or `material(color, pattern, color2, scale, metal, rough)`.
 A preset at another feature size is `material("granite", scale=0.4)`:
 start from the preset, change only what is given. Pattern sizes are in
-model units (the reference lists each preset's), so a 0.25-unit wood
-ring suits a table leg and a 20-unit floor wants `scale=2`.
+model units (the reference lists each preset's), so wood grain 0.25
+apart suits a table and a 20-unit floor wants `scale=2`.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
 tiles, dots. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 
@@ -408,7 +460,9 @@ box would touch the frame's edge and no further, so a zoom never crops
 in order and the last one wins where regions overlap; a region should
 reach a cell or two past the surface it means to paint, since a coarse
 mesh's vertices stray out of a region that ends exactly at the surface
-(measured: a cockpit floor read as antifouling on a quick sheet). A material with `glow=1` gives off its own light in every
+(measured: a cockpit floor read as antifouling on a quick sheet); it
+may reach into the solid as far as it likes, since only the surface is
+painted. A material with `glow=1` gives off its own light in every
 render, unshadowed: a flame, a lamp, a screen. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
@@ -477,19 +531,33 @@ or joins painted and unpainted parts; a program that both names a step
 floats free) or with slivers left by a cut, each named by the innermost
 step whose surface passes there, then its nearest named parent (open
 edges are placed at an edge that is on the model, with the steps whose
-surfaces meet there, or "with itself" when one step's surfaces cross,
-and a cluster of edges all on one plane is called out as a face lying
+surfaces meet there, exposed ones first; "in 'panel' twice, as 'a' and
+'b'" when two placements of one step cross, "alone" when no other part is
+within a cell, which is a crease of the step's own surface or the
+mesher's noise at a few edges; and a cluster of edges all on one plane is called out as a face lying
 exactly on a sample plane, which a nudge of a fraction of a cell cures);
 a named step transformed alone on the right of a `+` (`a + b | move(...)`
 moves b only, since `|` binds tighter; `(a + b) | move(...)` moves both,
-and `+ sphere(0.2) | move(...)` is the ordinary way to place one); a model
+and `+ sphere(0.2) | move(...)` is the ordinary way to place one); a cut
+that removes almost nothing, a slot tangent to the surface it was meant
+to mark (measured on a bishop's mitre), or a cutter whose box never
+reaches the shape; a model
 that would tip over, from its centre of mass and the footprint of its
 base; and, as a note, a model that does not rest on `y = 0`. Two parts
 count as joined when they overlap by about a cell in the field: parts
 that only touch (a barrel resting on a beam's top face, a box on a
 box) leave a seam that reads as an open edge or a second piece, so sink
 one into the other by a cell or two, or blend them with `union(k=)`,
-which also seals the void a tangency leaves. A focused render adds a
+which also seals the void a tangency leaves. The converse holds too: a
+part that reaches through a face by less than a cell (a tube's round
+cap ending a hair past a plate, a hex head whose corners sit just above
+a boss, a hub top just under a plank) or stops less than a cell short of
+it (a stringer passing a leg with a cell of gap) leaves the same seam,
+and no warning, since nothing there is thin: overlap by a cell or more,
+or clear by a cell or more. When the mesh is not watertight the report
+prints the three largest clusters of open edges, and `report.json`
+lists every one under `watertight.clusters` (its position, its edge
+count and the steps whose surfaces pass there). A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
@@ -507,6 +575,19 @@ under).
   a corner's radius. `check` prints bounds; the render's "Surface extent"
   row and `ground()` read the surface itself (rays from below), so they
   are not fooled.
+- The sampling lattice starts a fraction of a cell off the model's box,
+  so a face at a round coordinate (a plank's edge at x = 3.94, a base at
+  y = 0.15) rarely sits exactly on a sample plane, where the extractor
+  leaves open edges; a face that still does is called out in the
+  watertight row. The perspective views and the beauty render fit the
+  model's own points, so a long model on the diagonal fills its frame.
+- `--focus` on a placed set frames its first copy, in world orientation
+  (`--focus chairs_4` for another); a part that exists only through
+  `array`, `ring` or `mirror` cannot be focused on by itself (its step's box is the original, at the origin,
+  or the whole set); give one copy a name of its own next to the set, or
+  use `place()` for the copies and `--focus name_3`. A def called inline
+  (`plate = pawn() + rook()`) is a step with no name of its own: name
+  the parts you will want to focus on or see blamed.
 - The sheet, the views, the pose sheets and the animation strips draw
   glass (a material with `transmit`) on every other pixel, so what is
   behind it shows through a checker: a pendulum behind a glazed door is
@@ -530,7 +611,14 @@ under).
   a tip to a cell's width, as a real hand or blade is.
 - Two tubes meeting at one point (two shrouds at a masthead), or a line
   leaving a sheet at its corner, cross in a wedge thinner than any cell:
-  give them a fitting to meet in (a tang, a sphere, a boss).
+  give them a fitting to meet in (a tang, a sphere, a boss). The same
+  wedge appears wherever two surfaces meet at a shallow angle (a cone hub
+  under a canopy at 36 degrees) and where two tubes of equal radius cross
+  (a bar through a ring's centre line: tangent at the saddle); bury one
+  in the other by a cell, or give one a fitting. A tube ending inside a
+  plate thinner than two cells is a sliver either way: run it through.
+  A `curve()` bent to a radius tighter than its tube's crosses itself on
+  the inside of the bend, and `check` says so at the step.
 - `surface(shape, x, y, z)` slides to the nearest surface from the guess
   along the field, so a guess far from the face you mean can land on a
   nearer one (a keel rather than a bottom panel); guess within the part's

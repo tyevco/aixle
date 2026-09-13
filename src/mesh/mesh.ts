@@ -120,7 +120,9 @@ export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonMani
       b.mids.push(mid);
       buckets.set(key, b);
     }
-    for (const b of [...buckets.values()].sort((x, y) => y.count - x.count).slice(0, 3)) {
+    // Every bucket, fullest first: the report prints the top three and tallies all of them, and report.json
+    // carries the whole list (round 6: a tally of the top three left most edges unattributed).
+    for (const b of [...buckets.values()].sort((x, y) => y.count - x.count)) {
       const centre: Vec3 = [b.sum[0] / b.count, b.sum[1] / b.count, b.sum[2] / b.count];
       // The mean of a ring of edges round a hub is inside the hub (measured: a bicycle's report pointed there);
       // the edge nearest the mean is on the surface, and the box says whether the edges lie along a line or a plane.

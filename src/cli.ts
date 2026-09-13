@@ -8,14 +8,40 @@ import { anchorsOf, hasLooseBounds, placedShape, surfaceBottom, surfaceExtent } 
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { cellFor, check, diff, cutWarnings, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
 import { isShape2, isShape3, typeName } from "./lang/values.js";
+import { parse } from "./lang/parser.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
 const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
+
+/** A library's Markdown: its leading comment, then every top-level def with its signature and the comment above it. */
+function libraryMarkdown(file: string): string {
+  const source = readFileSync(file, "utf8");
+  const lines = source.split(/\r?\n/);
+  const program = parse(source);
+  const out: string[] = [`# ${basename(file, ".aix")}`, ""];
+  // The header: comment lines at the top of the file, up to the first blank line.
+  const head: string[] = [];
+  for (const l of lines) { if (/^\s*#/.test(l)) head.push(l.replace(/^\s*#\s?/, "")); else break; }
+  if (head.length) out.push(head.join("\n"), "");
+  // The constants a user sees: the top-level values that are not shapes (materials, numbers, lists), by running it.
+  const ev = check(source, file);
+  const exports = ev.steps.filter((st) => !isShape3(st.value) && !isShape2(st.value)).map((st) => st.name);
+  for (const st of program.body) {
+    if (st.type !== "def") continue;
+    const doc: string[] = [];
+    for (let i = st.line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, ""));
+    const params = st.params.map((p) => (p.default ? `${p.name}=${lines[st.line - 1].match(new RegExp(`${p.name}\\s*=\\s*([^,)]+)`))?.[1]?.trim() ?? "?"}` : p.name));
+    out.push(`## ${st.name}(${params.join(", ")})`, "");
+    if (doc.length) out.push(doc.join("\n"), "");
+  }
+  if (exports.length) out.push(`Constants: ${exports.join(", ")}`, "");
+  return out.join("\n");
+}
 
 function usage(): never {
   console.error(
@@ -30,6 +56,7 @@ function usage(): never {
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
+      "  aixle doc    <lib.aix>          a library's defs and their comments, for a program that would use it",
     ].join("\n"),
   );
   process.exit(2);
@@ -56,7 +83,10 @@ function main(argv: string[]): number {
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") usage();
   const { positional, opts } = flags(rest);
   if (cmd === "doc") {
-    const md = referenceMarkdown();
+    // `aixle doc lib.aix` documents a library the way the reference documents builtins: each def with its
+    // parameters and defaults, and the comment lines above it, so a caller places its parts without reading it.
+    const lib = positional[0];
+    const md = lib && lib.endsWith(".aix") ? libraryMarkdown(lib) : referenceMarkdown();
     if (typeof opts.write === "string") {
       writeFileSync(opts.write, md);
       console.log(`wrote ${opts.write}`);
@@ -84,6 +114,7 @@ function main(argv: string[]): number {
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
+      for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${m.names.join(", ")}`);
       for (const st of ev.steps) {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
         if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
@@ -129,7 +160,7 @@ function main(argv: string[]): number {
         if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
       }
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev)];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize)];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       return 0;
@@ -189,6 +220,7 @@ function main(argv: string[]): number {
       const unused = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value))).map((st) => st.name);
       if (unused.length) console.log(`\nnot in the output: ${unused.join(", ")}`);
       if (ev.poses.length) console.log(`\nposes: ${ev.poses.map((p) => p.name).join(", ")}`);
+      for (const m of ev.modules) console.log(`\nuse ${m.prefix} (${m.path}): ${m.names.join(", ")}`);
       return 0;
     } catch (e) {
       console.error(e instanceof Error ? e.message : String(e));

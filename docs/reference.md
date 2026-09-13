@@ -368,7 +368,7 @@ Roughen the surface with noise: in and out by up to `amp`, features about `size`
 
 ### grid
 
-nx by nz copies on the ground plane, dx and dz apart.
+nx by nz copies on the ground plane, dx and dz apart, stepping from the original towards +x and +z (a negative step goes the other way).
 
     grid(shape, nx, nz, dx, dz=?) -> shape
 
@@ -461,7 +461,7 @@ Paint only the part of the surface inside `region`, adding no geometry: a pupil 
 
 ### material
 
-A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood rings and brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
+A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
     material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?) -> material
 
@@ -630,6 +630,12 @@ Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post
 An existing mesh as a shape: `import("part.obj")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so.
 
     import(path, size=?, resolution=96) -> shape
+
+### use
+
+A library's defs and constants under a prefix: `use "parts/hardware.aix"` (relative to the program) or `use "std/furniture" as f` (shipped with the tool: std/hardware, std/furniture, std/plants). Then `hardware.hex_bolt(0.1, 0.6)` or `f.chair(seat=0.45)`. The library runs on its own: its defs see its own helpers and constants, its shapes stay its own, and `aixle doc lib.aix` prints what it offers.
+
+    use "path" [as name]
 
 ## Poses and animation
 

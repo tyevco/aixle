@@ -73,7 +73,10 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
   const nx = Math.min(maxCells, Math.ceil((grown.max[0] - grown.min[0]) / cell));
   const ny = Math.min(maxCells, Math.ceil((grown.max[1] - grown.min[1]) / cell));
   const nz = Math.min(maxCells, Math.ceil((grown.max[2] - grown.min[2]) / cell));
-  const ox = grown.min[0], oy = grown.min[1], oz = grown.min[2];
+  // The lattice starts 0.37 of a cell before the grown box rather than on it, so a face at a round coordinate
+  // (a plank's edge at x = 3.94, a chess piece's base at y = 0.15) does not sit exactly on a sample plane, where
+  // the extractor cannot resolve it and leaves open edges (measured on a bridge's re-import and a bicycle's tube).
+  const ox = grown.min[0] - cell * 0.37, oy = grown.min[1] - cell * 0.37, oz = grown.min[2] - cell * 0.37;
   const sx = nx + 1, sy = ny + 1, sz = nz + 1;
   const field = new Float32Array(sx * sy * sz);
   const dist = shape.dist;

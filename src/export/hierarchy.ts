@@ -48,6 +48,8 @@ export interface SceneHierarchy {
 
 export interface HierarchyOptions {
   cellSize: number;
+  /** Step names by shape, so a placed set's node carries the name the program gave it. */
+  names?: Map<Shape3, string>;
   sharp?: boolean;
   /** Atlas size in pixels; 0 for none. */
   texture: number;
@@ -74,18 +76,65 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
   const addMesh = (m: Mesh): number => { meshes.push(m); return meshes.length - 1; };
   const roots: SceneNode[] = [];
   const notes: string[] = [];
+  const names = opts.names ?? new Map<Shape3, string>();
 
   // A joint is declared at a world pivot, but a move above it (`(boat + cradle) | ground()`) carries the joint's
   // part elsewhere while the pivot stays in the program's numbers: the node and its mesh follow the move (measured:
   // a grounded boat's rudder and boom nodes sat a unit below its hull in the GLB). Only translations are carried;
   // a rotation or a scale above a joint would also turn its axis, which the node cannot express, so it is reported.
+  // The placed sets under a shape, not descending into joints (a joint's part has its own): each keeps its per-copy
+  // nodes wherever it sits in the tree, so a `place()` joined to a board with `+` is still one mesh and thirty-two
+  // nodes (measured: joined by `+`, an army became one 16 MB mesh).
+  const placedIn = (s: Shape3): Shape3[] => {
+    const out: Shape3[] = [];
+    const seen = new Set<Shape3>();
+    const walk = (n: Shape3) => {
+      if (seen.has(n) || n.joint) return;
+      seen.add(n);
+      if (n.instanced) { out.push(n); return; }
+      for (const k of n.parts ?? n.inner ?? []) walk(k);
+    };
+    walk(s);
+    return out;
+  };
+  const placedNodes = (set: Shape3, name: string, parentOrigin: Vec3, offset: Vec3): SceneNode => {
+    const { base, placements } = set.instanced!;
+    const baseJoints = allJoints(base);
+    for (const n of baseJoints) n.joint!.hidden = true;
+    const m = extract(base, opts);
+    for (const n of baseJoints) n.joint!.hidden = false;
+    const mi = triangleCount(m) ? addMesh(m) : -1;
+    return {
+      name,
+      mesh: -1,
+      translation: [offset[0] - parentOrigin[0], offset[1] - parentOrigin[1], offset[2] - parentOrigin[2]],
+      yaw: 0,
+      scale: 1,
+      origin: offset,
+      children: placements.map((p, i) => ({
+        name: `${name}_${i + 1}`,
+        mesh: mi,
+        translation: [p.x, p.y, p.z],
+        yaw: p.yaw,
+        scale: p.scale,
+        children: [],
+        origin: [p.x + offset[0], p.y + offset[1], p.z + offset[2]],
+      })),
+    };
+  };
+  /** The step name a placed set was given, for its node, or a numbered fallback. */
+  const setName = (set: Shape3, fallback: string): string => names.get(set) ?? fallback;
+
   const jointNode = (j: Shape3, parentOrigin: Vec3, offset: Vec3): SceneNode => {
     const st = j.joint!;
     const nested = findJoints(st.child);
+    const sets = placedIn(st.child);
     for (const n of nested) n.joint!.hidden = true;
+    for (const s of sets) s.instanced!.hidden = true;
     const child = offset[0] === 0 && offset[1] === 0 && offset[2] === 0 ? st.child : moveShape(st.child, offset[0], offset[1], offset[2]);
     const own = extract(child, opts);
     for (const n of nested) n.joint!.hidden = false;
+    for (const s of sets) s.instanced!.hidden = false;
     const pivot: Vec3 = [st.pivot[0] + offset[0], st.pivot[1] + offset[1], st.pivot[2] + offset[2]];
     const node: SceneNode = {
       name: st.name,
@@ -94,7 +143,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       yaw: 0,
       scale: 1,
       joint: st.name,
-      children: nested.map((n) => jointNode(n, pivot, offset)),
+      children: [...sets.map((s, i) => placedNodes(s, setName(s, `${st.name}_set${i + 1}`), pivot, [offset[0], offset[1], offset[2]])), ...nested.map((n) => jointNode(n, pivot, offset))],
       origin: pivot,
     };
     return node;
@@ -152,9 +201,12 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       continue;
     }
     const joints = allJoints(obj.shape);
+    const sets = placedIn(obj.shape);
     for (const n of joints) n.joint!.hidden = true;
+    for (const s of sets) s.instanced!.hidden = true;
     const own = extract(obj.shape, opts);
     for (const n of joints) n.joint!.hidden = false;
+    for (const s of sets) s.instanced!.hidden = false;
     roots.push({
       name: obj.name,
       mesh: triangleCount(own) ? addMesh(own) : -1,
@@ -162,11 +214,18 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       yaw: 0,
       scale: 1,
       origin: [0, 0, 0],
-      children: findJoints(obj.shape).map((j) => {
-        const { offset, rigid } = offsetTo(obj.shape, j);
-        if (!rigid) notes.push(`joint "${j.joint!.name}" sits under a rotation or a scale, which the export's joint node cannot carry: the GLB places it as if that transform were a move. Rotate or scale the part before the joint, not after.`);
-        return jointNode(j, [0, 0, 0], offset);
-      }),
+      children: [
+        ...sets.map((s, i) => {
+          const { offset, rigid } = offsetTo(obj.shape, s);
+          if (!rigid) notes.push(`the placed set "${setName(s, `${obj.name}_set${i + 1}`)}" sits under a rotation or a scale, which its copies' nodes cannot carry: the GLB places it as if that transform were a move.`);
+          return placedNodes(s, setName(s, `${obj.name}_set${i + 1}`), [0, 0, 0], offset);
+        }),
+        ...findJoints(obj.shape).map((j) => {
+          const { offset, rigid } = offsetTo(obj.shape, j);
+          if (!rigid) notes.push(`joint "${j.joint!.name}" sits under a rotation or a scale, which the export's joint node cannot carry: the GLB places it as if that transform were a move. Rotate or scale the part before the joint, not after.`);
+          return jointNode(j, [0, 0, 0], offset);
+        }),
+      ],
     });
   }
 

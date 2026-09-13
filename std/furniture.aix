@@ -1,0 +1,53 @@
+# std/furniture: a table, a chair, a stool, a bench and a shelf.
+# Every piece stands on y = 0, is centred on x and z, and faces +z (a
+# chair's back is at -z). Sizes are in model units; a room-scale scene
+# reads well with a table 0.75 tall. Wood by default: pass another
+# material as the last argument to change it.
+# Use: use "std/furniture" as f  then  f.chair(seat=0.45)
+
+oak = material("oak")
+walnut = material("walnut")
+
+# A table: a top w by d, `top` thick, on four square legs `leg` across, h tall overall.
+def table(w=1.6, d=0.9, h=0.75, top=0.04, leg=0.07, m=oak) = ((box(w, top, d) | move(0, h - top / 2, 0))
+  + (box(leg, h - top, leg) | move(w / 2 - leg, (h - top) / 2, d / 2 - leg))
+  + (box(leg, h - top, leg) | move(-w / 2 + leg, (h - top) / 2, d / 2 - leg))
+  + (box(leg, h - top, leg) | move(w / 2 - leg, (h - top) / 2, -d / 2 + leg))
+  + (box(leg, h - top, leg) | move(-w / 2 + leg, (h - top) / 2, -d / 2 + leg))) | paint(m)
+
+# A chair: seat w square at height `seat`, four legs 0.04 across, a backrest of three slats 0.03 thick rising `back` above the seat at -z.
+def chair(seat=0.45, w=0.42, back=0.45, m=walnut) = ((box(w, 0.035, w) | move(0, seat, 0))
+  + (cylinder(0.02, seat) | move(w / 2 - 0.03, seat / 2, w / 2 - 0.03))
+  + (cylinder(0.02, seat) | move(-w / 2 + 0.03, seat / 2, w / 2 - 0.03))
+  + (cylinder(0.02, seat + back) | move(w / 2 - 0.03, (seat + back) / 2, -w / 2 + 0.03))
+  + (cylinder(0.02, seat + back) | move(-w / 2 + 0.03, (seat + back) / 2, -w / 2 + 0.03))
+  + (box(w - 0.08, 0.05, 0.03) | move(0, seat + back * 0.45, -w / 2 + 0.03))
+  + (box(w - 0.08, 0.05, 0.03) | move(0, seat + back * 0.7, -w / 2 + 0.03))
+  + (box(w - 0.08, 0.06, 0.03) | move(0, seat + back * 0.95, -w / 2 + 0.03))) | paint(m)
+
+# A stool: a round seat of radius r at height h on three splayed legs.
+def stool(h=0.6, r=0.17, m=oak) = ((cylinder(r, 0.035) | move(0, h - 0.0175, 0))
+  + ring(cylinder(0.02, h) | rotate(x=-8) | move(r * 0.7, h / 2, 0), 3)) | paint(m)
+
+# A bench: l long, five seat slats and two back slats on two end frames.
+def bench(l=1.8, seat=0.45, m=oak) = (((box(l, 0.03, 0.08) | array(5, 0, 0, 0.1) | move(0, seat, -0.2))
+  + (box(l, 0.09, 0.03) | move(0, seat + 0.3, -0.24))
+  + (box(l, 0.09, 0.03) | move(0, seat + 0.45, -0.28))
+  + (bench_end(seat) | move(l / 2 - 0.08, 0, 0))
+  + (bench_end(seat) | move(-l / 2 + 0.08, 0, 0)))) | paint(m)
+
+def bench_end(seat) = (box(0.06, seat, 0.06) | move(0, seat / 2, 0.2)) + (box(0.06, seat + 0.5, 0.06) | rotate(x=8) | move(0, (seat + 0.5) / 2, -0.24)) + (box(0.06, 0.05, 0.5) | move(0, seat - 0.04, -0.02))
+
+# A shelf unit: two sides w apart, h tall, d deep, with n boards spaced evenly from the floor to the top.
+def shelf(w=1.0, h=1.6, d=0.3, n=4, m=walnut) = ((box(0.03, h, d) | move(w / 2 - 0.015, h / 2, 0))
+  + (box(0.03, h, d) | move(-w / 2 + 0.015, h / 2, 0))
+  + (box(w - 0.02, 0.03, d) | array(n, 0, (h - 0.03) / (n - 1), 0) | move(0, 0.015, 0))) | paint(m)
+
+# Rendering this file on its own shows every piece in a row, each its own object.
+set grid 200
+table_p = table() | move(-1.5, 0, 0)
+chair_p = chair() | move(-1.5, 0, 0.9)
+stool_p = stool() | move(0.2, 0, 0)
+bench_p = bench() | move(1.6, 0, 0.8)
+shelf_p = shelf() | move(1.6, 0, -0.8)
+scene table_p, chair_p, stool_p, bench_p, shelf_p

@@ -102,6 +102,8 @@ export interface Shape3 {
   warp?: (x: number, y: number, z: number) => Vec3;
   /** For an import: the cell its mesh was sampled at, so a render finer than that can say what the import cannot show. */
   sampledAt?: number;
+  /** Things a constructor noticed that will mesh badly (a curve bent tighter than its tube); the pipeline warns once per named step. */
+  notes?: string[];
   /** Named points on the shape, in its own frame, set by anchor(); anchorsOf() carries them through the tree. */
   anchors?: Record<string, Vec3>;
   /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
@@ -110,8 +112,8 @@ export interface Shape3 {
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
   joint?: JointState;
-  /** For a placed shape: the base and where its copies go. */
-  instanced?: { base: Shape3; placements: Placement[] };
+  /** For a placed shape: the base and where its copies go; while `hidden`, the whole set reads as empty (the exporter meshes its parent without it). */
+  instanced?: { base: Shape3; placements: Placement[]; hidden?: boolean };
 }
 
 export interface JointState {

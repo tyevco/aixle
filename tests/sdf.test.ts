@@ -196,6 +196,14 @@ describe("materials", () => {
     expect(albedo(c, 0.6, 0.1, 0.1)).toEqual(c.color2);
     const w = materialFromString("wood")!;
     expect(albedo(w, 0.3, 0.2, 0.1)).toEqual(albedo(w, 0.3, 0.2, 0.1));
+    // Wood is boards 2.5 scales wide across x with a dark seam between them, darker than the board's middle at any
+    // height along the grain (rings before this: a table top read as a bullseye).
+    const seam = albedo(w, w.scale * 2.5, 0.7, 0.2), middle = albedo(w, w.scale * 1.25, 0.7, 0.2);
+    expect(seam[0] + seam[1] + seam[2]).toBeLessThan(middle[0] + middle[1] + middle[2]);
+    // The grain runs along y: the colour a whole scale along the axis is far closer than one across it.
+    const at = albedo(w, 0.31, 0.2, 0.1), along = albedo(w, 0.31, 0.2 + w.scale * 0.5, 0.1), across = albedo(w, 0.31 + w.scale * 0.5, 0.2, 0.1);
+    const d = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+    expect(d(at, along)).toBeLessThan(d(at, across));
   });
 });
 
@@ -406,9 +414,31 @@ describe("feature size", () => {
     expect(O.paint(wall, preset("wood")!).feature).toBeCloseTo(0.1);
     expect(P.box(1, 1, 1).feature).toBeUndefined();
   });
+  it("a flat box is a plate and a long cylinder a rod, but a cube and a drum carry none", () => {
+    // A library's slats and rods are judged against the scene's cell only if the box itself says how thin it is
+    // (round 6: a bench's 0.03 slats under a 0.039 cell drew no warning). Only when clearly flat or slender.
+    expect(P.box(1, 0.1, 1).feature).toBeCloseTo(0.1);
+    expect(P.box(0.05, 2, 0.3).feature).toBeCloseTo(0.05);
+    expect(P.box(1, 0.3, 1).feature).toBeUndefined();
+    expect(P.cylinder(1, 0.1).feature).toBeCloseTo(0.1);
+    expect(P.cylinder(0.05, 3).feature).toBeCloseTo(0.1);
+    expect(P.cylinder(1, 2).feature).toBeUndefined();
+    expect(P.cone(0.02, 0, 0.5).feature).toBeCloseTo(0.04);
+    expect(P.cone(1, 0.8, 0.1).feature).toBeCloseTo(0.1);
+    expect(P.cone(0.5, 0.2, 1).feature).toBeUndefined();
+    expect(O.union([P.box(0.5, 0.5, 0.5), P.box(1, 0.02, 1)]).feature).toBeCloseTo(0.02);
+  });
 });
 
 describe("curves", () => {
+  it("measures the tightest bend and notes a tube thicker than it", () => {
+    expect(C.minBendRadius(C.bezierCurve([[0, 0, 0], [1, 0, 0], [3, 0, 0], [4, 0, 0]]))).toBe(Infinity);
+    const k = 0.5523 * 2;
+    const arc = C.bezierCurve([[2, 0, 0], [2, k, 0], [k, 2, 0], [0, 2, 0]]);
+    expect(Math.abs(C.minBendRadius(arc) - 2)).toBeLessThan(0.1);
+    expect(C.tubeCurve(arc, 0.5).notes).toBeUndefined();
+    expect(C.tubeCurve(arc, 2.5).notes?.[0]).toMatch(/bends to a radius of [\d.]+, tighter than the tube's 2.5/);
+  });
   it("a tube along a straight bezier is a capsule and along an arc is the arc's offset", () => {
     const straight = C.bezierCurve([[0, 0, 0], [1, 0, 0], [3, 0, 0], [4, 0, 0]]);
     const t = C.tubeCurve(straight, 0.5);

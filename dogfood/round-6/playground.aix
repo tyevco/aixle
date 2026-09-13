@@ -1,0 +1,160 @@
+# A children's playground, about 10 units across, one unit a metre.
+# A rubber pad on y = 0..0.1 with every piece sunk a little into it; a
+# blue A-frame swing set with two swings hung on chains (each a joint on
+# the beam), a yellow slide with a ladder, a platform and a green moulded
+# bed, a seesaw hinged on a galvanised axle, a tube climbing frame with
+# bolted bosses at every node, a timber bench and a litter bin.
+#
+# Everything is meshed at one grid, so every tube end stops inside its
+# host (a round cap poking 0.01 through a face is an open edge), every
+# ledge is at least a cell wide, and no two faces sit a hair apart.
+use "std/hardware"
+
+blue = material("#1f5fd0", rough=0.35)          # painted steel, colour one
+yellow = material("#f2b21b", rough=0.35)        # painted steel, colour two
+zinc = hardware.zinc                            # galvanised chains and bolts
+plastic = material("#3cb04a", rough=0.4)        # the moulded slide
+rubber = material("#8b4c3d", rough=0.95)        # the wet-pour surface
+seat_rubber = material("#2a2a2c", rough=0.9)
+bin_green = material("#2d7a3e", rough=0.5)
+
+# The pad.
+pad = box(10, 0.1, 8) | move(0, 0.05, 0) | paint(rubber)
+
+# The swing set: a beam along x on two splayed A-legs, a cast fitting at
+# each beam end for the legs to meet in.
+beam_h = 2.5
+beam = tube(0.07, [-1.8, beam_h, 0, 1.8, beam_h, 0], cap="flat") | paint(blue)
+def a_leg(sx) =
+  tube(0.05, [sx * 1.75, beam_h, 0, sx * 2.1, 0.08, 1.0])
+  + tube(0.05, [sx * 1.75, beam_h, 0, sx * 2.1, 0.08, -1.0])
+legs = (a_leg(1) + a_leg(-1)) | paint(blue)
+fittings = (sphere(0.11) | move(1.8, beam_h, 0)) + (sphere(0.11) | move(-1.8, beam_h, 0))
+fittings = fittings | paint(zinc)
+frame = beam + legs + fittings
+
+# The chain. The std chain's links only touch where they hook (an upright
+# link's wire is exactly the flat link's inner width), which the mesh reads
+# as open edges, so this chain is its own. A link is one solid, a 2D stadium
+# ring extruded (a tube plus two half-torus ends left near-coincident
+# surfaces where the arc met the tube): square wire 2r, centreline
+# half-width w, straight length p, with a hole a cell clear of the next
+# link's wire. Links alternate flat and upright, spaced so each link's
+# nose sits wholly inside the previous link's tip wire: a nose that pokes
+# out of the hole wall by less than a cell, or two tips crossing dead
+# centre with their side faces flush, both left open edges.
+link_p = 0.1
+link_w = 0.13
+link_r = 0.04
+def link() =
+  extrude(rect(link_p + 2 * (link_w + link_r), 2 * (link_w + link_r), round=link_w + link_r) | shell(2 * link_r), 2 * link_r)
+link_d = link_p + 2 * link_w + 0.03             # centre to centre: 0.39
+def chain(n) =
+  (link() | array(ceil(n / 2), 2 * link_d, 0, 0))
+  + (link() | rotate(x=90) | move(link_d, 0, 0) | array(floor(n / 2), 2 * link_d, 0, 0))
+chain_links = 5
+chain_len = (chain_links - 1) * link_d + link_p + 2 * link_w + link_r   # the last tip wire's centreline
+def hanging_chain(x) = chain(chain_links) | move(link_p / 2 + link_w + link_r, 0, 0) | rotate(z=-90) | move(x, beam_h, 0)
+
+# One swing: two chains from clamps on the beam down to eyes on a rubber seat.
+def swing(x) =
+  (cylinder(0.13, 0.22) | rotate(z=90) | move(x - 0.24, beam_h, 0) | paint(zinc))
+  + (cylinder(0.13, 0.22) | rotate(z=90) | move(x + 0.24, beam_h, 0) | paint(zinc))
+  + (hanging_chain(x - 0.24) | paint(zinc))
+  + (hanging_chain(x + 0.24) | paint(zinc))
+  + (sphere(0.09) | move(x - 0.24, beam_h - chain_len, 0) | paint(zinc))
+  + (sphere(0.09) | move(x + 0.24, beam_h - chain_len, 0) | paint(zinc))
+  + (box(0.6, 0.07, 0.24, round=0.02) | move(x, beam_h - chain_len - 0.08, 0) | paint(seat_rubber))
+swing_a = joint(swing(-0.8), "swing_a", -0.8, beam_h, 0)
+swing_b = joint(swing(0.8), "swing_b", 0.8, beam_h, 0)
+swing_set = (frame + swing_a + swing_b) | move(1.0, 0, -2.4)
+
+# The slide: a platform on four legs with rails, a ladder at the back and
+# the moulded bed sweeping down to the front.
+plat_h = 1.5
+platform = box(0.9, 0.12, 0.9, round=0.01) | move(0, plat_h, -1.2) | paint(yellow)
+plat_legs = (tube(0.05, [0.4, 0.08, -0.8, 0.4, plat_h - 0.03, -0.8]) | mirror("x"))
+  + (tube(0.05, [0.4, 0.08, -1.6, 0.4, plat_h - 0.03, -1.6]) | mirror("x"))
+plat_legs = plat_legs | paint(yellow)
+rail = tube(0.05, [0.42, plat_h + 0.02, -1.6, 0.42, 2.25, -1.6, 0.42, 2.25, -0.8, 0.42, plat_h + 0.02, -0.8], smooth=4)
+rails = (rail | mirror("x")) | paint(yellow)
+stringer = tube(0.055, [0.25, 0.08, -2.4, 0.25, plat_h - 0.03, -1.6])   # 0.07 clear of the back legs where it passes them
+stringers = (stringer | mirror("x")) | paint(yellow)
+rungs = empty()
+for i in range(4) {
+  ry = 0.3 + 0.3 * i
+  rz = -2.4 + 0.8 * (ry - 0.08) / (plat_h - 0.08)
+  rungs = rungs + tube(0.04, [-0.31, ry, rz, 0.31, ry, rz])   # thinner than the stringers, through them and 0.045 proud
+}
+rungs = rungs | paint(zinc)
+bed_profile = polygon(-0.3,0, 0.3,0, 0.3,0.22, 0.2,0.22, 0.2,0.08, -0.2,0.08, -0.2,0.22, -0.3,0.22)
+bed_path = curve([0, plat_h + 0.04, -1.0, 0, plat_h + 0.02, -0.6, 0, 0.9, 0.7, 0, 0.36, 1.7, 0, 0.3, 2.4])
+bed = sweep(bed_profile, bed_path) | paint(plastic)
+bed_feet = (tube(0.045, [0.25, 0.08, 2.2, 0.25, 0.4, 2.2]) | mirror("x")) | paint(yellow)
+slide = (platform + plat_legs + rails + stringers + rungs + bed + bed_feet) | move(-3.6, 0, 0)
+
+# The seesaw: an A-stand each side of a galvanised axle, each carrying a
+# pillow block under the axle; a plank on a hub round the axle, hinged
+# there. The plank clears the blocks by 1.5 cells at the full 12 degree tip
+# (a housing round the axle poked through the tipped plank by under a cell).
+piv_h = 0.55
+stand = (tube(0.045, [0.28, piv_h - 0.11, 0, 0.28, 0.08, 0.45]) + tube(0.045, [0.28, piv_h - 0.11, 0, 0.28, 0.08, -0.45])) | mirror("x")
+stand = stand | paint(blue)
+bearings = (box(0.1, 0.12, 0.16, round=0.01) | move(0.28, piv_h - 0.09, 0) | mirror("x")) | paint(zinc)
+axle = cylinder(0.06, 0.8) | rotate(z=90) | move(0, piv_h, 0) | paint(zinc)
+plank = box(3.0, 0.1, 0.28, round=0.01) | move(0, piv_h + 0.16, 0) | paint(yellow)
+hub = box(0.26, 0.24, 0.4, round=0.02) | move(0, piv_h + 0.03, 0) | paint(yellow)
+def handle(x) = tube(0.04, [x - 0.12, piv_h + 0.18, 0, x - 0.12, piv_h + 0.48, 0, x + 0.12, piv_h + 0.48, 0, x + 0.12, piv_h + 0.18, 0], smooth=3)
+handles = (handle(1.1) + handle(-1.1)) | paint(zinc)
+seats = (box(0.36, 0.07, 0.4, round=0.02) | move(1.36, piv_h + 0.2, 0) | mirror("x")) | paint(seat_rubber)
+tilt = joint(plank + hub + handles + seats, "seesaw", 0, piv_h, 0)
+seesaw = (stand + bearings + axle + tilt) | move(0.6, 0, 1.6)
+
+# The climbing frame: four posts, three rungs per face, a cast cube boss
+# with a hex bolt on each outer face at every node.
+half = 0.8
+post = tube(0.05, [half, 0.08, half, half, 1.85, half])
+posts = (post | mirror("x") | mirror("z")) | paint(blue)
+rungs_x = empty()
+rungs_z = empty()
+bosses = empty()
+bolts = empty()
+for i in range(3) {
+  ly = 0.6 + 0.6 * i
+  rungs_x = rungs_x + (tube(0.05, [-half, ly, half, half, ly, half]) | mirror("z"))
+  rungs_z = rungs_z + (tube(0.05, [half, ly, -half, half, ly, half]) | mirror("x"))
+  for sx in [-1, 1] {
+    for sz in [-1, 1] {
+      bosses = bosses + (box(0.28, round=0.02) | move(sx * half, ly, sz * half))
+      bolts = bolts + (hardware.hex_bolt(0.1, 0.15) | rotate(x=sz * 90) | move(sx * half, ly, sz * (half + 0.13)))
+      bolts = bolts + (hardware.hex_bolt(0.1, 0.15) | rotate(z=-sx * 90) | move(sx * (half + 0.13), ly, sz * half))
+    }
+  }
+}
+climber = (posts + (rungs_x | paint(yellow)) + (rungs_z | paint(yellow)) + (bosses | paint(zinc)) + (bolts | paint(zinc))) | move(3.6, 0, 1.0)
+
+# A bench facing the playground, and a bin beside it. The std bench's
+# slats are under a cell at this scene's grid and left a loose sliver, so
+# this one is built here with 0.07 timber; it faces +z at the origin, the
+# back at -z, and is turned round to face the playground.
+def bench_end(x) =
+  (box(0.07, 0.46, 0.07) | move(x, 0.23, 0.22))
+  + (box(0.07, 0.96, 0.07) | rotate(x=-10) | move(x, 0.47, -0.2))
+  + (box(0.07, 0.08, 0.66) | move(x, 0.44, 0.05))
+def back_slat(y) = box(1.6, 0.12, 0.1) | rotate(x=-10) | move(0, y, -0.2 - (y - 0.47) * tan(10) + 0.045)
+seat_slats = box(1.6, 0.07, 0.11) | move(0, 0.47, -0.15) | array(4, 0, 0, 0.14)
+bench = (bench_end(-0.72) + bench_end(0.72) + seat_slats + back_slat(0.62) + back_slat(0.84))
+  | paint("oak") | rotate(y=180) | move(-1.6, 0.04, 3.3)
+bin_body = cylinder(0.24, 0.75) | move(0, 0.375, 0)
+bin_open = bin_body - (cylinder(0.16, 1) | move(0, 0.58, 0))   # a wall and a floor 0.08 thick, open at the top
+bin_rim = torus(0.2, 0.06) | move(0, 0.745, 0)                  # covers the whole wall top
+bin = (bin_open + bin_rim) | paint(bin_green) | move(-0.3, 0.045, 3.4)
+
+pose("rest")
+pose("swing", swing_a=[30, 0, 0], swing_b=[-30, 0, 0])
+pose("tip", seesaw=[0, 0, 12])
+pose("play", swing_a=[30, 0, 0], swing_b=[-30, 0, 0], seesaw=[0, 0, 12])
+animation("playing", ["rest", "play", "rest"], seconds=2)
+set pose play
+set grid 256
+scene slide, pad, swing_set, seesaw, climber, bench, bin

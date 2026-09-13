@@ -8,7 +8,11 @@ the inside is cut open.
 
 1. **Plan in words first.** What is it, how big, which way does it face,
    what are its parts. Decide the unit. Decide the front is +z.
-2. **Write `model.aix`** part by part, one named step per line. Build each
+2. **Write `model.aix`** part by part, one named step per line. Before
+   building a bolt, a chair or a tree, `use "std/hardware"`,
+   `"std/furniture"` or `"std/plants"` (`aixle doc std/hardware.aix` lists
+   what is there) and place the part; keep your own repeated parts in a
+   library file of `def`s next to the program and `use` that. Build each
    part at the origin, then `rotate`, then `move` into place, or better,
    `anchor` the points where parts meet and `attach` them: `seat |
    attach("bottom", legs, "top")` needs no arithmetic and survives a
@@ -29,6 +33,7 @@ the inside is cut open.
 
 ```
 npx aixle check model.aix                  sizes and warnings, no pictures (--pose NAME: in that pose)
+npx aixle doc std/furniture.aix            what a library offers: each def with its parameters and the comment above it
 npx aixle explain model.aix                the program as a tree from the output down: each step's source line, size, material, anchors; read this first on a program you did not write
 npx aixle render model.aix --quick         the sheet only, small grid, fast; --watch re-renders on save
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
@@ -61,7 +66,8 @@ npx aixle diff before.aix after.aix        the two sheets side by side
   that is thicker on one side, a hole that does not go through, a cavity
   that broke out where it should not. Filled means solid.
 - A small part of a large model is a few pixels on the sheet: `--focus
-  name` frames every view on that step alone, meshed at the frame's own
+  name` (or `--focus name_3` for one copy of a placed set) frames every
+  view on that step alone, meshed at the frame's own
   finer cell, where the step is in the pose being shown; the report adds
   a "Close-up watertight" row for that mesh, so a lug or a tooth can be
   judged sound on its own.
@@ -87,6 +93,9 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | "is not part of the output" | a step never got added to the final shape | add it, or delete it |
 | an edge looks jagged | the grid is coarse for the size | `--grid 200` (slower, cubic) |
 | a shell wall, a tube or lettering is broken or gone, though the part is thick | the wall, tube radius or stroke weight is under a grid cell | `check` says which step and what grid; thicken it or raise the grid |
+| a library part comes out broken, or leaves a loose sliver, in a scene | a slat, rod or wall of the `use`d part is thinner than the scene's cell | `check` names the step and the size; raise the scene's grid, or use a bigger part |
+| open edges at a cap, a bolt head or a hub, with nothing thin nearby | the part reaches through a face, or stops short of it, by less than a cell | sink it a cell or more into the host, or leave a cell or more clear |
+| open edges "in 'x' twice, as 'a' and 'b'" | two placements of one step cross each other there | move one, or bury one in the other by a cell |
 | a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
 | the eyes, mouth or a label need geometry you do not want | a painted sphere bulges, a painted tube sticks out | `decal(shape, region, material)` paints the surface inside a region and adds nothing |
