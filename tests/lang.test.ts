@@ -52,6 +52,12 @@ describe("parser", () => {
     const p = parse("def f(a, b=2) = box(a, b)\nfor i in range(3) {\n  x = f(i)\n}\nshow x\nset grid 64");
     expect(p.body.map((s) => s.type)).toEqual(["def", "for", "show", "set"]);
   });
+  it("parses comparisons loosest of all, and assert with an optional message", () => {
+    const p = parse("assert 1 + 2 < 4 * 1, \"sum\"\nassert a == b");
+    expect(p.body[0]).toMatchObject({ type: "assert", test: { type: "binary", op: "<", left: { op: "+" }, right: { op: "*" } }, message: { type: "str", value: "sum" } });
+    expect(p.body[1]).toMatchObject({ type: "assert", test: { op: "==" }, message: undefined });
+    expect(() => parse("assert = 1")).toThrow(/'assert' is a keyword/);
+  });
   it("refuses a keyword as a name with a plain message", () => {
     expect(() => parse("scene = box(1)")).toThrow(/line 1: 'scene' is a keyword and cannot be a name/);
     expect(() => parse("show = 1")).toThrow(/'show' is a keyword/);
@@ -174,6 +180,24 @@ describe("interpreter", () => {
     expect(() => run("a = spehre(1)")).toThrow(/unknown function 'spehre'/);
     expect(() => run("a = b")).toThrow(/'b' is not defined/);
     expect(() => run("a = circle(1) + sphere(1)")).toThrow(/extrude or revolve/);
+  });
+  it("compares numbers and strings to 1 or 0, and refuses to compare shapes", () => {
+    const ev = run("a = 2 < 3\nb = 3 <= 2\nc = 1 == 1\nd = \"x\" != \"y\"\ne = max(0.2, 1 > 0)");
+    expect(ev.steps.map((s) => s.value)).toEqual([1, 0, 1, 1, 1]);
+    expect(() => run("a = sphere(1) < 2")).toThrow(/'<' compares two numbers, not a shape and a number; measure the shape first/);
+    expect(() => run("a = \"x\" < \"y\"")).toThrow(/'<' compares two numbers/);
+  });
+  it("records every assert with its text, both sides and the message, passed or not", () => {
+    const ev = run("m = box(2, 1, 1)\nassert width(m) < 5, \"fits\"\nassert tall(m) > 3\nassert m | tall == 1\nfor i in range(2) { assert i < 1 }");
+    expect(ev.asserts.map((a) => [a.line, a.passed, a.text, a.detail, a.message])).toEqual([
+      [2, true, "width(m) < 5", "2 < 5", "fits"],
+      [3, false, "tall(m) > 3", "1 > 3", undefined],
+      [4, true, "m | tall == 1", "1 == 1", undefined],
+      [5, true, "i < 1", "0 < 1", undefined],
+      [5, false, "i < 1", "1 < 1", undefined],
+    ]);
+    expect(() => run("assert sphere(1)")).toThrow(/assert tests a number/);
+    expect(() => run("assert 1 < 2, 3")).toThrow(/message is a string/);
   });
   it("warns when a shape expression is not assigned", () => {
     const ev = run("a = sphere(1)\na | move(1, 0, 0)");

@@ -1,0 +1,6 @@
+a = sphere(0.5)
+b = sphere(0.5) | move(1.2, 0, 0)
+assert clearance(a, b) > 0.5, "apart"
+assert pieces(a + b) == 1
+assert width(a) == 1
+show a + b

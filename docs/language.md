@@ -26,6 +26,7 @@ def name(a, b=2) = expr     # a parametric part; call it like a builtin
 for i in range(5) { ... }   # repeat the block; i is 0..4
 show a, b                   # output these (several are unioned)
 set grid 200                # a render setting from inside the file
+assert width(m) < 5, "fits"  # a promise the model makes; check reports a failure
 # a comment, or // a comment
 ```
 
@@ -70,7 +71,7 @@ for c in letters {
 
 | Kind | Made by | Combines with |
 | --- | --- | --- |
-| number | `1.5`, `2 * r + 1`, `sin(30)` | `+ - * / % ^`, unary `-` |
+| number | `1.5`, `2 * r + 1`, `sin(30)`, `a < b` (1 or 0) | `+ - * / % ^`, unary `-`, `< > <= >= == !=` |
 | string | `"wood"`, `"#a0522d"`, `"x"` | material and axis arguments; `+` joins |
 | list | `[1, 2, 3]`, `range(4)` | `for`, `polygon`, `len`, `list[i]` (0-based, `-1` is the last), `+` joins; a path may nest points: `[hip, knee]` with each a `[x, y, z]` |
 | shape | `box(...)`, `a + b`, `a \| move(...)` | `+` union, `-` difference, `&` intersection |
@@ -94,8 +95,11 @@ base + cap | move(0, 1, 0)      # base + (cap moved up)
 (base + cap) | move(0, 1, 0)    # both moved up
 ```
 
-Precedence, loosest to tightest: `+ -`, then `&`, then `* / %`, then unary
-`-`, then `^`, then `|`. Parentheses when in doubt.
+Precedence, loosest to tightest: `< > <= >= == !=`, then `+ -`, then
+`&`, then `* / %`, then unary `-`, then `^`, then `|`. Parentheses when
+in doubt. A comparison is a number, 1 or 0, so `assert` can test it and
+`min`/`max` can weigh it; `==` on numbers is exact, so compare a measured
+size with `<` and `>` and a tolerance, not `==`.
 
 ## Building shapes
 
@@ -563,6 +567,42 @@ frame's clip faces left out. The report's Physics section has the numbers: mass 
 density`, centre of mass, footprint, pieces, and how much of the surface
 overhangs (faces down more than 45°, which a printer would need support
 under).
+
+### Assertions
+
+```
+assert pieces(model) == 1, "one printable piece"
+assert clearance(handle, rim_text) > 0.05, "the handle clears the lettering"
+assert tall(lamp) < 2.2
+assert abs(width(seat) - 0.45) < 0.01, "the seat is 0.45 wide"
+```
+
+`assert test, "message"` is a promise the program makes about itself,
+tested on every evaluation: `check` prints each failure with the two
+sides of the comparison as they came out (`clearance(handle, rim_text) >
+0.05 is 0.031 > 0.05: the handle clears the lettering`) and exits with a
+failure, `render` counts a failure as a warning on the sheet, and the
+report has an Asserts row and `report.json` every assert with its
+result. The next agent to edit the program then learns what it broke
+from the tool rather than from a picture, and a promise that lived only
+in a report ("the handle must clear the rim text") lives in the program.
+In a pose (`check --pose reach`) the asserts run in that pose, so a
+clearance that must hold when a joint has turned is asserted with `set
+pose` or `--pose`. A used library's asserts run with it and are reported
+with the library's path.
+
+The queries that make it useful: `pieces(shape, resolution=64)` is the
+number of separate pieces the shape meshes into at that grid, as the
+report's Pieces row counts them (it meshes the shape, so it costs a
+moment; a whole scene wants the report instead); `clearance(a, b)` is
+the smallest gap between two surfaces, negative by how deep they overlap,
+zero when they touch, sampled from the fields at twelve points per side
+of each shape's box and then tightened, so it is exact for parts that
+face each other and can miss a feature narrower than a twelfth of the
+part. Measure parts rather than the whole model: `clearance(handle,
+body)`, not `clearance(handle, model)` (the handle is in the model, so
+that is zero). The bound queries (`width`, `tall`, `depth`, `top`,
+`bottom`, `height`) and the anchors (`at`) are the rest.
 
 ## Limits worth knowing
 

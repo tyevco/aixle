@@ -15,6 +15,8 @@ import * as S from "../sdf/shapes2d.js";
 import * as W from "../sdf/sweeps.js";
 import { bezierCurve, curveThrough, sweepCurve, tubeCurve, type Curve } from "../sdf/curves.js";
 import { textProfile, textWidth } from "../sdf/font.js";
+import { clearance } from "../sdf/measure.js";
+import { countPieces } from "../mesh/pieces.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
@@ -288,6 +290,10 @@ export const BUILTINS: Builtin[] = [
   def("width", "Queries", "The size of a shape's bounds along x.", ov([shape()], "number", (a) => s3(a[0]).bounds.max[0] - s3(a[0]).bounds.min[0])),
   def("depth", "Queries", "The size of a shape's bounds along z.", ov([shape()], "number", (a) => s3(a[0]).bounds.max[2] - s3(a[0]).bounds.min[2])),
   def("tall", "Queries", "The size of a shape's bounds along y.", ov([shape()], "number", (a) => s3(a[0]).bounds.max[1] - s3(a[0]).bounds.min[1])),
+  def("pieces", "Queries", "How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.",
+    ov([shape(), num("resolution", "cells on the longest side", 64)], "number", (a) => countPieces(s3(a[0]), n(a[1])))),
+  def("clearance", "Queries", "The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.",
+    ov([shape("a"), shape("b")], "number", (a) => clearance(s3(a[0]), s3(a[1])))),
 
   // --- materials ---
   def("paint", "Materials", "Give the whole shape a material: a preset name, a colour (\"#rrggbb\" or a name), or material(...). Paint parts before combining them to keep several materials.",

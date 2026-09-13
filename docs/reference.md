@@ -429,6 +429,20 @@ The size of a shape's bounds along y.
 
     tall(shape) -> number
 
+### pieces
+
+How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.
+
+    pieces(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
+### clearance
+
+The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.
+
+    clearance(a, b) -> number
+
 ### surface
 
 The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.

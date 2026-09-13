@@ -4,6 +4,7 @@ import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
 import * as W from "../src/sdf/sweeps.js";
 import * as C from "../src/sdf/curves.js";
+import * as C_ from "../src/sdf/measure.js";
 import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
 import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
 import { albedo, customMaterial, materialFromString, preset } from "../src/sdf/materials.js";
@@ -427,6 +428,17 @@ describe("feature size", () => {
     expect(P.cone(1, 0.8, 0.1).feature).toBeCloseTo(0.1);
     expect(P.cone(0.5, 0.2, 1).feature).toBeUndefined();
     expect(O.union([P.box(0.5, 0.5, 0.5), P.box(1, 0.02, 1)]).feature).toBeCloseTo(0.02);
+  });
+});
+
+describe("clearance", () => {
+  it("is the gap between two surfaces, negative by the overlap, zero at a touch", () => {
+    expect(C_.clearance(P.sphere(1), O.move(P.sphere(1), 3, 0, 0))).toBeCloseTo(1, 3);
+    expect(C_.clearance(P.sphere(1), O.move(P.sphere(1), 1.5, 0, 0))).toBeCloseTo(-0.5, 3);
+    expect(Math.abs(C_.clearance(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 1, 0, 0)))).toBeLessThan(1e-3);
+    // A thin plate beside a rod: the lattice over the plate's box has no point near its face, so every point projects.
+    expect(C_.clearance(P.box(2, 0.02, 2), O.move(P.cylinder(0.1, 1), 0, 0.6, 0))).toBeCloseTo(0.09, 2);
+    expect(C_.clearance(P.empty(), P.sphere(1))).toBe(Infinity);
   });
 });
 

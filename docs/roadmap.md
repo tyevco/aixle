@@ -104,7 +104,7 @@ already computes.
 
 **Must prototype.** Nothing; the 3D version is measured.
 
-## 6. `assert`: the model's own tests
+## 6. `assert`: built
 
 **Why.** Agents verify by reading pictures, which works, but a program
 cannot say what it promises, so the next agent to edit it cannot know
@@ -124,11 +124,18 @@ assert clearance(handle, rim_text) > 0.05
 `clearance()` (the minimum distance between two shapes, from the field)
 are the queries that make it useful.
 
-**How.** A statement; `clearance` samples one shape's surface points
-(from a coarse mesh) into the other's `dist`.
+`assert test, "message"` is a statement, with `< > <= >= == !=` on
+numbers (1 or 0), `pieces(shape, resolution)` meshed at that grid and
+counted as the report counts, and `clearance(a, b)` sampled from the
+fields (a lattice over each box projected onto its surface, the best pair
+tightened by alternating projections), negative by the overlap. `check`
+prints each failure with both sides as they came out and exits with a
+failure; `render` warns; the report has an Asserts row. The loop in the
+guide and the skill tells agents to write them once a thing is right.
 
-**Must prototype.** Whether agents write asserts unprompted, or only when
-the skill's loop tells them to.
+**Still to measure.** Whether agents write asserts unprompted, or only
+when the loop tells them to, and whether the asserts they write catch
+anything: the next dogfooding round's question.
 
 ## 7. Image textures and decals
 

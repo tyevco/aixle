@@ -26,7 +26,12 @@ the inside is cut open.
    then `slices.png` if anything is hollow or nested, then `steps.png` if a
    part is missing or misplaced, to see which step went wrong, and
    `report.md` for the numbers (does it stand, is it one piece).
-5. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
+5. **Say what the model promises**, with `assert`: one piece, a gap
+   that must stay open, a size that must hold (`assert pieces(model) ==
+   1`, `assert clearance(handle, rim) > 0.05`). `check` fails when one is
+   broken and says by how much, so the next edit cannot silently undo
+   what the pictures once showed.
+6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
 
 ## The commands

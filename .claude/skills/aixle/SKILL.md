@@ -48,7 +48,11 @@ Reference: `docs/reference.md` (every function, generated from the code),
    tree from the output down, each step with its source line, size,
    material and anchors, so you know which step feeds which before you
    render anything.
-5. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
+5. **Promise it with `assert`** once a thing is right: `assert
+   pieces(model) == 1`, `assert clearance(handle, rim) > 0.05`, `assert
+   tall(model) < 2.2`. `check` then fails, with the numbers, when a later
+   edit breaks it.
+6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
    `--beauty` for the presentation picture.
 
@@ -71,6 +75,7 @@ name = expr                      # a step
 def part(a, b=1) = expr          # a parametric part
 for i in range(6) { ... }        # loops; range(a, b), range(a, b, step), [1, 2.5]
 show name                        # the output (default: the last shape)
+assert pieces(m) == 1, "why"     # a promise; check fails with the numbers when it breaks
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(n, r, h)
 circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("Abc", size, arc=r)   # 2D
@@ -82,6 +87,7 @@ import("part.obj", size=2)                                                      
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
+pieces(s)  clearance(a, b)   a < b  a == b  a != b                                        # measure for assert (1 or 0)
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 

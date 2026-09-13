@@ -161,6 +161,22 @@ surface area whose normal points down more than 45 degrees, floor faces
 excluded. None of this needs the field: it is what the mesh says, which is
 what would be printed.
 
+### The model's own promises
+
+Every dogfooding report carried a line like "the handle must clear the
+rim text" that lived only in the report, so the next agent to edit the
+program could not know what it broke. `assert` puts the promise in the
+program: a comparison (a number, 1 or 0) with a message, run on every
+evaluation, printed by `check` with both sides as they came out and
+failing the check, counted by `render` as a warning. The two queries that
+make it useful are measured the way the report measures: `pieces` meshes
+the shape at a grid and counts as the Pieces row does, so `pieces(m) ==
+1` means what the render says; `clearance` samples each shape's field
+from a lattice over its box, projects the samples onto its surface, reads
+them in the other field, and tightens the best pair by alternating
+projections, so two parts that face each other get their exact gap and
+an overlap comes back negative by its depth.
+
 ## Feature sizes
 
 A bounding box sees a thin plate but not a thin wall: a shelled cup is as

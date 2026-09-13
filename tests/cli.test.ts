@@ -18,6 +18,23 @@ describe("aixle explain", () => {
   });
 });
 
+describe("asserts", () => {
+  it("check prints each failed assert with its numbers and exits with a failure; a passing program says so", { timeout: 60000 }, () => {
+    const out = cli("check", "examples/table.aix");
+    expect(out).toMatch(/\nasserts: 3 pass\n$/);
+    let failed = "";
+    try {
+      cli("check", "tests/fixtures/broken_promise.aix");
+    } catch (e) {
+      failed = (e as { stdout: string; status: number }).stdout;
+      expect((e as { status: number }).status).toBe(1);
+    }
+    expect(failed).toMatch(/assert \(line 3\) fails: clearance\(a, b\) > 0.5 is 0.2 > 0.5: apart\n/);
+    expect(failed).toMatch(/assert \(line 4\) fails: pieces\(a \+ b\) == 1 is 2 == 1\n/);
+    expect(failed).toMatch(/asserts: 1 pass, 2 fail\n$/);
+  });
+});
+
 describe("libraries", () => {
   // Five CLI launches under tsx: a few seconds each on a CI runner, so this test gets its own timeout.
   it("documents a library from its defs and comments, and check lists what a program uses", { timeout: 60000 }, () => {

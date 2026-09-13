@@ -19,10 +19,10 @@
  *   |          pipeline: `a | f(x)` is `f(a, x)`
  *   primary    number, string, name, call, list, ( expr )
  */
-import type { Arg, Expr, Program, Stmt } from "./ast.js";
+import { COMPARE_OPS, type Arg, type CompareOp, type Expr, type Program, type Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token } from "./lexer.js";
 
-const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use"]);
+const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
 
 class Parser {
   private pos = 0;
@@ -108,6 +108,13 @@ class Parser {
       }
       return { type: "use", path: pathTok.value, alias, line: t.line };
     }
+    if (t.type === "ident" && t.value === "assert") {
+      this.next();
+      const test = this.expr();
+      let message: Expr | undefined;
+      if (this.atOp(",")) { this.next(); message = this.expr(); }
+      return { type: "assert", test, message, line: t.line };
+    }
     if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === "=") {
       const name = this.expectIdent("a name").value;
       this.expectOp("=");
@@ -155,7 +162,18 @@ class Parser {
   // --- expressions ---
 
   expr(): Expr {
-    return this.additive();
+    return this.comparison();
+  }
+
+  // Loosest of all: `a + b < c` compares the sum. The result is a number, 1 or 0, for `assert`.
+  private comparison(): Expr {
+    let left = this.additive();
+    while (COMPARE_OPS.some((op) => this.atOp(op))) {
+      const t = this.next();
+      const right = this.additive();
+      left = { type: "binary", op: t.value as CompareOp, left, right, line: t.line };
+    }
+    return left;
   }
 
   private additive(): Expr {
