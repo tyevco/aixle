@@ -4,7 +4,7 @@
  * renders each so an agent can see how the model was built up, and the
  * report says which steps ended up in the output.
  */
-import type { Arg, Expr, Program, Stmt } from "./ast.js";
+import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
@@ -102,6 +102,25 @@ export interface Evaluation {
   defs: UserFn[];
   settings: Settings;
   warnings: string[];
+  /** Every assert the program ran, in order, passed or not; a used library's come first with its path. */
+  asserts: AssertResult[];
+}
+
+export interface AssertResult {
+  line: number;
+  /** The tested expression as text: `clearance(handle, rim) > 0.05`. */
+  text: string;
+  /** For a comparison, the two sides as evaluated: `0.031 > 0.05`. */
+  detail?: string;
+  message?: string;
+  passed: boolean;
+  /** The library file the assert is in, when it is not the program's own. */
+  file?: string;
+}
+
+/** One line for a failed assert, the same in `check`, the render's warnings and the report. */
+export function assertLine(a: AssertResult): string {
+  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line}) fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
 }
 
 const MAX_LOOP = 20000;
@@ -135,6 +154,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const steps = new Map<string, Step>();
   const settings: Settings = {};
   const warnings: string[] = [...(program.warnings ?? [])];
+  const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
   // "pose:joint" for every pose value given as one number rather than a triple.
   const singles = new Set<string>();
@@ -194,6 +214,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   function binary(op: string, a: Value, b: Value, line: number): Value {
+    if ((COMPARE_OPS as readonly string[]).includes(op)) return compare(op, a, b, line);
     if (typeof a === "number" && typeof b === "number") {
       switch (op) {
         case "+": return a + b;
@@ -231,6 +252,23 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if ((isShape3(a) && isShape2(b)) || (isShape2(a) && isShape3(b)))
       throw new RuntimeError(`cannot combine a 3D shape with a 2D profile; extrude or revolve the profile first`, line);
     throw new RuntimeError(`'${op}' does not apply to a ${typeName(a)} and a ${typeName(b)}`, line);
+  }
+
+  // A comparison is a number, 1 or 0: what assert tests, and what min()/max() can weigh. Numbers compare as
+  // numbers, strings as strings for == and !=; anything else is a mistake worth naming.
+  function compare(op: string, a: Value, b: Value, line: number): number {
+    if (typeof a === "number" && typeof b === "number") {
+      switch (op) {
+        case "<": return a < b ? 1 : 0;
+        case ">": return a > b ? 1 : 0;
+        case "<=": return a <= b ? 1 : 0;
+        case ">=": return a >= b ? 1 : 0;
+        case "==": return a === b ? 1 : 0;
+        case "!=": return a !== b ? 1 : 0;
+      }
+    }
+    if (typeof a === "string" && typeof b === "string" && (op === "==" || op === "!=")) return (a === b) === (op === "==") ? 1 : 0;
+    throw new RuntimeError(`'${op}' compares two numbers${op === "==" || op === "!=" ? " or two strings" : ""}, not a ${typeName(a)} and a ${typeName(b)}${isShape3(a) || isShape3(b) ? "; measure the shape first (width, tall, pieces, clearance, ...)" : ""}`, line);
   }
 
   function callImport(args: Arg[], scope: Scope, line: number): Value {
@@ -548,6 +586,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const exports = new Map<string, Value>();
         for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
         for (const d of lib.defs) exports.set(d.name, d);
+        for (const a of lib.asserts) asserts.push({ ...a, file: a.file ?? stmt.path });
         modules.set(prefix, { path: stmt.path, exports });
         moduleList.push({ prefix, path: stmt.path, names: [...exports.keys()] });
         return;
@@ -589,6 +628,26 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "expr": {
         const v = evalExpr(stmt.value, scope);
         if (isShape3(v) || isShape2(v)) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
+        return;
+      }
+      case "assert": {
+        // A comparison is evaluated side by side, so a failure can say what the two numbers were.
+        const t = stmt.test;
+        let value: Value, detail: string | undefined;
+        if (t.type === "binary" && (COMPARE_OPS as readonly string[]).includes(t.op)) {
+          const a = evalExpr(t.left, scope), b = evalExpr(t.right, scope);
+          value = compare(t.op, a, b, t.line);
+          const show = (v: Value) => (typeof v === "number" ? String(Number(v.toPrecision(4))) : typeof v === "string" ? JSON.stringify(v) : typeName(v));
+          detail = `${show(a)} ${t.op} ${show(b)}`;
+        } else value = evalExpr(t, scope);
+        if (typeof value !== "number") throw new RuntimeError(`assert tests a number (a comparison such as width(m) < 5, or 1 and 0), not a ${typeName(value)}`, stmt.line);
+        let message: string | undefined;
+        if (stmt.message) {
+          const m = evalExpr(stmt.message, scope);
+          if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
+          message = m;
+        }
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0 });
         return;
       }
     }
@@ -646,7 +705,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, used, steps: stepList, settings, warnings, modules: moduleList, defs };
+  return { output, outputName, objects, poses, animations, used, steps: stepList, settings, warnings, modules: moduleList, defs, asserts };
 }
 
 export function signature(name: string, ov: Overload): string {

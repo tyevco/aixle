@@ -54,7 +54,7 @@ generated from the code so it cannot drift.
 
 ```
 npm install
-npx aixle check  model.aix           # parse, evaluate, print sizes and warnings; no pictures (--pose NAME for a rig's pose)
+npx aixle check  model.aix           # parse, evaluate, print sizes, warnings and failed asserts; no pictures (--pose NAME for a rig's pose)
 npx aixle explain model.aix          # the program as a tree from the output down, for a program someone else wrote
 npx aixle render model.aix           # everything, into out/model/
 npx aixle render model.aix --quick   # the sheet only, in a second or two; add --watch to re-render on save

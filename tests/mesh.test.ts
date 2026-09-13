@@ -8,6 +8,7 @@ import { toGlb } from "../src/export/glb.js";
 import { albedo, preset } from "../src/sdf/materials.js";
 import { bakeAtlas } from "../src/export/atlas.js";
 import { analyse, hull2, insideMargin } from "../src/mesh/physics.js";
+import { countPieces } from "../src/mesh/pieces.js";
 import { materialFromString } from "../src/sdf/materials.js";
 
 describe("surface nets", () => {
@@ -209,5 +210,16 @@ describe("an imported mesh of overlapping shells", () => {
     expect(field.dist(0, 1.0, 0)).toBeLessThan(0);
     expect(field.dist(0, 1.0, 0.8)).toBeGreaterThan(0);
     expect(field.openness).toBeLessThan(0.01);
+  });
+});
+
+describe("pieces", () => {
+  it("counts the pieces a shape meshes into, as the report does", () => {
+    expect(countPieces(P.sphere(1), 32)).toBe(1);
+    expect(countPieces(O.union([P.sphere(1), O.move(P.sphere(1), 3, 0, 0)]), 32)).toBe(2);
+    // Two boxes overlapping by a cell are one piece; an enclosed void is a cavity, not a piece.
+    expect(countPieces(O.union([P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.9, 0, 0)]), 32)).toBe(1);
+    expect(countPieces(O.shell(P.sphere(1), 0.2), 32)).toBe(1);
+    expect(countPieces(P.empty(), 32)).toBe(0);
   });
 });

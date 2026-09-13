@@ -27,3 +27,9 @@ chairs = (c1 + c2 + c3 + c4) | paint("oak")
 
 dining = table + chairs
 show dining
+
+# What the model promises: chairs pulled clear of the table, and a chair
+# that is one piece (its slats meet the rails). check fails when one breaks.
+assert clearance(chairs, table) > 0.1, "the chairs clear the table"
+assert pieces(chair()) == 1, "a chair is one piece"
+assert tall(dining) < 1.8

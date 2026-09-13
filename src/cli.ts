@@ -8,7 +8,8 @@ import { anchorsOf, hasLooseBounds, placedShape, surfaceBottom, surfaceExtent } 
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, cutWarnings, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, diff, cutWarnings, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertLine } from "./lang/interpreter.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
@@ -163,7 +164,11 @@ function main(argv: string[]): number {
       const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize)];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
-      return 0;
+      // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
+      const failed = ev.asserts.filter((a) => !a.passed);
+      for (const a of failed) console.log(assertLine(a));
+      if (ev.asserts.length) console.log(`asserts: ${failed.length ? `${ev.asserts.length - failed.length} pass, ${failed.length} fail` : `${ev.asserts.length} pass`}`);
+      return failed.length ? 1 : 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);
       return 1;
@@ -221,6 +226,7 @@ function main(argv: string[]): number {
       if (unused.length) console.log(`\nnot in the output: ${unused.join(", ")}`);
       if (ev.poses.length) console.log(`\nposes: ${ev.poses.map((p) => p.name).join(", ")}`);
       for (const m of ev.modules) console.log(`\nuse ${m.prefix} (${m.path}): ${m.names.join(", ")}`);
+      if (ev.asserts.length) console.log(`\nasserts: ${assertsRow(ev.asserts)}`);
       return 0;
     } catch (e) {
       console.error(e instanceof Error ? e.message : String(e));

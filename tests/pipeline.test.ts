@@ -338,6 +338,21 @@ describe("round-6 findings", () => {
     expect(watertightNote(w([0.5, 0, 0]), boards, 0.02, edges)).toMatch(/in 'panel' twice, as 'a' and 'b'/);
     expect(edges).toEqual([{ at: [0.5, 0, 0], count: 4, steps: ["panel"] }]);
   });
+  it("a failed assert is a warning on the render and a row in the report", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("m = box(2, 1, 1)\nassert width(m) < 1, \"narrow\"\nassert tall(m) == 1", "promise.aix", dir, { grid: 24, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false });
+      expect(r.warnings).toContain("assert (line 2) fails: width(m) < 1 is 2 < 1: narrow");
+      expect(r.report).toMatch(/\| Asserts \| 1 pass, 1 fail: \(line 2\) fails: width\(m\) < 1 is 2 < 1: narrow \|/);
+      const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(json.asserts).toEqual([
+        { line: 2, text: "width(m) < 1", detail: "2 < 1", message: "narrow", passed: false },
+        { line: 3, text: "tall(m) == 1", detail: "1 == 1", passed: true },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("a scene's report judges each object on its own", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {

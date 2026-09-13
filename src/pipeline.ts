@@ -22,11 +22,11 @@ import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
 import { renderBeauty } from "./render/beauty.js";
-import { evaluate, type Evaluation } from "./lang/interpreter.js";
+import { assertLine, type AssertResult, evaluate, type Evaluation } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
-import { analyse, type Physics, type Piece } from "./mesh/physics.js";
+import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type Shape3 } from "./sdf/types.js";
@@ -443,9 +443,13 @@ export function paintWarnings(evaluation: Evaluation): string[] {
 }
 
 /** A speck: tiny in volume and in extent, a sliver left by a cut or a blend neck (round 5: counted as a piece and as a cavity). */
-function isSpeck(pc: Piece, physics: Physics, cellSize: number): boolean {
-  const main = physics.pieces[0];
-  return Math.abs(pc.volume) < Math.abs(main.volume) * 0.001 && pc.size < cellSize * 4;
+
+/** The asserts row: how many passed, and each failure as check prints it. */
+export function assertsRow(asserts: AssertResult[]): string {
+  const failed = asserts.filter((a) => !a.passed);
+  const passed = asserts.length - failed.length;
+  if (!failed.length) return `${passed} pass`;
+  return `${passed} pass, ${failed.length} fail: ${failed.map((a) => assertLine(a).replace(/^assert /, "")).join("; ")}`;
 }
 
 /** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and step. */
@@ -605,7 +609,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownAngles = shownPose ? rest.poses.find((p) => p.name === shownPose)?.angles : undefined;
   const evaluation = shownAngles ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: shownAngles }) : rest;
-  const warnings = [...evaluation.warnings];
+  const warnings = [...evaluation.warnings, ...evaluation.asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // A focused render's close-up mesh judged on its own (round 4: a focus sheet could not say whether the lug was sound).
@@ -915,6 +919,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Watertight | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
+      ...(evaluation.asserts.length ? [`| Asserts | ${assertsRow(evaluation.asserts)} |`] : []),
       "",
     );
     if (physics) {
@@ -1006,6 +1011,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
         watertight: edgeList.length ? { clusters: edgeList } : undefined,
+        asserts: evaluation.asserts.length ? evaluation.asserts : undefined,
         joints: joints.map((j) => ({ name: j.joint!.name, pivot: j.joint!.pivot })),
         poses: evaluation.poses.map((p) => p.name),
         animations: evaluation.animations.map((a) => a.name),

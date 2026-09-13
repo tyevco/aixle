@@ -95,6 +95,12 @@ export function insideMargin(hull: [number, number][], x: number, z: number): nu
   return m;
 }
 
+/** A speck: under a thousandth of the main piece and a few cells across, a sliver left by a cut, not a part. */
+export function isSpeck(pc: Piece, physics: Physics, cellSize: number): boolean {
+  const main = physics.pieces[0];
+  return Math.abs(pc.volume) < Math.abs(main.volume) * 0.001 && pc.size < cellSize * 4;
+}
+
 export function analyse(mesh: Mesh, cellSize: number): Physics {
   const { volume, centre } = centroidAndVolume(mesh);
   const p = mesh.positions;
