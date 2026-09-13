@@ -176,6 +176,34 @@ A workshop corner from the shipped libraries: a bench from std/furniture
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/workshop.aix) · <a href="/aixle/viewers/workshop.html" target="_blank" rel="noopener">viewer</a>
 
+## Libraries
+
+The plates of the libraries shipped with the tool, `use "std/hardware"`, `"std/furniture"` and `"std/plants"`: every part each one offers, as `aixle render std/<name>.aix` draws it.
+
+### furniture
+
+std/furniture: a table, a chair, a stool, a bench and a shelf.
+
+![furniture, beauty render](../std/renders/furniture_beauty.png) ![furniture, contact sheet](../std/renders/furniture.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/std/furniture.aix) · <a href="/aixle/viewers/furniture.html" target="_blank" rel="noopener">viewer</a>
+
+### hardware
+
+std/hardware: bolts, nuts, washers, screws, chains and handles.
+
+![hardware, beauty render](../std/renders/hardware_beauty.png) ![hardware, contact sheet](../std/renders/hardware.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/std/hardware.aix) · <a href="/aixle/viewers/hardware.html" target="_blank" rel="noopener">viewer</a>
+
+### plants
+
+std/plants: a potted plant, a bush, a tree and a tuft of grass.
+
+![plants, beauty render](../std/renders/plants_beauty.png) ![plants, contact sheet](../std/renders/plants.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/std/plants.aix) · <a href="/aixle/viewers/plants.html" target="_blank" rel="noopener">viewer</a>
+
 ## Dogfooding
 
 Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).

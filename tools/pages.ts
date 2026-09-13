@@ -42,6 +42,14 @@ function examples(): Model[] {
     .map((f) => ({ name: f.replace(/\.aix$/, ""), program: `examples/${f}`, renders: "examples/renders", caption: caption(join(dir, f)) }));
 }
 
+function libraries(): Model[] {
+  const dir = resolve(ROOT, "std");
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".aix"))
+    .sort()
+    .map((f) => ({ name: f.replace(/\.aix$/, ""), program: `std/${f}`, renders: "std/renders", caption: caption(join(dir, f)) }));
+}
+
 function dogfood(): Model[] {
   const dir = resolve(ROOT, "dogfood");
   const out: Model[] = [];
@@ -86,6 +94,7 @@ function gallery(): string {
     }
   };
   section("Examples", "The worked models under `examples/`, each written to exercise a part of the language.", examples());
+  section("Libraries", "The plates of the libraries shipped with the tool, `use \"std/hardware\"`, `\"std/furniture\"` and `\"std/plants\"`: every part each one offers, as `aixle render std/<name>.aix` draws it.", libraries());
   section("Dogfooding", "Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).", dogfood());
   return lines.join("\n");
 }
@@ -93,7 +102,7 @@ function gallery(): string {
 function viewers(): void {
   const out = resolve(ROOT, ".vitepress", "public", "viewers");
   mkdirSync(out, { recursive: true });
-  for (const m of [...examples(), ...dogfood()]) {
+  for (const m of [...examples(), ...libraries(), ...dogfood()]) {
     const tmp = join(tmpdir(), `aixle-viewer-${m.name}`);
     rmSync(tmp, { recursive: true, force: true });
     const t0 = performance.now();

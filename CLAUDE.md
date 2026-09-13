@@ -40,10 +40,11 @@ Layers, each pure and under test:
    generates `docs/reference.md` from it. Adding a function means adding it
    there, running `npm run docs`, and committing the reference with it; CI
    fails on a stale reference. Do not hand-edit `docs/reference.md`.
-4. **`examples/renders/`, `dogfood/renders/` and `docs/gallery.md` are
-   generated, never hand-edited.** A changed PNG in a diff must come from a
-   change in `src/` or a program, made with `npm run examples` or
-   `npm run dogfood` and committed together; CI regenerates and diffs.
+4. **`examples/renders/`, `dogfood/renders/`, `std/renders/` and
+   `docs/gallery.md` are generated, never hand-edited.** A changed PNG in a
+   diff must come from a change in `src/` or a program, made with
+   `npm run examples`, `npm run dogfood` or `npm run std` and committed
+   together; CI regenerates and diffs.
    The dogfood programs themselves are the agents' own and are not edited
    except to keep them running when the language changes; a change there
    says so in the commit.
@@ -67,6 +68,7 @@ npm run aixle -- render examples/mug.aix --beauty     the CLI from source (also:
 npm run docs          regenerate docs/reference.md
 npm run examples      regenerate examples/renders/ (pass names to do a few: npm run examples -- mug vase)
 npm run dogfood       regenerate dogfood/renders/ from the agents' programs
+npm run std           regenerate std/renders/, the shipped libraries' plates
 npm run pages         build the site into .vitepress/dist (gallery, viewer pages, vitepress build); pages:dev to serve it
 npm run check         all of the above, what CI runs
 npm run build         compile to dist/ for the bin
@@ -91,7 +93,7 @@ npm run build         compile to dist/ for the bin
 - A library part: a `def` in the right `std/*.aix` with a comment line
   above it saying its size, where its origin is and what it stands on,
   built at the origin standing on y = 0 facing +z; add it to the file's
-  `show` plate, render the file and read the plate.
+  `show` plate, `npm run std -- <name>` and read the plate.
 - A dogfooding round: brief a few fresh agents as `dogfood/README.md`
   describes, copy their programs, probes and reports unchanged into
   `dogfood/round-N/`, answer every friction point in the tool or the docs

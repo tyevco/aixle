@@ -15,12 +15,13 @@
     "docs": "tsx src/cli.ts doc --write docs/reference.md",
     "examples": "tsx tools/examples.ts",
     "dogfood": "tsx tools/dogfood.ts",
+    "std": "tsx tools/std.ts",
     "pages:gallery": "tsx tools/pages.ts",
     "pages:viewers": "tsx tools/pages.ts --viewers",
     "pages:dev": "vitepress dev",
     "pages:build": "vitepress build",
     "pages": "npm run pages:gallery && npm run pages:viewers && npm run pages:build",
-    "check": "npm run typecheck && npm test && npm run docs && npm run examples && npm run dogfood && npm run pages:gallery"
+    "check": "npm run typecheck && npm test && npm run docs && npm run examples && npm run dogfood && npm run std && npm run pages:gallery"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

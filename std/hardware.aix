@@ -17,8 +17,8 @@ def screw(r=0.08, len=0.5) = (((sphere(r) & (box(2 * r, r, 2 * r) | move(0, r * 
 # A hex nut for a bolt of radius r: 0.8r thick, standing on y = 0, with the hole through it.
 def nut(r=0.1) = (prism(6, r * 1.15, r * 0.8) - cylinder(r * 0.5, r * 3)) | move(0, r * 0.4, 0) | paint(zinc)
 
-# A flat washer for a bolt of radius r: 2.2r across, 0.15r thick, standing on y = 0.
-def washer(r=0.1) = (cylinder(r * 1.1, r * 0.15) - cylinder(r * 0.55, r)) | move(0, r * 0.075, 0) | paint(zinc)
+# A flat washer for a bolt of radius r: 2.2r across, a quarter of r thick, standing on y = 0.
+def washer(r=0.1) = (cylinder(r * 1.1, r * 0.25) - cylinder(r * 0.55, r)) | move(0, r * 0.125, 0) | paint(zinc)
 
 # One chain link: a rounded oval of wire radius r, pitch long, lying flat in the xz plane.
 def link(pitch=0.3, r=0.03) = sweep(circle(r), [-pitch / 2 + r * 2, 0, 0, pitch / 2 - r * 2, 0, 0], smooth=0) + (torus(r * 2, r) | move(-pitch / 2 + r * 2, 0, 0)) + (torus(r * 2, r) | move(pitch / 2 - r * 2, 0, 0))
@@ -29,6 +29,12 @@ def chain(n=8, pitch=0.3, r=0.03) = (link(pitch, r) + (link(pitch, r) | rotate(x
 # A bar handle: a rod of radius r spanning w along x, on two feet of height h standing on y = 0.
 def handle(w=0.6, r=0.04, h=0.12) = ((cylinder(r, w) | rotate(z=90) | move(0, h, 0)) + (cylinder(r * 1.2, h) | move(-w / 2 + r * 1.2, h / 2, 0)) + (cylinder(r * 1.2, h) | move(w / 2 - r * 1.2, h / 2, 0))) | paint(steel)
 
-# Rendering this file on its own shows every part in a row.
-plate = (hex_bolt() | move(-1.2, 0.6, 0)) + (screw() | move(-0.7, 0.5, 0)) + (nut() | move(-0.2, 0, 0)) + (washer() | move(0.3, 0, 0)) + (chain(6) | move(0.6, 0.09, 0)) + (handle() | move(0, 0, 0.8))
-show plate
+# Rendering this file on its own shows every part in a row, each its own object.
+set grid 200
+bolt_p = hex_bolt() | move(-1.2, 0.6, 0)
+screw_p = screw() | move(-0.7, 0.5, 0)
+nut_p = nut() | move(-0.2, 0, 0)
+washer_p = washer() | move(0.3, 0, 0)
+chain_p = chain(6) | move(0.6, 0.09, 0)
+handle_p = handle() | move(0, 0, 0.8)
+scene bolt_p, screw_p, nut_p, washer_p, chain_p, handle_p
