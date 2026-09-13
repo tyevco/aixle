@@ -8,7 +8,7 @@ import { anchorsOf, hasLooseBounds, placedShape, surfaceBottom, surfaceExtent } 
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { cellFor, check, diff, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { cellFor, check, diff, cutWarnings, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import { dimsLabel } from "./render/views.js";
@@ -160,7 +160,7 @@ function main(argv: string[]): number {
         if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
       }
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev)];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize)];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       return 0;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds } from "../src/pipeline.js";
+import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -305,6 +305,27 @@ describe("printing", () => {
       expect(r.evaluation.output!.dist(0, 0, 0)).toBeGreaterThan(0.5);
       expect(r.evaluation.output!.dist(0.9, 0.5, 0)).toBeLessThan(0);
       expect(r.evaluation.output!.dist(0, -0.9, 0)).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("round-6 findings", () => {
+  it("warns about a cut that removes almost nothing, but not about a trim under the floor", () => {
+    const tangent = check("mitre = ellipsoid(0.08, 0.12, 0.08) | move(0, 0.4, 0)\nslot = box(0.3, 0.06, 0.014) | rotate(x=-35) | move(0, 0.36, 0.1)\nbishop = mitre - slot");
+    expect(cutWarnings(tangent, 0.0125).join()).toMatch(/'bishop' \(line 3\): the cut removes nothing the samples could find/);
+    const slot = check("mitre = ellipsoid(0.08, 0.12, 0.08) | move(0, 0.4, 0)\nslot = box(0.3, 0.06, 0.03) | rotate(x=-35) | move(0, 0.36, 0.03)\nbishop = mitre - slot");
+    expect(cutWarnings(slot, 0.0125)).toEqual([]);
+    const trim = check("trunk = sphere(1) | displace(0.1, 0.5)\nbelow = box(4, 1, 4) | move(0, -1.4, 0)\ntree = trunk - below");
+    expect(cutWarnings(trim, 0.03)).toEqual([]);
+  });
+  it("a scene's report judges each object on its own", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("board = box(2, 0.2, 2) | move(0, -0.1, 0)\npawn = cylinder(0.15, 0.4) | move(0, 0.2, 0)\npawns = place(pawn, [-0.5,0,0,0, 0.5,0,0,0])\nscene board, pawns", "set.aix", dir, { grid: 40, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false });
+      expect(r.report).toMatch(/\| board \| yes \| 1 \| yes/);
+      expect(r.report).toMatch(/\| pawns \(each of 2 copies\) \| yes \| 1 \| yes/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

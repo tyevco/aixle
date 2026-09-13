@@ -64,7 +64,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
           return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
         })();
   const ambient = Math.max(0, opts.ambient ?? 1);
-  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1);
+  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, mesh.positions);
   const cell = Math.max(opts.cellSize, 1e-4);
   const floorY = Math.min(0, bounds.min[1]);
   const shadowBox = boundsGrow(bounds, cell);

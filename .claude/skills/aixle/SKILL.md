@@ -75,7 +75,7 @@ show name                        # the output (default: the last shape)
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(n, r, h)
 circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("Abc", size, arc=r)   # 2D
 extrude(profile, h)  revolve(profile, angle=360)  loft(a, b, h)                          # 2D to 3D
-tube(r, [x,y,z, ...], smooth=6, taper=1)  sweep(profile, [x,y,z, ...], smooth=6, twist=0, taper=1)
+tube(r, [x,y,z, ...], smooth=6, taper=1, cap="flat")  sweep(profile, [x,y,z, ...], smooth=6, twist=0, taper=1)
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # path lists
 bezier(points)  curve(points)   tube(r, c)  sweep(profile, c)   text("Ab", 1, face="serif") # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
@@ -88,7 +88,7 @@ set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)
   | twist(deg) | bend(deg) | wrap(r) | displace(amp, size) | array(n, dx, dy, dz) | grid(nx, nz, dx, dz)
-  | ring(n, radius) | ground() | center() | paint("wood") | decal(region, "black")
+  | ring(n, radius, axis="y") | ground() | center() | paint("wood") | decal(region, "black")
 ```
 
 y is up, angles are degrees, primitives are centred on the origin and stand

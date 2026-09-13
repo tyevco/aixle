@@ -66,7 +66,8 @@ npx aixle diff before.aix after.aix        the two sheets side by side
   that is thicker on one side, a hole that does not go through, a cavity
   that broke out where it should not. Filled means solid.
 - A small part of a large model is a few pixels on the sheet: `--focus
-  name` frames every view on that step alone, meshed at the frame's own
+  name` (or `--focus name_3` for one copy of a placed set) frames every
+  view on that step alone, meshed at the frame's own
   finer cell, where the step is in the pose being shown; the report adds
   a "Close-up watertight" row for that mesh, so a lug or a tooth can be
   judged sound on its own.

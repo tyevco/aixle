@@ -368,7 +368,7 @@ Roughen the surface with noise: in and out by up to `amp`, features about `size`
 
 ### grid
 
-nx by nz copies on the ground plane, dx and dz apart.
+nx by nz copies on the ground plane, dx and dz apart, stepping from the original towards +x and +z (a negative step goes the other way).
 
     grid(shape, nx, nz, dx, dz=?) -> shape
 

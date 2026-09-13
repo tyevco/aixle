@@ -23,7 +23,9 @@ export function empty3(): Shape3 {
 export function union(shapes: Shape3[], k = 0): Shape3 {
   // A hard union of hard unions is one flat list: `all = all + part` in a
   // loop then costs one box test per part instead of a chain of closures.
-  const flat = k <= 0 ? shapes.flatMap((s) => s.parts ?? [s]) : shapes;
+  // A placed set stays one part: flattening it into its copies would lose the set (its per-copy nodes in the
+  // export, its hidden switch) and the pawns of a `board + pawns` became one mesh (measured).
+  const flat = k <= 0 ? shapes.flatMap((s) => (s.parts && !s.instanced ? s.parts : [s])) : shapes;
   const live = flat.filter((s) => !isEmpty(s.bounds));
   if (live.length === 0) return empty3();
   if (live.length === 1) return live[0];
@@ -904,7 +906,14 @@ export function place(base: Shape3, placements: Placement[]): Shape3 {
     return move(s, p.x, p.y, p.z);
   });
   const u = union(copies);
-  return { ...u, instanced: { base, placements } };
+  const state = { base, placements, hidden: false };
+  const d = u.dist, h = u.hit;
+  return {
+    ...u,
+    dist: (x, y, z) => (state.hidden ? FAR : d(x, y, z)),
+    hit: (x, y, z) => (state.hidden ? { d: FAR, mat: DEFAULT_MATERIAL, lx: x, ly: y, lz: z } : h(x, y, z)),
+    instanced: state,
+  };
 }
 
 /**

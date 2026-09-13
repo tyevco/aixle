@@ -253,7 +253,7 @@ export const BUILTINS: Builtin[] = [
   // --- repetition ---
   def("array", "Repetition", "`count` copies stepping by dx, dy, dz from the original.",
     ov([shape(), num("count"), num("dx", "", 0), num("dy", "", 0), num("dz", "", 0)], "shape", (a) => O.array(s3(a[0]), n(a[1]), n(a[2]), n(a[3]), n(a[4])))),
-  def("grid", "Repetition", "nx by nz copies on the ground plane, dx and dz apart.",
+  def("grid", "Repetition", "nx by nz copies on the ground plane, dx and dz apart, stepping from the original towards +x and +z (a negative step goes the other way).",
     ov([shape(), num("nx"), num("nz"), num("dx"), num("dz", "defaults to dx", -1e9)], "shape",
       (a) => O.grid(s3(a[0]), n(a[1]), n(a[2]), n(a[3]), n(a[4]) === -1e9 ? n(a[3]) : n(a[4])))),
   def("ring", "Repetition", "`count` copies evenly around `axis` (default y), each first pushed out to `radius` along +x.",

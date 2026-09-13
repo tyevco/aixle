@@ -110,8 +110,8 @@ export interface Shape3 {
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
   joint?: JointState;
-  /** For a placed shape: the base and where its copies go. */
-  instanced?: { base: Shape3; placements: Placement[] };
+  /** For a placed shape: the base and where its copies go; while `hidden`, the whole set reads as empty (the exporter meshes its parent without it). */
+  instanced?: { base: Shape3; placements: Placement[]; hidden?: boolean };
 }
 
 export interface JointState {

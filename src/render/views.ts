@@ -112,7 +112,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
   const label = opts.label ?? true;
   if (view === "persp") {
     const az = opts.azimuth ?? info.azimuth ?? 35, el = opts.elevation ?? info.elevation ?? 25;
-    const cam = perspective(bounds, size, size, az, el);
+    const cam = perspective(bounds, size, size, az, el, 30, 1, mesh.positions);
     const target = createTarget(size, size, INK.viewPersp);
     renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor });
     floorGrid(cam, target, bounds, label);

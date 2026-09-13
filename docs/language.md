@@ -310,7 +310,14 @@ sheet shows them together, and the GLB has a node per object (the OBJ a
 group). `place(shape, [x,y,z,yaw, x,y,z,yaw, ...])` puts copies of a shape
 at each position and yaw (degrees about y; `fields=5` adds a scale per
 copy): the render is the union, the export is one mesh with a node per
-copy, so a forest costs one tree.
+copy, so a forest costs one tree. A placed set keeps its copies' nodes
+wherever it sits: joined to a board with `+`, inside a joint's part, or
+as a scene object of its own (round 6: joined by `+`, an army became one
+mesh). `--focus pawns_3` frames the third copy of a placed set on its
+own. A scene's report has, under Assembly, a row per object (a placed
+set once, for its base): watertight, pieces, stands, overhangs, since
+the rows above are for the fused union, in which thirty-two pieces
+resting on their board are one piece.
 
 `ground()` moves one shape, so in a `scene` it moves that object alone
 and the others stay where their numbers put them: ground the whole
@@ -442,7 +449,9 @@ box would touch the frame's edge and no further, so a zoom never crops
 in order and the last one wins where regions overlap; a region should
 reach a cell or two past the surface it means to paint, since a coarse
 mesh's vertices stray out of a region that ends exactly at the surface
-(measured: a cockpit floor read as antifouling on a quick sheet). A material with `glow=1` gives off its own light in every
+(measured: a cockpit floor read as antifouling on a quick sheet); it
+may reach into the solid as far as it likes, since only the surface is
+painted. A material with `glow=1` gives off its own light in every
 render, unshadowed: a flame, a lamp, a screen. A material with `transmit` (the `glass`,
 `amber` and `emerald` presets, or `material(color, transmit=0.8)`) is
 refracted and reflected by the beauty render and drawn opaque everywhere
@@ -516,7 +525,10 @@ and a cluster of edges all on one plane is called out as a face lying
 exactly on a sample plane, which a nudge of a fraction of a cell cures);
 a named step transformed alone on the right of a `+` (`a + b | move(...)`
 moves b only, since `|` binds tighter; `(a + b) | move(...)` moves both,
-and `+ sphere(0.2) | move(...)` is the ordinary way to place one); a model
+and `+ sphere(0.2) | move(...)` is the ordinary way to place one); a cut
+that removes almost nothing, a slot tangent to the surface it was meant
+to mark (measured on a bishop's mitre), or a cutter whose box never
+reaches the shape; a model
 that would tip over, from its centre of mass and the footprint of its
 base; and, as a note, a model that does not rest on `y = 0`. Two parts
 count as joined when they overlap by about a cell in the field: parts
@@ -541,6 +553,18 @@ under).
   a corner's radius. `check` prints bounds; the render's "Surface extent"
   row and `ground()` read the surface itself (rays from below), so they
   are not fooled.
+- The sampling lattice starts a fraction of a cell off the model's box,
+  so a face at a round coordinate (a plank's edge at x = 3.94, a base at
+  y = 0.15) rarely sits exactly on a sample plane, where the extractor
+  leaves open edges; a face that still does is called out in the
+  watertight row. The perspective views and the beauty render fit the
+  model's own points, so a long model on the diagonal fills its frame.
+- A part that exists only through `array`, `ring` or `mirror` cannot be
+  focused on by itself (its step's box is the original, at the origin,
+  or the whole set); give one copy a name of its own next to the set, or
+  use `place()` for the copies and `--focus name_3`. A def called inline
+  (`plate = pawn() + rook()`) is a step with no name of its own: name
+  the parts you will want to focus on or see blamed.
 - The sheet, the views, the pose sheets and the animation strips draw
   glass (a material with `transmit`) on every other pixel, so what is
   behind it shows through a checker: a pendulum behind a glazed door is

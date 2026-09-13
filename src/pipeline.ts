@@ -15,7 +15,7 @@ import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./e
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
-import { allJoints, intersect, move, placedBounds, surfaceExtent } from "./sdf/ops.js";
+import { allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent } from "./sdf/ops.js";
 import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -166,7 +166,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     const ss = boundsSize(st.value.bounds);
     const t = Math.min(ss[0], ss[1], ss[2]);
     if (t > 0 && t < cellSize * 1.2) {
-      out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it or raise the grid (set grid ${gridFor(t)}).`);
+      out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).`);
       // Its own feature size is settled too, or the union above it would repeat the warning under its own name
       // (measured: 'house', forty parts, listed as thin for its mullion).
       if (st.value.feature !== undefined) reportedFeatures.add(Math.round(st.value.feature * 1e6));
@@ -206,7 +206,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     const key = Math.round(f * 1e6);
     if (reportedFeatures.has(key)) continue;
     reportedFeatures.add(key);
-    out.push(`'${st.name}' (line ${st.line}) has a wall, tube (at its thin end, if tapered) or stroke only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it or raise the grid (set grid ${gridFor(f)}).`);
+    out.push(`'${st.name}' (line ${st.line}) has a wall, tube (at its thin end, if tapered) or stroke only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).`);
   }
   return out;
 }
@@ -316,6 +316,60 @@ export function paintState(s: Shape3, memo = new Map<Shape3, PaintState>()): Pai
   }
   memo.set(s, state);
   return state;
+}
+
+/**
+ * A cut that removes almost nothing: `a - b` where b's box overlaps a's
+ * but the material both cover is under a few cells, or none (measured: a
+ * bishop's slot cut 0.014 thick, tangent to the mitre, left no mark and
+ * no message). The overlap of the two boxes is sampled on a fixed
+ * lattice, so the estimate is the same every run.
+ */
+export function cutWarnings(evaluation: Evaluation, cellSize: number): string[] {
+  const out: string[] = [];
+  if (!(cellSize > 0)) return out;
+  const geometry = geometrySteps(evaluation);
+  for (const st of evaluation.steps) {
+    const v = st.value;
+    if (!isShape3(v) || !v.cut || !v.inner || v.inner.length < 2 || !geometry.has(st.name)) continue;
+    const a = v.inner[0], b = v.inner[1];
+    if (isEmpty(a.bounds) || isEmpty(b.bounds)) continue;
+    // An intersection keeps what both cover; a difference removes it. Either way the shared material is the measure.
+    const lo = [0, 1, 2].map((k) => Math.max(a.bounds.min[k], b.bounds.min[k]));
+    const hi = [0, 1, 2].map((k) => Math.min(a.bounds.max[k], b.bounds.max[k]));
+    if (lo.some((v0, k) => v0 >= hi[k])) {
+      if (!intersectionLike(v)) out.push(`'${st.name}' (line ${st.line}): the cut removes nothing; the cutter's box (${dimsLabel(b.bounds)} at ${b.bounds.min.map(fmt).join(", ")}) does not reach the shape's (${dimsLabel(a.bounds)} at ${a.bounds.min.map(fmt).join(", ")}).`);
+      continue;
+    }
+    const n = 14;
+    let inside = 0, cutter = 0;
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++)
+        for (let k = 0; k < n; k++) {
+          const x = lo[0] + ((i + 0.5) / n) * (hi[0] - lo[0]);
+          const y = lo[1] + ((j + 0.5) / n) * (hi[1] - lo[1]);
+          const z = lo[2] + ((k + 0.5) / n) * (hi[2] - lo[2]);
+          if (b.dist(x, y, z) >= 0) continue;
+          cutter++;
+          if (a.dist(x, y, z) < 0) inside++;
+        }
+    if (intersectionLike(v) || cutter === 0) continue;
+    const boxVol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]);
+    const removed = (inside / (n * n * n)) * boxVol;
+    // Two readings of "almost nothing": the shared material is under a few cells, whatever the cutter; or a cutter
+    // that sits mostly inside the shape's box (a slot, a hole, not a trim under the floor) barely touches the shape.
+    const bs = boundsSize(b.bounds);
+    const slotLike = boxVol > bs[0] * bs[1] * bs[2] * 0.5;
+    if (removed < cellSize ** 3 * 8 || (slotLike && inside < cutter * 0.04))
+      out.push(`'${st.name}' (line ${st.line}): the cut removes ${inside === 0 ? "nothing the samples could find" : `only about ${fmt(removed)} cubic units, ${((inside / cutter) * 100).toFixed(0)}% of the cutter where the boxes overlap`}: the cutter barely reaches into the shape. Push it in further or make it thicker, or it leaves no mark.`);
+  }
+  return out;
+}
+
+/** Whether a cut node is an intersection (keeps the overlap) rather than a difference; both carry `cut`, only a difference keeps a's box. */
+function intersectionLike(v: Shape3): boolean {
+  const a = v.inner![0];
+  return [0, 1, 2].some((k) => v.bounds.min[k] > a.bounds.min[k] + 1e-9 || v.bounds.max[k] < a.bounds.max[k] - 1e-9);
 }
 
 /** Warnings for steps that join painted and unpainted parts, once, at the smallest such step. */
@@ -587,6 +641,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       warnings.push(`The model is only ${fmt(thin)} units thin on one axis, about ${fmt(thin / fullCell)} cells; raise the grid (set grid 256) if it looks broken.`);
     warnings.push(...foldThinWarnings(thinWarnings(evaluation, fullCell, fullGrid)));
     warnings.push(...paintWarnings(evaluation));
+    warnings.push(...cutWarnings(evaluation, fullCell));
     if (opts.quick) {
       // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
       const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];
@@ -612,9 +667,26 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     let frame = trueBounds ?? bounds;
     let shownName = evaluation.outputName;
     if (focusName) {
-      const st = evaluation.steps.find((x) => x.name === focusName && isShape3(x.value));
-      const obj = evaluation.objects.find((o) => o.name === focusName);
-      const fs = st ? (st.value as Shape3) : obj?.shape;
+      let st = evaluation.steps.find((x) => x.name === focusName && isShape3(x.value));
+      let obj = evaluation.objects.find((o) => o.name === focusName);
+      let fs = st ? (st.value as Shape3) : obj?.shape;
+      // `--focus w_pawns_3`: one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
+      // placed group framed the whole span between its copies).
+      const copy = /^(.+)_(\d+)$/.exec(focusName);
+      if (!fs && copy) {
+        const setStep = evaluation.steps.find((x) => x.name === copy[1] && isShape3(x.value) && (x.value as Shape3).instanced);
+        const setObj = evaluation.objects.find((o) => o.name === copy[1] && o.shape.instanced);
+        const set = setStep ? (setStep.value as Shape3) : setObj?.shape;
+        const p = set?.instanced?.placements[Number(copy[2]) - 1];
+        if (set && p) {
+          let s = set.instanced!.base;
+          if (p.scale !== 1) s = scaleShape(s, p.scale, p.scale, p.scale);
+          if (p.yaw !== 0) s = rotateShape(s, 0, p.yaw, 0);
+          fs = move(s, p.x, p.y, p.z);
+          st = setStep;
+          obj = setObj;
+        }
+      }
       if (fs && !isEmpty(fs.bounds)) {
         // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the whole machine).
         // Carried through the joints and transforms above it, so a bucket inside a turned joint is framed where the
@@ -672,7 +744,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
     if (opts.obj !== false || opts.glb !== false) {
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, texture: textureSize > 0 ? Math.max(64, textureSize) : 0 }));
+      const stepNames = new Map<Shape3, string>();
+      for (const st of rest.steps) if (isShape3(st.value) && !stepNames.has(st.value)) stepNames.set(st.value, st.name);
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
@@ -823,6 +897,24 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   if (evaluation.objects.length > 1 || joints.length > 0 || evaluation.poses.length > 0) {
     lines.push("## Assembly", "");
     if (evaluation.objects.length > 1) lines.push(`Objects: ${evaluation.objects.map((o) => `${o.name}${o.shape.instanced ? ` (${o.shape.instanced.placements.length} copies)` : ""}`).join(", ")}`, "");
+    // A print-ready set is judged one object at a time: the scene's rows above are for the fused union, in which
+    // thirty-two chess pieces resting on their board count as one piece (measured). Each object is meshed on its
+    // own at the scene's cell (a placed set once, its base) and gets the same rows; a quick pass skips this.
+    if (evaluation.objects.length > 1 && mesh && !opts.quick && cellSize > 0) {
+      lines.push("Each object on its own, at the scene's cell:", "", "| Object | Watertight | Pieces | Stands | Overhangs |", "| --- | --- | --- | --- | --- |");
+      for (const o of evaluation.objects) {
+        const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
+        if (isEmpty(shape.bounds)) { lines.push(`| ${o.name} | empty | | | |`); continue; }
+        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
+        if (triangleCount(own.mesh) === 0) { lines.push(`| ${o.name} | no surface | | | |`); continue; }
+        const w = watertightReport(own.mesh);
+        const ph = analyse(own.mesh, own.cellSize);
+        const solid = ph.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, ph, own.cellSize)).length;
+        const label = o.shape.instanced ? `${o.name} (each of ${o.shape.instanced.placements.length} copies)` : o.name;
+        lines.push(`| ${label} | ${w.ok ? "yes" : `no: ${w.nonManifold + w.holes} edges`} | ${solid} | ${ph.footprint.length < 3 ? "unknown" : ph.stable ? `yes, ${fmt(ph.stabilityMargin)} inside` : `no, ${fmt(-ph.stabilityMargin)} outside`} | ${(ph.overhang * 100).toFixed(ph.overhang < 0.095 ? 1 : 0)}% |`);
+      }
+      lines.push("");
+    }
     if (joints.length) lines.push(`Joints: ${joints.map((j) => `${j.joint!.name} at (${j.joint!.pivot.map(fmt).join(", ")})`).join("; ")}`, "");
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
     if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.join(" → ")}, ${fmt(a.seconds)}s)`).join("; ")}`, "");

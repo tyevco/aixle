@@ -1,0 +1,75 @@
+# Staunton-style chess pieces, one def per piece. Every piece is turned
+# (a polygon on x >= 0 revolved about y) with its own top, built at the
+# origin standing on y = 0, facing +z (the knight looks towards +z).
+# Units: the king is 0.5 tall; base radii run 0.075 (pawn) to 0.11 (king).
+# The defs are unpainted, so the same def serves both colours.
+
+# The lathe: a closed (r, y) polygon spun about y.
+def turn(pts) = revolve(polygon(pts))
+
+# Pawn, 0.24 tall: a base, a waisted stem, a collar and a ball.
+def pawn() =
+  union(
+    turn([0,0, 0.075,0, 0.075,0.02, 0.068,0.032, 0.05,0.046, 0.036,0.062,
+          0.028,0.09, 0.026,0.13, 0.046,0.145, 0.046,0.156, 0.032,0.166, 0,0.166]),
+    sphere(0.042) | move(0, 0.198, 0),
+    k=0.012)
+
+# Rook, 0.32 tall: a base, a stem, a drum with four crenellations and a well.
+def rook() =
+  turn([0,0, 0.09,0, 0.09,0.025, 0.08,0.04, 0.058,0.062, 0.046,0.09, 0.04,0.14,
+        0.04,0.2, 0.052,0.212, 0.062,0.226, 0.062,0.32, 0,0.32])
+  - (box(0.036, 0.08, 0.2) | move(0, 0.34, 0) | ring(2))
+  - (cylinder(0.034, 0.08) | move(0, 0.34, 0))
+
+# Knight, 0.36 tall: a turned base and a horse's head, a side profile
+# extruded across x and blended onto the stem. The muzzle points to +z.
+def knight() =
+  union(
+    turn([0,0, 0.09,0, 0.09,0.025, 0.08,0.04, 0.058,0.062, 0.046,0.09,
+          0.05,0.12, 0.06,0.135, 0,0.135]),
+    extrude(polygon([0.05,0.10, 0.06,0.16, 0.066,0.22, 0.04,0.30, 0.032,0.35,
+                     0.008,0.31, -0.03,0.30, -0.075,0.27, -0.09,0.245,
+                     -0.078,0.22, -0.055,0.21, -0.03,0.2, -0.022,0.16,
+                     -0.03,0.10]),
+            0.062, "x") | round(0.006),
+    k=0.018)
+
+# Bishop, 0.41 tall: a base, a tall stem, a collar, a slotted mitre and a ball.
+def bishop() =
+  union(
+    turn([0,0, 0.095,0, 0.095,0.025, 0.085,0.04, 0.06,0.062, 0.046,0.09,
+          0.036,0.15, 0.032,0.22, 0.05,0.234, 0.05,0.246, 0.04,0.256, 0,0.256])
+    + (ellipsoid(0.05, 0.07, 0.05) | move(0, 0.312, 0))
+    - (box(0.2, 0.022, 0.08) | rotate(x=-40) | move(0, 0.35, 0.045)),
+    sphere(0.018) | move(0, 0.392, 0),
+    k=0.01)
+
+# Queen, 0.46 tall: a base, a stem, a collar, a flaring crown notched
+# eight times round its rim, and a ball.
+def queen() =
+  union(
+    turn([0,0, 0.105,0, 0.105,0.026, 0.095,0.042, 0.07,0.064, 0.05,0.095,
+          0.04,0.16, 0.036,0.26, 0.055,0.276, 0.055,0.29, 0.045,0.302,
+          0.068,0.37, 0.076,0.4, 0,0.4])
+    - (cylinder(0.019, 0.1) | move(0.08, 0.4, 0) | ring(8)),
+    sphere(0.026) | move(0, 0.428, 0),
+    k=0.01)
+
+# King, 0.5 tall: a base, a stem, a collar, a flaring crown, a cap and a cross.
+def king() =
+  turn([0,0, 0.11,0, 0.11,0.028, 0.1,0.045, 0.075,0.066, 0.055,0.098,
+        0.043,0.17, 0.038,0.28, 0.06,0.298, 0.06,0.312, 0.05,0.324,
+        0.07,0.39, 0.076,0.412, 0.045,0.424, 0,0.424])
+  + (box(0.026, 0.09, 0.026) | move(0, 0.455, 0))
+  + (box(0.066, 0.026, 0.026) | move(0, 0.468, 0))
+
+# The plate: every piece in a row, for `aixle render` on this file.
+pawn_p = pawn() | move(-0.75, 0, 0)
+rook_p = rook() | move(-0.45, 0, 0)
+knight_p = knight() | move(-0.15, 0, 0)
+bishop_p = bishop() | move(0.15, 0, 0)
+queen_p = queen() | move(0.45, 0, 0)
+king_p = king() | move(0.75, 0, 0)
+plate = pawn_p + rook_p + knight_p + bishop_p + queen_p + king_p
+show plate
