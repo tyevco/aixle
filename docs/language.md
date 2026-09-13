@@ -269,6 +269,40 @@ cell is gone whatever the render grid, and `check` warns with the
 `resolution=` that matches the render's cell when the import's is
 coarser, so a fine mesh wants `resolution=160` or so.
 
+## Libraries
+
+`use "parts/hardware.aix"` brings a library's defs and constants in
+under a prefix, `hardware.hex_bolt(0.1, 0.6)`; `use "std/furniture" as
+f` picks the name, and `std/` is the set shipped with the tool:
+`std/hardware` (bolts, nuts, washers, screws, chains, handles),
+`std/furniture` (a table, a chair, a stool, a bench, a shelf) and
+`std/plants` (a potted plant, a bush, a tree, grass). A path is relative
+to the program using it, `.aix` may be left off, and `aixle doc
+std/furniture.aix` prints what a library offers: each def with its
+parameters and defaults and the comment above it. Every shipped part is
+built at the origin standing on y = 0, facing +z, so it is placed with
+`move` or `attach` like anything else:
+
+```
+use "std/furniture" as f
+use "std/hardware"
+desk = f.table(1.6, 0.8, 0.75)
+bolt = hardware.hex_bolt(0.05, 0.3)
+corner = bolt | move(0.7, 0.75, 0.3)
+model = desk + corner + (f.chair() | move(0, 0, 0.7))
+```
+
+A library runs on its own: its defs see the library's own helpers and
+constants (and its own `use`s), never the caller's names, so a library
+cannot be broken by what a program calls things; its shapes stay its
+own (a library's `show` is its preview when rendered by itself, and
+costs the caller nothing); its materials and numbers are exported with
+its defs. To write one, put `def`s in a file with a comment line above
+each, a comment block at the top saying the conventions (where the
+origin is, which way is front, what the units are), and a `show` of a
+plate of every part so `aixle render` on the file is its test. `check`
+lists what a program uses and `explain` ends with it.
+
 ## Scenes, joints and poses
 
 `scene a, b, c` outputs several named objects instead of one shape: the

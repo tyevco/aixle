@@ -17,3 +17,17 @@ describe("aixle explain", () => {
     expect(out).toMatch(/\nposes: quarter/);
   });
 });
+
+describe("libraries", () => {
+  it("documents a library from its defs and comments, and check lists what a program uses", () => {
+    const doc = cli("doc", "std/hardware.aix");
+    expect(doc).toMatch(/^# hardware\n\nstd\/hardware: bolts, nuts/);
+    expect(doc).toMatch(/## hex_bolt\(r=0\.1, len=0\.6\)\n\nA hex-head bolt/);
+    expect(doc).toMatch(/Constants: steel, zinc/);
+    const check = cli("check", "examples/workshop.aix");
+    expect(check).toMatch(/^use f {14}std\/furniture: oak, walnut, table, chair, stool, bench, bench_end, shelf/m);
+    expect(check).toMatch(/no warnings/);
+    // Each shipped library renders on its own: its plate is its test.
+    for (const lib of ["hardware", "furniture", "plants"]) expect(cli("check", `std/${lib}.aix`)).toMatch(/^output: /m);
+  });
+});

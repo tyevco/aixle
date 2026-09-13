@@ -18,7 +18,7 @@ export class SyntaxError extends Error {
   }
 }
 
-const OPS = ["==", "!=", "<=", ">=", "..", "(", ")", "{", "}", "[", "]", ",", "=", "+", "-", "*", "/", "%", "^", "|", "&", "<", ">", ":"];
+const OPS = ["==", "!=", "<=", ">=", "..", "(", ")", "{", "}", "[", "]", ",", "=", "+", "-", "*", "/", "%", "^", "|", "&", "<", ">", ":", "."];
 
 /** Operators that carry a statement over a line break when a line ends with one of them. */
 const TRAILING = new Set(["=", "+", "-", "*", "/", "%", "^", "|", "&", ","]);

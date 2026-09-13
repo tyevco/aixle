@@ -305,6 +305,22 @@ glyph was rendered and read to check it.
 server, and loads three.js from a CDN, so it needs a network connection
 once. It exists for people; an agent verifies from the PNGs.
 
+## Libraries
+
+`use` runs a library file as a program of its own, in its own root
+scope, and exports what that run defined that is not a shape: its
+defs, materials, numbers, strings and lists, under a prefix. A def
+carries its root scope as its closure, so a library's def called from
+a program sees the library's helpers, constants and uses, never the
+caller's; two libraries may use the same helper names, and a program
+may shadow one, and nothing crosses. Its shapes are its own: the `show`
+at the bottom of every shipped library is its preview and its test
+(`aixle render std/hardware.aix`), and costs a user nothing but the
+closures. The shipped `std/` is a folder of ordinary `.aix` files beside
+`src/`; there is no registry, and `aixle doc lib.aix` reads the defs and
+the comments above them, so a library documents itself the way the
+builtins do.
+
 ## Anchors
 
 Every dogfooding round spent most of its iterations on placement

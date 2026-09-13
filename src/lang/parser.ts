@@ -22,7 +22,7 @@
 import type { Arg, Expr, Program, Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token } from "./lexer.js";
 
-const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set"]);
+const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use"]);
 
 class Parser {
   private pos = 0;
@@ -95,6 +95,18 @@ class Parser {
       this.next();
       const key = this.expectIdent("a setting name").value;
       return { type: "set", key, value: this.expr(), line: t.line };
+    }
+    if (t.type === "ident" && t.value === "use") {
+      this.next();
+      const pathTok = this.peek();
+      if (pathTok.type !== "str") throw new SyntaxError(`use needs the library's path as a string: use "parts/hardware.aix" or use "std/furniture" as f`, t.line);
+      this.next();
+      let alias: string | undefined;
+      if (this.at("ident") && this.peek().value === "as") {
+        this.next();
+        alias = this.expectIdent("a name for the library after 'as'").value;
+      }
+      return { type: "use", path: pathTok.value, alias, line: t.line };
     }
     if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === "=") {
       const name = this.expectIdent("a name").value;
@@ -203,7 +215,7 @@ class Parser {
     let left = this.primary();
     while (this.atOp("|")) {
       const t = this.next();
-      const callee = this.expectIdent("a function name after '|'").value;
+      const callee = this.dotted(this.expectIdent("a function name after '|'").value);
       const args: Arg[] = [{ value: left }];
       if (this.atOp("(")) args.push(...this.args(callee));
       left = { type: "call", callee, args, line: t.line, piped: true };
@@ -234,6 +246,15 @@ class Parser {
     return args;
   }
 
+  /** `hardware.hex_bolt`: a name in a used library, kept as one dotted name; the interpreter splits it. */
+  private dotted(name: string): string {
+    while (this.atOp(".") && this.peek(1).type === "ident") {
+      this.next();
+      name += "." + this.next().value;
+    }
+    return name;
+  }
+
   /** A primary followed by any number of `[i]` indexes: `angle("boom")[0]`, `pts[len(pts) - 1]`. */
   private primary(): Expr {
     let e = this.atom();
@@ -253,8 +274,9 @@ class Parser {
     if (t.type === "ident") {
       if (KEYWORDS.has(t.value)) throw new SyntaxError(`unexpected keyword '${t.value}'`, t.line);
       this.next();
-      if (this.atOp("(")) return { type: "call", callee: t.value, args: this.args(t.value), line: t.line };
-      return { type: "ident", name: t.value, line: t.line };
+      const name = this.dotted(t.value);
+      if (this.atOp("(")) return { type: "call", callee: name, args: this.args(name), line: t.line };
+      return { type: "ident", name, line: t.line };
     }
     if (t.type === "op" && t.value === "(") {
       this.next();

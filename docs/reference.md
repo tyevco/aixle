@@ -631,6 +631,12 @@ An existing mesh as a shape: `import("part.obj")` or a `.glb`, relative to the p
 
     import(path, size=?, resolution=96) -> shape
 
+### use
+
+A library's defs and constants under a prefix: `use "parts/hardware.aix"` (relative to the program) or `use "std/furniture" as f` (shipped with the tool: std/hardware, std/furniture, std/plants). Then `hardware.hex_bolt(0.1, 0.6)` or `f.chair(seat=0.45)`. The library runs on its own: its defs see its own helpers and constants, its shapes stay its own, and `aixle doc lib.aix` prints what it offers.
+
+    use "path" [as name]
+
 ## Poses and animation
 
 ### joint

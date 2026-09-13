@@ -28,8 +28,10 @@ export interface Show { type: "show"; values: Expr[]; line: number }
 export interface Scene { type: "scene"; values: Expr[]; line: number }
 export interface Set { type: "set"; key: string; value: Expr; line: number }
 export interface ExprStmt { type: "expr"; value: Expr; line: number }
+/** `use "parts/hardware.aix"` or `use "std/furniture" as f`: a library's defs under a prefix. */
+export interface Use { type: "use"; path: string; alias?: string; line: number }
 
-export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt;
+export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt | Use;
 
 export interface Program {
   body: Stmt[];

@@ -25,6 +25,7 @@ Layers, each pure and under test:
 | `tools/examples.ts`, `tools/dogfood.ts` | render `examples/*.aix` and `dogfood/**/*.aix` into their `renders/` folders (shared code in `tools/render-set.ts`) |
 | `dogfood/` | the dogfooding record: each round's agent-written programs, probes and reports, unchanged; rendered by CI like the examples |
 | `tools/pages.ts`, `.vitepress/` | the documentation site: the repo's own Markdown plus a generated gallery and GLB viewer pages, published by `.github/workflows/pages.yml` |
+| `std/` | the libraries shipped with the tool (`use "std/hardware"`): ordinary `.aix` files of `def`s, each with a comment above it and a `show` of a plate of its parts, which is its test |
 | `.claude/skills/aixle/` | the modelling loop as a Claude Code skill; keep it in step with `docs/agent-guide.md` |
 
 ## Hard rules
@@ -87,6 +88,10 @@ npm run build         compile to dist/ for the bin
 - An example: `examples/<name>.aix`, then `npm run examples -- <name>`, then
   read the three PNGs before committing them; `npm run pages:gallery` adds
   it to the gallery.
+- A library part: a `def` in the right `std/*.aix` with a comment line
+  above it saying its size, where its origin is and what it stands on,
+  built at the origin standing on y = 0 facing +z; add it to the file's
+  `show` plate, render the file and read the plate.
 - A dogfooding round: brief a few fresh agents as `dogfood/README.md`
   describes, copy their programs, probes and reports unchanged into
   `dogfood/round-N/`, answer every friction point in the tool or the docs

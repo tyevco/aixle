@@ -1,0 +1,33 @@
+# A workshop corner from the shipped libraries: a bench from std/furniture
+# bolted down with std/hardware, a stool, a shelf with a potted plant from
+# std/plants, and a chain hung from a handle. `aixle doc std/hardware.aix`
+# lists what each library has; every part comes built at the origin,
+# standing on y = 0, so placing one is a move or an attach.
+use "std/furniture" as f
+use "std/hardware"
+use "std/plants"
+set grid 200
+set azimuth 30
+set elevation 20
+
+bench = f.table(2.0, 0.8, 0.85, top=0.06, leg=0.09)
+stool = f.stool(0.62) | move(-0.4, 0, 0.75)
+shelf = f.shelf(1.0, 1.7, 0.28, 4) | move(0, 0, -1.1)
+
+# Bolts through the bench top at its corners: the head rests on the top.
+bolt = hardware.hex_bolt(0.05, 0.1)
+bolts = (bolt | move(0.9, 0.85, 0.32)) + (bolt | move(-0.9, 0.85, 0.32)) + (bolt | move(0.9, 0.85, -0.32)) + (bolt | move(-0.9, 0.85, -0.32))
+
+# A handle on the bench's front edge, and a chain hung from a hook on the shelf's side.
+grip = hardware.handle(0.5, 0.03, 0.08) | rotate(x=90) | move(0.5, 0.75, 0.41)
+hook = hardware.screw(0.04, 0.2) | rotate(z=90) | move(0.5, 1.4, -1.1)
+chain = hardware.chain(8, 0.2, 0.02) | rotate(z=-90) | move(0.5, 1.4, -1.1)
+
+# A potted plant on the top shelf and a nut and washer left on the bench.
+plant = plants.potted(0.5) | attach("bottom", shelf, "top") | move(-0.25, 0, 0)
+spare = (hardware.nut(0.05) | move(0.3, 0.85, 0)) + (hardware.washer(0.05) | move(0.45, 0.85, 0.1))
+
+# Three objects, since nothing joins the bench, the stool and the shelf.
+bench_set = bench + bolts + grip + spare
+shelf_set = shelf + hook + chain + plant
+scene bench_set, stool, shelf_set

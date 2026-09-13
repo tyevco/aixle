@@ -4,8 +4,9 @@
  * the exports and the report. The CLI is a thin wrapper over it, and so is
  * the examples generator.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseObj } from "./import/obj.js";
 import { parseGlb } from "./import/glb.js";
 import { meshField } from "./mesh/meshSdf.js";
@@ -92,6 +93,35 @@ const fmt = (v: number): string => {
   const s = Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   return s === "-0" ? "0" : s;
 };
+
+/** The folder the shipped libraries live in: `std/` beside `src/` (and beside `dist/` once built). */
+export const STD_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "std");
+
+/**
+ * `use "path"` resolves relative to the program that uses it (or, for a
+ * library's own uses, relative to that library), except `std/<name>`,
+ * which is the library shipped with the tool; `.aix` may be left off.
+ * Each file is read once per run.
+ */
+export function moduleResolver(sourceName: string) {
+  const cache = new Map<string, { source: string; file: string }>();
+  return (path: string, from?: string): { source: string; file: string } => {
+    const withExt = path.endsWith(".aix") ? path : `${path}.aix`;
+    const file = /^std\//.test(withExt) ? resolve(STD_DIR, withExt.slice(4)) : resolve(dirname(resolve(from ?? sourceName)), withExt);
+    const hit = cache.get(file);
+    if (hit) return hit;
+    let source: string;
+    try {
+      source = readFileSync(file, "utf8");
+    } catch {
+      const std = existsSync(STD_DIR) ? readdirSync(STD_DIR).filter((f) => f.endsWith(".aix")).map((f) => `std/${f.replace(/\.aix$/, "")}`) : [];
+      throw new Error(`cannot read ${file}${std.length ? `; the shipped libraries are ${std.join(", ")}` : ""}`);
+    }
+    const out = { source, file };
+    cache.set(file, out);
+    return out;
+  };
+}
 
 /** Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field. */
 export function importResolver(sourceName: string, log: (line: string) => void = () => {}) {
@@ -457,7 +487,7 @@ export function cellFor(evaluation: Evaluation, gridOverride?: number): { grid: 
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointAngles?: Record<string, [number, number, number]>): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), jointAngles });
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointAngles });
 }
 
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
@@ -480,17 +510,18 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
   const resolver = importResolver(sourceName, log);
   const program = parse(source);
-  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver }));
+  const modules = moduleResolver(sourceName);
+  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownAngles = shownPose ? rest.poses.find((p) => p.name === shownPose)?.angles : undefined;
-  const evaluation = shownAngles ? evaluate(program, { resolveImport: resolver, jointAngles: shownAngles }) : rest;
+  const evaluation = shownAngles ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: shownAngles }) : rest;
   const warnings = [...evaluation.warnings];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // A focused render's close-up mesh judged on its own (round 4: a focus sheet could not say whether the lug was sound).
   let closeUpNote: string | undefined;
   if (shownPose && !shownAngles && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
-  const shapeAt: ShapeAt = (angles) => evaluate(program, { resolveImport: resolver, jointAngles: angles }).output;
+  const shapeAt: ShapeAt = (angles) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: angles }).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
   const size = Math.max(64, Math.round(opts.size ?? (evaluation.settings.size as number | undefined) ?? 512));
   const output = evaluation.output;

@@ -53,34 +53,16 @@ tangent-space encoded.
 are axis-aligned, which helps); whether curvature from `dist` is stable
 enough on blended shapes; atlas memory at four maps.
 
-## 3. Modules: `use "file.aix"`
+## 3. Modules: built
 
-**Why.** Every round rebuilt bolts, chains, lanterns and crates from
-scratch, and a `def` cannot be shared between programs. Libraries of
-parts are how a language grows past its builtins without growing them.
-
-**What.**
-
-```
-use "parts/hardware.aix"            # its defs, relative to this file
-use "std/furniture" as f            # shipped with the tool
-bolt = hardware.hex_bolt(0.2, 1)
-chair = f.chair(seat=0.45)
-```
-
-A used file runs in its own scope; its top-level `def`s (and material
-names) are exported; its shapes are not, so using a file has no cost
-until a `def` is called. `aixle doc parts/hardware.aix` documents a
-library the way the reference documents builtins, from the `def` lines
-and their leading comments.
-
-**How.** The parser has `import` for meshes already; `use` resolves
-through the same resolver; the interpreter evaluates the module once and
-binds its defs under the prefix. A `std/` folder in the package with a
-handful of audited parts (hardware, furniture, plants) seeds it.
-
-**Must prototype.** How a library `def` states its own frame and anchors
-so callers place it without reading it (depends on 1).
+`use "path"` and `use "std/name" as x` are in the language, with
+`std/hardware`, `std/furniture` and `std/plants` shipped and `aixle doc
+lib.aix` documenting a library from its defs and comments. A library
+runs in its own scope with its own uses, so its defs see only its own
+names. Round 6 measures whether agents reach for the shipped libraries
+and write their own; the anchors a library def should carry so callers
+place it without reading it (proposal 1, now built) are the next thing
+to add to the shipped parts.
 
 ## 4. Printing: STL, hollowing, a print report
 

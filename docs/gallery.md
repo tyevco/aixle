@@ -168,6 +168,14 @@ A windmill, placed with anchors instead of arithmetic: the cap sits on
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/windmill.aix) · <a href="/aixle/viewers/windmill.html" target="_blank" rel="noopener">viewer</a>
 
+### workshop
+
+A workshop corner from the shipped libraries: a bench from std/furniture
+
+![workshop, beauty render](../examples/renders/workshop_beauty.png) ![workshop, contact sheet](../examples/renders/workshop.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/workshop.aix) · <a href="/aixle/viewers/workshop.html" target="_blank" rel="noopener">viewer</a>
+
 ## Dogfooding
 
 Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).
