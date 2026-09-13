@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 const cli = (...args: string[]) => execFileSync("npx", ["tsx", "src/cli.ts", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
 describe("aixle explain", () => {
-  it("prints the program as a tree from the output down, with each step's source line, size and anchors", () => {
+  it("prints the program as a tree from the output down, with each step's source line, size and anchors", { timeout: 30000 }, () => {
     const out = cli("explain", "examples/windmill.aix");
     const lines = out.split("\n");
     expect(lines[0]).toMatch(/^windmill \(line \d+\)  [\d.]+ × [\d.]+ × [\d.]+  painted  anchors: crown/);
@@ -19,7 +19,8 @@ describe("aixle explain", () => {
 });
 
 describe("libraries", () => {
-  it("documents a library from its defs and comments, and check lists what a program uses", () => {
+  // Five CLI launches under tsx: a few seconds each on a CI runner, so this test gets its own timeout.
+  it("documents a library from its defs and comments, and check lists what a program uses", { timeout: 60000 }, () => {
     const doc = cli("doc", "std/hardware.aix");
     expect(doc).toMatch(/^# hardware\n\nstd\/hardware: bolts, nuts/);
     expect(doc).toMatch(/## hex_bolt\(r=0\.1, len=0\.6\)\n\nA hex-head bolt/);
