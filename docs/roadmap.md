@@ -59,8 +59,11 @@ enough on blended shapes; atlas memory at four maps.
 `std/hardware`, `std/furniture` and `std/plants` shipped and `aixle doc
 lib.aix` documenting a library from its defs and comments. A library
 runs in its own scope with its own uses, so its defs see only its own
-names. Round 6 measures whether agents reach for the shipped libraries
-and write their own; the anchors a library def should carry so callers
+names. Round 6 measured whether agents reach for the shipped libraries
+and write their own: three of four did (one wrote its own piece library,
+two took plants, furniture and hardware from `std/`), and what the
+libraries cost (a chain that was never watertight, slats under the
+scene's cell with no warning) is answered; the anchors a library def should carry so callers
 place it without reading it (proposal 1, now built) are the next thing
 to add to the shipped parts.
 

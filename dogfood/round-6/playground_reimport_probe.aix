@@ -1,0 +1,4 @@
+# Re-import probe: the playground's exported GLB read back as a shape, to
+# compare its size, pieces and what survived against the program.
+back = import("../out/playground/model.glb", resolution=160)
+show back

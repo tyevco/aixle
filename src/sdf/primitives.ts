@@ -31,27 +31,37 @@ export function sphere(r: number): Shape3 {
 /** A box `w` wide (x), `h` tall (y), `d` deep (z), edges rounded by `round`. */
 export function box(w: number, h: number, d: number, round = 0): Shape3 {
   const hx = Math.max(w / 2 - round, 0), hy = Math.max(h / 2 - round, 0), hz = Math.max(d / 2 - round, 0);
-  return primitive((x, y, z) => {
+  const out = primitive((x, y, z) => {
     const qx = Math.abs(x) - hx, qy = Math.abs(y) - hy, qz = Math.abs(z) - hz;
     const ox = Math.max(qx, 0), oy = Math.max(qy, 0), oz = Math.max(qz, 0);
     return length3(ox, oy, oz) + Math.min(Math.max(qx, Math.max(qy, qz)), 0) - round;
   }, symmetric(w / 2, h / 2, d / 2));
+  // A box's thinnest side is a feature it carries into any union, so a slat inside a library's bench is judged
+  // against the cell like a wall is (round 6: a bench's 0.03 slats under a 0.039 cell drew no warning and left a
+  // loose sliver). Only when clearly flat: a cube is not a wall.
+  const thin = Math.min(w, h, d), thick = Math.max(w, h, d);
+  if (thin > 0 && thin < thick * 0.25) out.feature = thin;
+  return out;
 }
 
 /** A cylinder of radius `r` and height `h` along y, edges rounded by `round`. */
 export function cylinder(r: number, h: number, round = 0): Shape3 {
   const rr = Math.max(r - round, 0), hh = Math.max(h / 2 - round, 0);
-  return primitive((x, y, z) => {
+  const out = primitive((x, y, z) => {
     const dx = length2(x, z) - rr, dy = Math.abs(y) - hh;
     return Math.min(Math.max(dx, dy), 0) + length2(Math.max(dx, 0), Math.max(dy, 0)) - round;
   }, symmetric(r, h / 2, r));
+  // A disc much thinner than it is wide is a plate, a rod much longer than it is wide is a tube; see box.
+  const thin = Math.min(2 * r, h), thick = Math.max(2 * r, h);
+  if (thin > 0 && thin < thick * 0.25) out.feature = thin;
+  return out;
 }
 
 /** A cone (frustum) of height `h` along y: radius `r1` at the bottom, `r2` at the top. */
 export function cone(r1: number, r2: number, h: number): Shape3 {
   const hh = h / 2;
   const ra = r1, rb = r2;
-  return primitive((x, y, z) => {
+  const out = primitive((x, y, z) => {
     // Quilez's capped cone, radius ra at y=-hh and rb at y=+hh.
     const qx = length2(x, z), qy = y;
     const k1x = rb, k1y = hh;
@@ -61,7 +71,10 @@ export function cone(r1: number, r2: number, h: number): Shape3 {
     const cbx = qx - k1x + k2x * t, cby = qy - k1y + k2y * t;
     const s = cbx < 0 && cay < 0 ? -1 : 1;
     return s * Math.sqrt(Math.min(cax * cax + cay * cay, cbx * cbx + cby * cby));
-  }, symmetric(Math.max(r1, r2), hh, Math.max(r1, r2)));
+  }, symmetric(Math.max(r1, r2), hh, Math.max(r1, r2)));  // A spike much longer than it is wide is a rod, a flat frustum a disc; judged by its wider end, like a tapered tube.
+  const thin = Math.min(2 * Math.max(r1, r2), h), thick = Math.max(2 * Math.max(r1, r2), h);
+  if (thin > 0 && thin < thick * 0.25) out.feature = thin;
+  return out;
 }
 
 /** A capsule of radius `r` and total height `h` (caps included) along y. */

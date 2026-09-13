@@ -8,20 +8,20 @@ bark = material("#5a4130", "noise", "#3d2b1f", scale=0.3, rough=0.9)
 leaf = material("#3f8f3a", "noise", "#2c6b2a", scale=0.4, rough=0.85)
 clay = material("#b8623a", rough=0.8)
 
-# A potted plant h tall: a tapered pot, soil, a stem and a head of leaves.
+# A potted plant about h tall and 0.6h across: a tapered pot, soil proud of its rim, a stem and a head of leaves.
 def potted(h=0.6) = (((cone(h * 0.16, h * 0.2, h * 0.3) | move(0, h * 0.15, 0)) | paint(clay))
-  + ((cylinder(h * 0.17, h * 0.02) | move(0, h * 0.29, 0)) | paint(bark))
-  + ((cylinder(h * 0.015, h * 0.4) | move(0, h * 0.48, 0)) | paint(bark))
+  + ((cylinder(h * 0.17, h * 0.08) | move(0, h * 0.28, 0)) | paint(bark))
+  + ((cylinder(h * 0.035, h * 0.4) | move(0, h * 0.48, 0)) | paint(bark))
   + (foliage(h * 0.22) | move(0, h * 0.75, 0)))
 
-# A bush of radius r: a clump of blended spheres, roughened.
-def bush(r=0.5) = foliage(r) | move(0, r * 0.85, 0)
+# A bush about 2r across and 1.8r tall (a clump of blended spheres, roughened), standing on y = 0.
+def bush(r=0.5) = foliage(r * 0.72) | move(0, r * 0.75, 0)
 
-# A tree h tall: a tapering trunk with a rounded canopy of radius h / 4.
+# A tree about h tall with a canopy about 0.7h across: a tapering trunk with a rounded head of leaves.
 def tree(h=4) = ((cone(h * 0.06, h * 0.035, h * 0.55) | move(0, h * 0.275, 0)) | paint(bark)) + (foliage(h * 0.25) | move(0, h * 0.72, 0))
 
-# A tuft of grass r across: a few blades, tallest r tall.
-def grass(r=0.2) = (ring(cone(r * 0.06, 0, r) | rotate(x=25) | move(r * 0.3, r * 0.45, 0), 5) + (cone(r * 0.06, 0, r * 0.8) | move(0, r * 0.4, 0))) | paint(leaf)
+# A tuft of grass about r across and r tall: six blades 0.24r thick at the root, so it wants a cell under about 0.1r.
+def grass(r=0.2) = (ring(cone(r * 0.12, 0, r) | rotate(x=25) | move(r * 0.3, r * 0.45, 0), 5) + (cone(r * 0.12, 0, r * 0.8) | move(0, r * 0.4, 0))) | paint(leaf)
 
 def foliage(r) = union(sphere(r), sphere(r * 0.75) | move(r * 0.6, r * 0.2, 0), sphere(r * 0.75) | move(-r * 0.5, r * 0.35, r * 0.3), sphere(r * 0.7) | move(0, r * 0.5, -r * 0.5), sphere(r * 0.7) | move(r * 0.2, -r * 0.3, r * 0.5), k=r * 0.4) | displace(r * 0.08, r * 0.5) | paint(leaf)
 

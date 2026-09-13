@@ -25,7 +25,7 @@ chain = hardware.chain(8, 0.2, 0.02) | rotate(z=-90) | move(0.5, 1.4, -1.1)
 
 # A potted plant on the top shelf and a nut and washer left on the bench.
 plant = plants.potted(0.5) | attach("bottom", shelf, "top") | move(-0.25, 0, 0)
-spare = (hardware.nut(0.05) | move(0.3, 0.85, 0)) + (hardware.washer(0.05) | move(0.45, 0.85, 0.1))
+spare = (hardware.nut(0.06) | move(0.3, 0.85, 0)) + (hardware.washer(0.06) | move(0.45, 0.85, 0.1))
 
 # Three objects, since nothing joins the bench, the stool and the shelf.
 bench_set = bench + bolts + grip + spare

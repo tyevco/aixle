@@ -1,0 +1,97 @@
+# A cafe terrace: stone paving 8 across, four round bistro tables each with
+# a parasol on a pole through it, the same painted-metal chair placed round
+# each table (some turned), a weathered-wood planter of bushes along the
+# back edge, an A-frame menu board with lettering, and a lamp post at the
+# front right corner. Units are metres; the front is +z.
+use "std/plants"
+set grid 320
+set azimuth 35
+set elevation 20
+set zoom 1.25
+set ambient 1.4
+set light_azimuth -30
+set light_elevation 50
+
+# ---- materials ----
+green_metal = material("#2f5d43", metal=0.5, rough=0.45)
+iron_black = material("#26272a", metal=0.5, rough=0.5)
+canvas_red = material("#c0392b", "noise", "#a8301f", scale=0.06, rough=0.95)
+canvas_cream = material("#f0e6c8", "noise", "#dccfa8", scale=0.06, rough=0.95)
+weathered = material("#8f8274", "wood", "#5c5148", scale=0.18, rough=0.95, axis="x")
+paver = material("#a39e95", "tiles", "#7a746c", scale=0.6, rough=0.9)
+glow = material("#ffd890", glow=1.2)
+
+# ---- paving: the base everything is sunk 0.02 into ----
+paving = box(8, 0.11, 5.6) | move(0, 0.055, 0) | paint(paver)   # 0.11: a top at 0.10 would lie on a sample plane
+
+# ---- a bistro chair at the origin, facing +z (back at -z) ----
+seat = cylinder(0.2, 0.03, round=0.01) | move(0, 0.45, 0)
+# Front legs end at the seat top, so their round caps show as rivets; the hoop is one
+# curve from rear foot to rear foot, so it carries the rear legs with it.
+leg = tube(0.03, [0.14, 0.465, 0.14, 0.18, -0.02, 0.18])
+legs = leg | mirror("x")
+hoop = tube(0.03, curve([-0.18, -0.02, -0.18, -0.14, 0.44, -0.14, -0.19, 0.70, -0.19, -0.14, 0.90, -0.22, 0.14, 0.90, -0.22, 0.19, 0.70, -0.19, 0.14, 0.44, -0.14, 0.18, -0.02, -0.18]))
+# Two short spokes from the ring out to the hoop; their inner caps are buried in the ring's tube.
+spokes = tube(0.025, [0.10, 0.70, -0.185, 0.19, 0.70, -0.185]) | mirror("x")
+ring = torus(0.09, 0.032) | rotate(x=90) | move(0, 0.70, -0.183)   # a fatter tube than the bar, so the two cross rather than run tangent
+chair = (seat + legs + hoop + spokes + ring) | paint(green_metal)
+
+# ---- a round table with a parasol pole through it ----
+top = cylinder(0.36, 0.03, round=0.01) | move(0, 0.715, 0)
+stem = cylinder(0.03, 0.72) | move(0, 0.34, 0)
+foot = cone(0.24, 0.12, 0.05) | move(0, 0.005, 0)
+table = (top + stem + foot) | paint(green_metal)
+
+pole = cylinder(0.025, 2.3) | move(0, 1.15, 0)
+finial = sphere(0.06) | move(0, 2.29, 0)
+ferrule = cylinder(0.07, 0.18) | move(0, 2.19, 0)   # a collar where the canopy meets the pole: hides the cut cone's tip
+# The cut cone's tip (r 0.02) hides inside the pole, so no flat ring is left under the apex.
+canopy = (cone(0.95, 0.02, 0.42) - (cone(0.95, 0.02, 0.42) | move(0, -0.07, 0))) | move(0, 2.05, 0)
+parasol_red = ((pole + finial + ferrule) | paint(green_metal)) + (canopy | paint(canvas_red))
+parasol_cream = ((pole + finial + ferrule) | paint(green_metal)) + (canopy | paint(canvas_cream))
+
+# ---- placements: tables at x = +-2, z = 0.9 and -1.1, on the paving's top ----
+tables = place(table, [-2, 0.08, 0.9, 0,  2, 0.08, 0.9, 0,  -2, 0.08, -1.1, 0,  2, 0.08, -1.1, 0])
+parasols_red = place(parasol_red, [-2, 0.08, 0.9, 0,  2, 0.08, -1.1, 0])
+parasols_cream = place(parasol_cream, [2, 0.08, 0.9, 0,  -2, 0.08, -1.1, 0])
+
+# Chairs 0.6 from each table's centre, yawed to face it; a few pulled out and turned.
+chairs = place(chair, [
+  -2.6, 0.08, 0.9, 90,   -1.4, 0.08, 0.9, -90,   -2, 0.08, 1.5, 180,
+  2, 0.08, 1.5, 195,     2, 0.08, 0.3, 0,
+  -2.7, 0.08, -1.1, 70,  -1.4, 0.08, -1.1, -90,  -2, 0.08, -0.5, 180,
+  2.6, 0.08, -1.1, -90,  1.35, 0.08, -1.2, 110])
+
+# ---- the planter along the back edge ----
+planter_box = box(5.0, 0.45, 0.5, round=0.01) | move(0, 0.225, 0)
+planter_void = box(4.9, 0.5, 0.4) | move(0, 0.33, 0)
+trough = (planter_box - planter_void) | paint(weathered)
+soil = box(4.92, 0.28, 0.42) | move(0, 0.215, 0) | paint("dirt")   # down to the trough floor: no sealed void under it
+bushes = plants.bush(0.19) | move(0, 0.2, 0) | array(8, 0.62, 0, 0) | move(-2.17, 0, 0)
+planter = (trough + soil + bushes) | move(0, 0.08, -2.45)
+
+# ---- the A-frame menu board ----
+panel = box(0.55, 0.8, 0.035, round=0.005) | paint("pine")
+slate = decal(panel, box(0.45, 0.56, 0.06) | move(0, -0.06, 0.03), "#2b2f2c")
+title = extrude(text("MENU", 0.13, 0.035, align="center"), 0.06, "z") | move(0, 0.06, 0.03)
+line1 = extrude(text("coffee 2", 0.085, 0.028, align="center"), 0.06, "z") | move(0, -0.11, 0.03)
+line2 = extrude(text("cake 3", 0.085, 0.028, align="center"), 0.06, "z") | move(0, -0.25, 0.03)
+board = decal(slate, title + line1 + line2, "#f4efe0")
+front_board = board | move(0, -0.4, 0) | rotate(x=-12) | move(0, 0.8, 0)
+back_board = board | move(0, -0.4, 0) | rotate(y=180) | rotate(x=12) | move(0, 0.8, 0)
+hinge = box(0.58, 0.17, 0.14, round=0.01) | move(0, 0.725, 0) | paint("pine")
+menu = (front_board + back_board + hinge) | rotate(y=25) | move(-3.3, 0.08, 2.1)
+
+# ---- the lamp post at the front right corner ----
+lamp_base = cone(0.2, 0.1, 0.3) | move(0, 0.13, 0)
+lamp_pole = cylinder(0.05, 2.8) | move(0, 1.5, 0)
+collar = cylinder(0.09, 0.1) | move(0, 2.87, 0)
+# Four corner posts and two plates: two through-cuts crosswise, no inner void, so nothing is a sliver.
+lantern_frame = box(0.40, 0.42, 0.40) - box(0.28, 0.30, 0.6) - box(0.6, 0.30, 0.28)
+lantern = (lantern_frame | move(0, 3.1, 0) | paint(iron_black)) + (box(0.32, 0.36, 0.32) | move(0, 3.1, 0) | paint(glow))
+roof = box(0.48, 0.15, 0.48, round=0.01) | move(0, 3.265, 0)
+cap = loft(rect(0.44, 0.44), rect(0.06, 0.06), 0.2) | move(0, 3.38, 0)
+lamp_top = sphere(0.045) | move(0, 3.48, 0)
+lamp = (((lamp_base + lamp_pole + collar + roof + cap + lamp_top) | paint(iron_black)) + lantern) | move(3.5, 0.08, 2.3)
+
+scene tables, chairs, parasols_red, parasols_cream, paving, planter, menu, lamp

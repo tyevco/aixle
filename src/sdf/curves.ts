@@ -303,6 +303,26 @@ const COST_PER_SEGMENT = 14;
  * exact. `taper` scales the radius along the arc length; caps are
  * hemispheres, or flat at the curve's ends with cap="flat".
  */
+/** The smallest radius of curvature along a curve, from sampled second differences; Infinity for a straight line. */
+export function minBendRadius(curve: Curve, n = 128): number {
+  let best = Infinity;
+  for (let s = 0; s < curve.segments; s++) {
+    let prev = pointAt(curve.ctrl, s, 0), cur = pointAt(curve.ctrl, s, 1 / n);
+    for (let i = 2; i <= n; i++) {
+      const next = pointAt(curve.ctrl, s, i / n);
+      // The circle through three consecutive samples: radius = |a||b||c| / (4 * area).
+      const ax = cur[0] - prev[0], ay = cur[1] - prev[1], az = cur[2] - prev[2];
+      const bx = next[0] - cur[0], by = next[1] - cur[1], bz = next[2] - cur[2];
+      const cx = next[0] - prev[0], cy = next[1] - prev[1], cz = next[2] - prev[2];
+      const crossX = ay * bz - az * by, crossY = az * bx - ax * bz, crossZ = ax * by - ay * bx;
+      const area2 = Math.hypot(crossX, crossY, crossZ);
+      if (area2 > 1e-12) best = Math.min(best, (Math.hypot(ax, ay, az) * Math.hypot(bx, by, bz) * Math.hypot(cx, cy, cz)) / (2 * area2));
+      prev = cur; cur = next;
+    }
+  }
+  return best;
+}
+
 export function tubeCurve(curve: Curve, r: number, taper = 1, cap: "round" | "flat" = "round"): Shape3 {
   const reach = Math.max(r, r * taper);
   const N = nearestOn(curve, reach);
@@ -324,6 +344,13 @@ export function tubeCurve(curve: Curve, r: number, taper = 1, cap: "round" | "fl
     return d;
   }, boundsGrow(curve.bounds, reach), curve.segments * COST_PER_SEGMENT);
   out.feature = 2 * r * Math.min(1, taper);
+  // A curve bent tighter than the tube is thick crosses itself on the inside of the bend: a crease no sheet shows
+  // and open edges the report can only place "in the step alone" (round 6: a chair's backrest hoop, whose agent
+  // diagnosed its residual edge as this by hand). Said here, at the step that made it. The radius is sampled, so
+  // it is read a little large at a sharp corner (the smallest true radius of a corner 0.28 wide on a 0.03 tube is
+  // 0.071; at 128 samples per segment it reads 0.075).
+  const bend = minBendRadius(curve);
+  if (bend < reach) out.notes = [`its curve bends to a radius of ${bend.toFixed(3)}, tighter than the tube's ${reach}: the inner side crosses itself there. Space the points wider at the bend, or thin the tube.`];
   return out;
 }
 

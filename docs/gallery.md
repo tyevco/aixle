@@ -407,3 +407,43 @@ round 5: A treehouse: a rough-barked tree with four branches and a blended canop
 ![round-5_treehouse, beauty render](../dogfood/renders/round-5_treehouse_beauty.png) ![round-5_treehouse, contact sheet](../dogfood/renders/round-5_treehouse.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/treehouse.aix) · <a href="/aixle/viewers/round-5_treehouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/treehouse.report.md)
+
+### round-6_chess
+
+round 6: A chess set on its board, in the starting position. The board is 4 units
+
+![round-6_chess, beauty render](../dogfood/renders/round-6_chess_beauty.png) ![round-6_chess, contact sheet](../dogfood/renders/round-6_chess.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-6/chess.aix) · <a href="/aixle/viewers/round-6_chess.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-6/chess.report.md)
+
+### round-6_chess_pieces
+
+round 6: Staunton-style chess pieces, one def per piece. Every piece is turned
+
+![round-6_chess_pieces, beauty render](../dogfood/renders/round-6_chess_pieces_beauty.png) ![round-6_chess_pieces, contact sheet](../dogfood/renders/round-6_chess_pieces.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-6/chess_pieces.aix) · <a href="/aixle/viewers/round-6_chess_pieces.html" target="_blank" rel="noopener">viewer</a>
+
+### round-6_footbridge
+
+round 6: A steel truss footbridge over a stream: two Warren trusses of box
+
+![round-6_footbridge, beauty render](../dogfood/renders/round-6_footbridge_beauty.png) ![round-6_footbridge, contact sheet](../dogfood/renders/round-6_footbridge.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-6/footbridge.aix) · <a href="/aixle/viewers/round-6_footbridge.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-6/footbridge.report.md)
+
+### round-6_playground
+
+round 6: A children's playground, about 10 units across, one unit a metre.
+
+![round-6_playground, beauty render](../dogfood/renders/round-6_playground_beauty.png) ![round-6_playground, contact sheet](../dogfood/renders/round-6_playground.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-6/playground.aix) · <a href="/aixle/viewers/round-6_playground.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-6/playground.report.md)
+
+### round-6_terrace
+
+round 6: A cafe terrace: stone paving 8 across, four round bistro tables each with
+
+![round-6_terrace, beauty render](../dogfood/renders/round-6_terrace_beauty.png) ![round-6_terrace, contact sheet](../dogfood/renders/round-6_terrace.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-6/terrace.aix) · <a href="/aixle/viewers/round-6_terrace.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-6/terrace.report.md)

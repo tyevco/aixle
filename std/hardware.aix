@@ -20,11 +20,11 @@ def nut(r=0.1) = (prism(6, r * 1.15, r * 0.8) - cylinder(r * 0.5, r * 3)) | move
 # A flat washer for a bolt of radius r: 2.2r across, a quarter of r thick, standing on y = 0.
 def washer(r=0.1) = (cylinder(r * 1.1, r * 0.25) - cylinder(r * 0.55, r)) | move(0, r * 0.125, 0) | paint(zinc)
 
-# One chain link: a rounded oval of wire radius r, pitch long, lying flat in the xz plane.
-def link(pitch=0.3, r=0.03) = sweep(circle(r), [-pitch / 2 + r * 2, 0, 0, pitch / 2 - r * 2, 0, 0], smooth=0) + (torus(r * 2, r) | move(-pitch / 2 + r * 2, 0, 0)) + (torus(r * 2, r) | move(pitch / 2 - r * 2, 0, 0))
+# One chain link: a stadium of wire 2r square (edges rounded), pitch long and 8r wide, lying flat in the xz plane; its eyes are 4r across, so the next link's wire passes through with r of clearance on each side.
+def link(pitch=0.3, r=0.03) = extrude(shell(rect(pitch, 8 * r, round=4 * r), 2 * r), 2 * r) | round(r * 0.4)
 
-# A chain of n links (rounded to a pair) along +x from the origin, links alternately flat and upright, each hooked through the next.
-def chain(n=8, pitch=0.3, r=0.03) = (link(pitch, r) + (link(pitch, r) | rotate(x=90) | move(pitch - r * 4, 0, 0))) | array(n / 2, (pitch - r * 4) * 2, 0, 0) | move(pitch / 2, 0, 0) | paint(steel)
+# A chain of n links (rounded to a pair) along +x from the origin, links alternately flat and upright, each hooked through the next with clearance (measured: eyes only 2r across, and round wire meeting its own eyes tangentially, left every hook an open edge). About n * (pitch - 6r) + 6r long, 8r wide.
+def chain(n=8, pitch=0.3, r=0.03) = (link(pitch, r) + (link(pitch, r) | rotate(x=90) | move(pitch - r * 6, 0, 0))) | array(n / 2, (pitch - r * 6) * 2, 0, 0) | move(pitch / 2, 0, 0) | paint(steel)
 
 # A bar handle: a rod of radius r spanning w along x, on two feet of height h standing on y = 0.
 def handle(w=0.6, r=0.04, h=0.12) = ((cylinder(r, w) | rotate(z=90) | move(0, h, 0)) + (cylinder(r * 1.2, h) | move(-w / 2 + r * 1.2, h / 2, 0)) + (cylinder(r * 1.2, h) | move(w / 2 - r * 1.2, h / 2, 0))) | paint(steel)

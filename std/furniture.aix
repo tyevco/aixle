@@ -15,15 +15,15 @@ def table(w=1.6, d=0.9, h=0.75, top=0.04, leg=0.07, m=oak) = ((box(w, top, d) | 
   + (box(leg, h - top, leg) | move(w / 2 - leg, (h - top) / 2, -d / 2 + leg))
   + (box(leg, h - top, leg) | move(-w / 2 + leg, (h - top) / 2, -d / 2 + leg))) | paint(m)
 
-# A chair: seat w square at height `seat`, four legs, a backrest of three slats rising `back` above the seat at -z.
+# A chair: seat w square at height `seat`, four legs 0.04 across, a backrest of three slats 0.03 thick rising `back` above the seat at -z.
 def chair(seat=0.45, w=0.42, back=0.45, m=walnut) = ((box(w, 0.035, w) | move(0, seat, 0))
   + (cylinder(0.02, seat) | move(w / 2 - 0.03, seat / 2, w / 2 - 0.03))
   + (cylinder(0.02, seat) | move(-w / 2 + 0.03, seat / 2, w / 2 - 0.03))
   + (cylinder(0.02, seat + back) | move(w / 2 - 0.03, (seat + back) / 2, -w / 2 + 0.03))
   + (cylinder(0.02, seat + back) | move(-w / 2 + 0.03, (seat + back) / 2, -w / 2 + 0.03))
-  + (box(w - 0.08, 0.05, 0.02) | move(0, seat + back * 0.45, -w / 2 + 0.03))
-  + (box(w - 0.08, 0.05, 0.02) | move(0, seat + back * 0.7, -w / 2 + 0.03))
-  + (box(w - 0.08, 0.06, 0.02) | move(0, seat + back * 0.95, -w / 2 + 0.03))) | paint(m)
+  + (box(w - 0.08, 0.05, 0.03) | move(0, seat + back * 0.45, -w / 2 + 0.03))
+  + (box(w - 0.08, 0.05, 0.03) | move(0, seat + back * 0.7, -w / 2 + 0.03))
+  + (box(w - 0.08, 0.06, 0.03) | move(0, seat + back * 0.95, -w / 2 + 0.03))) | paint(m)
 
 # A stool: a round seat of radius r at height h on three splayed legs.
 def stool(h=0.6, r=0.17, m=oak) = ((cylinder(r, 0.035) | move(0, h - 0.0175, 0))

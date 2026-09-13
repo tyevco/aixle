@@ -15,7 +15,8 @@ import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./e
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
-import { allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent } from "./sdf/ops.js";
+import type { Vec3 } from "./core/vec.js";
+import { allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -160,6 +161,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
   const out: string[] = [];
   const gridFor = (t: number) => Math.min(512, Math.ceil((grid * 2.5 * cellSize) / t));
   const reportedFeatures = new Set<number>();
+  const notedShapes = new Set<Shape3>();
   const geometry = geometrySteps(evaluation);
   for (const st of evaluation.steps) {
     if (!isShape3(st.value) || !geometry.has(st.name) || isEmpty(st.value.bounds)) continue;
@@ -199,6 +201,11 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
         );
       }
     }
+    // What the constructor itself noticed, once, at the step that made it (a curve bent tighter than its tube).
+    if (st.value.notes && !notedShapes.has(st.value)) {
+      notedShapes.add(st.value);
+      for (const note of st.value.notes) out.push(`'${st.name}' (line ${st.line}): ${note}`);
+    }
     // A wall, tube or stroke inside a thick step: bounds cannot see it, so the shape carries the size itself.
     // Reported once per size, at the step that introduced it, not again at every step built on top.
     const f = st.value.feature;
@@ -206,7 +213,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     const key = Math.round(f * 1e6);
     if (reportedFeatures.has(key)) continue;
     reportedFeatures.add(key);
-    out.push(`'${st.name}' (line ${st.line}) has a wall, tube (at its thin end, if tapered) or stroke only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).`);
+    out.push(`'${st.name}' (line ${st.line}) has a part (a wall, slat, rod, tube at its thin end, or stroke) only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).`);
   }
   return out;
 }
@@ -246,23 +253,30 @@ export function geometrySteps(evaluation: Evaluation): Set<string> {
  * stretches a step of `tol`. Smallest box first, so the most specific
  * name comes first.
  */
-function stepsNearDetailed(evaluation: Evaluation, c: [number, number, number], tol: number): { name: string; leaf: boolean; d: number }[] {
+function stepsNearDetailed(evaluation: Evaluation, c: [number, number, number], tol: number): { name: string; leaf: boolean; d: number; parents: string[] }[] {
   const names = new Map<Shape3, string>();
   for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
   const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
   // Every named shape within reach, with how close its surface passes, its depth in the tree and whether it is
   // innermost: the closest first (by the cell, so a hand's tip a fifth of a cell from a recess wall names both, not
   // a dial a whole cell away: measured on a clock), then innermost, then the nearest ancestors.
-  const found = new Map<string, { d: number; depth: number; leaf: boolean }>();
+  const found = new Map<string, { d: number; depth: number; leaf: boolean; parents: Set<string>; exposed: boolean }>();
+  // The whole model's field, for telling an exposed surface from a buried one.
+  const modelDist = roots.length ? (x: number, y: number, z: number) => Math.min(...roots.map((r) => r.dist(x, y, z))) : undefined;
+  // The forward maps of the nodes walked through so far, to carry a point in a child's frame back to the world.
+  const warps: ((x: number, y: number, z: number) => Vec3)[] = [];
+  const toWorld = (p: Vec3): Vec3 => { let q = p; for (let i = warps.length - 1; i >= 0; i--) q = warps[i](q[0], q[1], q[2]); return q; };
   let budget = 20000;
   // Returns whether a named step at or below `n` was within reach of the point.
-  const walk = (n: Shape3, x: number, y: number, z: number, t: number, depth: number): boolean => {
+  const walk = (n: Shape3, x: number, y: number, z: number, t: number, depth: number, parent: string): boolean => {
     if (--budget < 0 || isEmpty(n.bounds)) return false;
     const b = n.bounds;
     if (x < b.min[0] - t || x > b.max[0] + t || y < b.min[1] - t || y > b.max[1] + t || z < b.min[2] - t || z > b.max[2] + t) return false;
     const dn = Math.abs(n.dist(x, y, z));
     if (dn > t) return false;
     let cx = x, cy = y, cz = z, ct = t;
+    const pushed = !!(n.unwarp && n.warp);
+    if (pushed) warps.push(n.warp!);
     if (n.unwarp) {
       const q = n.unwarp(x, y, z);
       let stretch = 0;
@@ -273,19 +287,32 @@ function stepsNearDetailed(evaluation: Evaluation, c: [number, number, number], 
       cx = q[0]; cy = q[1]; cz = q[2]; ct = stretch > 0 && Number.isFinite(stretch) ? stretch : t;
     }
     let below = false;
-    for (const k of n.parts ?? n.inner ?? []) if (walk(k, cx, cy, cz, ct, depth + 1)) below = true;
-    if (n.instanced && !n.parts) below = walk(n.instanced.base, cx, cy, cz, ct, depth + 1) || below;
     const name = names.get(n);
+    const here = name ?? parent;
+    for (const k of n.parts ?? n.inner ?? []) if (walk(k, cx, cy, cz, ct, depth + 1, here)) below = true;
+    if (n.instanced && !n.parts) below = walk(n.instanced.base, cx, cy, cz, ct, depth + 1, here) || below;
+    if (pushed) warps.pop();
     if (name === undefined) return below;
     const prev = found.get(name);
-    found.set(name, { d: Math.min(dn / t, prev?.d ?? Infinity), depth: Math.max(depth, prev?.depth ?? 0), leaf: !below || (prev?.leaf ?? false) });
+    const parents = prev?.parents ?? new Set<string>();
+    if (parent) parents.add(parent);
+    // Exposed or buried: the step's nearest surface point, read back in the model, sits on the outside (the part
+    // the edge is on) or inside another part (a cap ending inside a housing, which is not the part to name).
+    let exposed = prev?.exposed ?? false;
+    if (!exposed && modelDist) {
+      const q = surfacePoint(n, x, y, z);
+      // Back to the world through the transforms above (the walk pulled the point into this node's frame).
+      const w = toWorld(q);
+      exposed = modelDist(w[0], w[1], w[2]) > -tol * 0.5;
+    }
+    found.set(name, { d: Math.min(dn / t, prev?.d ?? Infinity), depth: Math.max(depth, prev?.depth ?? 0), leaf: !below || (prev?.leaf ?? false), parents, exposed });
     return true;
   };
-  for (const r of roots) walk(r, c[0], c[1], c[2], tol, 0);
+  for (const r of roots) walk(r, c[0], c[1], c[2], tol, 0, "");
   const bucket = (v: number) => Math.round(v * 3);
   return [...found.entries()]
-    .sort((a, b) => bucket(a[1].d) - bucket(b[1].d) || Number(b[1].leaf) - Number(a[1].leaf) || b[1].depth - a[1].depth)
-    .map(([name, f]) => ({ name, leaf: f.leaf, d: f.d }));
+    .sort((a, b) => Number(b[1].exposed) - Number(a[1].exposed) || bucket(a[1].d) - bucket(b[1].d) || Number(b[1].leaf) - Number(a[1].leaf) || b[1].depth - a[1].depth)
+    .map(([name, f]) => ({ name, leaf: f.leaf, d: f.d, parents: [...f.parents] }));
 }
 
 /** The names near a point, quoted, at most `limit`: what the warnings print. */
@@ -471,17 +498,25 @@ function cavitiesRow(physics: Physics, cellSize: number): string {
  * A tally per step follows, so one construct carrying every edge shows
  * in one read.
  */
-function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number): string {
+export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[] }[] = []): string {
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
   const tally = new Map<string, number>();
   let planar = 0;
-  const spots = (w.clusters ?? []).map((cl) => {
+  const all = w.clusters ?? [];
+  const spots = all.map((cl, index) => {
     // Named at an edge that is on the model, not at the cluster's mean, which for a ring of edges is inside the part.
     const near = stepsNearDetailed(evaluation, cl.at, cellSize * 2);
     const leaves = near.filter((n) => n.leaf).slice(0, 2);
     const names = leaves.length ? leaves : near.slice(0, 1);
     for (const n of names) tally.set(n.name, (tally.get(n.name) ?? 0) + cl.count);
-    const label = names.length === 0 ? "" : names.length === 1 ? ` in '${names[0].name}' (with itself: two of its own surfaces cross there)` : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
+    // One step reached through two named parents is two placements of the same part crossing (two boards of one
+    // panel), which is worth more than "with itself".
+    const twice = names.length === 1 && names[0].parents.length >= 2 ? names[0].parents.slice(0, 2) : undefined;
+    // One name alone: the step's own surface folds or creases there, or a sample-plane coincidence; a straight
+    // tube has no second surface to cross, so it is not called "with itself" (round 6: that read as nonsense).
+    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
+    edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name) });
+    if (index >= 3) return "";
     // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
     // plane, which the extractor cannot resolve (measured: a down tube's side and a tyre's equator on grid planes).
     const flat = cl.count >= 3 ? [0, 1, 2].find((k) => cl.box.max[k] - cl.box.min[k] < cellSize * 0.05) : undefined;
@@ -489,9 +524,10 @@ function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Eval
     const plane = flat !== undefined ? `, all on the plane ${"xyz"[flat]} = ${fmt(cl.at[flat])}` : "";
     return `${cl.count} at (${cl.at.map(fmt).join(", ")})${label}${plane}`;
   });
-  const byStep = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `'${n}' ${c}`).join(", ");
+  const byStep = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, c]) => `'${n}' ${c}`).join(", ");
   const planeNote = planar ? " Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part or the grid by a fraction of a cell, or change the radius a little." : "";
-  return `${w.note} The edges are mostly ${spots.join("; ")}.${byStep ? ` By step: ${byStep}.` : ""}${planeNote}`;
+  const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
+  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${planeNote}`;
 }
 
 /**
@@ -574,6 +610,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let quickDropped = 0;
   // A focused render's close-up mesh judged on its own (round 4: a focus sheet could not say whether the lug was sound).
   let closeUpNote: string | undefined;
+  // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
+  const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownAngles && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
   const shapeAt: ShapeAt = (angles) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: angles }).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
@@ -645,6 +683,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (opts.quick) {
       // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
       const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];
+      // An import sampled finer than this pass's cell loses its thin parts here too (round 6: a quick sheet called an
+      // imported playground twenty pieces).
+      for (const st of evaluation.steps) if (isShape3(st.value) && st.value.sampledAt !== undefined && st.value.sampledAt < cellSize && !dropped.includes(st.name)) dropped.push(st.name);
       if (dropped.length) {
         quickDropped = dropped.length;
         warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet (${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ", ..." : ""}), so the pieces count and the footprint are not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
@@ -871,7 +912,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
+      `| Watertight | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       "",
@@ -964,6 +1005,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         materials: mesh?.materials.map((m) => m.name) ?? [],
         objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
+        watertight: edgeList.length ? { clusters: edgeList } : undefined,
         joints: joints.map((j) => ({ name: j.joint!.name, pivot: j.joint!.pivot })),
         poses: evaluation.poses.map((p) => p.name),
         animations: evaluation.animations.map((a) => a.name),

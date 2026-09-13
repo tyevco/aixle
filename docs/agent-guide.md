@@ -93,6 +93,9 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | "is not part of the output" | a step never got added to the final shape | add it, or delete it |
 | an edge looks jagged | the grid is coarse for the size | `--grid 200` (slower, cubic) |
 | a shell wall, a tube or lettering is broken or gone, though the part is thick | the wall, tube radius or stroke weight is under a grid cell | `check` says which step and what grid; thicken it or raise the grid |
+| a library part comes out broken, or leaves a loose sliver, in a scene | a slat, rod or wall of the `use`d part is thinner than the scene's cell | `check` names the step and the size; raise the scene's grid, or use a bigger part |
+| open edges at a cap, a bolt head or a hub, with nothing thin nearby | the part reaches through a face, or stops short of it, by less than a cell | sink it a cell or more into the host, or leave a cell or more clear |
+| open edges "in 'x' twice, as 'a' and 'b'" | two placements of one step cross each other there | move one, or bury one in the other by a cell |
 | a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
 | the eyes, mouth or a label need geometry you do not want | a painted sphere bulges, a painted tube sticks out | `decal(shape, region, material)` paints the surface inside a region and adds nothing |

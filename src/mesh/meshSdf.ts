@@ -4,7 +4,7 @@
  *
  * The field is sampled once onto a grid over the mesh (unsigned distance
  * by a bounding-volume hierarchy of point-triangle queries; sign by the
- * parity of ray crossings along each grid line, which is right for closed
+ * winding count of ray crossings along each grid line, which is right for closed
  * meshes and the best that can be done for open ones) and read back by
  * trilinear interpolation, clamped outside the grid to the distance to
  * its box. Detail finer than the grid softens; the grid follows the mesh's
@@ -177,13 +177,20 @@ export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
   for (let k = 0; k < nz; k++)
     for (let j = 0; j < ny; j++)
       for (let i = 0; i < nx; i++) field[(k * ny + j) * nx + i] = meshDistance(P, I, bvh, ox + i * cell, oy + j * cell, oz + k * cell);
-  // Sign by parity of crossings along z for each (i, j) line.
+  // Sign by the winding count of crossings along z for each (i, j) line: each crossing adds the triangle's
+  // orientation, and a point is inside where the count is not zero. Parity read a region covered by two closed
+  // shells (a canopy overlapping its pole, an object sunk into the paving, as the tool's own GLB of a scene is
+  // written) as outside, so a round trip split a terrace into five pieces (measured). The nonzero rule keeps the
+  // overlap solid and reads a mesh wound either way; the openness measure stays the parity of the count.
   let odd = 0;
   const crossings: number[] = [];
+  const signs: number[] = [];
+  const order: number[] = [];
   for (let j = 0; j < ny; j++)
     for (let i = 0; i < nx; i++) {
       const x = ox + i * cell, y = oy + j * cell;
       crossings.length = 0;
+      signs.length = 0;
       for (let t = 0; t < nt; t++) {
         // Ray along +z from z = -inf: does the triangle's xy projection contain (x, y)? Then record its z there.
         const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
@@ -198,14 +205,17 @@ export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
         // zero for both triangles, which leaves the parity right.
         if (l1 <= 0 || l2 <= 0 || l3 <= 0) continue;
         crossings.push(l1 * P[a + 2] + l2 * P[b + 2] + l3 * P[c + 2]);
+        signs.push(det > 0 ? 1 : -1);
       }
-      crossings.sort((p, q) => p - q);
+      order.length = crossings.length;
+      for (let c = 0; c < crossings.length; c++) order[c] = c;
+      order.sort((p, q) => crossings[p] - crossings[q]);
       if (crossings.length % 2 === 1) odd++;
-      let inside = false, ci = 0;
+      let depth = 0, ci = 0;
       for (let k = 0; k < nz; k++) {
         const z = oz + k * cell;
-        while (ci < crossings.length && crossings[ci] < z) { inside = !inside; ci++; }
-        if (inside) field[(k * ny + j) * nx + i] *= -1;
+        while (ci < order.length && crossings[order[ci]] < z) { depth += signs[order[ci]]; ci++; }
+        if (depth !== 0) field[(k * ny + j) * nx + i] *= -1;
       }
     }
   const openness = odd / (nx * ny);

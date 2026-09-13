@@ -263,7 +263,10 @@ longest side to that many units. Closed meshes work; an open mesh has no
 inside, and `check` says so. Positions and triangles only: the mesh's
 materials are not read, and `resolution` is the sampling of the import,
 separate from the render grid. Sampling a large mesh takes tens of
-seconds, and `check` and `render` each do it. The import's own detail is limited by its
+seconds, and minutes for a scene at resolution 300, and `check` and
+`render` each do it. A mesh of overlapping closed shells (the tool's own
+GLB of a scene, where objects are sunk into each other) imports as one
+solid: the sign is the winding count of crossings, not their parity. The import's own detail is limited by its
 resolution: anything in the mesh thinner than about 1.2 of its sampling
 cell is gone whatever the render grid, and `check` warns with the
 `resolution=` that matches the render's cell when the import's is
@@ -301,7 +304,11 @@ its defs. To write one, put `def`s in a file with a comment line above
 each, a comment block at the top saying the conventions (where the
 origin is, which way is front, what the units are), and a `show` of a
 plate of every part so `aixle render` on the file is its test. `check`
-lists what a program uses and `explain` ends with it.
+lists what a program uses and `explain` ends with it. A part's slats,
+rods and walls carry their thickness into the scene, so `check` warns
+when a used part has a member thinner than the scene's cell (a bench's
+0.03 slats under a 0.039 cell), at the step that placed it; the fix is
+the scene's grid, or a bigger part.
 
 ## Scenes, joints and poses
 
@@ -342,7 +349,9 @@ animation on `anim_<name>.png`, and the GLB carries the joints as nodes
 with the animations as glTF channels, which the viewer page plays. `set
 pose reach` (or `--pose reach` on the command line) makes the sheet, the
 views, the slices and the beauty render show that pose, and `check --pose
-reach` prints every step's size in it; exports are always at rest. The
+reach` prints every step's size in it. The report and the STL describe
+the model as shown, posed if a pose is set; the GLB and the OBJ are
+always at rest, with the joints as nodes. The
 thumbnails on `poses.png` are meshed coarsely, so judge a pose that
 matters at full size with `set pose`.
 
@@ -520,8 +529,10 @@ or joins painted and unpainted parts; a program that both names a step
 floats free) or with slivers left by a cut, each named by the innermost
 step whose surface passes there, then its nearest named parent (open
 edges are placed at an edge that is on the model, with the steps whose
-surfaces meet there, or "with itself" when one step's surfaces cross,
-and a cluster of edges all on one plane is called out as a face lying
+surfaces meet there, exposed ones first; "in 'panel' twice, as 'a' and
+'b'" when two placements of one step cross, "alone" when no other part is
+within a cell, which is a crease of the step's own surface or the
+mesher's noise at a few edges; and a cluster of edges all on one plane is called out as a face lying
 exactly on a sample plane, which a nudge of a fraction of a cell cures);
 a named step transformed alone on the right of a `+` (`a + b | move(...)`
 moves b only, since `|` binds tighter; `(a + b) | move(...)` moves both,
@@ -535,7 +546,16 @@ count as joined when they overlap by about a cell in the field: parts
 that only touch (a barrel resting on a beam's top face, a box on a
 box) leave a seam that reads as an open edge or a second piece, so sink
 one into the other by a cell or two, or blend them with `union(k=)`,
-which also seals the void a tangency leaves. A focused render adds a
+which also seals the void a tangency leaves. The converse holds too: a
+part that reaches through a face by less than a cell (a tube's round
+cap ending a hair past a plate, a hex head whose corners sit just above
+a boss, a hub top just under a plank) or stops less than a cell short of
+it (a stringer passing a leg with a cell of gap) leaves the same seam,
+and no warning, since nothing there is thin: overlap by a cell or more,
+or clear by a cell or more. When the mesh is not watertight the report
+prints the three largest clusters of open edges, and `report.json`
+lists every one under `watertight.clusters` (its position, its edge
+count and the steps whose surfaces pass there). A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
@@ -559,8 +579,9 @@ under).
   leaves open edges; a face that still does is called out in the
   watertight row. The perspective views and the beauty render fit the
   model's own points, so a long model on the diagonal fills its frame.
-- A part that exists only through `array`, `ring` or `mirror` cannot be
-  focused on by itself (its step's box is the original, at the origin,
+- `--focus` on a placed set frames its first copy, in world orientation
+  (`--focus chairs_4` for another); a part that exists only through
+  `array`, `ring` or `mirror` cannot be focused on by itself (its step's box is the original, at the origin,
   or the whole set); give one copy a name of its own next to the set, or
   use `place()` for the copies and `--focus name_3`. A def called inline
   (`plate = pawn() + rook()`) is a step with no name of its own: name
@@ -588,7 +609,14 @@ under).
   a tip to a cell's width, as a real hand or blade is.
 - Two tubes meeting at one point (two shrouds at a masthead), or a line
   leaving a sheet at its corner, cross in a wedge thinner than any cell:
-  give them a fitting to meet in (a tang, a sphere, a boss).
+  give them a fitting to meet in (a tang, a sphere, a boss). The same
+  wedge appears wherever two surfaces meet at a shallow angle (a cone hub
+  under a canopy at 36 degrees) and where two tubes of equal radius cross
+  (a bar through a ring's centre line: tangent at the saddle); bury one
+  in the other by a cell, or give one a fitting. A tube ending inside a
+  plate thinner than two cells is a sliver either way: run it through.
+  A `curve()` bent to a radius tighter than its tube's crosses itself on
+  the inside of the bend, and `check` says so at the step.
 - `surface(shape, x, y, z)` slides to the nearest surface from the guess
   along the field, so a guess far from the face you mean can land on a
   nearer one (a keel rather than a bottom panel); guess within the part's

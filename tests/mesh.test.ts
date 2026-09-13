@@ -191,3 +191,23 @@ describe("physics", () => {
     expect(insideMargin(h, 3, 1)).toBeLessThan(0);
   });
 });
+
+describe("an imported mesh of overlapping shells", () => {
+  it("reads the overlap as solid, so the tool's own GLB of a scene round-trips as one piece", async () => {
+    const { buildHierarchy } = await import("../src/export/hierarchy.js");
+    const { toGlbScene } = await import("../src/export/glb.js");
+    const { parseGlb } = await import("../src/import/glb.js");
+    const { meshField } = await import("../src/mesh/meshSdf.js");
+    // A post sunk 0.2 into a slab, as two scene objects: two closed shells that overlap.
+    const slab = O.move(P.box(2, 0.4, 2), 0, 0.2, 0);
+    const post = O.move(P.cylinder(0.3, 1.2), 0, 0.8, 0);
+    const h = buildHierarchy([{ name: "slab", shape: slab }, { name: "post", shape: post }], { cellSize: 0.05, texture: 0 });
+    const field = meshField(parseGlb(toGlbScene(h, "test")), 64);
+    // Inside the overlap (post within the slab), inside each alone, and outside.
+    expect(field.dist(0, 0.3, 0)).toBeLessThan(0);
+    expect(field.dist(0, 0.1, 0.8)).toBeLessThan(0);
+    expect(field.dist(0, 1.0, 0)).toBeLessThan(0);
+    expect(field.dist(0, 1.0, 0.8)).toBeGreaterThan(0);
+    expect(field.openness).toBeLessThan(0.01);
+  });
+});
