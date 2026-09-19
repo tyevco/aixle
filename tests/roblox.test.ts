@@ -3,6 +3,7 @@ import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { buildHierarchy } from "../src/export/hierarchy.js";
 import { toRoblox } from "../src/export/roblox.js";
+import { triangleCount } from "../src/mesh/mesh.js";
 
 /** The JSON chunk of a GLB. */
 const glbJson = (glb: Buffer): { nodes: { name: string; rotation?: number[]; translation?: number[]; mesh?: number; children?: number[] }[]; scenes: { nodes: number[] }[] } => {
@@ -42,5 +43,19 @@ describe("Roblox export", () => {
     const j = glbJson(r2.glb);
     expect(j.nodes[j.scenes[0].nodes[0]].name).toBe("pair");
     expect(j.nodes.map((n) => n.name)).toEqual(expect.arrayContaining(["a", "b", "HandAttachment_Att"]));
+  });
+  it("shares a triangle budget across a jointed model's meshes", () => {
+    const leg = O.joint(O.move(P.cylinder(0.2, 1), 0.6, 0.5, 0), "leg", 0.6, 1, 0);
+    const pet = O.anchor(O.union([O.move(P.sphere(0.8), 0, 1, 0), leg]), "HatAttachment", 0, 0, 0);
+    const plain = buildHierarchy([{ name: "pet", shape: pet }], { cellSize: 0.02, texture: 0 });
+    expect(plain.meshes.length).toBe(2);
+    expect(plain.triangles).toBeGreaterThan(4000);
+    const h = buildHierarchy([{ name: "pet", shape: pet }], { cellSize: 0.02, texture: 0, maxTriangles: 4000 });
+    expect(h.triangles).toBeLessThanOrEqual(4000);
+    // Each mesh kept its share rather than each taking the whole budget.
+    for (const m of h.meshes) expect(triangleCount(m)).toBeLessThan(4000);
+    const r = toRoblox(h, "pet", { anchors: O.anchorsOf(pet), size: [1.6, 2, 1.6], before: plain.triangles });
+    expect(r.note).toMatch(/Handle with 2 meshes \(one per joint\), \d+ triangles, decimated from \d+/);
+    expect(r.warnings).toEqual([]);
   });
 });

@@ -57,7 +57,7 @@ export interface HierarchyOptions {
   /** Atlas size in pixels; 0 for none. */
   texture: number;
   maxResolution?: number;
-  /** Decimate each mesh to at most this many triangles (a Roblox budget), before the atlas is baked. */
+  /** Decimate the meshes to at most this many triangles in all (a Roblox budget), each taking its share, before the atlas is baked. */
   maxTriangles?: number;
 }
 
@@ -66,8 +66,7 @@ function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
   const longest = Math.max(s[0], s[1], s[2]);
   if (!(longest > 0) || isEmpty(shape.bounds)) return surfaceNets(shape, { resolution: 8 }).mesh;
   const resolution = Math.max(8, Math.min(opts.maxResolution ?? 512, Math.ceil(longest / opts.cellSize)));
-  const mesh = surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
-  return opts.maxTriangles && triangleCount(mesh) > opts.maxTriangles ? decimate(mesh, opts.maxTriangles, opts.crease ?? 35) : mesh;
+  return surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
 }
 
 function shifted(mesh: Mesh, origin: Vec3): Mesh {
@@ -237,6 +236,14 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
 
   let triangles = 0;
   for (const m of meshes) triangles += triangleCount(m);
+  // A budget is for the whole export: each mesh gives up the same share, so a jointed pet's ten bones together
+  // come in under an accessory's four thousand rather than each taking four thousand of its own.
+  if (opts.maxTriangles && triangles > opts.maxTriangles) {
+    const share = opts.maxTriangles / triangles;
+    for (let i = 0; i < meshes.length; i++) meshes[i] = decimate(meshes[i], Math.max(4, Math.floor(triangleCount(meshes[i]) * share)), opts.crease ?? 35);
+    triangles = 0;
+    for (const m of meshes) triangles += triangleCount(m);
+  }
   const out: SceneHierarchy = { roots, meshes, triangles, notes };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);

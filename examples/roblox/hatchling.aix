@@ -1,0 +1,78 @@
+# The hatchling from tyevco/minecraft-qol as a Roblox shoulder pet: the
+# same cubes as its Bedrock geometry (body, snouted head with horn nubs,
+# four legs, a two-segment tail with a fin, folded wing buds), one
+# geometry pixel to 0.12 studs so it perches within the shoulder
+# accessory's 2.67 × 4.40 × 3.09. Bedrock entities face -z and Aixle
+# models +z, so z is flipped here; the Roblox export turns the whole thing
+# to face the character's -Z. Every bone is a joint, and the Bedrock idle,
+# flap and glide clips are poses and animations the GLB carries.
+set roblox 1
+set grid 128
+
+px = 0.12
+# The ember variant's ramp, from the texture generator's tiles.
+scales = material("#e0642a", "noise", "#9c3a14", scale=0.15, rough=0.8)
+belly = material("#f5b981", "stripes", "#ffcf9a", scale=0.12, rough=0.7)
+membrane = material("#eb8a41", "noise", "#9c3a14", scale=0.2, rough=0.6)
+horn = material("#d9cfb4", rough=0.5)
+eye = material("#2b1208", rough=0.3)
+
+# A Bedrock cube: origin (low corner) and size in pixels, z flipped to face +z, grown a third of a pixel so
+# touching bones overlap into one piece.
+def cube(ox, oy, oz, w, h, d) = box((w + 0.35) * px, (h + 0.35) * px, (d + 0.35) * px) | move((ox + w / 2) * px, (oy + h / 2) * px, -(oz + d / 2) * px)
+def pv(x, y, z) = [x * px, y * px, -z * px]
+
+# Head: a 6 by 5 by 5 box with a 4 by 2 by 2 snout, two horn nubs, eyes as decals on the face.
+skull = cube(-3, 6, -9, 6, 5, 5)
+snout = cube(-2, 6, -11, 4, 2, 2)
+horns = cube(-3, 11, -7, 1, 2, 1) + cube(2, 11, -7, 1, 2, 1)
+eye_l = sphere(0.7 * px) | move(1.8 * px, 9 * px, 9.2 * px)
+eye_r = sphere(0.7 * px) | move(-1.8 * px, 9 * px, 9.2 * px)
+head_p = (((skull + snout) | paint(scales)) + (horns | paint(horn))) | decal(eye_l + eye_r, eye)
+head_pivot = pv(0, 7, -4)
+head = joint(head_p, "head", head_pivot[0], head_pivot[1], head_pivot[2])
+
+# Legs: 2 by 3 by 2 each, hinged at the hip where they meet the body.
+def leg(name, x, z) = joint(cube(x, 0, z, 2, 3, 2) | paint(scales), name, (x + 1) * px, 3 * px, -(z + 1) * px)
+front_left = leg("front_left_leg", 1, -4)
+front_right = leg("front_right_leg", -3, -4)
+back_left = leg("back_left_leg", 1, 2)
+back_right = leg("back_right_leg", -3, 2)
+
+# Tail: a segment, then a tip with a membrane fin, each on its own hinge.
+fin = cube(-1.5, 4, 13, 3, 3, 1) | paint(membrane)
+tip_p = (cube(-1, 4.5, 9, 2, 2, 4) | paint(scales)) + fin
+tip_pivot = pv(0, 5.5, 9)
+tail_tip = joint(tip_p, "tail_tip", tip_pivot[0], tip_pivot[1], tip_pivot[2])
+tail_pivot = pv(0, 5.5, 5)
+tail = joint((cube(-1.5, 4, 5, 3, 3, 4) | paint(scales)) + tail_tip, "tail", tail_pivot[0], tail_pivot[1], tail_pivot[2])
+
+# Wing buds: 1 by 5 by 5 plates folded against the flanks, tilted out at rest about the hinge on the flank
+# (a rotate turns about the origin, so the bud is carried to the hinge, turned, and carried back).
+def wing(name, x, tilt) =
+  joint(cube(x, 4, -3, 1, 5, 5) | move(-(x + (x < 0)) * px, -8 * px, -1 * px) | rotate(z=tilt) | move((x + (x < 0)) * px, 8 * px, 1 * px) | paint(membrane),
+        name, (x + (x < 0)) * px, 8 * px, 1 * px)
+left_wing = wing("left_wing", 3, -35)
+right_wing = wing("right_wing", -4, 35)
+
+# The body carries everything; it is a joint too, so a glide can pitch the whole hatchling.
+body_p = (cube(-3, 3, -4, 6, 5, 9) | paint(scales)) | decal(box(6 * px, 1.2 * px, 9 * px) | move(0, 3 * px, 0), belly)
+body_pivot = pv(0, 3, 0)
+hatchling_p = body_p + head + front_left + front_right + back_left + back_right + tail + left_wing + right_wing
+hatchling = joint(hatchling_p, "body", body_pivot[0], body_pivot[1], body_pivot[2]) | anchor("RightShoulderAttachment", 0, 0, 0)
+show hatchling
+
+# Bedrock's clips as poses: the flap's two beats, the glide's two extremes, and a look aside from the idle.
+pose("rest")
+pose("look", head=[4, 6, 0], tail=[0, 12, 0], tail_tip=[0, -18, 0])
+pose("flap_up", left_wing=[0, 0, -45], right_wing=[0, 0, 45], head=[-15, 0, 0])
+pose("glide", body=[-8, 0, 0], left_wing=[0, 0, -18], right_wing=[0, 0, 18], front_left_leg=[-35, 0, 0], front_right_leg=[-35, 0, 0], back_left_leg=[25, 0, 0], back_right_leg=[25, 0, 0], tail=[0, 0, 10])
+pose("glide_deep", body=[-14, 0, 0], left_wing=[0, 0, -52], right_wing=[0, 0, 52], front_left_leg=[-35, 0, 0], front_right_leg=[-35, 0, 0], back_left_leg=[25, 0, 0], back_right_leg=[25, 0, 0], tail=[0, 8, 10], tail_tip=[0, -14, 0])
+animation("flap", ["rest", "flap_up", "rest", "flap_up", "rest"], seconds=0.6)
+animation("glide", ["glide", "glide_deep", "glide"], seconds=1.2, loop=1)
+animation("idle", ["rest", "look", "rest"], seconds=2, loop=1)
+
+assert width(hatchling) <= 2.67, "a shoulder accessory may be 2.67 studs wide"
+assert tall(hatchling) <= 4.4
+assert depth(hatchling) <= 3.09, "and 3.09 studs deep"
+assert pieces(hatchling) == 1, "one piece: every bone overlaps its parent"

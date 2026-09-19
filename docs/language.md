@@ -520,12 +520,18 @@ The report says whether the model fits that attachment's size limit at
 the Normal body scale (a hat 1.87 × 2.5 × 1.87 studs, a face piece
 1.87 × 1.25 × 1.25, a back piece 9.86 × 8.59 × 4.87), and decimates the
 mesh to the budget: a rigid accessory's 4000 triangles when there is an
-Attachment anchor, a MeshPart's 10000 per mesh otherwise, by quadric
-edge collapses that never cross a material seam or fold a face, so a
-hat meshed at grid 96 goes out at 4000 with its brim, band and crown.
+Attachment anchor (shared across the meshes of a jointed model, each
+giving up the same share), a MeshPart's 10000 per mesh otherwise, by
+quadric edge collapses that never cross a material seam or fold a face,
+so a hat meshed at grid 96 goes out at 4000 with its brim, band and
+crown. A jointed model exports its joints as nodes under `Handle` and
+its animations as glTF clips, which is an animated rig for Studio
+rather than a rigid accessory: `examples/roblox/hatchling.aix` is the
+Minecraft repo's pet dragon rebuilt cube for cube as a shoulder pet,
+with its Bedrock idle, flap and glide clips as poses and animations.
 The report says what it was decimated from. `examples/roblox/` has a
-hat, glasses, a backpack, wings, a café set, a lamp, a plant and a
-sign; a Roblox accessory hangs on its attachment, so an accessory gets
+hat, glasses, a backpack, wings, the hatchling, a café set, a lamp, a
+plant and a sign; a Roblox accessory hangs on its attachment, so an accessory gets
 no warning about standing. Bedrock draws geometry with x mirrored, so
 cubes are authored at -x and the model stands in the game as it does on
 the sheet, its +z front to the south, the block convention; an entity
