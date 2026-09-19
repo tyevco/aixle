@@ -346,11 +346,21 @@ slanted hinge or a tilted rotor: a pose then gives it one angle
 (`steer=25`), `angle("steer")[0]` reads it, and the GLB animation turns
 about that axis rather than through an Euler triple.
 `pose("reach", shoulder=[0, 0, 25], elbow=[0, 0, -40])` names a set of
-angles (degrees about x, then y, then z; unnamed joints rest);
+angles (degrees about x, then y, then z; unnamed joints rest). A joint
+can move and scale as well as turn: `pose("hop", body=xform(move=[0,
+0.3, 0], scale=[1, 1.1, 1]), head=xform(rotate=[-10, 0, 0]))` gives the
+joint a whole transform, scaled about its pivot, then turned, then moved
+(the glTF order, so the export plays what the sheet shows); `rotate=`
+takes the same triple or single angle a bare pose value does.
 `animation("wave", ["rest", "reach", "rest"], seconds=2)` strings poses
-into evenly spaced keyframes. Every pose is drawn on `poses.png`, every
-animation on `anim_<name>.png`, and the GLB carries the joints as nodes
-with the animations as glTF channels, which the viewer page plays. `set
+into evenly spaced keyframes; `times=[0, 0.15, 0.6]` puts each pose at
+its own second instead, the last being the length, and `ease=1` slows
+to a stop at every pose (0 is linear, a value between blends the two).
+Every pose is drawn on `poses.png`, every
+animation on `anim_<name>.png` (an eased or timed one says so in its
+bar), and the GLB carries the joints as nodes with the animations as
+glTF rotation, translation and scale channels, which the viewer page
+plays with loop, speed and a scrub bar, or all in turn. `set
 pose reach` (or `--pose reach` on the command line) makes the sheet, the
 views, the slices and the beauty render show that pose, and `check --pose
 reach` prints every step's size in it. The report and the STL describe

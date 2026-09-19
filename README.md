@@ -82,7 +82,7 @@ npx aixle doc                        # the reference, to stdout
 | `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
 | `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
-| `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |
+| `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
@@ -107,7 +107,7 @@ import("part.obj", size=2)                                                      
 use "std/furniture" as f   f.chair(seat=0.45)   use "parts/mine.aix"   mine.bracket(0.2)   # libraries of defs
 anchor(part, "tip", x, y, z)   at(part, "tip")   lamp | attach("bottom", arm, "tip")     # placement by name
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
-pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
+pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render
 decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stripes", axis="x")  # surface paint
 

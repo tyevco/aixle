@@ -111,7 +111,7 @@ function main(argv: string[]): number {
       // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.angles) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints) : rest;
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
@@ -184,7 +184,7 @@ function main(argv: string[]): number {
       const rest = check(source, file);
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.angles) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints) : rest;
       const lines = source.split(/\r?\n/);
       const byName = new Map(ev.steps.map((st) => [st.name, st]));
       const memo = new Map<Shape3, PaintState>();

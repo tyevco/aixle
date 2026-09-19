@@ -91,7 +91,7 @@ helix(r, h, turns)  arc(r, from, to)  spline(points)                            
 bezier(points)  curve(points)   tube(r, c)  sweep(profile, c)   text("Ab", 1, face="serif") # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
-pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
+pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
 pieces(s)  clearance(a, b)   a < b  a == b  a != b                                        # measure for assert (1 or 0)
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
@@ -131,7 +131,9 @@ nest the forearm's joint inside the upper arm's part, write poses, then
 read `poses.png` and `anim_<name>.png`: a part that swings about the
 wrong point has the wrong pivot. To judge one pose properly render it
 at full size with `--pose name` (or `set pose name`); `check --pose name`
-prints the posed sizes.
+prints the posed sizes. A pose value may be `xform(rotate=, move=,
+scale=)` for a hop or a squash, and an animation takes `times=[...]`
+for uneven keys and `ease=1` to settle into each pose.
 
 ```
 upper = capsule(0.15, 1.6) | move(0, 1.8, 0) | paint("steel")

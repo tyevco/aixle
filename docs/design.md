@@ -195,15 +195,25 @@ made relative to the pivot, and a placed shape is a node per copy over one
 mesh. Every mesh is extracted at the same cell size and all of them share
 one atlas: they are merged for baking and split again with their UVs.
 
-A joint is a plain rotation of its part about the pivot, built with the
-angles a pose gives it, and a pose is applied by evaluating the program
-again with those angles: an evaluation takes milliseconds, every joint
-then has exact rotated bounds, and nested joints are turned by their own
-angles before the parent is built, so they follow it. The first design had
+A joint is a plain transform of its part about the pivot, built with
+what a pose gives it (a scale about the pivot, then the turn, then a
+move: glTF's own order, so a viewer composes the channels the way the
+sheet drew them), and a pose is applied by evaluating the program
+again with those values: an evaluation takes milliseconds, every joint
+then has exact transformed bounds, and nested joints are set before the
+parent is built, so they follow it. The first design had
 a joint read live angles from a mutable state instead; its bounds then had
 to cover every rotation, which made a five-unit arm sixteen units across
 and wasted most of the extraction grid on air. Exports are at rest, with
-the poses as glTF rotation channels on the joint nodes.
+the poses as glTF rotation channels on the joint nodes, and translation
+and scale channels only on the joints a pose moves or scales.
+
+An animation's keys are evenly spaced unless it gives times, and blend
+linearly unless it gives an ease, a cosine blend that slows to a stop
+at each key. glTF samplers are linear (its cubic spline needs tangents
+a pose does not have), so an eased animation is written as eight linear
+keys per segment: the file grows a little and every viewer plays the
+same curve the strip shows.
 
 ## Twist, taper, text
 
@@ -387,7 +397,12 @@ glyph was rendered and read to check it.
 
 `viewer.html` embeds the GLB as base64 so it opens from disk with no
 server, and loads three.js from a CDN, so it needs a network connection
-once. It exists for people; an agent verifies from the PNGs.
+once. It exists for people; an agent verifies from the PNGs. With
+animations it grows a bar along the bottom: loop, speed, a scrub bar
+that pauses the clip at a moment, and a button that plays every clip
+once in turn, so a person can check a rig's timing without a second
+tool. The page keeps its own paused and finished flags because
+three.js's action reports a clip that ran to its end as paused.
 
 ## Libraries
 

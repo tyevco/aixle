@@ -286,7 +286,7 @@ describe("round-3 findings", () => {
   it("angle() reads the pose being evaluated, and numbers print whole", () => {
     const src = 'arm = box(0.2, 2, 0.2) | move(0, 1, 0)\nj = joint(arm, "hinge", 0, 0, 0)\na = angle("hinge")[0]\nshow j';
     expect(check(src).steps.find((s) => s.name === "a")!.value).toBe(0);
-    expect(check(src, "rig.aix", undefined, { hinge: [30, 0, 0] }).steps.find((s) => s.name === "a")!.value).toBe(30);
+    expect(check(src, "rig.aix", undefined, { hinge: { angles: [30, 0, 0], move: [0, 0, 0], scale: [1, 1, 1] } }).steps.find((s) => s.name === "a")!.value).toBe(30);
   });
 });
 

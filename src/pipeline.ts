@@ -19,7 +19,7 @@ import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/robl
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
 import { anchorsOf, allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
-import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
+import { INK, interpolatePose, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
@@ -31,7 +31,7 @@ import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, t
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, dimsLabel, type StepView, type ViewName } from "./render/views.js";
-import { boundsCenter, boundsSize, isEmpty, type Bounds, type Shape3 } from "./sdf/types.js";
+import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
 
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
 export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
@@ -588,8 +588,8 @@ export function cellFor(evaluation: Evaluation, gridOverride?: number): { grid: 
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointAngles?: Record<string, [number, number, number]>): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointAngles });
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses });
 }
 
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
@@ -615,8 +615,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const modules = moduleResolver(sourceName);
   const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
-  const shownAngles = shownPose ? rest.poses.find((p) => p.name === shownPose)?.angles : undefined;
-  const evaluation = shownAngles ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: shownAngles }) : rest;
+  const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints }) : rest;
   const warnings = [...evaluation.warnings, ...evaluation.asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
@@ -624,8 +624,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let closeUpNote: string | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
-  if (shownPose && !shownAngles && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
-  const shapeAt: ShapeAt = (angles) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: angles }).output;
+  if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
+  const shapeAt: ShapeAt = (joints) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints }).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
   const size = Math.max(64, Math.round(opts.size ?? (evaluation.settings.size as number | undefined) ?? 512));
   const output = evaluation.output;
@@ -644,7 +644,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Joints and poses: the sheet shows `set pose` (rest by default); exports are always at rest.
   const joints = output ? allJoints(output) : [];
   const jointNames = joints.map((j) => j.joint!.name);
-  const poseViews: PoseView[] = evaluation.poses.map((p) => ({ name: p.name, angles: p.angles }));
+  const poseViews: PoseView[] = evaluation.poses.map((p) => ({ name: p.name, joints: p.joints }));
   const azimuth = opts.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
 
@@ -812,15 +812,27 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const glbAnimations: GlbAnimation[] = evaluation.animations
         .filter((a) => a.poses.every((pn) => pn === "rest" || poseViews.some((v) => v.name === pn)))
         .map((a) => {
-          const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", angles: {} });
-          const times = keys.map((_, i) => (keys.length === 1 ? 0 : (i / (keys.length - 1)) * a.seconds));
+          const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
+          const timing = { times: a.times, ease: a.ease };
+          // glTF samplers are linear, so an eased animation is sampled a few times per segment; a linear one at its keys.
+          const keyTimes = a.times ?? keys.map((_, i) => (keys.length === 1 ? 0 : (i / (keys.length - 1)) * a.seconds));
+          const times: number[] = [];
+          const sub = a.ease > 0 ? 8 : 1;
+          for (let i = 0; i < keyTimes.length - 1; i++) for (let k = 0; k < sub; k++) times.push(keyTimes[i] + ((keyTimes[i + 1] - keyTimes[i]) * k) / sub);
+          times.push(keyTimes[keyTimes.length - 1]);
+          const samples = times.map((t) => interpolatePose(keys, jointNames, a.seconds > 0 ? t / a.seconds : 0, timing));
           const rotations: Record<string, [number, number, number, number][]> = {};
+          const moves: Record<string, Vec3[]> = {};
+          const scales: Record<string, Vec3[]> = {};
           for (const j of joints) {
             const jn = j.joint!.name;
             const axis = j.joint!.axis;
-            rotations[jn] = keys.map((k) => { const an = k.angles[jn] ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
+            rotations[jn] = samples.map((s) => { const an = s[jn]?.angles ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
+            // Translation and scale channels only where a key moves or scales the joint: most joints only turn.
+            if (keys.some((k) => k.joints[jn]?.move.some((v) => v !== 0))) moves[jn] = samples.map((s) => [...(s[jn]?.move ?? [0, 0, 0])] as Vec3);
+            if (keys.some((k) => k.joints[jn]?.scale.some((v) => v !== 1))) scales[jn] = samples.map((s) => [...(s[jn]?.scale ?? [1, 1, 1])] as Vec3);
           }
-          return { name: a.name, times, rotations };
+          return { name: a.name, times, rotations, moves, scales };
         });
       if (opts.obj !== false) {
         const { obj, mtl } = toObjScene(hierarchy, name, "model.mtl", hierarchy.atlas ? "model.png" : undefined);
@@ -870,8 +882,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const poseCell = cellSize * 1.5;
       time("poses", () => write("poses.png", renderPoses(shapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation).toPng()));
       for (const a of evaluation.animations) {
-        const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", angles: {} });
-        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(shapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation).toPng()));
+        const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
+        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(shapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease }).toPng()));
       }
     }
     if (opts.beauty || evaluation.settings.beauty === 1) {

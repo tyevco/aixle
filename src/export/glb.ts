@@ -131,6 +131,10 @@ export interface GlbAnimation {
   times: number[];
   /** Per joint name: one [x, y, z, w] quaternion per keyframe. */
   rotations: Record<string, [number, number, number, number][]>;
+  /** Per joint name: one offset per keyframe, added to the node's rest translation. Joints not named do not move. */
+  moves?: Record<string, [number, number, number][]>;
+  /** Per joint name: one [sx, sy, sz] per keyframe about the pivot. Joints not named keep their size. */
+  scales?: Record<string, [number, number, number][]>;
 }
 
 /** Quaternion for rotations about x, then y, then z, in degrees (the joint convention). */
@@ -238,6 +242,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
   // Nodes.
   const nodes: Record<string, unknown>[] = [];
   const jointNodeIndex = new Map<string, number>();
+  const jointNodeRest = new Map<string, { translation: [number, number, number]; scale: number }>();
   const addNode = (n: SceneNode): number => {
     const node: Record<string, unknown> = { name: n.name };
     if (n.mesh >= 0) node.mesh = n.mesh;
@@ -246,7 +251,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     if (n.scale !== 1) node.scale = [n.scale, n.scale, n.scale];
     const index = nodes.length;
     nodes.push(node);
-    if (n.joint) jointNodeIndex.set(n.joint, index);
+    if (n.joint) { jointNodeIndex.set(n.joint, index); jointNodeRest.set(n.joint, { translation: [n.translation[0], n.translation[1], n.translation[2]], scale: n.scale }); }
     const children = n.children.map(addNode);
     if (children.length) node.children = children;
     return index;
@@ -267,6 +272,27 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
       const outAcc = floatAccessor(flat, "VEC4", false, 0);
       samplers.push({ input: inputAcc, output: outAcc, interpolation: "LINEAR" });
       channels.push({ sampler: samplers.length - 1, target: { node: nodeIndex, path: "rotation" } });
+    }
+    // A move is on top of where the joint sits at rest; a scale on top of the node's own (1 for a joint).
+    for (const [jointName, offsets] of Object.entries(a.moves ?? {})) {
+      const nodeIndex = jointNodeIndex.get(jointName);
+      const rest = jointNodeRest.get(jointName);
+      if (nodeIndex === undefined || !rest) continue;
+      const flat = new Float32Array(offsets.length * 3);
+      offsets.forEach((o, i) => flat.set([rest.translation[0] + o[0], rest.translation[1] + o[1], rest.translation[2] + o[2]], i * 3));
+      const outAcc = floatAccessor(flat, "VEC3", false, 0);
+      samplers.push({ input: inputAcc, output: outAcc, interpolation: "LINEAR" });
+      channels.push({ sampler: samplers.length - 1, target: { node: nodeIndex, path: "translation" } });
+    }
+    for (const [jointName, sizes] of Object.entries(a.scales ?? {})) {
+      const nodeIndex = jointNodeIndex.get(jointName);
+      const rest = jointNodeRest.get(jointName);
+      if (nodeIndex === undefined || !rest) continue;
+      const flat = new Float32Array(sizes.length * 3);
+      sizes.forEach((sc, i) => flat.set([sc[0] * rest.scale, sc[1] * rest.scale, sc[2] * rest.scale], i * 3));
+      const outAcc = floatAccessor(flat, "VEC3", false, 0);
+      samplers.push({ input: inputAcc, output: outAcc, interpolation: "LINEAR" });
+      channels.push({ sampler: samplers.length - 1, target: { node: nodeIndex, path: "scale" } });
     }
     if (channels.length) anims.push({ name: a.name, samplers, channels });
   }

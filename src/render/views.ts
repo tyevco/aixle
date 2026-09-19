@@ -9,7 +9,7 @@
  */
 import type { Vec3 } from "../core/vec.js";
 import { albedo } from "../sdf/materials.js";
-import { boundsCenter, boundsSize, isEmpty, type Bounds, type Shape3 } from "../sdf/types.js";
+import { boundsCenter, boundsSize, isEmpty, REST_POSE, type Bounds, type JointPose, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
 import { meshBounds, triangleCount, type Mesh } from "../mesh/mesh.js";
 import { orthographic, perspective, project, toView, type Camera, type OrthoView } from "./camera.js";
@@ -335,14 +335,23 @@ export { mixColor };
 
 export interface PoseView {
   name: string;
-  angles: Record<string, [number, number, number]>;
+  /** Per joint: angles, move and scale; a joint not named is at rest. */
+  joints: Record<string, JointPose>;
 }
 
-export type ShapeAt = (angles: Record<string, [number, number, number]>) => Shape3 | undefined;
+/** How an animation runs between its keyframe poses: absolute times per pose, and how much to ease at each. */
+export interface Timing {
+  /** One time in seconds per key, ascending from 0; evenly spaced when absent. */
+  times?: number[];
+  /** 0 is linear; 1 slows to a stop at every key (a cosine blend). */
+  ease?: number;
+}
+
+export type ShapeAt = (joints: Record<string, JointPose>) => Shape3 | undefined;
 
 /** The mesh of the model in one pose, at about `cellSize`; undefined when the pose has no shape. */
-function poseMesh(shapeAt: ShapeAt, angles: Record<string, [number, number, number]>, cellSize: number): Mesh | undefined {
-  const shape = shapeAt(angles);
+function poseMesh(shapeAt: ShapeAt, joints: Record<string, JointPose>, cellSize: number): Mesh | undefined {
+  const shape = shapeAt(joints);
   if (!shape || isEmpty(shape.bounds)) return undefined;
   const s = boundsSize(shape.bounds);
   const resolution = Math.max(12, Math.min(112, Math.ceil(Math.max(s[0], s[1], s[2]) / cellSize)));
@@ -377,7 +386,7 @@ function framingFor(meshes: (Mesh | undefined)[]): Bounds {
 
 /** One thumbnail per pose, the rest pose first, all framed alike. `shapeAt` rebuilds the model for a set of angles. */
 export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseView[], thumb: number, cellSize: number, azimuth?: number, elevation?: number): Canvas {
-  const all: PoseView[] = [{ name: "rest", angles: {} }, ...poses.filter((p) => p.name !== "rest")];
+  const all: PoseView[] = [{ name: "rest", joints: {} }, ...poses.filter((p) => p.name !== "rest")];
   const cols = Math.min(5, all.length);
   const rows = Math.ceil(all.length / cols);
   const gutter = 6, bar = 30;
@@ -385,7 +394,7 @@ export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseV
   out.fill(0, 0, out.width, bar, INK.bar);
   const listed = jointNames.length > 6 ? `${jointNames.slice(0, 6).join(", ")}, ...` : jointNames.join(", ");
   drawText(out, 10, 8, `POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${listed}`, INK.barText, 2);
-  const meshes = all.map((p) => poseMesh(shapeAt, p.angles, cellSize));
+  const meshes = all.map((p) => poseMesh(shapeAt, p.joints, cellSize));
   const framing = framingFor(meshes);
   all.forEach((p, i) => {
     const c = poseThumb(meshes[i], framing, thumb, p.name, azimuth, elevation);
@@ -394,29 +403,53 @@ export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseV
   return out;
 }
 
-/** Angles at time t in [0, 1] along evenly spaced keyframe poses, interpolated per component. */
-export function interpolatePose(keys: PoseView[], jointNames: string[], t: number): Record<string, [number, number, number]> {
+/** The blend fraction for a linear fraction u in [0, 1]: `ease` of the way from linear to a cosine ease in and out. */
+export function easeBlend(u: number, ease = 0): number {
+  if (ease <= 0) return u;
+  const smooth = (1 - Math.cos(Math.PI * u)) / 2;
+  return u + Math.min(1, ease) * (smooth - u);
+}
+
+/** Which keyframe segment holds the time fraction t in [0, 1], and how far along it is, for evenly spaced or given times. */
+export function keyAt(count: number, t: number, timing: Timing = {}): { i: number; u: number } {
+  if (count < 2) return { i: 0, u: 0 };
+  const tt = Math.max(0, Math.min(1, t));
+  if (!timing.times || timing.times.length !== count) {
+    const f = tt * (count - 1);
+    const i = Math.min(count - 2, Math.floor(f));
+    return { i, u: easeBlend(f - i, timing.ease) };
+  }
+  const times = timing.times;
+  const T = tt * times[times.length - 1];
+  let i = 0;
+  while (i < count - 2 && T >= times[i + 1]) i++;
+  const span = times[i + 1] - times[i] || 1;
+  return { i, u: easeBlend(Math.max(0, Math.min(1, (T - times[i]) / span)), timing.ease) };
+}
+
+/** The pose at time t in [0, 1] along keyframe poses, every component (angles, move, scale) blended per joint. */
+export function interpolatePose(keys: PoseView[], jointNames: string[], t: number, timing: Timing = {}): Record<string, JointPose> {
   if (keys.length === 0) return {};
-  if (keys.length === 1) return keys[0].angles;
-  const f = Math.max(0, Math.min(1, t)) * (keys.length - 1);
-  const i = Math.min(keys.length - 2, Math.floor(f));
-  const u = f - i;
-  const out: Record<string, [number, number, number]> = {};
+  if (keys.length === 1) return keys[0].joints;
+  const { i, u } = keyAt(keys.length, t, timing);
+  const out: Record<string, JointPose> = {};
+  const mix = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
   for (const j of jointNames) {
-    const a = keys[i].angles[j] ?? [0, 0, 0], b = keys[i + 1].angles[j] ?? [0, 0, 0];
-    out[j] = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+    const a = keys[i].joints[j] ?? REST_POSE, b = keys[i + 1].joints[j] ?? REST_POSE;
+    out[j] = { angles: mix(a.angles, b.angles), move: mix(a.move, b.move), scale: mix(a.scale, b.scale) };
   }
   return out;
 }
 
 /** A strip of frames through an animation's keyframes, with the time under each. */
-export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number): Canvas {
+export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number, timing: Timing = {}): Canvas {
   const gutter = 4, bar = 24, labelH = 12;
   const out = new Canvas(frames * (frame + gutter) + gutter, frame + gutter * 2 + bar + labelH, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
-  drawText(out, 10, 6, `${name.toUpperCase()}   ${fmt(seconds)}s   keyframes: ${keys.map((k) => k.name).join(" → ")}`, INK.barText, 2);
+  const keyList = keys.map((k, i) => (timing.times ? `${k.name} ${fmt(timing.times[i])}s` : k.name)).join(" → ");
+  drawText(out, 10, 6, `${name.toUpperCase()}   ${fmt(seconds)}s${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}   keyframes: ${keyList}`, INK.barText, 2);
   const meshes: (Mesh | undefined)[] = [];
-  for (let i = 0; i < frames; i++) meshes.push(poseMesh(shapeAt, interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1)), cellSize));
+  for (let i = 0; i < frames; i++) meshes.push(poseMesh(shapeAt, interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1), timing), cellSize));
   const framing = framingFor(meshes);
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : i / (frames - 1);

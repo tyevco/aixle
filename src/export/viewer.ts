@@ -26,6 +26,12 @@ export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles:
   #bar button { background: #f4f2ee; color: #2a2a2e; border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
   #bar button:hover { background: #fff; }
   #bar span { color: #b8b8c0; }
+  #anim { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: #2a2a2ee6; color: #f4f2ee; z-index: 2; flex-wrap: wrap; }
+  #anim button, #anim select { background: #f4f2ee; color: #2a2a2e; border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  #bar button.on { background: #ffd27a; }
+  #anim label { display: flex; gap: 4px; align-items: center; color: #b8b8c0; cursor: pointer; }
+  #anim input[type=range] { flex: 1; min-width: 120px; accent-color: #ffd27a; }
+  #anim #time { min-width: 90px; font-variant-numeric: tabular-nums; }
   canvas { display: block; }
   #err { position: fixed; inset: 60px 20px auto; color: #b0402a; display: none; }
 </style>
@@ -34,6 +40,7 @@ export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles:
 <div id="bar"><b>${escapeHtml(name)}</b><span>${dims} units · ${triangles} triangles</span>
   <button data-view="persp">Perspective</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-view="top">Top</button>
   <button id="wire">Wireframe</button><button id="grid">Grid</button>${animations.map((a, i) => `<button data-anim="${i}">▶ ${escapeHtml(a)}</button>`).join("")}<span>drag to orbit · wheel to zoom · right-drag to pan</span></div>
+${animations.length ? `<div id="anim"><button id="all">▶ All</button><button id="pause">❚❚</button><label><input type="checkbox" id="loop" checked> loop</label><label>speed <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><input type="range" id="scrub" min="0" max="1" step="0.001" value="0"><span id="time">no animation</span></div>` : ""}
 <div id="err">three.js could not be loaded from the CDN; this page needs a network connection the first time.</div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
@@ -73,23 +80,69 @@ const grid = new THREE.GridHelper(step * 40, 40, 0xbfbbb0, 0xd8d5cc);
 grid.position.y = floorY + radius * 0.001; scene.add(grid);
 const axes = new THREE.AxesHelper(radius * 0.5); axes.position.y = floorY; scene.add(axes);
 const bytes = Uint8Array.from(atob(GLB), (c) => c.charCodeAt(0));
-let model, mixer, clips = [], action;
+let model, mixer, clips = [], action, queue = [];
+// The action's own flags conflate paused with finished (clampWhenFinished pauses it), so the page keeps its own.
+let paused = false, done = false, once = false;
 const clock = new THREE.Clock();
+const el = (id) => document.getElementById(id);
+const animBar = el("anim"), buttons = [...document.querySelectorAll("[data-anim]")];
 new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
   model = gltf.scene;
   model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.material.map) o.material.vertexColors = true; } });
   scene.add(model);
   clips = gltf.animations || [];
   mixer = new THREE.AnimationMixer(model);
+  mixer.timeScale = animBar ? Number(el("speed").value) : 1;
+  // "All" plays each animation once in turn; the finished event only fires for a once-through action.
+  mixer.addEventListener("finished", () => { if (queue.length) play(queue.shift(), true); else done = true; });
 });
-document.querySelectorAll("[data-anim]").forEach((b) => b.addEventListener("click", () => {
-  const clip = clips[Number(b.dataset.anim)];
+function looping() { return animBar && el("loop").checked && !once; }
+function play(clip, inTurn = false) {
   if (!clip || !mixer) return;
-  if (action && action.getClip() === clip && action.isRunning()) { action.stop(); action = null; return; }
   if (action) action.stop();
+  once = inTurn;
+  paused = false; done = false;
   action = mixer.clipAction(clip);
+  clock.getDelta(); // drop the time since the last frame, so the clip starts at 0 rather than part way in
+  action.setLoop(looping() ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+  action.clampWhenFinished = true;
   action.reset().play();
+  if (animBar) { el("scrub").max = clip.duration; el("scrub").value = 0; }
+  buttons.forEach((b) => b.classList.toggle("on", clips[Number(b.dataset.anim)] === clip));
+}
+function stop() { if (action) action.stop(); action = null; queue = []; buttons.forEach((b) => b.classList.remove("on")); }
+buttons.forEach((b) => b.addEventListener("click", () => {
+  const clip = clips[Number(b.dataset.anim)];
+  if (action && action.getClip() === clip && !paused && !done) { stop(); return; }
+  queue = [];
+  play(clip);
 }));
+if (animBar) {
+  el("all").addEventListener("click", () => { queue = clips.slice(1); play(clips[0], true); });
+  el("pause").addEventListener("click", () => {
+    if (!action) { if (clips.length) play(clips[0]); return; }
+    if (done) { play(action.getClip(), once); return; }
+    paused = !paused;
+    action.paused = paused;
+  });
+  el("loop").addEventListener("change", () => { if (action) action.setLoop(looping() ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); });
+  el("speed").addEventListener("change", () => { if (mixer) mixer.timeScale = Number(el("speed").value); });
+  // Dragging the scrub bar pauses the animation at that moment; the play button resumes it from there.
+  el("scrub").addEventListener("input", () => {
+    if (!action) { if (clips.length) play(clips[0]); else return; }
+    paused = true; done = false;
+    action.paused = true;
+    action.time = Number(el("scrub").value);
+  });
+}
+function tick() {
+  if (!animBar) return;
+  if (!action) { el("time").textContent = "no animation"; el("pause").textContent = "▶"; return; }
+  const clip = action.getClip();
+  if (!paused && !done) el("scrub").value = action.time;
+  el("time").textContent = clip.name + "  " + action.time.toFixed(2) + " / " + clip.duration.toFixed(2) + " s" + (done ? "  (done)" : paused ? "  (paused)" : "");
+  el("pause").textContent = paused || done ? "▶" : "❚❚";
+}
 function view(name) {
   const d = radius / Math.sin(THREE.MathUtils.degToRad(15)) * 1.1;
   const p = { persp: [Math.sin(0.61) * Math.cos(0.44), Math.sin(0.44), Math.cos(0.61) * Math.cos(0.44)], front: [0, 0, 1], right: [1, 0, 0], top: [0, 1, 0.0001] }[name];
@@ -102,7 +155,7 @@ document.getElementById("wire").addEventListener("click", () => model?.traverse(
 document.getElementById("grid").addEventListener("click", () => { grid.visible = !grid.visible; axes.visible = grid.visible; });
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 view("persp");
-renderer.setAnimationLoop(() => { controls.update(); if (mixer) mixer.update(clock.getDelta()); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); if (mixer) mixer.update(clock.getDelta()); tick(); renderer.render(scene, camera); });
 </script>
 </body>
 </html>

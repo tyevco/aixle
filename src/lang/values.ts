@@ -12,7 +12,19 @@ export interface UserFn {
   closure?: unknown;
 }
 
-export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn | Curve;
+/** What xform() makes: a joint's pose in one value, for pose("hop", body=xform(move=[0, 0.3, 0])). */
+export interface Xform {
+  kind: "xform";
+  angles: [number, number, number];
+  /** True when rotate= was one number: an angle about the joint's axis. */
+  single: boolean;
+  move: [number, number, number];
+  scale: [number, number, number];
+}
+
+export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn | Curve | Xform;
+
+export const isXform = (v: Value): v is Xform => typeof v === "object" && !Array.isArray(v) && (v as Xform).kind === "xform";
 
 export type ParamType = "number" | "string" | "shape" | "shape2" | "anyshape" | "material" | "list" | "curve" | "axis" | "any";
 
@@ -28,7 +40,7 @@ export interface Param {
 
 export interface Overload {
   params: Param[];
-  returns: "number" | "string" | "shape" | "shape2" | "material" | "list" | "curve" | "any";
+  returns: "number" | "string" | "shape" | "shape2" | "material" | "list" | "curve" | "transform" | "any";
   impl: (args: Value[], rest: Value[]) => Value;
 }
 
@@ -48,6 +60,7 @@ export function typeName(v: Value): string {
   if (kind === "shape2") return "shape2";
   if (kind === "fn") return "function";
   if (kind === "curve") return "curve";
+  if (kind === "xform") return "transform";
   return "material";
 }
 

@@ -62,15 +62,22 @@ hatchling_p = body_p + head + front_left + front_right + back_left + back_right 
 hatchling = joint(hatchling_p, "body", body_pivot[0], body_pivot[1], body_pivot[2]) | anchor("RightShoulderAttachment", 0, 0, 0)
 show hatchling
 
-# Bedrock's clips as poses: the flap's two beats, the glide's two extremes, and a look aside from the idle.
+# Bedrock's clips as poses: the flap's two beats, the glide's two extremes, and a look aside from the idle,
+# with a breath (the body scaled a little about its pivot). The hop moves the body joint up and squashes
+# and stretches it: xform() carries a joint's turn, move and scale together.
 pose("rest")
-pose("look", head=[4, 6, 0], tail=[0, 12, 0], tail_tip=[0, -18, 0])
+pose("look", head=[4, 6, 0], tail=[0, 12, 0], tail_tip=[0, -18, 0], body=xform(scale=[1, 1.03, 1]))
 pose("flap_up", left_wing=[0, 0, -45], right_wing=[0, 0, 45], head=[-15, 0, 0])
 pose("glide", body=[-8, 0, 0], left_wing=[0, 0, -18], right_wing=[0, 0, 18], front_left_leg=[-35, 0, 0], front_right_leg=[-35, 0, 0], back_left_leg=[25, 0, 0], back_right_leg=[25, 0, 0], tail=[0, 0, 10])
 pose("glide_deep", body=[-14, 0, 0], left_wing=[0, 0, -52], right_wing=[0, 0, 52], front_left_leg=[-35, 0, 0], front_right_leg=[-35, 0, 0], back_left_leg=[25, 0, 0], back_right_leg=[25, 0, 0], tail=[0, 8, 10], tail_tip=[0, -14, 0])
-animation("flap", ["rest", "flap_up", "rest", "flap_up", "rest"], seconds=0.6)
-animation("glide", ["glide", "glide_deep", "glide"], seconds=1.2, loop=1)
-animation("idle", ["rest", "look", "rest"], seconds=2, loop=1)
+pose("crouch", body=xform(rotate=[6, 0, 0], move=[0, -1 * px, 0], scale=[1.06, 0.88, 1.06]), head=[-10, 0, 0], tail=[0, 0, 0])
+pose("hop", body=xform(move=[0, 5 * px, 0], scale=[0.95, 1.1, 0.95]), left_wing=[0, 0, -30], right_wing=[0, 0, 30], front_left_leg=[-25, 0, 0], front_right_leg=[-25, 0, 0], back_left_leg=[30, 0, 0], back_right_leg=[30, 0, 0], tail=[10, 0, 0])
+# The flap snaps up and settles down: times= puts the up beats at 0.12 and 0.42 of 0.6 seconds; ease= slows
+# the glide and the idle to a stop at each pose instead of turning sharply.
+animation("flap", ["rest", "flap_up", "rest", "flap_up", "rest"], times=[0, 0.12, 0.3, 0.42, 0.6])
+animation("glide", ["glide", "glide_deep", "glide"], seconds=1.2, loop=1, ease=1)
+animation("idle", ["rest", "look", "rest"], seconds=2, loop=1, ease=1)
+animation("hop", ["rest", "crouch", "hop", "crouch", "rest"], times=[0, 0.2, 0.45, 0.7, 0.9], ease=0.5)
 
 assert width(hatchling) <= 2.67, "a shoulder accessory may be 2.67 studs wide"
 assert tall(hatchling) <= 4.4

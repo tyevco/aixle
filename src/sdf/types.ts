@@ -116,12 +116,24 @@ export interface Shape3 {
   instanced?: { base: Shape3; placements: Placement[]; hidden?: boolean };
 }
 
+/** What a pose gives one joint: degrees about x, y, z (or about its axis, angles[0]), a move in world units, and a scale about the pivot. */
+export interface JointPose {
+  angles: Vec3;
+  move: Vec3;
+  scale: Vec3;
+}
+
+export const REST_POSE: JointPose = { angles: [0, 0, 0], move: [0, 0, 0], scale: [1, 1, 1] };
+
 export interface JointState {
   name: string;
   pivot: Vec3;
   child: Shape3;
   /** The rotation this joint was built with, degrees about x, y, z (applied x, then y, then z); with an axis, angles[0] about it. */
   angles: Vec3;
+  /** The move this joint was built with, after the turn, in world units; and the scale about the pivot, before it. */
+  move: Vec3;
+  scale: Vec3;
   /** When set, the joint turns about this one axis through the pivot and a pose gives it one angle (a steering column, a slanted hinge). */
   axis?: Vec3;
   /** When true the joint's whole subtree reads as empty, so a parent's own geometry can be meshed alone. */
