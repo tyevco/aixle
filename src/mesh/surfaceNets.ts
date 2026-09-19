@@ -17,6 +17,11 @@
  *
  * Vertex normals come from the field's gradient, and the material query runs
  * once per vertex, which is where the render and the exporters get colours.
+ * A vertex on a crease (a box's edge, a block meeting a cylinder) is split
+ * once per side by `crease` degrees (creases.ts), each copy taking the
+ * normal and material of its own side from a point just inside that face,
+ * so an edge shades as an edge rather than a bevel. The copies share a
+ * position; the watertight and pieces checks weld them back.
  *
  * `resolution` is the number of cells along the longest side; the cell is
  * cubic. Detail thinner than a cell is lost, so a report line says what the
@@ -24,6 +29,7 @@
  */
 import { boundsGrow, boundsSize, isEmpty, type Material, type Shape3, type Bounds } from "../sdf/types.js";
 import type { Mesh } from "./mesh.js";
+import { splitCreases } from "./creases.js";
 
 export interface NetsOptions {
   resolution: number;
@@ -33,6 +39,8 @@ export interface NetsOptions {
   maxCells?: number;
   /** Place vertices by the tangent-plane fit (dual contouring). Default true. */
   sharp?: boolean;
+  /** Split a vertex whose faces meet at more than this many degrees, a copy per side; 0 keeps one smooth normal per vertex. Default 35. */
+  crease?: number;
   /** Extract over this box instead of the shape's bounds: a tighter box found from a coarse pass, or a close-up region. */
   bounds?: Bounds;
 }
@@ -105,6 +113,15 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
     out[o] = gx / l; out[o + 1] = gy / l; out[o + 2] = gz / l;
   };
 
+  const fine = cell * 0.1;
+  const gradientFine = (x: number, y: number, z: number, out: Float64Array): void => {
+    const gx = dist(x + fine, y, z) - dist(x - fine, y, z);
+    const gy = dist(x, y + fine, z) - dist(x, y - fine, z);
+    const gz = dist(x, y, z + fine) - dist(x, y, z - fine);
+    const l = Math.sqrt(gx * gx + gy * gy + gz * gz) || 1;
+    out[0] = gx / l; out[1] = gy / l; out[2] = gz / l;
+  };
+
   // Crossing point (and, for sharp placement, normal) per crossing lattice
   // edge, computed once and shared by the four cells around the edge.
   const edgeKey = (i: number, j: number, k: number, axis: number): number => ((k * sy + j) * sx + i) * 3 + axis;
@@ -125,8 +142,11 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
     id = cx.length;
     cx.push(x); cy.push(y); cz.push(z);
     if (sharp) {
+      // The tangent plane's normal from a finer difference than the vertex normals use: half a cell each way
+      // straddles the next face near an edge and tilts the plane, and the vertex lands a quarter of a cell short
+      // of the edge with a sliver of bevel beside it (measured on a box: z = -0.484 for an edge at -0.5).
       const g = new Float64Array(3);
-      gradient(x, y, z, g, 0);
+      gradientFine(x, y, z, g);
       cnList.push(g[0], g[1], g[2]);
     }
     crossings.set(key, id);
@@ -259,17 +279,31 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
         }
       }
 
-  // Normals from the gradient, materials from the hit query.
-  const n = positions.length / 3;
+  // Creases: a vertex whose faces disagree is copied once per side.
+  const creaseAngle = opts.crease ?? 35;
+  const creased = creaseAngle > 0 && indices.length ? splitCreases(positions, new Uint32Array(indices), creaseAngle) : undefined;
+  const finalPositions = creased ? creased.positions : new Float32Array(positions);
+  const ix = creased ? creased.indices : new Uint32Array(indices);
+
+  // Normals from the gradient, materials from the hit query. A copy of a split vertex takes its side's mean face
+  // normal, exact on a flat face and half a cell's curvature off on a curved one, and reads its material a little
+  // way inside its side, from the middle of its faces rather than the vertex, which sits on the crease itself.
+  const n = finalPositions.length / 3;
   const normals = new Float32Array(n * 3);
   const local = new Float32Array(n * 3);
   const materialIndex = new Uint16Array(n);
   const materials: Material[] = [];
   const matIds = new Map<Material, number>();
   const g = new Float64Array(3);
+  const inset = cell * 0.25;
   for (let v = 0; v < n; v++) {
-    const x = positions[v * 3], y = positions[v * 3 + 1], z = positions[v * 3 + 2];
-    gradient(x, y, z, g, 0);
+    let x = finalPositions[v * 3], y = finalPositions[v * 3 + 1], z = finalPositions[v * 3 + 2];
+    if (creased && creased.split[v]) {
+      g[0] = creased.side[v * 3]; g[1] = creased.side[v * 3 + 1]; g[2] = creased.side[v * 3 + 2];
+      x = creased.centroid[v * 3] - g[0] * inset; y = creased.centroid[v * 3 + 1] - g[1] * inset; z = creased.centroid[v * 3 + 2] - g[2] * inset;
+    } else if (creased && creased.flat[v]) {
+      g[0] = creased.side[v * 3]; g[1] = creased.side[v * 3 + 1]; g[2] = creased.side[v * 3 + 2];
+    } else gradient(x, y, z, g, 0);
     normals[v * 3] = g[0]; normals[v * 3 + 1] = g[1]; normals[v * 3 + 2] = g[2];
     const h = shape.hit(x, y, z);
     local[v * 3] = h.lx; local[v * 3 + 1] = h.ly; local[v * 3 + 2] = h.lz;
@@ -282,10 +316,8 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
     materialIndex[v] = id;
   }
 
-  const ix = new Uint32Array(indices);
-
   return {
-    mesh: { positions: new Float32Array(positions), normals, local, materialIndex, materials, indices: ix },
+    mesh: { positions: finalPositions, normals, local, materialIndex, materials, indices: ix },
     cellSize: cell,
     dims: [nx, ny, nz],
     samples: field.length,

@@ -1,0 +1,23 @@
+# Round glasses for a Roblox avatar, in studs; a face accessory may be
+# 1.87 × 1.25 × 1.25. The lenses face +z here and -Z in Roblox, the
+# character's front; the FaceFrontAttachment anchor sits a little behind
+# the lenses, where the face is, so the frames stand off it.
+set roblox 1
+set grid 96
+
+frame = material("#2a1f14", rough=0.4)
+lens = material("#9fc3d6", transmit=0.6, rough=0.1)
+
+rim = torus(0.34, 0.045) | rotate(x=90)
+glass = cylinder(0.32, 0.08) | rotate(x=90) | paint(lens)
+eye = (rim | paint(frame)) + glass
+eyes = (eye | move(-0.42, 0, 0)) + (eye | move(0.42, 0, 0))
+bridge = tube(0.04, [-0.1, 0.12, 0, 0, 0.18, 0, 0.1, 0.12, 0]) | paint(frame)
+arm = tube(0.035, [0, 0, 0, 0, 0, -0.9, 0, -0.18, -1.05]) | paint(frame)
+arms = (arm | move(-0.78, 0.05, 0)) + (arm | move(0.78, 0.05, 0))
+glasses = (eyes + bridge + arms) | anchor("FaceFrontAttachment", 0, 0, -0.15)
+show glasses
+
+assert width(glasses) <= 1.87, "a face accessory may be 1.87 studs wide"
+assert tall(glasses) <= 1.25
+assert pieces(glasses) == 1

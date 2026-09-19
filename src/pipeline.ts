@@ -14,9 +14,11 @@ import { box, primitive } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
+import { toBedrock } from "./export/bedrock.js";
+import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
-import { allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { anchorsOf, allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -61,6 +63,12 @@ export interface RunOptions {
   beautySize?: number;
   /** Vertex placement: sharp (dual contouring, default) or the rounded surface-nets mean. */
   sharp?: boolean;
+  /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
+  crease?: number;
+  /** Also write model.roblox.glb: the GLB turned to face -Z with a Handle node and `_Att` attachment nodes from the anchors, sized against Roblox's accessory limits (or `set roblox 1`). */
+  roblox?: boolean;
+  /** Also write Minecraft Bedrock geometry (model.geo.json and its texture) at this many pixels per unit, a unit being a block; 16 is the game's own (or `set minecraft 16`). */
+  minecraft?: number;
   /** Perspective camera direction in degrees; defaults 35 and 25, or `set azimuth` / `set elevation`. */
   azimuth?: number;
   elevation?: number;
@@ -157,7 +165,7 @@ export function importResolver(sourceName: string, log: (line: string) => void =
  * entirely (measured: rails at 0.9 of a cell vanished, a plate at 1.3
  * survived); say so from its bounds alone, so `check` can say it too.
  */
-export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: number): string[] {
+export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: number, thin = 1.2): string[] {
   const out: string[] = [];
   const gridFor = (t: number) => Math.min(512, Math.ceil((grid * 2.5 * cellSize) / t));
   const reportedFeatures = new Set<number>();
@@ -167,7 +175,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     if (!isShape3(st.value) || !geometry.has(st.name) || isEmpty(st.value.bounds)) continue;
     const ss = boundsSize(st.value.bounds);
     const t = Math.min(ss[0], ss[1], ss[2]);
-    if (t > 0 && t < cellSize * 1.2) {
+    if (t > 0 && t < cellSize * thin) {
       out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).`);
       // Its own feature size is settled too, or the union above it would repeat the warning under its own name
       // (measured: 'house', forty parts, listed as thin for its mullion).
@@ -209,7 +217,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     // A wall, tube or stroke inside a thick step: bounds cannot see it, so the shape carries the size itself.
     // Reported once per size, at the step that introduced it, not again at every step built on top.
     const f = st.value.feature;
-    if (f === undefined || !(f > 0) || f >= cellSize * 1.2) continue;
+    if (f === undefined || !(f > 0) || f >= cellSize * thin) continue;
     const key = Math.round(f * 1e6);
     if (reportedFeatures.has(key)) continue;
     reportedFeatures.add(key);
@@ -640,6 +648,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const azimuth = opts.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
 
+  const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
+  let minecraftNote: string | undefined;
+  let robloxNote: string | undefined;
+  // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
+  const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
   let bounds: Bounds | undefined;
   let trueBounds: Bounds | undefined;
@@ -655,7 +668,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The box sets the cell size, and a rotated joint or a blend leaves it loose (measured: a posed excavator's box
     // was twice its surface, costing a third of the resolution), so find the surface's extent coarsely first.
     const extractBox = time("extent", () => tightBounds(output));
-    let nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, bounds: extractBox }));
+    let nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: extractBox }));
     // The safety net: if the mesh reaches a face of a tightened box, something was cut off there (a part thinner than
     // the rays' spacing), so extract again over the whole bounds rather than ship a clipped model.
     if (extractBox !== output.bounds && triangleCount(nets.mesh) > 0) {
@@ -664,7 +677,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const clipped = [0, 1, 2].some((k) => (extractBox.min[k] > output.bounds.min[k] + near && mb.min[k] < extractBox.min[k] + near) || (extractBox.max[k] < output.bounds.max[k] - near && mb.max[k] > extractBox.max[k] - near));
       if (clipped) {
         log(`extent: the surface reaches the tightened box, so extracting over the full bounds instead`);
-        nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
+        nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
       }
     }
     mesh = nets.mesh;
@@ -758,7 +771,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         bounds: frame,
         cost: output.cost + 1,
       };
-      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, bounds: frame }));
+      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: frame }));
       if (triangleCount(close.mesh) > 0) {
         viewMesh = close.mesh; viewCell = close.cellSize;
         // The close-up is meshed at its own, finer cell, so its edges are a second reading of the same surface: the
@@ -791,7 +804,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
       const stepNames = new Map<Shape3, string>();
       for (const st of rest.steps) if (isShape3(st.value) && !stepNames.has(st.value)) stepNames.set(st.value, st.name);
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
@@ -821,6 +834,35 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         write("model.glb", glb);
         if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name)));
       }
+      // Roblox: the meshes decimated to the budget (an accessory's 4000 when an Attachment anchor is present, a
+      // MeshPart's 10000 otherwise), their own atlas, under a root turned to face -Z with the attachments as nodes.
+      if (opts.roblox ?? evaluation.settings.roblox === 1) {
+        const anchors = rest.output ? anchorsOf(rest.output) : {};
+        const accessory = Object.keys(anchors).some((n) => /Attachment$/.test(n));
+        const budget = accessory ? ACCESSORY_TRIANGLES : MESHPART_TRIANGLES;
+        const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget }));
+        const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.triangles });
+        write("model.roblox.glb", rb.glb);
+        warnings.push(...rb.warnings);
+        robloxNote = rb.note;
+        log(`roblox: ${rb.note}, in ${timings.roblox} ms`);
+      }
+    }
+    // Minecraft Bedrock geometry: the field voxelised at so many pixels per block and merged into cuboids, with a
+    // texture of the materials. Written at rest, an object per bone, joints left to the game's own animation.
+    const minecraftPx = opts.minecraft ?? (typeof evaluation.settings.minecraft === "number" ? evaluation.settings.minecraft : 0);
+    if (minecraftPx > 0) {
+      const bedrock = time("minecraft", () => toBedrock(rest.objects, name, { pixelsPerUnit: minecraftPx }));
+      write("model.geo.json", JSON.stringify(bedrock.geometry, null, 2) + "\n");
+      write("model.geo.png", bedrock.texture.toPng());
+      warnings.push(...bedrock.warnings);
+      // A voxel is the geometry's cell: a part thinner than one is lost there whatever the render's grid. A whole
+      // voxel always holds a sample centre, so the threshold is one voxel, not the mesher's 1.2 cells: a one-pixel
+      // plate is the ordinary member of a block model.
+      const voxel = 1 / minecraftPx;
+      warnings.push(...foldThinWarnings(thinWarnings(rest, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${minecraftPx} pixels per block; set minecraft ${minecraftPx * 2} halves it)`));
+      minecraftNote = `${bedrock.cubes} cube${bedrock.cubes === 1 ? "" : "s"} from ${bedrock.voxels} voxels at ${bedrock.pixelsPerUnit} pixels per block, texture ${bedrock.texture.width} × ${bedrock.texture.height}, bone${bedrock.bones.length === 1 ? "" : "s"} ${bedrock.bones.join(", ") || "none"}; identifier geometry.${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
+      log(`minecraft: ${minecraftNote}, in ${timings.minecraft} ms`);
     }
     if (joints.length > 0 && opts.poses !== false) {
       // Pose thumbnails are meshed at 1.5 cells: measured, 2 cells at a 0.35 sheet was too coarse to tell a
@@ -896,9 +938,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // A quick pass that dropped thin steps may have dropped the feet (measured: a bicycle's stand), so it does not
     // judge standing either.
     if (quickDropped) { /* the quick note says the footprint is not judged */ }
-    else if (!physics.stable && physics.footprint.length >= 3)
+    else if (!physics.stable && physics.footprint.length >= 3 && !robloxAccessory)
       warnings.push(`The centre of mass (${physics.centre.map(fmt).join(", ")}) is ${fmt(-physics.stabilityMargin)} units outside the base's footprint: the model would tip over. Widen the base or move weight over it.`);
-    else if (physics.stable && physics.stabilityMargin < cellSize * 3)
+    else if (physics.stable && physics.stabilityMargin < cellSize * 3 && !robloxAccessory)
       warnings.push(`The centre of mass is only ${fmt(physics.stabilityMargin)} units inside the base's footprint: the model would balance, barely.`);
   }
 
@@ -920,6 +962,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       ...(evaluation.asserts.length ? [`| Asserts | ${assertsRow(evaluation.asserts)} |`] : []),
+      ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),
+      ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; x is authored mirrored, as Bedrock draws it) |`] : []),
       "",
     );
     if (physics) {
@@ -951,7 +995,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       for (const o of evaluation.objects) {
         const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
         if (isEmpty(shape.bounds)) { lines.push(`| ${o.name} | empty | | | |`); continue; }
-        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
+        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
         if (triangleCount(own.mesh) === 0) { lines.push(`| ${o.name} | no surface | | | |`); continue; }
         const w = watertightReport(own.mesh);
         const ph = analyse(own.mesh, own.cellSize);
@@ -988,6 +1032,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "turntable.png": "eight views around the model",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
+    "model.roblox.glb": "the GLB for Roblox Studio's 3D Importer: a Handle node facing -Z with _Att attachment nodes from the anchors",
+    "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object",
+    "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
     "poses.png": "every pose, rest first",
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",

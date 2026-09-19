@@ -1,0 +1,19 @@
+# Furniture for a Roblox place, in studs: the shipped library's table and
+# chairs, which are sized in metres, scaled by 3.5 (a stud is 0.28 m, so a
+# 0.75 table is 2.6 studs tall, right for a 5-stud avatar), plus a rug.
+# set roblox writes model.roblox.glb with a node per object, turned to
+# face -Z; no attachment, since a place's furniture is not an accessory.
+use "std/furniture" as f
+set roblox 1
+set grid 96
+
+wool = material("#8c2f39", "stripes", "#c9a86a", scale=0.5, rough=1)
+
+table = f.table(1.2, 0.8) | scale(3.5)
+chair_a = f.chair() | rotate(y=180) | scale(3.5) | move(0, 0, 2.6)
+chair_b = f.chair() | scale(3.5) | move(0, 0, -2.6)
+rug = cylinder(3.4, 0.16) | scale(1, 1, 0.7) | move(0, 0.08, 0) | paint(wool)
+scene table, chair_a, chair_b, rug
+
+assert tall(table) < 3, "a table is under 3 studs"
+assert clearance(chair_a, table) > 0.2, "the chairs are pulled out"

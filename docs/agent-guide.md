@@ -108,7 +108,8 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
 | the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
 | the beauty render leaves the model small in the frame | the camera fits the box's corners, so a diagonal model has empty corners | `set zoom 1.2` or `--zoom 1.2` (it stops where the box would touch the edge) |
-| a material boundary speckles in the views | two painted surfaces nearly coincide, so each vertex picks either | give them a clear angle, or one shape with a `decal`; the beauty render is unaffected |
+| a material boundary speckles in the views | two painted surfaces nearly coincide (under 35 degrees apart), so each vertex picks either | give them a clear angle, or one shape with a `decal`; a seam at a crease is clean, and the beauty render is unaffected |
+| a box or a join reads soft, as if bevelled, in the viewer or a GLB | one smooth normal per vertex, from `set crease 0` | leave `crease` at its default (35), which splits vertices at edges |
 | a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |
 | "watertight: no" with edges you cannot find | two surfaces pass through one cell | the report says where the edges are and which steps hold them |
 | letters or a label need to go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)`; `bend(deg)` curves about z instead |

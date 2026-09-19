@@ -1,0 +1,21 @@
+# A shop sign for a Roblox place, in studs: a board with raised lettering
+# hung by chains from a crossbar on two posts, 3.6 wide and standing on
+# its own. The lettering faces +z here, -Z in Roblox.
+set roblox 1
+set grid 96
+
+wood = material("walnut")
+paint_ = material("#f1e7c9", rough=0.7)
+iron = material("#2b2b2b", rough=0.6)
+
+board = box(3, 1.2, 0.12, round=0.04) | move(0, 1.8, 0) | paint(wood)
+letters = extrude(text("CAFE", 0.6, weight=0.12), 0.08, "z") | center() | move(0, 1.85, 0.1) | paint(paint_)
+post = box(0.16, 3.3, 0.16) | move(0, 1.65, 0)
+foot = box(0.5, 0.1, 0.5) | move(0, 0.05, 0)
+frame = ((post + foot) | move(-1.7, 0, 0)) + ((post + foot) | move(1.7, 0, 0)) + (box(3.6, 0.14, 0.14) | move(0, 3.25, 0))
+chains = (tube(0.03, [0, 2.4, 0, 0, 3.2, 0]) | move(-1.2, 0, 0)) + (tube(0.03, [0, 2.4, 0, 0, 3.2, 0]) | move(1.2, 0, 0))
+sign = board + letters + ((frame + chains) | paint(iron))
+show sign
+
+assert width(sign) < 4, "fits a doorway"
+assert pieces(sign) == 1

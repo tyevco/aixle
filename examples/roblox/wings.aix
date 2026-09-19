@@ -1,0 +1,28 @@
+# Feathered wings for a Roblox avatar, in studs, on the BodyBackAttachment:
+# a small hub against the back (+z here, the character's back after the
+# turn) and two swept wings of overlapping feathers, a back accessory
+# within 9.86 × 8.59 × 4.87.
+set roblox 1
+set grid 128
+
+feather = material("#f2ede4", "noise", "#d9d2c4", scale=0.4, rough=0.9)
+gold = material("brass")
+
+def quill(len, w) = ellipsoid(w, len / 2, 0.09) | move(0, len / 2, 0)
+# One wing: five feathers fanned from the hub, longer toward the tip, swept up and out.
+def wing() =
+  (quill(2.6, 0.32) | rotate(z=-70) | move(0.2, 0.4, 0))
+  + (quill(3.0, 0.34) | rotate(z=-52) | move(0.2, 0.5, 0.02))
+  + (quill(3.2, 0.34) | rotate(z=-36) | move(0.2, 0.6, 0.04))
+  + (quill(2.9, 0.32) | rotate(z=-20) | move(0.2, 0.7, 0.06))
+  + (quill(2.3, 0.28) | rotate(z=-6) | move(0.2, 0.8, 0.08))
+
+right = wing()
+left = wing() | mirror("x")
+hub = sphere(0.35) | scale(1, 1.2, 0.7) | move(0, 0.6, 0.1) | paint(gold)
+wings = (((right + left) | paint(feather)) + hub) | anchor("BodyBackAttachment", 0, 0.6, 0.35)
+show wings
+
+assert width(wings) <= 9.86, "a back accessory may be 9.86 studs wide"
+assert tall(wings) <= 8.59
+assert pieces(wings) == 1
