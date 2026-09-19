@@ -121,6 +121,24 @@ keeps a 384-pixel thumbnail readable.
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.
 
+## Minecraft geometry
+
+A Bedrock entity or block model is not a mesh but a list of axis-aligned
+cuboids, each face a window into one texture, in pixels at sixteen to the
+block. Rather than fit boxes to the mesh, the exporter samples the field
+on the pixel lattice (a unit is a block, so a 0.75-tall table is twelve
+pixels) and merges the filled voxels greedily: a run along one axis, the
+row grown along a second, the slab along the third. Which axis leads
+changes the count (a mug's wall wants vertical runs, a table top
+horizontal ones), so all six orders are tried and the fewest cubes kept:
+a mug is about two hundred. Each face window is painted by reading the
+material just inside the face through the same `albedo()` the renders
+use, so a decal and a wood pattern come through, and the windows are
+shelf-packed into a power-of-two texture. Bedrock draws geometry with x
+mirrored (measured in the Minecraft repo this tool grew up beside: a
+cube authored on +x lands on the block's west), so cubes are authored at
+-x and the model stands in the game as on the sheet.
+
 ## Imported meshes
 
 An imported mesh becomes a field by sampling: unsigned distance on a grid

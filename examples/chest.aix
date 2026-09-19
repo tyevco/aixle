@@ -1,0 +1,30 @@
+# A treasure chest at Minecraft block scale: one unit is one block, so the
+# chest is 14/16 wide and every member is at least a sixteenth thick. With
+# set minecraft the render also writes model.geo.json and model.geo.png,
+# Bedrock geometry of the model voxelised at 16 pixels to the block.
+set minecraft 16
+set grid 160
+
+px = 1 / 16
+planks = material("oak", scale=0.12)
+iron = material("iron")
+
+# The box: a hollow body 14 wide, 9 tall, 14 deep, walls one pixel thick, open at the top.
+body = (box(14 * px, 9 * px, 14 * px) | move(0, 4.5 * px, 0)) - (box(12 * px, 9 * px, 12 * px) | move(0, 5.5 * px, 0))
+# The lid: a slab 14 by 5 by 14, its back edge on the body's back edge, hinged there.
+lid = box(14 * px, 5 * px, 14 * px) | move(0, 11.5 * px, 0)
+# Iron bands round the front corners and a lock plate on the front, each a pixel proud of the wood.
+# Everything sits on whole pixels: a hole between two pixel columns holds no voxel centre and is lost.
+band = box(2 * px, 14 * px, 1 * px) | move(0, 7 * px, 7 * px)
+bands = (band | move(-5 * px, 0, 0)) + (band | move(5 * px, 0, 0))
+lock = box(4 * px, 5 * px, 1 * px) | move(0, 8.5 * px, 7 * px)
+keyhole = box(2 * px, 3 * px, 2 * px) | move(0, 8.5 * px, 7.5 * px)
+
+wood = (body + lid) | paint(planks)
+metal = (bands + lock - keyhole) | paint(iron)
+chest = wood + metal
+show chest
+
+assert width(chest) < 1, "fits a block"
+assert tall(chest) <= 1
+assert pieces(chest) == 1

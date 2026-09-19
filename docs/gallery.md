@@ -24,6 +24,14 @@ A robot arm with three joints. Each part is built in place, then declared
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/arm.aix) · <a href="/aixle/viewers/arm.html" target="_blank" rel="noopener">viewer</a>
 
+### chest
+
+A treasure chest at Minecraft block scale: one unit is one block, so the
+
+![chest, beauty render](../examples/renders/chest_beauty.png) ![chest, contact sheet](../examples/renders/chest.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/chest.aix) · <a href="/aixle/viewers/chest.html" target="_blank" rel="noopener">viewer</a>
+
 ### fence
 
 A fenced plot with a row of trees: place() puts copies of one shape at

@@ -495,7 +495,24 @@ viewer and the GLB; `set crease 60` splits only sharper corners, `set
 crease 0` keeps one smooth normal per vertex for a sculpted model that
 should read soft (`--crease` on the command line). `set texture
 2048` sizes the baked texture atlas (`0` turns it off and the GLB carries
-vertex colours instead).
+vertex colours instead). `set minecraft 16` also writes Minecraft Bedrock
+geometry (`--minecraft` on the command line, with an optional pixel
+count): the field is sampled at that many pixels per unit, a unit being
+one block, every filled voxel is a pixel of solid, and the voxels are
+merged into as few cuboids as they allow, a bone per scene object, each
+cube face with its own window in `model.geo.png` painted from the
+materials; `model.geo.json` is the geometry, identifier
+`geometry.<name>`. A curved thing comes out stepped, which is what a
+block model is; a mug at 16 is about 250 cubes, and `set minecraft 8` is
+a chunkier, cheaper model. A part thinner than a voxel (a sixteenth of a
+block at 16: a chair leg 0.04 across) is lost, and the render warns which;
+geometry is always sixteen to the block, so `set minecraft 32` samples
+twice as fine and writes cubes on half pixels, which the game accepts,
+with a texel per voxel. Bedrock draws geometry with x mirrored, so
+cubes are authored at -x and the model stands in the game as it does on
+the sheet, its +z front to the south, the block convention; an entity
+faces north, so turn an entity model `rotate(y=180)` first. Joints are
+not carried: the geometry is the rest pose.
 
 ## The fast loop
 

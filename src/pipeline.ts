@@ -14,6 +14,7 @@ import { box, primitive } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
+import { toBedrock } from "./export/bedrock.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
 import { allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
@@ -63,6 +64,8 @@ export interface RunOptions {
   sharp?: boolean;
   /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
   crease?: number;
+  /** Also write Minecraft Bedrock geometry (model.geo.json and its texture) at this many pixels per unit, a unit being a block; 16 is the game's own (or `set minecraft 16`). */
+  minecraft?: number;
   /** Perspective camera direction in degrees; defaults 35 and 25, or `set azimuth` / `set elevation`. */
   azimuth?: number;
   elevation?: number;
@@ -159,7 +162,7 @@ export function importResolver(sourceName: string, log: (line: string) => void =
  * entirely (measured: rails at 0.9 of a cell vanished, a plate at 1.3
  * survived); say so from its bounds alone, so `check` can say it too.
  */
-export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: number): string[] {
+export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: number, thin = 1.2): string[] {
   const out: string[] = [];
   const gridFor = (t: number) => Math.min(512, Math.ceil((grid * 2.5 * cellSize) / t));
   const reportedFeatures = new Set<number>();
@@ -169,7 +172,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     if (!isShape3(st.value) || !geometry.has(st.name) || isEmpty(st.value.bounds)) continue;
     const ss = boundsSize(st.value.bounds);
     const t = Math.min(ss[0], ss[1], ss[2]);
-    if (t > 0 && t < cellSize * 1.2) {
+    if (t > 0 && t < cellSize * thin) {
       out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).`);
       // Its own feature size is settled too, or the union above it would repeat the warning under its own name
       // (measured: 'house', forty parts, listed as thin for its mullion).
@@ -211,7 +214,7 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
     // A wall, tube or stroke inside a thick step: bounds cannot see it, so the shape carries the size itself.
     // Reported once per size, at the step that introduced it, not again at every step built on top.
     const f = st.value.feature;
-    if (f === undefined || !(f > 0) || f >= cellSize * 1.2) continue;
+    if (f === undefined || !(f > 0) || f >= cellSize * thin) continue;
     const key = Math.round(f * 1e6);
     if (reportedFeatures.has(key)) continue;
     reportedFeatures.add(key);
@@ -643,6 +646,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const elevation = opts.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
+  let minecraftNote: string | undefined;
   let mesh: Mesh | undefined;
   let bounds: Bounds | undefined;
   let trueBounds: Bounds | undefined;
@@ -825,6 +829,22 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name)));
       }
     }
+    // Minecraft Bedrock geometry: the field voxelised at so many pixels per block and merged into cuboids, with a
+    // texture of the materials. Written at rest, an object per bone, joints left to the game's own animation.
+    const minecraftPx = opts.minecraft ?? (typeof evaluation.settings.minecraft === "number" ? evaluation.settings.minecraft : 0);
+    if (minecraftPx > 0) {
+      const bedrock = time("minecraft", () => toBedrock(rest.objects, name, { pixelsPerUnit: minecraftPx }));
+      write("model.geo.json", JSON.stringify(bedrock.geometry, null, 2) + "\n");
+      write("model.geo.png", bedrock.texture.toPng());
+      warnings.push(...bedrock.warnings);
+      // A voxel is the geometry's cell: a part thinner than one is lost there whatever the render's grid. A whole
+      // voxel always holds a sample centre, so the threshold is one voxel, not the mesher's 1.2 cells: a one-pixel
+      // plate is the ordinary member of a block model.
+      const voxel = 1 / minecraftPx;
+      warnings.push(...foldThinWarnings(thinWarnings(rest, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${minecraftPx} pixels per block; set minecraft ${minecraftPx * 2} halves it)`));
+      minecraftNote = `${bedrock.cubes} cube${bedrock.cubes === 1 ? "" : "s"} from ${bedrock.voxels} voxels at ${bedrock.pixelsPerUnit} pixels per block, texture ${bedrock.texture.width} × ${bedrock.texture.height}, bone${bedrock.bones.length === 1 ? "" : "s"} ${bedrock.bones.join(", ") || "none"}; identifier geometry.${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
+      log(`minecraft: ${minecraftNote}, in ${timings.minecraft} ms`);
+    }
     if (joints.length > 0 && opts.poses !== false) {
       // Pose thumbnails are meshed at 1.5 cells: measured, 2 cells at a 0.35 sheet was too coarse to tell a
       // bent elbow from a broken one; a full-size check of one pose is `set pose name` or `--pose name`.
@@ -923,6 +943,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       ...(evaluation.asserts.length ? [`| Asserts | ${assertsRow(evaluation.asserts)} |`] : []),
+      ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; x is authored mirrored, as Bedrock draws it) |`] : []),
       "",
     );
     if (physics) {
@@ -991,6 +1012,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "turntable.png": "eight views around the model",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
+    "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object",
+    "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
     "poses.png": "every pose, rest first",
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",

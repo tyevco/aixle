@@ -54,7 +54,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    edit breaks it.
 6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
-   `--beauty` for the presentation picture.
+   `--beauty` for the presentation picture, and `--minecraft` when the
+   model is for Bedrock: `model.geo.json` and its texture, the model
+   voxelised at 16 pixels to the block (one unit is a block; keep every
+   member at least 1/16 thick, or `set minecraft 32`).
 
 ## Reading the sheet
 
