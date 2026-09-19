@@ -1,0 +1,24 @@
+# A top hat for a Roblox avatar. One unit is one stud; a hat may be
+# 1.87 × 2.5 × 1.87 at the Normal body scale. The HatAttachment anchor is
+# where the hat meets the top of the head, so the brim's underside is at
+# y = 0 and the anchor there; set roblox writes model.roblox.glb with the
+# hat turned to face -Z and the anchor as a HatAttachment_Att node. A rigid
+# accessory is one mesh under 4000 triangles: the export decimates to that.
+set roblox 1
+set grid 96
+
+felt = material("#1c1a22", rough=0.9)
+silk = material("#8b1e2d", rough=0.5)
+
+brim = cylinder(0.9, 0.06, round=0.02) | move(0, 0.03, 0)
+crown = cylinder(0.62, 1.1, round=0.05) | move(0, 0.55 + 0.06, 0)
+# The band sits proud of the crown, and the crown's top is a slightly wider disc.
+band = (cylinder(0.68, 0.16) - cylinder(0.6, 0.2)) | move(0, 0.2, 0) | paint(silk)
+top = cylinder(0.64, 0.1) | move(0, 1.16 + 0.05, 0)
+hat = ((brim + crown + top) | paint(felt)) + band
+tophat = hat | anchor("HatAttachment", 0, 0, 0)
+show tophat
+
+assert width(tophat) <= 1.87, "a hat may be 1.87 studs wide"
+assert tall(tophat) <= 2.5
+assert pieces(tophat) == 1

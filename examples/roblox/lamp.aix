@@ -1,0 +1,22 @@
+# A floor lamp for a Roblox place, in studs: 6 tall, a weighted base, a
+# brass stem and a shade that glows. One object, one mesh.
+set roblox 1
+set grid 80
+
+brass = material("brass")
+shade = material("#f4e3b8", glow=0.8, rough=0.9)
+iron = material("#2b2b2b", rough=0.6)
+
+base = cylinder(0.9, 0.12, round=0.04) | move(0, 0.06, 0) | paint(iron)
+stem = cylinder(0.07, 5.9) | move(0, 3.0, 0) | paint(brass)
+collar = cylinder(0.14, 0.12) | move(0, 5.0, 0) | paint(brass)
+cone_shade = cone(1.1, 0.7, 1.1) | move(0, 5.45, 0)
+hollow = cone(1.0, 0.6, 1.2) | move(0, 5.4, 0)
+lampshade = (cone_shade - hollow) | paint(shade)
+# A brass cap joins the stem's top to the shade's rim, so the lamp is one piece.
+cap = cylinder(0.74, 0.1) | move(0, 5.95, 0) | paint(brass)
+lamp = base + stem + collar + lampshade + cap
+show lamp
+
+assert tall(lamp) < 6.2
+assert pieces(lamp) == 1

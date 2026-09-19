@@ -65,6 +65,7 @@ npx aixle render model.aix --focus lid --pose reach      # frame one part; show 
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png)
+npx aixle render model.aix --roblox             # also model.roblox.glb for Roblox Studio (facing -Z, _Att attachment nodes)
 npx aixle doc                        # the reference, to stdout
 ```
 
@@ -84,6 +85,7 @@ npx aixle doc                        # the reference, to stdout
 | `viewer.html` | orbit the GLB in a browser: self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
+| `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
 | `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, with its texture |
 | `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings |
 

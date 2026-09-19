@@ -508,7 +508,25 @@ a chunkier, cheaper model. A part thinner than a voxel (a sixteenth of a
 block at 16: a chair leg 0.04 across) is lost, and the render warns which;
 geometry is always sixteen to the block, so `set minecraft 32` samples
 twice as fine and writes cubes on half pixels, which the game accepts,
-with a texel per voxel. Bedrock draws geometry with x mirrored, so
+with a texel per voxel. `set roblox 1` (or `--roblox`) also writes
+`model.roblox.glb` for Roblox Studio's 3D Importer: a unit is a stud, the
+model is turned half a turn about y at its root so its +z front faces the
+character's -Z, a single object is the one mesh a rigid accessory needs
+under a node named `Handle`, a scene keeps a node per object, and every
+anchor whose name ends in `Attachment` (`anchor(hat, "HatAttachment", 0,
+0, 0)` at the point where the hat meets the head) becomes an empty node
+named with the importer's `_Att` suffix for the Accessory Fitting Tool.
+The report says whether the model fits that attachment's size limit at
+the Normal body scale (a hat 1.87 × 2.5 × 1.87 studs, a face piece
+1.87 × 1.25 × 1.25, a back piece 9.86 × 8.59 × 4.87), and decimates the
+mesh to the budget: a rigid accessory's 4000 triangles when there is an
+Attachment anchor, a MeshPart's 10000 per mesh otherwise, by quadric
+edge collapses that never cross a material seam or fold a face, so a
+hat meshed at grid 96 goes out at 4000 with its brim, band and crown.
+The report says what it was decimated from. `examples/roblox/` has a
+hat, glasses, a backpack, wings, a café set, a lamp, a plant and a
+sign; a Roblox accessory hangs on its attachment, so an accessory gets
+no warning about standing. Bedrock draws geometry with x mirrored, so
 cubes are authored at -x and the model stands in the game as it does on
 the sheet, its +z front to the south, the block convention; an entity
 faces north, so turn an entity model `rotate(y=180)` first. Joints are

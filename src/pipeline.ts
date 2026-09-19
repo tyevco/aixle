@@ -15,9 +15,10 @@ import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./e
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
 import { toBedrock } from "./export/bedrock.js";
+import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
-import { allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { anchorsOf, allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -64,6 +65,8 @@ export interface RunOptions {
   sharp?: boolean;
   /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
   crease?: number;
+  /** Also write model.roblox.glb: the GLB turned to face -Z with a Handle node and `_Att` attachment nodes from the anchors, sized against Roblox's accessory limits (or `set roblox 1`). */
+  roblox?: boolean;
   /** Also write Minecraft Bedrock geometry (model.geo.json and its texture) at this many pixels per unit, a unit being a block; 16 is the game's own (or `set minecraft 16`). */
   minecraft?: number;
   /** Perspective camera direction in degrees; defaults 35 and 25, or `set azimuth` / `set elevation`. */
@@ -647,6 +650,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let minecraftNote: string | undefined;
+  let robloxNote: string | undefined;
+  // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
+  const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
   let bounds: Bounds | undefined;
   let trueBounds: Bounds | undefined;
@@ -828,6 +834,19 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         write("model.glb", glb);
         if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name)));
       }
+      // Roblox: the meshes decimated to the budget (an accessory's 4000 when an Attachment anchor is present, a
+      // MeshPart's 10000 otherwise), their own atlas, under a root turned to face -Z with the attachments as nodes.
+      if (opts.roblox ?? evaluation.settings.roblox === 1) {
+        const anchors = rest.output ? anchorsOf(rest.output) : {};
+        const accessory = Object.keys(anchors).some((n) => /Attachment$/.test(n));
+        const budget = accessory ? ACCESSORY_TRIANGLES : MESHPART_TRIANGLES;
+        const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget }));
+        const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.triangles });
+        write("model.roblox.glb", rb.glb);
+        warnings.push(...rb.warnings);
+        robloxNote = rb.note;
+        log(`roblox: ${rb.note}, in ${timings.roblox} ms`);
+      }
     }
     // Minecraft Bedrock geometry: the field voxelised at so many pixels per block and merged into cuboids, with a
     // texture of the materials. Written at rest, an object per bone, joints left to the game's own animation.
@@ -919,9 +938,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // A quick pass that dropped thin steps may have dropped the feet (measured: a bicycle's stand), so it does not
     // judge standing either.
     if (quickDropped) { /* the quick note says the footprint is not judged */ }
-    else if (!physics.stable && physics.footprint.length >= 3)
+    else if (!physics.stable && physics.footprint.length >= 3 && !robloxAccessory)
       warnings.push(`The centre of mass (${physics.centre.map(fmt).join(", ")}) is ${fmt(-physics.stabilityMargin)} units outside the base's footprint: the model would tip over. Widen the base or move weight over it.`);
-    else if (physics.stable && physics.stabilityMargin < cellSize * 3)
+    else if (physics.stable && physics.stabilityMargin < cellSize * 3 && !robloxAccessory)
       warnings.push(`The centre of mass is only ${fmt(physics.stabilityMargin)} units inside the base's footprint: the model would balance, barely.`);
   }
 
@@ -943,6 +962,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       ...(evaluation.asserts.length ? [`| Asserts | ${assertsRow(evaluation.asserts)} |`] : []),
+      ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),
       ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; x is authored mirrored, as Bedrock draws it) |`] : []),
       "",
     );
@@ -1012,6 +1032,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "turntable.png": "eight views around the model",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
+    "model.roblox.glb": "the GLB for Roblox Studio's 3D Importer: a Handle node facing -Z with _Att attachment nodes from the anchors",
     "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object",
     "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
     "poses.png": "every pose, rest first",

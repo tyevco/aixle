@@ -10,6 +10,7 @@ import { bakeAtlas } from "../src/export/atlas.js";
 import { analyse, hull2, insideMargin } from "../src/mesh/physics.js";
 import { countPieces } from "../src/mesh/pieces.js";
 import { splitCreases } from "../src/mesh/creases.js";
+import { decimate } from "../src/mesh/decimate.js";
 import { weldIndices } from "../src/mesh/mesh.js";
 import { materialFromString } from "../src/sdf/materials.js";
 
@@ -280,5 +281,42 @@ describe("creases", () => {
       for (let c = 0; c < 3; c++) expect(s.positions[s.indices[t * 3 + c] * 3]).toBe(positions[indices[t * 3 + c] * 3]);
     // At 100 degrees the right angle is not a crease.
     expect(splitCreases(positions, indices, 100).positions.length / 3).toBe(4);
+  });
+});
+
+describe("decimation", () => {
+  it("brings a sphere under a budget, closed and within a few percent of its volume, and a box down to its faces", () => {
+    const s = surfaceNets(P.sphere(1), { resolution: 48 });
+    const before = triangleCount(s.mesh);
+    expect(before).toBeGreaterThan(8000);
+    const d = decimate(s.mesh, 2000);
+    expect(triangleCount(d)).toBeLessThanOrEqual(2000);
+    expect(isWatertight(d)).toBe(true);
+    expect(Math.abs(meshVolume(d) - meshVolume(s.mesh)) / meshVolume(s.mesh)).toBeLessThan(0.03);
+    const b = surfaceNets(P.box(1, 1, 1), { resolution: 24 });
+    const db = decimate(b.mesh, 100);
+    expect(triangleCount(db)).toBeLessThanOrEqual(100);
+    expect(isWatertight(db)).toBe(true);
+    expect(Math.abs(meshVolume(db) - 1)).toBeLessThan(0.02);
+    // Every normal of the box is still on an axis: the crease split is redone after the collapses.
+    let off = 0;
+    for (let v = 0; v < db.normals.length; v += 3) if (1 - Math.max(Math.abs(db.normals[v]), Math.abs(db.normals[v + 1]), Math.abs(db.normals[v + 2])) > 0.02) off++;
+    expect(off).toBe(0);
+  });
+  it("keeps a material seam: no collapse crosses from one material to the other", () => {
+    const red = materialFromString("#ff0000")!, blue = materialFromString("#0000ff")!;
+    const two = O.union([O.paint(O.move(P.box(1, 1, 1), -0.5, 0, 0), red), O.paint(O.move(P.box(1, 1, 1), 0.5, 0, 0), blue)]);
+    const m = surfaceNets(two, { resolution: 32 }).mesh;
+    const d = decimate(m, 300);
+    expect(triangleCount(d)).toBeLessThanOrEqual(300);
+    expect(d.materials).toBe(m.materials);
+    // Every vertex is still on its own side of x = 0 for its material (welded copies aside, none has crossed).
+    for (let v = 0; v < d.positions.length / 3; v++) {
+      const x = d.positions[v * 3], mat = d.materials[d.materialIndex[v]];
+      if (Math.abs(x) < 1e-6) continue;
+      expect(mat === red ? x < 0 : x > 0).toBe(true);
+    }
+    // Unchanged when already under budget.
+    expect(decimate(m, 1e9)).toBe(m);
   });
 });

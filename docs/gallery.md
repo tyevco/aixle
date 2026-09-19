@@ -184,6 +184,74 @@ A workshop corner from the shipped libraries: a bench from std/furniture
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/workshop.aix) · <a href="/aixle/viewers/workshop.html" target="_blank" rel="noopener">viewer</a>
 
+## Roblox
+
+Costume pieces and furniture for Roblox under `examples/roblox/`, in studs: each writes `model.roblox.glb` for Studio's 3D Importer, an accessory with its attachment and decimated to the 4000 triangle budget.
+
+### roblox_backpack
+
+A backpack for a Roblox avatar, in studs. The face against the
+
+![roblox_backpack, beauty render](../examples/renders/roblox_backpack_beauty.png) ![roblox_backpack, contact sheet](../examples/renders/roblox_backpack.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/backpack.aix) · <a href="/aixle/viewers/roblox_backpack.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_cafe_set
+
+Furniture for a Roblox place, in studs: the shipped library's table and
+
+![roblox_cafe_set, beauty render](../examples/renders/roblox_cafe_set_beauty.png) ![roblox_cafe_set, contact sheet](../examples/renders/roblox_cafe_set.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/cafe_set.aix) · <a href="/aixle/viewers/roblox_cafe_set.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_glasses
+
+Round glasses for a Roblox avatar, in studs; a face accessory may be
+
+![roblox_glasses, beauty render](../examples/renders/roblox_glasses_beauty.png) ![roblox_glasses, contact sheet](../examples/renders/roblox_glasses.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/glasses.aix) · <a href="/aixle/viewers/roblox_glasses.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_lamp
+
+A floor lamp for a Roblox place, in studs: 6 tall, a weighted base, a
+
+![roblox_lamp, beauty render](../examples/renders/roblox_lamp_beauty.png) ![roblox_lamp, contact sheet](../examples/renders/roblox_lamp.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/lamp.aix) · <a href="/aixle/viewers/roblox_lamp.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_plant
+
+A potted plant for a Roblox place, from the shipped plants library
+
+![roblox_plant, beauty render](../examples/renders/roblox_plant_beauty.png) ![roblox_plant, contact sheet](../examples/renders/roblox_plant.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/plant.aix) · <a href="/aixle/viewers/roblox_plant.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_sign
+
+A shop sign for a Roblox place, in studs: a board with raised lettering
+
+![roblox_sign, beauty render](../examples/renders/roblox_sign_beauty.png) ![roblox_sign, contact sheet](../examples/renders/roblox_sign.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/sign.aix) · <a href="/aixle/viewers/roblox_sign.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_tophat
+
+A top hat for a Roblox avatar. One unit is one stud; a hat may be
+
+![roblox_tophat, beauty render](../examples/renders/roblox_tophat_beauty.png) ![roblox_tophat, contact sheet](../examples/renders/roblox_tophat.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/tophat.aix) · <a href="/aixle/viewers/roblox_tophat.html" target="_blank" rel="noopener">viewer</a>
+
+### roblox_wings
+
+Feathered wings for a Roblox avatar, in studs, on the BodyBackAttachment:
+
+![roblox_wings, beauty render](../examples/renders/roblox_wings_beauty.png) ![roblox_wings, contact sheet](../examples/renders/roblox_wings.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/wings.aix) · <a href="/aixle/viewers/roblox_wings.html" target="_blank" rel="noopener">viewer</a>
+
 ## Libraries
 
 The plates of the libraries shipped with the tool, `use "std/hardware"`, `"std/furniture"` and `"std/plants"`: every part each one offers, as `aixle render std/<name>.aix` draws it.

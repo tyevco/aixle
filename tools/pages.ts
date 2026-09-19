@@ -42,6 +42,16 @@ function examples(): Model[] {
     .map((f) => ({ name: f.replace(/\.aix$/, ""), program: `examples/${f}`, renders: "examples/renders", caption: caption(join(dir, f)) }));
 }
 
+/** The Roblox pieces under examples/roblox/, rendered as roblox_<name> beside the examples. */
+function roblox(): Model[] {
+  const dir = resolve(ROOT, "examples", "roblox");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".aix"))
+    .sort()
+    .map((f) => ({ name: `roblox_${f.replace(/\.aix$/, "")}`, program: `examples/roblox/${f}`, renders: "examples/renders", caption: caption(join(dir, f)) }));
+}
+
 function libraries(): Model[] {
   const dir = resolve(ROOT, "std");
   return readdirSync(dir)
@@ -94,6 +104,7 @@ function gallery(): string {
     }
   };
   section("Examples", "The worked models under `examples/`, each written to exercise a part of the language.", examples());
+  section("Roblox", "Costume pieces and furniture for Roblox under `examples/roblox/`, in studs: each writes `model.roblox.glb` for Studio's 3D Importer, an accessory with its attachment and decimated to the 4000 triangle budget.", roblox());
   section("Libraries", "The plates of the libraries shipped with the tool, `use \"std/hardware\"`, `\"std/furniture\"` and `\"std/plants\"`: every part each one offers, as `aixle render std/<name>.aix` draws it.", libraries());
   section("Dogfooding", "Models built by fresh agents from the docs alone, kept as they wrote them, with their reports. See [the exercise](../dogfood/README.md).", dogfood());
   return lines.join("\n");
@@ -102,7 +113,7 @@ function gallery(): string {
 function viewers(): void {
   const out = resolve(ROOT, ".vitepress", "public", "viewers");
   mkdirSync(out, { recursive: true });
-  for (const m of [...examples(), ...libraries(), ...dogfood()]) {
+  for (const m of [...examples(), ...roblox(), ...libraries(), ...dogfood()]) {
     const tmp = join(tmpdir(), `aixle-viewer-${m.name}`);
     rmSync(tmp, { recursive: true, force: true });
     const t0 = performance.now();

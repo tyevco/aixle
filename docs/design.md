@@ -139,6 +139,37 @@ mirrored (measured in the Minecraft repo this tool grew up beside: a
 cube authored on +x lands on the block's west), so cubes are authored at
 -x and the model stands in the game as on the sheet.
 
+## Roblox
+
+Studio's 3D Importer takes a glTF, so Roblox needs no new writer, only
+the GLB arranged its way: a unit is a stud, a character faces -Z where an
+Aixle model faces +z, so the export's root is turned half a turn about y
+and a hat's brim built on +z lands over the face; a rigid accessory is
+one mesh under four thousand triangles, so a single object is exported
+under a node named `Handle` and decimated to the budget (a MeshPart in a
+place gets ten thousand per mesh); and the Accessory Fitting Tool wants
+an attachment, so every
+anchor named like one (`HatAttachment`, `BodyBackAttachment`) is written
+as an empty child node with the importer's `_Att` suffix, at the point
+the program gave it. The size limits per attachment type at the Normal
+body scale are a table in the exporter and a row in the report, not a
+gate: a place's furniture has none. Which face of a piece meets the
+character is a modelling convention the examples state: a backpack's
+straps on +z, the character's back after the turn.
+
+The decimation is quadric error with half-edge collapses: an edge's ends
+are candidates to move onto the other at the cost of the mover's
+quadric (its faces' plane quadrics, area-weighted) evaluated at the
+survivor, so a vertex on a flat face goes for nothing and a corner
+stays. Moving onto an existing vertex rather than to a new optimum keeps
+every attribute exact, the survivor's material and local point included,
+which is what the atlas baker needs; a collapse that would cross a
+material boundary or fold a face over is refused, so seams and the
+outline survive. The mesher's crease copies are welded first and the
+result re-split by the same rule. A top hat meshed at 71 thousand
+triangles comes out at 4000 with its brim, band and crown intact, read
+back through `import()`.
+
 ## Imported meshes
 
 An imported mesh becomes a field by sampling: unsigned distance on a grid

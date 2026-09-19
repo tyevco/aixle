@@ -1,0 +1,25 @@
+# A backpack for a Roblox avatar, in studs. The face against the
+# character's back is +z here (the character's back is +Z in Roblox and
+# the export turns the model round), and the BodyBackAttachment anchor is
+# on that face at shoulder height, so the pack hangs off the torso.
+set roblox 1
+set grid 96
+
+canvas = material("#3f6b3a", "noise", "#345a30", scale=0.3, rough=0.95)
+strap = material("#2a2a2a", rough=0.8)
+buckle = material("brass")
+
+body = box(1.6, 2.0, 0.8, round=0.15) | move(0, 1.0, 0)
+pocket = box(1.1, 0.8, 0.25, round=0.08) | move(0, 0.6, -0.45)
+lid = box(1.65, 0.5, 0.85, round=0.12) | move(0, 1.85, -0.02)
+pack = (body + pocket + lid) | paint(canvas)
+# Two straps up the back face, at +z, where the torso is.
+loop = tube(0.06, [0, 0.3, 0.42, 0, 1.9, 0.42]) | paint(strap)
+straps = (loop | move(-0.45, 0, 0)) + (loop | move(0.45, 0, 0))
+clasp = box(0.2, 0.12, 0.08) | move(0, 0.95, -0.6) | paint(buckle)
+backpack = (pack + straps + clasp) | anchor("BodyBackAttachment", 0, 1.4, 0.4)
+show backpack
+
+assert width(backpack) <= 9.86
+assert tall(backpack) <= 8.59
+assert pieces(backpack) == 1

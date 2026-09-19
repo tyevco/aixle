@@ -15,6 +15,7 @@ import type { Vec3 } from "../core/vec.js";
 import { allJoints, findJoints, move as moveShape } from "../sdf/ops.js";
 import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
+import { decimate } from "../mesh/decimate.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
 import { bakeAtlas, type AtlasResult } from "./atlas.js";
 
@@ -56,6 +57,8 @@ export interface HierarchyOptions {
   /** Atlas size in pixels; 0 for none. */
   texture: number;
   maxResolution?: number;
+  /** Decimate each mesh to at most this many triangles (a Roblox budget), before the atlas is baked. */
+  maxTriangles?: number;
 }
 
 function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
@@ -63,7 +66,8 @@ function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
   const longest = Math.max(s[0], s[1], s[2]);
   if (!(longest > 0) || isEmpty(shape.bounds)) return surfaceNets(shape, { resolution: 8 }).mesh;
   const resolution = Math.max(8, Math.min(opts.maxResolution ?? 512, Math.ceil(longest / opts.cellSize)));
-  return surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
+  const mesh = surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
+  return opts.maxTriangles && triangleCount(mesh) > opts.maxTriangles ? decimate(mesh, opts.maxTriangles, opts.crease ?? 35) : mesh;
 }
 
 function shifted(mesh: Mesh, origin: Vec3): Mesh {
