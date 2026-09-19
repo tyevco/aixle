@@ -63,6 +63,7 @@ npx aixle render model.aix --beauty         # plus beauty.png (a second or a few
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
+npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle doc                        # the reference, to stdout
 ```
 

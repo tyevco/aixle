@@ -45,9 +45,30 @@ export function meshVolume(m: Mesh): number {
 }
 
 /** True when every edge is shared by exactly two triangles in opposite directions. */
+/**
+ * Indices with every vertex that shares a position joined to the first of
+ * them: the mesher copies a vertex per side at a crease so each copy can
+ * carry its own normal, and the closed-surface checks want the copies as
+ * one vertex again.
+ */
+export function weldIndices(m: Mesh): Uint32Array {
+  const p = m.positions;
+  const first = new Map<string, number>();
+  const nv = p.length / 3;
+  const to = new Uint32Array(nv);
+  for (let v = 0; v < nv; v++) {
+    const key = `${p[v * 3]},${p[v * 3 + 1]},${p[v * 3 + 2]}`;
+    const f = first.get(key);
+    if (f === undefined) { first.set(key, v); to[v] = v; } else to[v] = f;
+  }
+  const ix = new Uint32Array(m.indices.length);
+  for (let i = 0; i < ix.length; i++) ix[i] = to[m.indices[i]];
+  return ix;
+}
+
 export function isWatertight(m: Mesh): boolean {
   const seen = new Map<string, number>();
-  const ix = m.indices;
+  const ix = weldIndices(m);
   for (let i = 0; i < ix.length; i += 3) {
     for (let e = 0; e < 3; e++) {
       const a = ix[i + e], b = ix[i + ((e + 1) % 3)];
@@ -79,7 +100,7 @@ export interface EdgeCluster {
 
 export function watertightReport(m: Mesh): { ok: boolean; holes: number; nonManifold: number; note: string; where?: Bounds; clusters?: EdgeCluster[] } {
   const count = new Map<string, number>();
-  const ix = m.indices;
+  const ix = weldIndices(m);
   for (let i = 0; i < ix.length; i += 3)
     for (let e = 0; e < 3; e++) {
       const a = ix[i + e], b = ix[i + ((e + 1) % 3)];

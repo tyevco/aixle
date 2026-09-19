@@ -61,6 +61,8 @@ export interface RunOptions {
   beautySize?: number;
   /** Vertex placement: sharp (dual contouring, default) or the rounded surface-nets mean. */
   sharp?: boolean;
+  /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
+  crease?: number;
   /** Perspective camera direction in degrees; defaults 35 and 25, or `set azimuth` / `set elevation`. */
   azimuth?: number;
   elevation?: number;
@@ -640,6 +642,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const azimuth = opts.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
 
+  const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let mesh: Mesh | undefined;
   let bounds: Bounds | undefined;
   let trueBounds: Bounds | undefined;
@@ -655,7 +658,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The box sets the cell size, and a rotated joint or a blend leaves it loose (measured: a posed excavator's box
     // was twice its surface, costing a third of the resolution), so find the surface's extent coarsely first.
     const extractBox = time("extent", () => tightBounds(output));
-    let nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, bounds: extractBox }));
+    let nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: extractBox }));
     // The safety net: if the mesh reaches a face of a tightened box, something was cut off there (a part thinner than
     // the rays' spacing), so extract again over the whole bounds rather than ship a clipped model.
     if (extractBox !== output.bounds && triangleCount(nets.mesh) > 0) {
@@ -664,7 +667,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const clipped = [0, 1, 2].some((k) => (extractBox.min[k] > output.bounds.min[k] + near && mb.min[k] < extractBox.min[k] + near) || (extractBox.max[k] < output.bounds.max[k] - near && mb.max[k] > extractBox.max[k] - near));
       if (clipped) {
         log(`extent: the surface reaches the tightened box, so extracting over the full bounds instead`);
-        nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
+        nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
       }
     }
     mesh = nets.mesh;
@@ -758,7 +761,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         bounds: frame,
         cost: output.cost + 1,
       };
-      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, bounds: frame }));
+      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: frame }));
       if (triangleCount(close.mesh) > 0) {
         viewMesh = close.mesh; viewCell = close.cellSize;
         // The close-up is meshed at its own, finer cell, so its edges are a second reading of the same surface: the
@@ -791,7 +794,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
       const stepNames = new Map<Shape3, string>();
       for (const st of rest.steps) if (isShape3(st.value) && !stepNames.has(st.value)) stepNames.set(st.value, st.name);
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
@@ -951,7 +954,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       for (const o of evaluation.objects) {
         const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
         if (isEmpty(shape.bounds)) { lines.push(`| ${o.name} | empty | | | |`); continue; }
-        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0 }));
+        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
         if (triangleCount(own.mesh) === 0) { lines.push(`| ${o.name} | no surface | | | |`); continue; }
         const w = watertightReport(own.mesh);
         const ph = analyse(own.mesh, own.cellSize);

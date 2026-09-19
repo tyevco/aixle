@@ -78,6 +78,25 @@ diagonal so a quad bent around a corner does not fold. Crossing points and
 their normals are computed once per lattice edge and shared by the four
 cells around it, so sharpness costs about six field evaluations per
 crossing edge. `sharp: false` gives the plain surface-nets mean back.
+The tangent planes' normals come from a finer difference (a tenth of a
+cell) than the vertex normals: half a cell each way straddles the next
+face near an edge, tilts the plane, and leaves the vertex a quarter of a
+cell short of the edge with a sliver of bevel beside it (measured on a
+box: an edge at z = -0.5 meshed at -0.484).
+
+Sharp geometry still shaded soft, because a vertex carries one normal
+and on an edge that normal is the field's gradient, which points between
+the faces; every renderer interpolates it across both, so a box read as
+bevelled and a block on a cylinder as melted in, in the sheets, the
+viewer and any GLB consumer. A vertex whose faces disagree by more than
+the crease angle (35 degrees) is now split once per group of agreeing
+faces, each copy with its group's mean face normal and the material read
+just inside its own side, so the seam between a red ball and an oak slab
+is oak on the slab and red on the ball. An unsplit vertex whose faces
+agree within fifteen degrees takes their mean too, which is exact on a
+flat face; a surface bent more than that per cell keeps the gradient,
+which is smoother there. The copies share a position, so the watertight
+and pieces checks weld them back by position before counting.
 
 ## One mesh, rendered and exported; one field, for the beauty render
 

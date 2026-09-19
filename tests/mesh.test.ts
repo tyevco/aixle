@@ -9,6 +9,8 @@ import { albedo, preset } from "../src/sdf/materials.js";
 import { bakeAtlas } from "../src/export/atlas.js";
 import { analyse, hull2, insideMargin } from "../src/mesh/physics.js";
 import { countPieces } from "../src/mesh/pieces.js";
+import { splitCreases } from "../src/mesh/creases.js";
+import { weldIndices } from "../src/mesh/mesh.js";
 import { materialFromString } from "../src/sdf/materials.js";
 
 describe("surface nets", () => {
@@ -221,5 +223,62 @@ describe("pieces", () => {
     expect(countPieces(O.union([P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.9, 0, 0)]), 32)).toBe(1);
     expect(countPieces(O.shell(P.sphere(1), 0.2), 32)).toBe(1);
     expect(countPieces(P.empty(), 32)).toBe(0);
+  });
+});
+
+describe("creases", () => {
+  it("splits a box's vertices so every copy has an axis-aligned normal, and the welded mesh is still closed and one piece", () => {
+    const r = surfaceNets(P.box(1, 1, 1), { resolution: 16 });
+    const n = r.mesh.normals;
+    // All but the slanted slivers a corner cell leaves (a handful, of no area) are on an axis; before the split a
+    // vertex on an edge carried the diagonal gradient, and every face vertex within half a cell of an edge leaned.
+    let worst = 0, off = 0;
+    for (let v = 0; v < n.length; v += 3) {
+      const d = 1 - Math.max(Math.abs(n[v]), Math.abs(n[v + 1]), Math.abs(n[v + 2]));
+      worst = Math.max(worst, d);
+      if (d > 0.02) off++;
+    }
+    expect(worst).toBeLessThan(0.1);
+    expect(off / (n.length / 3)).toBeLessThan(0.01);
+    // More vertices than the unsplit mesh (each corner and edge vertex has a copy per face), the same triangles.
+    const plain = surfaceNets(P.box(1, 1, 1), { resolution: 16, crease: 0 });
+    expect(r.mesh.positions.length).toBeGreaterThan(plain.mesh.positions.length);
+    expect(r.mesh.indices.length).toBe(plain.mesh.indices.length);
+    let diagonal = 0;
+    for (let v = 0; v < plain.mesh.normals.length; v += 3) if (Math.max(Math.abs(plain.mesh.normals[v]), Math.abs(plain.mesh.normals[v + 1]), Math.abs(plain.mesh.normals[v + 2])) < 0.9) diagonal++;
+    expect(diagonal).toBeGreaterThan(0);
+    expect(isWatertight(r.mesh)).toBe(true);
+    expect(analyse(r.mesh, r.cellSize).pieces).toHaveLength(1);
+    expect(new Set(weldIndices(r.mesh)).size).toBe(plain.mesh.positions.length / 3);
+  });
+  it("leaves a sphere alone and gives each side of a material seam its own colour", () => {
+    const s = surfaceNets(P.sphere(1), { resolution: 24 });
+    const plain = surfaceNets(P.sphere(1), { resolution: 24, crease: 0 });
+    expect(s.mesh.positions.length).toBe(plain.mesh.positions.length);
+    // A blue ball standing in a red slab: every vertex on the slab's top face, the seam ring included, is red.
+    const red = materialFromString("#ff0000")!, blue = materialFromString("#0000ff")!;
+    const m = surfaceNets(O.union([O.paint(P.box(2, 0.2, 2), red), O.paint(O.move(P.sphere(0.5), 0, 0.5, 0), blue)]), { resolution: 40 });
+    let top = 0, wrong = 0;
+    for (let v = 0; v < m.mesh.positions.length / 3; v++) {
+      if (m.mesh.normals[v * 3 + 1] < 0.99 || Math.abs(m.mesh.positions[v * 3 + 1] - 0.1) > 1e-3) continue;
+      top++;
+      if (m.mesh.materials[m.mesh.materialIndex[v]] !== red) wrong++;
+    }
+    expect(top).toBeGreaterThan(100);
+    expect(wrong).toBe(0);
+  });
+  it("groups a vertex's faces by angle and copies the position once per group", () => {
+    // Two triangles meeting at a right angle along the edge (0,0,0)-(1,0,0): both vertices on the edge split.
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0]);
+    const indices = new Uint32Array([0, 2, 1, 0, 1, 3]);
+    const s = splitCreases(positions, indices, 35);
+    expect(s.positions.length / 3).toBe(6);
+    expect([...s.source]).toEqual([0, 1, 2, 3, 0, 1]);
+    expect([...s.split]).toEqual([1, 1, 0, 0, 1, 1]);
+    // Each triangle still has three vertices at the same places.
+    for (let t = 0; t < 2; t++)
+      for (let c = 0; c < 3; c++) expect(s.positions[s.indices[t * 3 + c] * 3]).toBe(positions[indices[t * 3 + c] * 3]);
+    // At 100 degrees the right angle is not a crease.
+    expect(splitCreases(positions, indices, 100).positions.length / 3).toBe(4);
   });
 });

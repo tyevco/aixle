@@ -10,7 +10,7 @@
  * and pieces as the connected components of the triangle graph, each with
  * its own volume so a speck can be told from a floating part.
  */
-import type { Mesh } from "./mesh.js";
+import { weldIndices, type Mesh } from "./mesh.js";
 
 export interface Piece {
   triangles: number;
@@ -110,12 +110,12 @@ export function analyse(mesh: Mesh, cellSize: number): Physics {
   for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= floor + cellSize * 1.5) contacts.push([p[i], p[i + 2]]);
   const footprint = hull2(contacts);
   const stabilityMargin = insideMargin(footprint, centre[0], centre[2]);
-  // Connected components over shared vertices.
+  // Connected components over shared vertices, the copies a crease split made welded back into one.
   const nv = p.length / 3;
   const parent = new Int32Array(nv);
   for (let i = 0; i < nv; i++) parent[i] = i;
   const find = (a: number): number => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
-  const ix = mesh.indices;
+  const ix = weldIndices(mesh);
   for (let t = 0; t < ix.length; t += 3) {
     const a = find(ix[t]), b = find(ix[t + 1]), c = find(ix[t + 2]);
     parent[a] = b; parent[find(b)] = find(c);

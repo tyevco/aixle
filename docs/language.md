@@ -487,7 +487,13 @@ of a view and of the beauty render (`--beauty-size` overrides the latter). `set 
 cross-section plane; a scene's default cut goes through its first
 object, so list the one to cut first. `set beauty 1` always writes the ray-marched
 `beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
-to rounded vertex placement if a sharp corner ever misbehaves. `set texture
+to rounded vertex placement if a sharp corner ever misbehaves. Edges are
+creases: a vertex whose faces meet at more than 35 degrees (a box's edge,
+a block standing on a cylinder, a cut) is split so each side shades and
+exports with its own normal and its own material, in the sheets, the
+viewer and the GLB; `set crease 60` splits only sharper corners, `set
+crease 0` keeps one smooth normal per vertex for a sculpted model that
+should read soft (`--crease` on the command line). `set texture
 2048` sizes the baked texture atlas (`0` turns it off and the GLB carries
 vertex colours instead).
 

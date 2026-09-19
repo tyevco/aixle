@@ -51,6 +51,8 @@ export interface HierarchyOptions {
   /** Step names by shape, so a placed set's node carries the name the program gave it. */
   names?: Map<Shape3, string>;
   sharp?: boolean;
+  /** Crease angle for vertex splitting, or undefined for the mesher's default. */
+  crease?: number;
   /** Atlas size in pixels; 0 for none. */
   texture: number;
   maxResolution?: number;
@@ -61,7 +63,7 @@ function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
   const longest = Math.max(s[0], s[1], s[2]);
   if (!(longest > 0) || isEmpty(shape.bounds)) return surfaceNets(shape, { resolution: 8 }).mesh;
   const resolution = Math.max(8, Math.min(opts.maxResolution ?? 512, Math.ceil(longest / opts.cellSize)));
-  return surfaceNets(shape, { resolution, sharp: opts.sharp }).mesh;
+  return surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
 }
 
 function shifted(mesh: Mesh, origin: Vec3): Mesh {
