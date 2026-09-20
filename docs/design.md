@@ -157,8 +157,17 @@ block, and for an entity, turned half a turn, it is written as it is:
 the Aixle hatchling, built from the Bedrock file's numbers with z
 flipped, exports the file's numbers back. A test pushes a cube's centre
 through that convention for the exported numbers and checks it lands
-inside the posed shape, for both orientations. What the game does with
-the texture windows' orientation is still to be seen in it.
+inside the posed shape, for both orientations. The face windows' u and
+v directions come from the game's own corner table, as the Minecraft
+repo's viewer draws every face (north's u runs from +x to -x in geometry
+space, south's the other way, east's from +z to -z, west's the other
+way, up's and down's along x), mapped through the mirror for a block and
+the half turn for an entity; a test reads every window of a six-dot
+probe cube the way that table does and checks each texel is the model's
+colour there, and the Aixle export was screenshotted in that viewer
+beside Aixle's own sheet (round 7: the first rule had a block's front and
+top and an entity's front mirrored). What remains unseen in the game
+itself is only what that viewer has not itself been checked against.
 
 ## Roblox
 

@@ -301,12 +301,16 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
         // half a turn, so its x and z sides are the model's opposite ones.
         const dir: 1 | -1 = entity && f.axis !== 1 ? (f.dir === 1 ? -1 : 1) : f.dir;
         const plane = dir > 0 ? hi[f.axis] : lo[f.axis];
-        // u increases with the axis on top and up faces; on the north face (seen from -z) the world's +x is on the
-        // viewer's left, so u runs against x there, as it does on the east face against z. These are world directions,
-        // and u always runs along x or z, which for an entity are the model's negatives.
-        const worldFlipU = f.face === "north" || f.face === "east" || f.face === "down";
-        const flipU = entity ? !worldFlipU : worldFlipU;
-        // v runs down the texture: from the top of a side face, or from the far (-z) edge of the top face.
+        // Which way u runs across the window, in model space, from the game's own face corners (as the Minecraft
+        // repo's viewer draws them, in geometry space: north's u runs from +x to -x, south's from -x to +x, east's
+        // from +z to -z, west's from -z to +z, up's and down's from -x to +x) mapped through the mirror for a
+        // block (geometry x is -model x) or the half turn for an entity (geometry z is -model z). Measured in that
+        // viewer, round 7: the first rule had a block's front and top and an entity's front mirrored.
+        const flipU = entity
+          ? f.face === "north" || f.face === "west"
+          : f.face === "south" || f.face === "east" || f.face === "up" || f.face === "down";
+        // v runs down the texture: from the top of a side face; on the top face from geometry -z, on the bottom from
+        // geometry +z, which for an entity are the model's +z and -z.
         const fromLowV = f.axis === 1 ? (entity ? f.face !== "up" : f.face === "up") : false;
         const win: Window = {
           w, h,

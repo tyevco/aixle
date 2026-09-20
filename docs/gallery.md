@@ -531,3 +531,35 @@ round 6: A cafe terrace: stone paving 8 across, four round bistro tables each wi
 ![round-6_terrace, beauty render](../dogfood/renders/round-6_terrace_beauty.png) ![round-6_terrace, contact sheet](../dogfood/renders/round-6_terrace.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-6/terrace.aix) · <a href="/aixle/viewers/round-6_terrace.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-6/terrace.report.md)
+
+### round-7_drone
+
+round 7: A camera quadcopter drone, about 0.38 units across, standing on two skid
+
+![round-7_drone, beauty render](../dogfood/renders/round-7_drone_beauty.png) ![round-7_drone, contact sheet](../dogfood/renders/round-7_drone.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-7/drone.aix) · <a href="/aixle/viewers/round-7_drone.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-7/drone.report.md)
+
+### round-7_fox
+
+round 7: A fox as a Minecraft Bedrock entity: boxes on the 16-pixel lattice, one
+
+![round-7_fox, beauty render](../dogfood/renders/round-7_fox_beauty.png) ![round-7_fox, contact sheet](../dogfood/renders/round-7_fox.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-7/fox.aix) · <a href="/aixle/viewers/round-7_fox.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-7/fox.report.md)
+
+### round-7_jack
+
+round 7: A jack-in-the-box: a wooden box with painted panels, a lid hinged along
+
+![round-7_jack, beauty render](../dogfood/renders/round-7_jack_beauty.png) ![round-7_jack, contact sheet](../dogfood/renders/round-7_jack.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-7/jack.aix) · <a href="/aixle/viewers/round-7_jack.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-7/jack.report.md)
+
+### round-7_marionette
+
+round 7: A wooden marionette as a Roblox rig: a unit is a stud, about 2.5 studs
+
+![round-7_marionette, beauty render](../dogfood/renders/round-7_marionette_beauty.png) ![round-7_marionette, contact sheet](../dogfood/renders/round-7_marionette.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-7/marionette.aix) · <a href="/aixle/viewers/round-7_marionette.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-7/marionette.report.md)
