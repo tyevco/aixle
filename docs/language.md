@@ -606,7 +606,9 @@ entity, x for a block; a `scale` as it is. A linear clip has a key per
 pose, an eased one eight per segment, and a held value is its two end
 keys. The face texture is painted from the model's own surface behind
 each texel (a decal on a face, a skin thinner than a voxel: both reach
-it) and its unused texels are transparent. A box model on the game's
+it), with each window's u and v running as the game reads them (checked
+against the Minecraft repo's viewer), and its unused texels are
+transparent. A box model on the game's
 lattice is easiest built as the hatchling is: a `cube(ox, oy, oz, w, h,
 d)` helper in geometry pixels, each part grown a third of a pixel so
 touching bones fuse into one piece (grown upward only at the feet, or

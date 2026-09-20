@@ -61,6 +61,7 @@ describe("Minecraft Bedrock geometry", () => {
 import { bedrockRotation, toBedrockAnimations, type BedrockClip } from "../src/export/bedrock.js";
 import { eulerXYZ, rotAxis, rotX, rotY, rotZ, matMul, apply, type Mat3, type Vec3 } from "../src/core/vec.js";
 import { REST_POSE, type JointPose } from "../src/sdf/types.js";
+import { albedo } from "../src/sdf/materials.js";
 
 describe("Bedrock bones and animations", () => {
   const jp = (angles: Vec3 = [0, 0, 0], move: Vec3 = [0, 0, 0], scale: Vec3 = [1, 1, 1]): JointPose => ({ angles, move, scale });
@@ -153,6 +154,55 @@ describe("Bedrock bones and animations", () => {
     let clear = 0;
     for (let i = 3; i < r.texture.data.length; i += 4) if (r.texture.data[i] === 0) clear++;
     expect(clear).toBeGreaterThan(0);
+  });
+  it("paints every face window the way the game's corner table reads it, for a block and for an entity", () => {
+    // The corner table the Minecraft repo's viewer builds faces from (tools/viewer/viewer.js), in geometry space:
+    // TL, TR, BL as seen from outside, u running TL to TR and v TL to BL. A texel's colour must be the model's own
+    // at the point that table puts it, once the geometry is mirrored in x (the game's drawing) and, for an
+    // entity, the model turned half a turn.
+    type P = [number, number, number];
+    const table = (o: number[], sz: number[], face: string): [P, P, P] => {
+      const [x, y, z] = o, [X, Y, Z] = [o[0] + sz[0], o[1] + sz[1], o[2] + sz[2]];
+      switch (face) {
+        case "north": return [[X, Y, z], [x, Y, z], [X, y, z]];
+        case "south": return [[x, Y, Z], [X, Y, Z], [x, y, Z]];
+        case "east": return [[X, Y, Z], [X, Y, z], [X, y, Z]];
+        case "west": return [[x, Y, z], [x, Y, Z], [x, y, z]];
+        case "up": return [[x, Y, z], [X, Y, z], [x, Y, Z]];
+        default: return [[x, y, Z], [X, y, Z], [x, y, z]];
+      }
+    };
+    const dots: [P, string][] = [[[0.3, 0.8, 0.5], "#ff0000"], [[0.5, 0.8, 0.3], "#0000ff"], [[0.3, 1, 0.3], "#00ff00"], [[-0.3, 0.8, -0.5], "#ffff00"], [[-0.5, 0.2, 0.3], "#ff00ff"], [[0.3, 0, -0.3], "#00ffff"]];
+    let shape = O.paint(O.move(P.box(1, 1, 1), 0, 0.5, 0), materialFromString("#808080")!);
+    for (const [at, c] of dots) shape = O.decal(shape, O.move(P.sphere(0.09), at[0], at[1], at[2]), materialFromString(c)!);
+    for (const entity of [false, true]) {
+      const r = toBedrock([{ name: "probe", shape }], "probe", { pixelsPerUnit: 16, entity });
+      const cube = (r.geometry as { "minecraft:geometry": { bones: { cubes: { origin: number[]; size: number[]; uv: Record<string, { uv: number[]; uv_size: number[] }> }[] }[] }[] })["minecraft:geometry"][0].bones[0].cubes[0];
+      let checked = 0, wrong: string[] = [];
+      for (const face of ["north", "south", "east", "west", "up", "down"]) {
+        const w = cube.uv[face];
+        const [tl, tr, bl] = table(cube.origin, cube.size, face);
+        for (let v = 0; v < w.uv_size[1]; v += 3)
+          for (let u = 0; u < w.uv_size[0]; u += 3) {
+            const fu = (u + 0.5) / w.uv_size[0], fv = (v + 0.5) / w.uv_size[1];
+            // The texel's point on the face in geometry pixels, then the world (x mirrored, sixteen to the block), then the model.
+            const g = [0, 1, 2].map((k) => tl[k] + (tr[k] - tl[k]) * fu + (bl[k] - tl[k]) * fv);
+            const world = [-g[0] / 16, g[1] / 16, g[2] / 16];
+            const m: P = entity ? [-world[0], world[1], -world[2]] : [world[0], world[1], world[2]];
+            // A hair inside the face so the hit is the solid's.
+            const n = face === "north" ? [0, 0, -1] : face === "south" ? [0, 0, 1] : face === "east" ? [1, 0, 0] : face === "west" ? [-1, 0, 0] : face === "up" ? [0, 1, 0] : [0, -1, 0];
+            const mn = entity ? [-n[0], n[1], -n[2]] : [-n[0], n[1], n[2]];
+            const hit = shape.hit(m[0] - mn[0] * 0.002, m[1] - mn[1] * 0.002, m[2] - mn[2] * 0.002);
+            const want = albedo(hit.mat, hit.lx, hit.ly, hit.lz).map((c) => Math.round(c * 255));
+            const i = ((w.uv[1] + v) * r.texture.width + (w.uv[0] + u)) * 4;
+            const got = [r.texture.data[i], r.texture.data[i + 1], r.texture.data[i + 2]];
+            checked++;
+            if (got.some((c, k) => Math.abs(c - want[k]) > 8)) wrong.push(`${entity ? "entity" : "block"} ${face} texel (${u}, ${v}) is ${got.join(",")}, the model there is ${want.join(",")}`);
+          }
+      }
+      expect(checked).toBeGreaterThan(100);
+      expect(wrong, wrong.slice(0, 5).join("\n")).toEqual([]);
+    }
   });
   it("collapses a held value to its two ends", () => {
     const clip: BedrockClip = {
