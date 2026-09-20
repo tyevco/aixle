@@ -73,6 +73,16 @@ describe("booleans", () => {
     const tube = W.tube([[0, 0, 0], [1, 0, 0], [1, 1, 0]], 0.2);
     expect(tube.dist(1, 0, 0)).toBeCloseTo(-0.2, 6);
   });
+  it("marks a field that is a bound rather than a distance", () => {
+    expect(O.union([a, b]).bound).toBeUndefined();
+    expect(O.union([a, b], 0.3).bound).toBe(true);
+    expect(O.difference(a, b).bound).toBeUndefined();
+    expect(O.difference(a, b, 0.2).bound).toBe(true);
+    expect(O.scale(a, 2, 2, 2).bound).toBeUndefined();
+    expect(O.scale(a, 1, 2, 1).bound).toBe(true);
+    for (const w of [O.twist(a, 30), O.bend(a, 30), O.wrap(a, 3), O.displace(a, 0.1, 0.5), W.loft(S.circle(1), S.rect(1, 1), 2)]) expect(w.bound).toBe(true);
+    expect(O.move(a, 1, 0, 0).bound).toBeUndefined();
+  });
   it("many-part unions cull without changing the result near the surface, and never overestimate", () => {
     const parts = Array.from({ length: 40 }, (_, i) => O.move(P.box(0.5, 0.5, 0.5), i * 0.7, 0, 0));
     const u = O.union(parts);
@@ -365,6 +375,14 @@ describe("spatial index", () => {
     const sw = W.sweep(S.circle(0.15), pts);
     expect(sw.dist(1, 0, 0)).toBeLessThan(0);
     expect(sw.dist(1.3, 0, 0)).toBeGreaterThan(0.1);
+  });
+});
+
+describe("arc about an axis", () => {
+  it("lies on the ground about y, stands in yz about x and in xy about z", () => {
+    expect(W.arcPath(1, 0, 90, 1)).toEqual([0, 0, 1, 1, 0, expect.closeTo(0, 9)]);
+    expect(W.arcPath(1, 0, 90, 1, "x")).toEqual([0, 0, 1, 0, 1, expect.closeTo(0, 9)]);
+    expect(W.arcPath(1, 0, 90, 1, "z")).toEqual([0, 1, 0, 1, expect.closeTo(0, 9), 0]);
   });
 });
 

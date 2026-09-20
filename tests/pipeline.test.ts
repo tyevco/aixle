@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -399,5 +399,15 @@ describe("round-6 findings", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("glass on a bound", () => {
+  it("warns when a transmit material sits on a loft, a blend or a warp, and not on an exact shape", () => {
+    const ev = check('body = loft(rect(1, 0.6, round=0.2), rect(0.8, 0.5, round=0.1), 1.2)\nglass = body | paint("glass")\nblob = union(sphere(0.5), sphere(0.5) | move(0.6, 0, 0), k=0.2) | paint(material("glass", transmit=0.6))\nfine = box(1, 1, 1, round=0.1) | paint("glass")\nbent = box(1, 0.2, 2) | bend(20) | paint("gold")\nshow glass + blob + fine + bent', "g.aix");
+    expect(glassWarnings(ev)).toEqual([
+      "'glass' (line 2) is glass on a field that is a bound, not a distance ('body': a loft, a smooth union, a warp or a non-uniform scale): the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.",
+      "'blob' (line 3) is glass on a field that is a bound, not a distance (a loft, a smooth union, a warp or a non-uniform scale): the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.",
+    ]);
   });
 });

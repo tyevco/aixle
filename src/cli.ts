@@ -8,7 +8,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { watch } from "node:fs";
@@ -195,7 +195,7 @@ function main(argv: string[]): number {
       }
       // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
       const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike.

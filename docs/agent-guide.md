@@ -136,7 +136,7 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | glass reads frosted and opaque in `--quick --beauty` | the quick grid is 64 cells and the wall is under a cell | judge glass at the full grid; keep a glowing part a cell clear of its glass |
 | contour lines behind glass | a `loft` or a smooth union is a bound, not a distance; or two faces coincide | a rounded box or an exact primitive under `transmit`; grow a liquid a cell into its cavity and promise `inside(liquid, cavity) > 0.9` |
 | "is not part of the output" for a probe or a cavity region | it was warned as unused | it no longer is: a step an assert, a decal or a camera reads is a region, tagged `(region)` in `check` and on the steps sheet |
-| a fine speckle renders as square blocks | `speckle` is a cubic block pattern at `scale` | `"noise"` at a small scale for a soft mottle; `scale` is the block size |
+| a fine speckle renders as square blocks | `speckle` is a cubic block pattern at `scale` | `"noise"` at a small scale for a soft mottle; `scale` is the block size; `examples/patterns.aix` is a plate of all ten |
 | a part stuck on a curved body reads as a disc | two convex surfaces meeting | a skin of the body's own surface: `(offset(body, 0.05) - offset(body, -0.012)) & oval`, `intersect(..., k=)` for the rim |
 | a material boundary speckles in the views | two painted surfaces nearly coincide (under 35 degrees apart), so each vertex picks either | give them a clear angle, or one shape with a `decal`; a seam at a crease is clean, and the beauty render is unaffected |
 | a box or a join reads soft, as if bevelled, in the viewer or a GLB | one smooth normal per vertex, from `set crease 0` | leave `crease` at its default (35), which splits vertices at edges |

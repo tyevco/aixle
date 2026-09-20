@@ -206,9 +206,11 @@ A smooth path through the points, subdivided until no piece turns more than `deg
 
 ### arc
 
-A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).
+A path list for an arc of radius r about `axis`: on the ground plane about y (0 is +z, 90 is +x); about x it stands in the yz plane (0 at +z, 90 at +y: a toe curling round a branch that lies along x); about z in the xy plane (0 at +y, 90 at +x).
 
-    arc(r, from=0, to=90, segments=16) -> list
+    arc(r, from=0, to=90, segments=16, axis="y") -> list
+
+- `axis`: y, x or z
 
 ### loft
 

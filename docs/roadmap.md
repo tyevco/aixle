@@ -209,11 +209,9 @@ It is a printer over the dependencies the evaluation records. Not built:
 - A point light (`light(..., position=[x, y, z])`) for a campfire or a
   lamp lighting its neighbours, and a per-light strip so a rim light's
   contribution can be seen (round 9 asked for both).
-- A warning when a `transmit` material sits on a `loft`, a smooth union
-  or a scaled shape, whose field is a bound, and a note when a camera's
-  focus is mostly hidden by another step (round 9).
-- A plate of the patterns and a thumbnail per environment in the
-  reference; `arc(axis=)`; a `posed` line for a joint step itself.
+- A note when a camera's focus is mostly hidden by another step, and a
+  thumbnail per environment in the reference (round 9); a `posed` line
+  for a joint step itself.
 
 ## What was considered and set aside
 

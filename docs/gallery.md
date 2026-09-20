@@ -88,6 +88,14 @@ A desk nameplate: a walnut wedge with a brass plate on its leaning face,
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/nameplate.aix) · <a href="/aixle/viewers/nameplate.html" target="_blank" rel="noopener">viewer</a>
 
+### patterns
+
+A plate of the ten material patterns: each on a rounded cube at scale 0.25
+
+![patterns, beauty render](../examples/renders/patterns_beauty.png) ![patterns, contact sheet](../examples/renders/patterns.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/patterns.aix) · <a href="/aixle/viewers/patterns.html" target="_blank" rel="noopener">viewer</a>
+
 ### robot
 
 A toy robot: mirror() builds both arms and legs from one side, and each

@@ -198,7 +198,7 @@ four points and `smooth=6`. A hollow spout is one tube minus a thinner one
 on the same path. `taper=` scales the end relative to the start (a horn,
 a tapering tail) and `sweep` also takes `twist=` degrees over the whole
 path, so three circles swept along `helix(r, h, turns)` with
-`twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to)` and
+`twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to, axis="y")` and
 `spline(points)` make point lists, and any of them can feed `curve()`
 for a smooth tube (a tight helix as a polyline has a join wedge at
 every segment; `tube(r, curve(helix(...)))` has none; a helix starts at `(r, 0, 0)` and rises
@@ -603,7 +603,8 @@ What the lights and the skies can and cannot do, measured in round 9:
   and bars where the two surfaces touch. A `loft` or a smooth `union(k=)`
   is a bound rather than a distance, and glass on one bands the picture
   behind it (a liquid seen through a lofted flacon drew contour lines;
-  a rounded box rendered clean); two coincident faces band too, so a
+  a rounded box rendered clean; `check` warns when a `transmit`
+  material sits on such a field); two coincident faces band too, so a
   liquid filling a cavity is grown a cell into the wall, and its promise
   is `inside(liquid, cavity) > 0.9`, not `== 1`. `glow` on a `transmit`
   material is not visible.

@@ -198,8 +198,8 @@ export const BUILTINS: Builtin[] = [
   def("spline", "Paths", "A smooth path through the points, subdivided until no piece turns more than `degrees`: a curve that shows no faceting in a tube or sweep, however tight.",
     ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("degrees", "largest turn between pieces", 3)], "list",
       (a) => W.splinePath(W.toPoints(nums(a[0]), "spline"), n(a[1])))),
-  def("arc", "Paths", "A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).",
-    ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16)], "list", (a) => W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
+  def("arc", "Paths", "A path list for an arc of radius r about `axis`: on the ground plane about y (0 is +z, 90 is +x); about x it stands in the yz plane (0 at +z, 90 at +y: a toe curling round a branch that lies along x); about z in the xy plane (0 at +y, 90 at +x).",
+    ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16), str("axis", "y, x or z", "y")], "list", (a) => { const ax = String(a[4]); if (ax !== "x" && ax !== "y" && ax !== "z") throw new Error(`arc(): axis is x, y or z, not "${ax}"`); return W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3]), ax); })),
   def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them; centred on y = 0 like extrude (from -h/2 to h/2), each profile laid flat with its y along -z.",
     ov([shape2("a"), shape2("b"), num("h")], "shape", (a) => W.loft(s2(a[0]), s2(a[1]), n(a[2])))),
 

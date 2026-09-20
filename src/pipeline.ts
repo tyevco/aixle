@@ -443,6 +443,38 @@ function intersectionLike(v: Shape3): boolean {
 }
 
 /** Warnings for steps that join painted and unpainted parts, once, at the smallest such step. */
+/**
+ * Glass on a field that is a bound rather than a distance: a loft, a smooth boolean, a warp or a non-uniform scale.
+ * The beauty render marches through glass, and a bound makes it stop short in bands (round 9: a liquid seen through a
+ * lofted flacon drew contour lines; the same bottle as a rounded box rendered clean).
+ */
+export function glassWarnings(evaluation: Evaluation): string[] {
+  const geometry = geometrySteps(evaluation);
+  const out: string[] = [];
+  const names = new Map<Shape3, string>();
+  for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
+  for (const st of evaluation.steps) {
+    const v = st.value;
+    if (!isShape3(v) || !v.painted || !geometry.has(st.name) || isEmpty(v.bounds)) continue;
+    const c = boundsCenter(v.bounds);
+    if (!(v.hit(c[0], c[1], c[2]).mat.transmit > 0)) continue;
+    // The first bound field under the paint, by name when it has one.
+    let found: Shape3 | undefined;
+    const seen = new Set<Shape3>();
+    const walk = (n: Shape3) => {
+      if (found || seen.has(n)) return;
+      seen.add(n);
+      if (n.bound) { found = n; return; }
+      for (const k of n.parts ?? n.inner ?? []) walk(k);
+    };
+    walk(v);
+    if (!found) continue;
+    const what = names.get(found);
+    out.push(`'${st.name}' (line ${st.line}) is glass on a field that is a bound, not a distance${what ? ` ('${what}': a loft, a smooth union, a warp or a non-uniform scale)` : " (a loft, a smooth union, a warp or a non-uniform scale)"}: the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.`);
+  }
+  return out;
+}
+
 export function paintWarnings(evaluation: Evaluation): string[] {
   const memo = new Map<Shape3, PaintState>();
   const geometry = geometrySteps(evaluation);
@@ -851,6 +883,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     warnings.push(...foldThinWarnings(thinWarnings(evaluation, fullCell, fullGrid)));
     warnings.push(...paintWarnings(evaluation));
     warnings.push(...cutWarnings(evaluation, fullCell));
+    warnings.push(...glassWarnings(evaluation));
     if (opts.quick) {
       // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
       const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];

@@ -337,12 +337,16 @@ export function helixPath(r: number, h: number, turns: number, perTurn = 16): nu
 }
 
 /** Points of an arc of radius `r` in the x/z plane from `from` to `to` degrees, `segments` pieces. */
-export function arcPath(r: number, from: number, to: number, segmentsCount = 16): number[] {
+export function arcPath(r: number, from: number, to: number, segmentsCount = 16, axis: "x" | "y" | "z" = "y"): number[] {
   const out: number[] = [];
   const n = Math.max(1, Math.round(segmentsCount));
   for (let i = 0; i <= n; i++) {
     const a = ((from + ((to - from) * i) / n) * Math.PI) / 180;
-    out.push(r * Math.sin(a), 0, r * Math.cos(a));
+    const s = r * Math.sin(a), c = r * Math.cos(a);
+    // About y: 0 at +z, 90 at +x. About x: 0 at +z, 90 at +y (a toe round a branch). About z: 0 at +y, 90 at +x.
+    if (axis === "x") out.push(0, s, c);
+    else if (axis === "z") out.push(s, c, 0);
+    else out.push(s, 0, c);
   }
   return out;
 }
@@ -363,6 +367,8 @@ export function loft(a: Shape2, b: Shape2, h: number): Shape3 {
     return Math.min(Math.max(d2, cap), 0) + length2(Math.max(d2, 0), Math.max(cap, 0));
   }, { min: [minx, -hh, -maxy], max: [maxx, hh, -miny] }, a.cost + b.cost);
   out.feature = a.feature === undefined ? b.feature : b.feature === undefined ? a.feature : Math.min(a.feature, b.feature);
+  // A blend of two profiles' distances is a bound on the solid's distance, not the distance.
+  out.bound = true;
   return out;
 }
 

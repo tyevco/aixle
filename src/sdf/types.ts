@@ -130,6 +130,8 @@ export interface Shape3 {
   anchors?: Record<string, Vec3>;
   /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
   loose?: boolean;
+  /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
+  bound?: boolean;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
