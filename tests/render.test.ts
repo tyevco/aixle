@@ -249,6 +249,11 @@ describe("beauty lights and environments", () => {
     // One white light at the default direction, declared, matches the default key light's picture.
     const declared = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }] });
     expect(declared.get(48, 44)).not.toBe(plain.get(0, 95));
+    // A point light just right of the sphere lights its right side and not its left; farther away it does less.
+    const point = (x: number) => renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: 0, elevation: 0, size: 1, color: [1, 1, 1], power: 1, position: [x, 0.2, 0.3], range: 1.5 }] });
+    const near = point(1.6), off = point(6);
+    expect(lum(near.get(70, 48))).toBeGreaterThan(lum(near.get(26, 48)) + 60);
+    expect(lum(near.get(70, 48))).toBeGreaterThan(lum(off.get(70, 48)) + 30);
     // A second light from the right lifts the sphere's right side.
     const two = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }, { azimuth: 120, elevation: 30, size: 1, color: [1, 1, 1], power: 1 }] });
     expect(lum(two.get(70, 48))).toBeGreaterThan(lum(declared.get(70, 48)));

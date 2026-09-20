@@ -105,6 +105,10 @@ export interface Light {
   colorName: string;
   /** 1 is the default key light's strength. */
   power: number;
+  /** A point light: where it is; azimuth and elevation are then unused. */
+  position?: [number, number, number];
+  /** A point light's reach: its strength halves at this distance from it. */
+  range?: number;
   line: number;
 }
 
@@ -501,9 +505,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   function callLight(args: Arg[], scope: Scope, line: number): Value {
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
     const nameArg = values.find((v) => !v.name);
-    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`light(): light(name, azimuth=-40, elevation=55, size=1, color="white", power=1)`, line);
+    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`light(): light(name, azimuth=-40, elevation=55, size=1, color="white", power=1), or light(name, position=[x, y, z], range=2, ...)`, line);
     const name = nameArg.value;
-    for (const v of values) if (v.name && !["azimuth", "elevation", "size", "color", "power"].includes(v.name)) throw new RuntimeError(`light("${name}"): no parameter named '${v.name}'; it takes azimuth, elevation, size, color and power`, line);
+    for (const v of values) if (v.name && !["azimuth", "elevation", "size", "color", "power", "position", "range"].includes(v.name)) throw new RuntimeError(`light("${name}"): no parameter named '${v.name}'; it takes azimuth, elevation, size, color and power, or position and range for a point light`, line);
     const num = (key: string, def: number): number => {
       const v = values.find((x) => x.name === key)?.value ?? def;
       if (typeof v !== "number") throw new RuntimeError(`light("${name}"): ${key} is a number`, line);
@@ -516,7 +520,17 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const colorV = values.find((x) => x.name === "color")?.value ?? "white";
     let color: [number, number, number], colorName: string;
     try { const m = toMaterial(colorV); color = [m.color[0], m.color[1], m.color[2]]; colorName = typeof colorV === "string" ? colorV : m.name; } catch (err) { throw new RuntimeError(`light("${name}"): color: ${(err as Error).message}`, line); }
-    const lightDef: Light = { name, azimuth, elevation, size, color, colorName, power, line };
+    // A point light: at a place, reaching `range`; a campfire's warmth on the stones round it (round 9 asked).
+    const posV = values.find((x) => x.name === "position")?.value;
+    let position: [number, number, number] | undefined, range: number | undefined;
+    if (posV !== undefined) {
+      if (!Array.isArray(posV) || posV.length !== 3 || !posV.every((v) => typeof v === "number")) throw new RuntimeError(`light("${name}"): position is [x, y, z]`, line);
+      position = [posV[0] as number, posV[1] as number, posV[2] as number];
+      range = num("range", 2);
+      if (range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
+      if (values.some((x) => x.name === "azimuth" || x.name === "elevation")) warnings.push(`light("${name}") (line ${line}): a point light is at its position; azimuth and elevation are ignored`);
+    } else if (values.some((x) => x.name === "range")) throw new RuntimeError(`light("${name}"): range goes with position=[x, y, z]; a light with no position is a direction`, line);
+    const lightDef: Light = { name, azimuth, elevation, size, color, colorName, power, position, range, line };
     const existing = lights.findIndex((l) => l.name === name);
     if (existing >= 0) lights[existing] = lightDef; else lights.push(lightDef);
     return name;

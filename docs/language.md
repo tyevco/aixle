@@ -564,12 +564,17 @@ environment, so a misspelt name is a warning before any render.
 
 What the lights and the skies can and cannot do, measured in round 9:
 
-- A light is a direction, not a place. `elevation=8` means "from the
-  horizon", whatever stands there; a campfire's warmth on the things
-  round it is best faked with a warm light from above and in front
-  (`azimuth=20, elevation=35`), and a low light throws a long shadow
-  across a top-down shot. A `glow` material lights itself only: a flame
-  does not light the stones round it or the ground under it.
+- A light with an azimuth is a direction, not a place: `elevation=8`
+  means "from the horizon", whatever stands there, and a low light
+  throws a long shadow across a top-down shot. A campfire's warmth on
+  the stones round it is a point light, `light("fire", position=[0,
+  0.4, 0], range=2, color="#ff9a3c", power=1.5)`: at a place, its
+  strength halving `range` away, shadowed by what stands between, and
+  not reaching the far floor. Put it in the air just outside the glowing
+  part (a solid the light sits inside shadows everything; inside a glass
+  shade is fine, since glass lets its light through dimmed). A `glow`
+  material lights itself only: a flame does not light the stones round
+  it or the ground under it unless a point light sits in it.
 - `night` scales the ambient light to 0.4 of the studio's, so a first
   render is dark: start from `set ambient 1.6` with a moon of
   `power=0.9`, and let a glow carry the picture. `sunset` is a warm

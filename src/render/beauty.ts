@@ -32,6 +32,9 @@ export interface BeautyLight {
   color: Vec3;
   /** 1 is the default key light's strength. */
   power: number;
+  /** A point light: its place; azimuth and elevation are unused. Its strength halves `range` away from it. */
+  position?: Vec3;
+  range?: number;
 }
 
 /** The procedural skies the metals reflect and the floor sits in. */
@@ -107,12 +110,20 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   const pal = PALETTES[opts.environment ?? "studio"];
   const SKY = pal.sky, GROUND = pal.ground, FLOOR = pal.floor;
   // The lights: the program's, or the one key light the settings describe (its default direction kept as it was).
-  type Lit = { dir: Vec3; softness: number; color: Vec3; power: number };
+  type Lit = { dir: Vec3; softness: number; color: Vec3; power: number; pos?: Vec3; range: number };
+  const centre = boundsCenter(opts.reachBounds ?? bounds);
   const lights: Lit[] = (opts.lights && opts.lights.length
-    ? opts.lights.map((l) => ({ dir: lightDirection(l.azimuth, l.elevation), size: l.size, color: l.color, power: l.power }))
-    : [{ dir: opts.lightAzimuth === undefined && opts.lightElevation === undefined ? DEFAULT_LIGHT : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55), size: opts.lightSize ?? 1, color: [1, 1, 1] as Vec3, power: 1 }]
-  ).map((l) => ({ dir: l.dir, softness: 6 / Math.max(0.1, l.size), color: l.color, power: Math.max(0, l.power) }));
+    ? opts.lights.map((l) => ({ dir: l.position ? normalize([l.position[0] - centre[0], l.position[1] - centre[1], l.position[2] - centre[2]]) : lightDirection(l.azimuth, l.elevation), size: l.size, color: l.color, power: l.power, pos: l.position, range: l.range ?? 2 }))
+    : [{ dir: opts.lightAzimuth === undefined && opts.lightElevation === undefined ? DEFAULT_LIGHT : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55), size: opts.lightSize ?? 1, color: [1, 1, 1] as Vec3, power: 1, pos: undefined, range: 2 }]
+  ).map((l) => ({ dir: l.dir, softness: 6 / Math.max(0.1, l.size), color: l.color, power: Math.max(0, l.power), pos: l.pos, range: Math.max(1e-6, l.range) }));
   const totalPower = Math.max(1e-6, lights.reduce((s, l) => s + l.power, 0));
+  /** A light as seen from p: its direction there and its strength (a point light falls off with distance), and how far it is. */
+  const toward = (l: Lit, p: Vec3): { dir: Vec3; k: number; far: number } => {
+    if (!l.pos) return { dir: l.dir, k: 1, far: Infinity };
+    const dx = l.pos[0] - p[0], dy = l.pos[1] - p[1], dz = l.pos[2] - p[2];
+    const far = Math.hypot(dx, dy, dz) || 1e-9;
+    return { dir: [dx / far, dy / far, dz / far], k: (l.range * l.range) / (l.range * l.range + far * far), far };
+  };
   const ambient = Math.max(0, opts.ambient ?? 1) * pal.ambient;
   const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, opts.fitPoints ?? mesh.positions);
   const cell = Math.max(opts.cellSize, 1e-4);
@@ -141,9 +152,9 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     normalize([dist(x + eps, y, z) - dist(x - eps, y, z), dist(x, y + eps, z) - dist(x, y - eps, z), dist(x, y, z + eps) - dist(x, y, z - eps)]);
 
   /** 0 = fully shadowed, 1 = lit, towards one light; skipped when the ray cannot reach the model's box. */
-  const shadow = (p: Vec3, LIGHT: Vec3 = lights[0].dir, softness: number = lights[0].softness): number => {
-    // Ray-box test against the shadow box.
-    let tmin = 0, tmax = reach;
+  const shadow = (p: Vec3, LIGHT: Vec3 = lights[0].dir, softness: number = lights[0].softness, limit = Infinity): number => {
+    // Ray-box test against the shadow box; a point light's ray stops at the light.
+    let tmin = 0, tmax = Math.min(reach, limit);
     for (let a = 0; a < 3; a++) {
       const inv = 1 / LIGHT[a];
       let t0 = (shadowBox.min[a] - p[a]) * inv, t1 = (shadowBox.max[a] - p[a]) * inv;
@@ -190,8 +201,9 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   const floorLight = (p: Vec3): Vec3 => {
     const out: Vec3 = [0.62 * pal.ambient, 0.62 * pal.ambient, 0.62 * pal.ambient];
     for (const l of lights) {
-      const sh = shadow(p, l.dir, l.softness);
-      const k = (0.38 * sh * Math.max(0, l.dir[1]) * l.power) / totalPower;
+      const at = toward(l, p);
+      const sh = shadow(p, at.dir, l.softness, at.far);
+      const k = (0.38 * sh * Math.max(0, at.dir[1]) * l.power * at.k) / totalPower;
       out[0] += k * l.color[0]; out[1] += k * l.color[1]; out[2] += k * l.color[2];
     }
     return out;
@@ -209,14 +221,15 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     const diff: Vec3 = [0, 0, 0], spec: Vec3 = [0, 0, 0];
     const gloss = 1 - rough;
     for (const l of lights) {
-      const LIGHT = l.dir;
+      const at = toward(l, p);
+      const LIGHT = at.dir;
       const nl = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
-      const sh = nl > 0 ? shadow([p[0] + n[0] * cell, p[1] + n[1] * cell, p[2] + n[2] * cell], LIGHT, l.softness) : 1;
-      const d = nl * sh * 0.85 * (1 - metal * 0.6) * l.power;
+      const sh = nl > 0 ? shadow([p[0] + n[0] * cell, p[1] + n[1] * cell, p[2] + n[2] * cell], LIGHT, l.softness, at.far) : 1;
+      const d = nl * sh * 0.85 * (1 - metal * 0.6) * l.power * at.k;
       const hx = LIGHT[0] - view[0], hy = LIGHT[1] - view[1], hz = LIGHT[2] - view[2];
       const hl = Math.hypot(hx, hy, hz) || 1;
       const nh = Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl);
-      const s = Math.pow(nh, 4 + gloss * gloss * 160) * (0.05 + gloss * 0.7) * sh * (0.4 + nl) * l.power;
+      const s = Math.pow(nh, 4 + gloss * gloss * 160) * (0.05 + gloss * 0.7) * sh * (0.4 + nl) * l.power * at.k;
       diff[0] += d * l.color[0]; diff[1] += d * l.color[1]; diff[2] += d * l.color[2];
       spec[0] += s * l.color[0]; spec[1] += s * l.color[1]; spec[2] += s * l.color[2];
     }
@@ -395,7 +408,8 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       // blended over the last third of the reach, since a hard switch drew a seam across a top-down shot (round 9).
       const away = boundsDistance(model, p[0], p[1], p[2]);
       const w = away >= reach ? 0 : away <= reach * 0.66 ? 1 : (reach - away) / (reach * 0.34);
-      const far: Vec3 = [0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[0]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[1]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[2]) / totalPower, 0)];
+      // A point light does not reach the far floor.
+      const far: Vec3 = [0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (l.pos ? 0 : (Math.max(0, l.dir[1]) * l.power * l.color[0]) / totalPower), 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (l.pos ? 0 : (Math.max(0, l.dir[1]) * l.power * l.color[1]) / totalPower), 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (l.pos ? 0 : (Math.max(0, l.dir[1]) * l.power * l.color[2]) / totalPower), 0)];
       const nearLit: Vec3 = w > 0 ? floorLight([p[0], p[1] + cell, p[2]]) : far;
       const nearAo = w > 0 ? occlusion(p, n) : 1;
       const lit: Vec3 = [far[0] + (nearLit[0] * nearAo - far[0]) * w, far[1] + (nearLit[1] * nearAo - far[1]) * w, far[2] + (nearLit[2] * nearAo - far[2]) * w];

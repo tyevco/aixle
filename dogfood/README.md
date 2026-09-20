@@ -179,10 +179,10 @@ ambient was raised; a low light meant "from the horizon"; chrome was
 white under a white sky; glass could not be judged in a quick pass;
 glass on a loft banded; a focus shot's marcher stopped at the frame so a
 through hole read as blind. Their reports' three changes each are
-answered below. Not done: a point light, a per-light contribution
-picture, an occlusion warning for a focus shot, environment thumbnails
-in the reference, a posed line for a joint step itself, and loop
-variables kept out of the step list.
+answered below. Not done: a per-light contribution picture, an
+occlusion warning for a focus shot, environment thumbnails in the
+reference, a posed line for a joint step itself, and loop variables
+kept out of the step list.
 
 ## What each round changed
 
@@ -381,8 +381,11 @@ zoom's frame cap, dof's scale, the command line overriding only the
 render's own view, speckle's blocks and a skin that hugs a curved body;
 then `check` warns when glass sits on a loft, a smooth boolean, a warp
 or a non-uniform scale (a `bound` flag on those fields), `arc(axis=)`
-stands an arc in yz or xy, and `examples/patterns.aix` is a plate of the
-ten patterns at two scales.
+stands an arc in yz or xy, `examples/patterns.aix` is a plate of the
+ten patterns at two scales, and `light(name, position=[x, y, z],
+range=)` is a point light, shadowed by what stands between and falling
+off with distance, so a lamp or a fire lights its neighbours (the lamp
+example's bulb now lights its base and the inside of its shade).
 
 ## Running a round
 

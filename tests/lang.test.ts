@@ -269,6 +269,13 @@ describe("interpreter", () => {
     expect(w).toContainEqual("set environment dusk: no such environment; the skies are studio, overcast, sunset, night (studio is the default)");
     expect(w).toContainEqual("set camera hero: no such camera; cameras: x; the render uses its own view");
     expect(w).toContainEqual('camera "x" (line 2): focus="nope" names no step or object; the shot frames the whole model');
+    // A point light: at a place, with a range; the parts it does not take are errors or a warning.
+    const point = run('light("fire", position=[0, 0.4, 0], range=1.5, color="#ff9a3c")\nlight("odd", position=[1, 1, 1], azimuth=30)');
+    expect(point.lights.map((l) => [l.name, l.position, l.range])).toEqual([["fire", [0, 0.4, 0], 1.5], ["odd", [1, 1, 1], 2]]);
+    expect(point.warnings).toContainEqual('light("odd") (line 2): a point light is at its position; azimuth and elevation are ignored');
+    expect(() => run('light("k", position=[1, 2])')).toThrow(/position is \[x, y, z\]/);
+    expect(() => run('light("k", range=2)')).toThrow(/range goes with position/);
+    expect(() => run('light("k", position=[0, 1, 0], range=0)')).toThrow(/range is the distance/);
     expect(() => run('light("k", size=0)')).toThrow(/size is the light's apparent size, above 0/);
     expect(() => run('light("k", colour="red")')).toThrow(/no parameter named 'colour'/);
     expect(() => run('light("k", color="nope")')).toThrow(/light\("k"\): color: "nope" is not a material preset or a colour/);

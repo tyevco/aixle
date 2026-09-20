@@ -24,9 +24,12 @@ lamp = base + arm + joint + stem + shade + bulb
 show lamp
 
 # Lit for the picture: a warm key from the front left, a cool rim from behind, under a night sky so the
-# glowing bulb carries it; a second shot framed on the shade. beauty.png takes the "desk" camera.
+# glowing bulb carries it, and a point light in the air just under the bulb so it lights the base and the
+# inside of the shade (a glow lights only itself); a second shot framed on the shade. beauty.png takes the
+# "desk" camera.
 light("key", azimuth=-35, elevation=45, size=1.5, color="#fff1dc")
 light("rim", azimuth=150, elevation=25, power=0.6, color="#bcd4ff")
+light("bulb", position=[1.6, 2.28, 0], range=2.5, size=0.5, color="#fff0b0", power=1.4)
 camera("desk", azimuth=30, elevation=18, zoom=1.15)
 camera("shade", focus="shade", azimuth=60, elevation=10)
 set camera desk

@@ -1139,7 +1139,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const ambient = typeof evaluation.settings.ambient === "number" ? evaluation.settings.ambient : undefined;
       const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
       // The program's lights, when it declares any; else the one key light the settings describe.
-      const lights: BeautyLight[] | undefined = evaluation.lights.length ? evaluation.lights.map((l) => ({ name: l.name, azimuth: l.azimuth, elevation: l.elevation, size: l.size, color: l.color, power: l.power })) : undefined;
+      const lights: BeautyLight[] | undefined = evaluation.lights.length ? evaluation.lights.map((l) => ({ name: l.name, azimuth: l.azimuth, elevation: l.elevation, size: l.size, color: l.color, power: l.power, position: l.position, range: l.range })) : undefined;
       // Framed like the views: on the focused step when there is one.
       // Framed on the surface the mesh found, not the box a blend or a displace padded (measured: a tree's box was
       // 10% wider than its surface on every side, and the zoom could not reach past it).
@@ -1400,7 +1400,7 @@ export function roleLabel(role: StepRole | undefined): string {
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */
 export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false): string[] {
   const lines: string[] = [];
-  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`);
+  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`);
   if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
   if (environment) lines.push(`Environment: ${environment}`);
   return lines;
