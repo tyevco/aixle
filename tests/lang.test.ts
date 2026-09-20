@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/lang/lexer.js";
 import { parse } from "../src/lang/parser.js";
-import { evaluate } from "../src/lang/interpreter.js";
+import { assertLine, evaluate } from "../src/lang/interpreter.js";
 import { isShape2, isShape3 } from "../src/lang/values.js";
 import type { Shape3 } from "../src/sdf/types.js";
 
@@ -57,6 +57,12 @@ describe("parser", () => {
     expect(p.body[0]).toMatchObject({ type: "assert", test: { type: "binary", op: "<", left: { op: "+" }, right: { op: "*" } }, message: { type: "str", value: "sum" } });
     expect(p.body[1]).toMatchObject({ type: "assert", test: { op: "==" }, message: undefined });
     expect(() => parse("assert = 1")).toThrow(/'assert' is a keyword/);
+    // A pose name after the message, or before it, as a bare word or a string.
+    expect(parse('assert tall(m) < 2, "shut", pose=shut').body[0]).toMatchObject({ type: "assert", message: { value: "shut" }, pose: "shut" });
+    expect(parse('assert tall(m) < 2, pose="shut", "closed"').body[0]).toMatchObject({ type: "assert", message: { value: "closed" }, pose: "shut" });
+    expect(parse("assert tall(m) < 2, pose=shut").body[0]).toMatchObject({ type: "assert", message: undefined, pose: "shut" });
+    expect(() => parse("assert 1, pose=2")).toThrow(/pose= names a pose/);
+    expect(() => parse('assert 1, "a", "b"')).toThrow(/a message and pose=name/);
   });
   it("refuses a keyword as a name with a plain message", () => {
     expect(() => parse("scene = box(1)")).toThrow(/line 1: 'scene' is a keyword and cannot be a name/);
@@ -198,6 +204,21 @@ describe("interpreter", () => {
     ]);
     expect(() => run("assert sphere(1)")).toThrow(/assert tests a number/);
     expect(() => run("assert 1 < 2, 3")).toThrow(/message is a string/);
+  });
+  it("judges an assert that names a pose only in that pose's evaluation", () => {
+    const src = 'lid = joint(box(1, 0.2, 1) | move(0, 1.1, 0), "hinge", 0, 1, 0.5)\npose("open", hinge=[-90, 0, 0])\nassert tall(lid) < 0.5, "lies flat", pose=open\nassert tall(lid) < 0.5, "at rest"\nassert tall(lid) < 0.5, pose=rest';
+    const rest = run(src);
+    // At rest the posed assert is pending, not judged; pose=rest is the rest evaluation.
+    expect(rest.asserts.map((a) => [a.line, a.passed, a.pose, a.pending])).toEqual([[3, true, "open", true], [4, true, undefined, undefined], [5, true, "rest", undefined]]);
+    expect(rest.warnings.filter((w) => /assert/.test(w))).toEqual([]);
+    const open = evaluate(parse(src), { jointPoses: rest.poses[0].joints, poseName: "open" });
+    // Opened, the lid stands up: its own assert fails with the numbers it saw; the unposed one is evaluated here too
+    // (the pipeline takes its verdict from the rest evaluation) and the pose=rest one is pending.
+    expect(open.asserts.map((a) => [a.line, a.passed, a.pending])).toEqual([[3, false, undefined], [4, false, undefined], [5, true, true]]);
+    expect(open.asserts[0].detail).toMatch(/^1 < 0\.5$/);
+    expect(assertLine(open.asserts[0])).toBe("assert (line 3) in pose open fails: tall(lid) < 0.5 is 1 < 0.5: lies flat");
+    // An assert for a pose that does not exist is never tested, and says so.
+    expect(run(`${src}\nassert 1, pose=shut`).warnings).toContainEqual('assert (line 6) is for pose "shut", which is not defined; poses: open; it is never tested');
   });
   it("warns when a shape expression is not assigned", () => {
     const ev = run("a = sphere(1)\na | move(1, 0, 0)");

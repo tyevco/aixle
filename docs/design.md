@@ -245,8 +245,9 @@ seconds, most of it the shut box again and again); a quick pass draws
 the sheet and leaves the strips to the full render. A focus applies to
 them too: the model clipped to the focused step's frame where each pose
 puts it, at the frame's cell. Asserts are judged at rest, because they
-are promises about the model as built and a pose is a view of it; a
-posed report says on its Stands, footprint and watertight rows which
+are promises about the model as built and a pose is a view of it,
+unless one names its pose (`pose=reach`), which is judged in that pose's
+own evaluation, the same one the pose sheet draws from; a posed report says on its Stands, footprint and watertight rows which
 pose it measured, does not judge standing when the pose lifts the model
 off the floor, and takes the footprint at y = 0 when a corner dips a
 little below it (a sitting fox's tail tip), since a model built on the
@@ -254,10 +255,13 @@ floor stands on the floor.
 
 An animation's keys are evenly spaced unless it gives times, and blend
 linearly unless it gives an ease, a cosine blend that slows to a stop
-at each key. glTF samplers are linear (its cubic spline needs tangents
-a pose does not have), so an eased animation is written as eight linear
-keys per segment: the file grows a little and every viewer plays the
-same curve the strip shows.
+at each key; `ease_ends` is the ease at the first and last key alone, so
+a loop can run through its seam or a one-shot launch at once, and a
+segment eased at one end only is a quarter sine. glTF samplers are
+linear (its cubic spline needs tangents a pose does not have), so an
+eased segment is written as eight linear keys, a linear one as its two:
+the file grows a little and every viewer plays the same curve the strip
+shows.
 
 ## Twist, taper, text
 

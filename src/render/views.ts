@@ -345,6 +345,8 @@ export interface Timing {
   times?: number[];
   /** 0 is linear; 1 slows to a stop at every key (a cosine blend). */
   ease?: number;
+  /** The ease at the first and last key alone; `ease` when absent. */
+  easeEnds?: number;
   /** Whether the animation loops, for the strip's bar; a one-shot says ONCE. */
   loop?: boolean;
 }
@@ -452,11 +454,26 @@ export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseV
   return out;
 }
 
-/** The blend fraction for a linear fraction u in [0, 1]: `ease` of the way from linear to a cosine ease in and out. */
-export function easeBlend(u: number, ease = 0): number {
-  if (ease <= 0) return u;
-  const smooth = (1 - Math.cos(Math.PI * u)) / 2;
-  return u + Math.min(1, ease) * (smooth - u);
+/**
+ * The blend fraction for a linear fraction u in [0, 1]: `easeIn` of the way from linear to a stop at the start,
+ * `easeOut` at the end. Equal eases are the cosine blend; a lone ease at one end is a quarter sine, so a launch
+ * can start at once and settle, or a loop's seam run straight through.
+ */
+export function easeBlend(u: number, easeIn = 0, easeOut = easeIn): number {
+  const a = Math.max(0, Math.min(1, easeIn)), b = Math.max(0, Math.min(1, easeOut));
+  if (a <= 0 && b <= 0) return u;
+  const both = (1 - Math.cos(Math.PI * u)) / 2;
+  const m = Math.min(a, b);
+  let v = u + m * (both - u);
+  if (a > m) v += (a - m) * (1 - Math.cos((Math.PI * u) / 2) - u);
+  if (b > m) v += (b - m) * (Math.sin((Math.PI * u) / 2) - u);
+  return v;
+}
+
+/** The eases at a segment's two keys: the first and last key of the animation take `easeEnds` when it is given. */
+function segmentEase(i: number, count: number, timing: Timing): [number, number] {
+  const ease = timing.ease ?? 0, ends = timing.easeEnds ?? ease;
+  return [i === 0 ? ends : ease, i === count - 2 ? ends : ease];
 }
 
 /** Which keyframe segment holds the time fraction t in [0, 1], and how far along it is, for evenly spaced or given times. */
@@ -466,14 +483,14 @@ export function keyAt(count: number, t: number, timing: Timing = {}): { i: numbe
   if (!timing.times || timing.times.length !== count) {
     const f = tt * (count - 1);
     const i = Math.min(count - 2, Math.floor(f));
-    return { i, u: easeBlend(f - i, timing.ease) };
+    return { i, u: easeBlend(f - i, ...segmentEase(i, count, timing)) };
   }
   const times = timing.times;
   const T = tt * times[times.length - 1];
   let i = 0;
   while (i < count - 2 && T >= times[i + 1]) i++;
   const span = times[i + 1] - times[i] || 1;
-  return { i, u: easeBlend(Math.max(0, Math.min(1, (T - times[i]) / span)), timing.ease) };
+  return { i, u: easeBlend(Math.max(0, Math.min(1, (T - times[i]) / span)), ...segmentEase(i, count, timing)) };
 }
 
 /** The pose at time t in [0, 1] along keyframe poses, every component (angles, move, scale) blended per joint. */
@@ -496,7 +513,7 @@ export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: st
   const width = frames * (frame + gutter) + gutter;
   const keyList = keys.map((k, i) => (timing.times ? `${k.name} ${fmt(timing.times[i])}s` : k.name)).join(" → ");
   // The bar says whether it loops (round 7: a one-shot's bar read like a loop's) and wraps a long key list.
-  const lines = barLines(`${name.toUpperCase()}   ${fmt(seconds)}s   ${timing.loop === false ? "once" : "loop"}${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}   keyframes: ${keyList}`, width);
+  const lines = barLines(`${name.toUpperCase()}   ${fmt(seconds)}s   ${timing.loop === false ? "once" : "loop"}${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}${timing.easeEnds !== undefined && timing.easeEnds !== (timing.ease ?? 0) ? `   ends ${fmt(timing.easeEnds)}` : ""}   keyframes: ${keyList}`, width);
   const bar = 6 + lines.length * BAR_LINE;
   const out = new Canvas(width, frame + gutter * 2 + bar + labelH, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);

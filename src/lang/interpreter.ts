@@ -53,6 +53,8 @@ export interface EvalOptions {
   moduleFrom?: string;
   /** The pose per joint name for this evaluation. Joints not named are at rest. */
   jointPoses?: Record<string, JointPose>;
+  /** The name of that pose, so an `assert ..., pose=name` knows whether this is its evaluation. */
+  poseName?: string;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -84,6 +86,8 @@ export interface Animation {
   times?: number[];
   /** 0 is linear between poses; 1 is a full ease in and out at every keyframe. */
   ease: number;
+  /** The ease at the first and last keyframe alone: 0 runs straight through the ends of a loop or a one-shot. */
+  easeEnds: number;
   loop: boolean;
   line: number;
 }
@@ -120,11 +124,15 @@ export interface AssertResult {
   passed: boolean;
   /** The library file the assert is in, when it is not the program's own. */
   file?: string;
+  /** The pose the assert is for (`pose=name`); none for a promise about the model at rest. */
+  pose?: string;
+  /** True when this evaluation is not the assert's pose, so it was not tested here. */
+  pending?: boolean;
 }
 
 /** One line for a failed assert, the same in `check`, the render's warnings and the report. */
 export function assertLine(a: AssertResult): string {
-  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line}) fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
 }
 
 const MAX_LOOP = 20000;
@@ -334,12 +342,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const list = positional[1] ?? values.find((v) => v.name === "poses")?.value;
     if (typeof name !== "string" || !Array.isArray(list) || list.some((p) => typeof p !== "string"))
       throw new RuntimeError(`animation(): animation(name, [pose, pose, ...], seconds=1, loop=1, times=[...], ease=0)`, line);
-    for (const v of values) if (v.name && !["poses", "seconds", "loop", "times", "ease"].includes(v.name)) throw new RuntimeError(`animation("${name}"): no parameter named '${v.name}'; it takes poses, seconds, loop, times and ease`, line);
+    for (const v of values) if (v.name && !["poses", "seconds", "loop", "times", "ease", "ease_ends"].includes(v.name)) throw new RuntimeError(`animation("${name}"): no parameter named '${v.name}'; it takes poses, seconds, loop, times, ease and ease_ends`, line);
     let seconds = values.find((v) => v.name === "seconds")?.value ?? positional[2] ?? 1;
     const loop = values.find((v) => v.name === "loop")?.value ?? 1;
     const ease = values.find((v) => v.name === "ease")?.value ?? 0;
+    const easeEnds = values.find((v) => v.name === "ease_ends")?.value ?? ease;
     if (typeof seconds !== "number" || typeof loop !== "number") throw new RuntimeError(`animation("${name}"): seconds and loop must be numbers`, line);
     if (typeof ease !== "number" || ease < 0 || ease > 1) throw new RuntimeError(`animation("${name}"): ease is a number from 0 (linear) to 1 (a full ease in and out at every pose)`, line);
+    if (typeof easeEnds !== "number" || easeEnds < 0 || easeEnds > 1) throw new RuntimeError(`animation("${name}"): ease_ends is a number from 0 to 1, the ease at the first and last pose (ease by default)`, line);
     let times: number[] | undefined;
     const t = values.find((v) => v.name === "times")?.value;
     if (t !== undefined) {
@@ -356,7 +366,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       seconds = last;
     }
     if ((seconds as number) <= 0) throw new RuntimeError(`animation("${name}"): seconds must be positive`, line);
-    const anim: Animation = { name, poses: list as string[], seconds: seconds as number, times, ease, loop: loop !== 0, line };
+    const anim: Animation = { name, poses: list as string[], seconds: seconds as number, times, ease, easeEnds, loop: loop !== 0, line };
     const existing = animations.findIndex((a) => a.name === name);
     if (existing >= 0) animations[existing] = anim; else animations.push(anim);
     return name;
@@ -660,6 +670,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "assert": {
+        // A promise about a pose is tested in that pose's evaluation and only noted in any other.
+        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true }); return; }
         // A comparison is evaluated side by side, so a failure can say what the two numbers were.
         const t = stmt.test;
         let value: Value, detail: string | undefined;
@@ -676,7 +688,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
           message = m;
         }
-        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0 });
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose });
         return;
       }
     }
@@ -713,6 +725,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         if (single && !axisJoints.has(j)) warnings.push(`pose "${p.name}" (line ${p.line}): ${j} is one number, but joint "${j}" has no axis=, so it takes [x, y, z] degrees`);
         if (!single && axisJoints.has(j) && (p.joints[j].angles[1] !== 0 || p.joints[j].angles[2] !== 0)) warnings.push(`pose "${p.name}" (line ${p.line}): joint "${j}" turns about its axis, so it takes one angle, not [x, y, z]; only the first number is used`);
       }
+    for (const a of asserts)
+      if (a.pose && a.pose !== "rest" && !poses.some((p) => p.name === a.pose)) warnings.push(`assert (line ${a.line}) is for pose "${a.pose}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}; it is never tested`);
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
     for (const a of animations)
       for (const pn of new Set(a.poses))

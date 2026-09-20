@@ -597,8 +597,24 @@ export function minecraftThinWarnings(ev: Evaluation, px: number, grid: number):
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses });
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName });
+}
+
+/**
+ * Every assert with its verdict: the rest evaluation's own, and for each pose an assert names (`pose=name`) the
+ * verdict from the program evaluated in that pose, which `evalIn` supplies (undefined for a pose that does not
+ * exist; the rest evaluation already warned about it).
+ */
+export function collectAsserts(rest: Evaluation, evalIn: (poseName: string) => Evaluation | undefined): AssertResult[] {
+  const out: AssertResult[] = rest.asserts.filter((a) => !a.pose || a.pose === "rest");
+  const poseNames = [...new Set(rest.asserts.filter((a) => a.pose && a.pose !== "rest").map((a) => a.pose!))];
+  for (const pn of poseNames) {
+    const ev = evalIn(pn);
+    if (!ev) continue;
+    out.push(...ev.asserts.filter((a) => a.pose === pn && !a.pending));
+  }
+  return out.sort((a, b) => a.line - b.line);
 }
 
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
@@ -625,10 +641,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
-  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints }) : rest;
-  // Asserts are the program's promises about the model as built, so they are judged at rest: a "2.5 tall" on a rig
-  // must not fail in its jump pose (round 7, twice).
-  const warnings = [...evaluation.warnings, ...rest.asserts.filter((a) => !a.passed).map(assertLine)];
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose }) : rest;
+  // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
+  // asserts for a pose share it.
+  const evalCache = new Map<string, Evaluation>();
+  const evalAt = (joints: Record<string, JointPose>, poseName?: string): Evaluation => {
+    const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
+    let ev = evalCache.get(key);
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name }); evalCache.set(key, ev); }
+    return ev;
+  };
+  // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"
+  // on a rig failed in its jump pose) unless one names its pose, which is tested in that pose's evaluation.
+  const asserts = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? evalAt(p.joints, pn) : undefined; });
+  const warnings = [...evaluation.warnings, ...asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // Set when the shown pose has lifted the whole model off the floor: standing is then not judged.
@@ -638,14 +664,6 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
-  // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips and a focused frame share it.
-  const evalCache = new Map<string, Evaluation>();
-  const evalAt = (joints: Record<string, JointPose>): Evaluation => {
-    const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
-    let ev = evalCache.get(key);
-    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints }); evalCache.set(key, ev); }
-    return ev;
-  };
   const shapeAt: ShapeAt = (joints) => evalAt(joints).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
   const size = Math.max(64, Math.round(opts.size ?? (evaluation.settings.size as number | undefined) ?? 512));
@@ -672,11 +690,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     .filter((a) => a.poses.every((pn) => pn === "rest" || poseViews.some((v) => v.name === pn)))
     .map((a) => {
       const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
-      const timing = { times: a.times, ease: a.ease };
+      const timing = { times: a.times, ease: a.ease, easeEnds: a.easeEnds };
       const keyTimes = a.times ?? keys.map((_, i) => (keys.length === 1 ? 0 : (i / (keys.length - 1)) * a.seconds));
       const times: number[] = [];
-      const sub = a.ease > 0 ? 8 : 1;
-      for (let i = 0; i < keyTimes.length - 1; i++) for (let k = 0; k < sub; k++) times.push(keyTimes[i] + ((keyTimes[i + 1] - keyTimes[i]) * k) / sub);
+      for (let i = 0; i < keyTimes.length - 1; i++) {
+        // A segment eased at either key is sampled eight times; a linear one keeps its two keys.
+        const eased = (i === 0 ? a.easeEnds : a.ease) > 0 || (i === keyTimes.length - 2 ? a.easeEnds : a.ease) > 0;
+        const sub = eased ? 8 : 1;
+        for (let k = 0; k < sub; k++) times.push(keyTimes[i] + ((keyTimes[i + 1] - keyTimes[i]) * k) / sub);
+      }
       times.push(keyTimes[keyTimes.length - 1]);
       const samples = times.map((t) => interpolatePose(keys, jointNames, a.seconds > 0 ? t / a.seconds : 0, timing));
       const axes: Record<string, Vec3 | undefined> = {};
@@ -945,7 +967,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       if (opts.quick) log(`quick pass: ${evaluation.animations.length} animation strip${evaluation.animations.length === 1 ? "" : "s"} skipped; the full render draws them`);
       else for (const a of evaluation.animations) {
         const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
-        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(poseShapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease, loop: a.loop }, cache).toPng()));
+        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(poseShapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease, easeEnds: a.easeEnds, loop: a.loop }, cache).toPng()));
       }
     }
     if (opts.beauty || evaluation.settings.beauty === 1) {
@@ -1037,7 +1059,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
-      ...(rest.asserts.length ? [`| Asserts | ${assertsRow(rest.asserts)}${shownPose ? " (judged at rest)" : ""} |`] : []),
+      ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),
       ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),
       ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; ${minecraftEntity ? "z is flipped: the entity's half turn and Bedrock's x mirror together" : "x is authored mirrored, as Bedrock draws it"}) |`] : []),
       "",
@@ -1083,7 +1105,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     }
     if (joints.length && output) lines.push("Joints, each under the joint it turns with:", "", "```", ...jointTreeLines(output, fmt), "```", "");
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
-    if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.map((pn, i) => (a.times ? `${pn} ${fmt(a.times[i])}s` : pn)).join(" → ")}, ${fmt(a.seconds)}s, ${a.loop ? "loop" : "once"}${a.ease ? `, ease ${fmt(a.ease)}` : ""})`).join("; ")}`, "");
+    if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.map((pn, i) => (a.times ? `${pn} ${fmt(a.times[i])}s` : pn)).join(" → ")}, ${fmt(a.seconds)}s, ${a.loop ? "loop" : "once"}${a.ease ? `, ease ${fmt(a.ease)}` : ""}${a.easeEnds !== a.ease ? `, ends ${fmt(a.easeEnds)}` : ""})`).join("; ")}`, "");
   }
   lines.push("## Steps", "", "Sizes and spans are bounding boxes: exact for primitives and unions, loose after a cut (`a - b` keeps a's box), a rotation or a twist; `a & b` tightens to the overlap.", "", "| # | Name | Line | Size | x | y | z | In output |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   shapeSteps.forEach((st, i) => {
@@ -1135,7 +1157,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
         watertight: edgeList.length ? { clusters: edgeList } : undefined,
-        asserts: rest.asserts.length ? rest.asserts : undefined,
+        asserts: asserts.length ? asserts : undefined,
         joints: joints.map((j) => ({ name: j.joint!.name, pivot: j.joint!.pivot })),
         poses: evaluation.poses.map((p) => p.name),
         animations: evaluation.animations.map((a) => a.name),

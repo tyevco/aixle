@@ -8,7 +8,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedShape, surfaceBottom, 
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { assertLine } from "./lang/interpreter.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
@@ -114,7 +114,7 @@ function main(argv: string[]): number {
       // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.joints) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints, pose.name) : rest;
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
@@ -178,9 +178,10 @@ function main(argv: string[]): number {
       if (warnings.length === 0) console.log("no warnings");
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
-      const failed = rest.asserts.filter((a) => !a.passed);
+      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn)) : undefined; });
+      const failed = all.filter((a) => !a.passed);
       for (const a of failed) console.log(assertLine(a));
-      if (rest.asserts.length) console.log(`asserts: ${failed.length ? `${rest.asserts.length - failed.length} pass, ${failed.length} fail` : `${rest.asserts.length} pass`}${pose ? " (judged at rest)" : ""}`);
+      if (all.length) console.log(`asserts: ${failed.length ? `${all.length - failed.length} pass, ${failed.length} fail` : `${all.length} pass`}${all.some((a) => a.pose) ? " (at rest, or in the pose each names)" : pose ? " (judged at rest)" : ""}`);
       return failed.length ? 1 : 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);

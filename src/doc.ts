@@ -64,10 +64,10 @@ export function referenceMarkdown(): string {
     "",
     "### animation",
     "",
-    "A glTF animation from poses: `animation(\"wave\", [\"rest\", \"wave\", \"rest\"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. `times=[0, 0.2, 1.2]` puts each pose at its own second instead (the last is the length, so leave seconds out); `ease=1` slows to a stop at every pose (0 is linear, between is a blend), which the GLB carries as a few keys per segment. A rest pose is any pose with no angles, or the name \"rest\". Each animation gets a frame strip `anim_<name>.png`, and the viewer page plays them with loop, speed and a scrub bar.",
+    "A glTF animation from poses: `animation(\"wave\", [\"rest\", \"wave\", \"rest\"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. `times=[0, 0.2, 1.2]` puts each pose at its own second instead (the last is the length, so leave seconds out); `ease=1` slows to a stop at every pose (0 is linear, between is a blend), which the GLB carries as a few keys per segment; `ease_ends=0` leaves the first and last pose alone, so a loop runs through its seam. A rest pose is any pose with no angles, or the name \"rest\". Each animation gets a frame strip `anim_<name>.png`, and the viewer page plays them with loop, speed and a scrub bar.",
     "",
-    "    animation(name, poses, seconds=1, loop=1, ease=0) -> string",
-    "    animation(name, poses, times=[0, ...], loop=1, ease=0) -> string",
+    "    animation(name, poses, seconds=1, loop=1, ease=0, ease_ends=ease) -> string",
+    "    animation(name, poses, times=[0, ...], loop=1, ease=0, ease_ends=ease) -> string",
     "",
   );
   out.push("## Roblox attachments", "", "An `anchor` with one of these names becomes the accessory's attachment in `model.roblox.glb` (`set roblox 1`), and the report checks the model against the size limit for it at the Normal body scale, in studs (width × height × depth).", "", "| Attachment | Kind | Limit |", "| --- | --- | --- |");
