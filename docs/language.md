@@ -560,7 +560,10 @@ when it has one and taking the render's own view for whatever it leaves
 out; `set camera hero` makes that shot the sheet's perspective view and
 `beauty.png` as well (the front, right and top views are unchanged).
 `check` and the report list the lights, the cameras and the
-environment, so a misspelt name is a warning before any render.
+environment, so a misspelt name is a warning before any render. With
+two or more lights `render --beauty` also writes `lights.png`, the
+picture under each light alone and then all of them, so what a rim
+light adds is seen rather than guessed from two near-identical shots.
 
 What the lights and the skies can and cannot do, measured in round 9:
 

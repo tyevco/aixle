@@ -1154,6 +1154,25 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       time("beauty", () => shoot("beauty.png", beautyFrame, !!focusName, azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}  ${dimsLabel(beautyFrame)}`));
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
       // Every declared camera is a shot of its own, framed on its focus= when it has one.
+      // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
+      // near-identical pictures (round 9: two agents could not tell whether a light did anything).
+      if (lights && lights.length >= 2) {
+        const frame = Math.max(96, Math.round(bsize * 0.4));
+        const gutter = 6, bar = 26;
+        const strip = new Canvas((frame + gutter) * (lights.length + 1) + gutter, bar + frame + gutter * 2, INK.page);
+        strip.fill(0, 0, strip.width, bar, INK.bar);
+        drawText(strip, 10, 7, `LIGHTS   each alone, then all ${lights.length}`, INK.barText, 2);
+        const one = (ls: BeautyLight[] | undefined, label: string) =>
+          renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights: ls, environment, fitPoints: focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: focusName ? modelBounds : undefined, label });
+        time("lights", () => {
+          lights.forEach((l, i) => {
+            const desc = l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`;
+            strip.blit(one([l], `${l.name}  ${desc}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}`), gutter + i * (frame + gutter), bar + gutter);
+          });
+          strip.blit(one(lights, "all"), gutter + lights.length * (frame + gutter), bar + gutter);
+        });
+        write("lights.png", strip.toPng());
+      }
       for (const c of evaluation.cameras) {
         if (shot && opts.camera && c.name !== shot.name) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
@@ -1320,6 +1339,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
+    "lights.png": "the beauty render under each declared light alone, then all of them, so each light's contribution can be seen",
     ...cameraFiles,
   };
   for (const f of files) lines.push(`- \`${f}\`: ${descriptions[f] ?? (f.startsWith("anim_") ? "frames through the animation" : "")}`);
@@ -1400,7 +1420,7 @@ export function roleLabel(role: StepRole | undefined): string {
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */
 export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false): string[] {
   const lines: string[] = [];
-  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`);
+  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}${evaluation.lights.length >= 2 ? " (lights.png shows each alone)" : ""}`);
   if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
   if (environment) lines.push(`Environment: ${environment}`);
   return lines;

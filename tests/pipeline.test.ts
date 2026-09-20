@@ -32,7 +32,9 @@ describe("pipeline", () => {
       const r = run("m = box(1) | paint(\"gold\")", "box.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, beauty: true, beautySize: 64 });
       // A declared camera is a shot of its own, framed on its focus; the report lists lights, cameras and the sky.
       const shots = run('m = box(1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5, color="#cfe0ff")\ncamera("hero", azimuth=20, zoom=1.2)\ncamera("knob", focus="k")\nset environment night\nshow both', "shots.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
-      expect(shots.files).toEqual(expect.arrayContaining(["beauty.png", "beauty_hero.png", "beauty_knob.png"]));
+      expect(shots.files).toEqual(expect.arrayContaining(["beauty.png", "beauty_hero.png", "beauty_knob.png", "lights.png"]));
+      expect(shots.report).toMatch(/\(lights\.png shows each alone\)/);
+      expect(shots.timings.lights).toBeDefined();
       expect(shots.report).toMatch(/Lights: key \(azimuth -30, elevation 40, size 1, white\); rim \(azimuth 160, elevation 20, size 1, #cfe0ff, power 0\.5\)/);
       expect(shots.report).toMatch(/Cameras: hero \(azimuth 20, zoom 1\.2\) → beauty_hero\.png; knob \(on k\) → beauty_knob\.png/);
       expect(shots.report).toMatch(/Environment: night/);

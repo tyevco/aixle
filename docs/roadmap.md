@@ -206,8 +206,6 @@ It is a printer over the dependencies the evaluation records. Not built:
 - An APNG turntable, since the PNG writer is there.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
-- A per-light strip so a rim light's contribution can be seen (round 9
-  asked; a point light, its other ask, is built).
 - A note when a camera's focus is mostly hidden by another step, and a
   thumbnail per environment in the reference (round 9); a `posed` line
   for a joint step itself.
