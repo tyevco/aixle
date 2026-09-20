@@ -4,11 +4,11 @@
  *   aixle check  <file.aix>
  *   aixle doc    [--write FILE]
  */
-import { anchorsOf, hasLooseBounds, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
+import { anchorsOf, hasLooseBounds, jointTreeLines, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, diff, cutWarnings, foldThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { assertLine } from "./lang/interpreter.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
@@ -17,7 +17,9 @@ import { isShape2, isShape3, typeName } from "./lang/values.js";
 import { parse } from "./lang/parser.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
-const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
+// Two decimals, one above ten, none above a hundred; below 0.1, two significant figures, so a small model's parts
+// (a 0.006 lens on a 0.4-unit drone, round 7) still print as themselves.
+const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.005 ? String(Number(v.toPrecision(2))) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 /** A library's Markdown: its leading comment, then every top-level def with its signature and the comment above it. */
 function libraryMarkdown(file: string): string {
@@ -116,6 +118,8 @@ function main(argv: string[]): number {
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
+      // The rig as a tree, joints made inside a def included, so it can be checked without a render (round 7).
+      if (rest.output) { const tree = jointTreeLines(rest.output, short); if (tree.length) console.log(`joints:\n${tree.map((l) => `  ${l}`).join("\n")}`); }
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
       for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${m.names.join(", ")}`);
@@ -161,16 +165,22 @@ function main(argv: string[]): number {
       if (ev.output && !isEmpty(ev.output.bounds)) {
         // The surface's lowest point, not the bounds': the note a render would make, without the render.
         const bottom = surfaceBottom(ev.output);
-        if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
+        // In a pose the floor is the pose's doing: ground() would move the rest model and the exports too.
+        if (pose && bottom < -cellSize) console.log(`note: in pose ${pose.name} the lowest point of the surface is at y = ${short(bottom)}, below the floor: raise the root joint with xform(move=) in the pose, or bend it less`);
+        else if (pose && bottom > cellSize * 2) console.log(`note: in pose ${pose.name} the model is off the floor: its lowest point is at y = ${short(bottom)} (standing is not judged in this pose)`);
+        else if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
       }
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize)];
+      // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
+      const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
-      const failed = ev.asserts.filter((a) => !a.passed);
+      // They are judged at rest: a promise about the model as built, whatever pose is being measured.
+      const failed = rest.asserts.filter((a) => !a.passed);
       for (const a of failed) console.log(assertLine(a));
-      if (ev.asserts.length) console.log(`asserts: ${failed.length ? `${ev.asserts.length - failed.length} pass, ${failed.length} fail` : `${ev.asserts.length} pass`}`);
+      if (rest.asserts.length) console.log(`asserts: ${failed.length ? `${rest.asserts.length - failed.length} pass, ${failed.length} fail` : `${rest.asserts.length} pass`}${pose ? " (judged at rest)" : ""}`);
       return failed.length ? 1 : 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);

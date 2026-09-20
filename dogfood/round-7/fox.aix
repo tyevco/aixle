@@ -1,0 +1,77 @@
+# A fox as a Minecraft Bedrock entity: boxes on the 16-pixel lattice, one
+# unit a block, facing +z (the entity export turns it north). Every part is a
+# bone: body is the root, head, four legs, tail with tail_tip nested.
+set minecraft 16
+set minecraft_entity 1
+set grid 128
+
+px = 1 / 16
+fur = material("#e8842c", rough=0.8)
+white = material("#f4f0e8", rough=0.7)
+black = material("#1a1a1c", rough=0.6)
+eye = material("#241408", rough=0.3)
+
+# A Bedrock cube from its low corner and size in pixels, grown a third of a
+# pixel (upward only in y, so feet stay on y = 0) so touching bones overlap into one piece.
+def cube(ox, oy, oz, w, h, d) = box((w + 0.35) * px, (h + 0.35) * px, (d + 0.35) * px) | move((ox + w / 2) * px, (oy + (h + 0.35) / 2) * px, (oz + d / 2) * px)
+
+# Body: 6 wide, 5 tall, 8 long, sitting on the legs. The white chest is the body's own front bottom
+# pixel row, painted: as a decal it reached model.geo.png on the underside but never on the front
+# (north) face, whatever depth the region was given, and a thin painted skin did not either (measured, round 7).
+chest = cube(-3, 2, 3, 6, 2, 1) | paint(white)
+body_p = ((cube(-3, 2, -4, 6, 5, 7) + cube(-3, 4, 3, 6, 3, 1)) | paint(fur)) + chest
+
+# Head: 4 by 4 by 4 on the front of the body, a 2 by 2 snout whose top front pixel is a black nose cube, two
+# ears with black tip pixels, eyes as decals. Colour that must reach model.geo.png is a whole painted pixel
+# cube: a thin painted skin (0.9 px) and a decal on a front face never reached the texture (measured, round 7).
+skull = cube(-2, 4, 3, 4, 4, 4)
+snout = cube(-1, 4, 7, 2, 2, 1) + cube(-1, 4, 8, 2, 1, 1)
+nose = cube(-1, 5, 8, 2, 1, 1) | paint(black)
+ear_l = cube(1, 8, 4, 1, 1, 1)
+ear_r = cube(-2, 8, 4, 1, 1, 1)
+ear_tips = (cube(1, 9, 4, 1, 1, 1) + cube(-2, 9, 4, 1, 1, 1)) | paint(black)
+eyes = (box(1 * px, 1 * px, 1.6 * px) | move(1.5 * px, 6.5 * px, 7 * px)) + (box(1 * px, 1 * px, 1.6 * px) | move(-1.5 * px, 6.5 * px, 7 * px))
+head_p = (((skull + snout + ear_l + ear_r) | paint(fur)) + nose + ear_tips) | decal(eyes, eye)
+head = joint(head_p, "head", 0, 6 * px, 3 * px)
+
+# Legs: 2 by 3 by 2, hinged at the hip where they meet the body; the paw is the bottom pixel, painted black
+# (as a decal it reached the texture only when its region ran 1.5 px below the sole).
+def leg(name, x, z) =
+  joint((cube(x, 1, z, 2, 2, 2) | paint(fur)) + (cube(x, 0, z, 2, 1, 2) | paint(black)),
+        name, (x + 1) * px, 3 * px, (z + 1) * px)
+front_left = leg("front_left", 1, 2)
+front_right = leg("front_right", -3, 2)
+back_left = leg("back_left", 1, -4)
+back_right = leg("back_right", -3, -4)
+
+# Tail: a 2 by 2 by 3 segment off the back of the body, then a taller white tip, each on its own hinge.
+tail_tip_p = cube(-1, 4, -10, 2, 3, 3) | paint(white)
+tail_tip = joint(tail_tip_p, "tail_tip", 0, 5 * px, -7 * px)
+tail_p = (cube(-1, 4, -7, 2, 2, 3) | paint(fur)) + tail_tip
+tail = joint(tail_p, "tail", 0, 5 * px, -4 * px)
+
+# The body carries everything; its pivot is on the floor under the hips, so a
+# squash about it keeps the feet on the ground and a pitch back lifts the nose.
+fox_p = body_p + head + front_left + front_right + back_left + back_right + tail
+fox = joint(fox_p, "body", 0, 0, -3 * px)
+show fox
+
+# Poses. Rotation is right-handed: a positive x angle turns the nose down, a
+# hanging leg back and the tail (which points to -z) up, so a leg forward is negative x.
+pose("rest")
+pose("look", head=[8, 30, 12])
+pose("walk_a", front_left=[-30, 0, 0], back_right=[-30, 0, 0], front_right=[30, 0, 0], back_left=[30, 0, 0])
+pose("walk_b", front_left=[30, 0, 0], back_right=[30, 0, 0], front_right=[-30, 0, 0], back_left=[-30, 0, 0])
+pose("crouch", body=xform(move=[0, -0.5 * px, 0], scale=[1.05, 0.8, 1.05]), head=[18, 0, 0], front_left=[-30, 0, 0], front_right=[-30, 0, 0], back_left=[30, 0, 0], back_right=[30, 0, 0], tail=[-10, 0, 0])
+pose("pounce", body=xform(rotate=[-12, 0, 0], move=[0, 5 * px, 5 * px], scale=[0.95, 0.95, 1.15]), head=[10, 0, 0], front_left=[-45, 0, 0], front_right=[-45, 0, 0], back_left=[40, 0, 0], back_right=[40, 0, 0], tail=[25, 0, 0], tail_tip=[15, 0, 0])
+pose("sit", body=xform(rotate=[-20, 0, 0], move=[0, -1.5 * px, 0]), back_left=[-70, 0, 0], back_right=[-70, 0, 0], front_left=[20, 0, 0], front_right=[20, 0, 0], head=[20, 0, 0], tail=[-25, 0, 0], tail_tip=[45, 0, 0])
+pose("breath_l", body=xform(scale=[1, 1.04, 1]), tail=[0, 20, 0], tail_tip=[0, 15, 0])
+pose("breath_r", body=xform(scale=[1, 1.04, 1]), tail=[0, -20, 0], tail_tip=[0, -15, 0])
+
+# Animations: the idle breathes and sways, the walk loops through its two
+# poses, the pounce holds the crouch, snaps into the leap and settles.
+animation("idle", ["rest", "breath_l", "rest", "breath_r", "rest"], seconds=3, loop=1, ease=1)
+animation("walk", ["walk_a", "walk_b", "walk_a"], seconds=0.6, loop=1)
+animation("pounce", ["rest", "crouch", "crouch", "pounce", "rest"], times=[0, 0.3, 0.8, 0.95, 1.4], loop=0, ease=1)
+
+assert pieces(fox) == 1, "one piece: every bone overlaps its parent"

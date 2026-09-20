@@ -1,0 +1,107 @@
+# A wooden marionette as a Roblox rig: a unit is a stud, about 2.5 studs
+# tall, standing on y = 0 and facing +z. Painted pine limbs with a darker
+# walnut ball at every hinge; a painted face. Left is the figure's left (+x).
+# Every limb is built in place, then wrapped in a joint at its world pivot;
+# the elbow's joint sits inside the shoulder's part and the knee's inside
+# the hip's, so they turn with them. The whole figure is one root joint,
+# "body", pivoted at the origin so a squash keeps the feet on the floor.
+set roblox 1
+set grid 128
+
+wood = material("pine", scale=0.18)
+ball = material("walnut", scale=0.1)
+skin = material("#f0d2a8", rough=0.7)
+ink = material("#2a1a10", rough=0.5)
+blush = material("#e07a70", rough=0.7)
+
+# Landmarks (y of each hinge, x of each side).
+hip_y = 1.2
+knee_y = 0.68
+ankle_y = 0.16
+leg_x = 0.17
+shoulder_y = 1.85
+shoulder_x = 0.34
+elbow_y = 1.43
+wrist_y = 1.03
+neck_y = 1.9
+
+def hinge(x, y, z, r=0.1) = sphere(r) | move(x, y, z) | paint(ball)
+
+# An arm: upper arm from the shoulder down to the elbow, forearm from the
+# elbow to the wrist, a paddle hand; the elbow joint nested in the shoulder's.
+def arm(shoulder, elbow, s) =
+  joint(
+    (capsule(0.075, shoulder_y - elbow_y + 0.06) | move(s * shoulder_x, (shoulder_y + elbow_y) / 2, 0) | paint(wood))
+    + hinge(s * shoulder_x, shoulder_y, 0, 0.11)
+    + joint(
+        (capsule(0.065, elbow_y - wrist_y + 0.06) | move(s * shoulder_x, (elbow_y + wrist_y) / 2, 0) | paint(wood))
+        + hinge(s * shoulder_x, elbow_y, 0, 0.095)
+        + (box(0.13, 0.2, 0.06, round=0.025) | move(s * shoulder_x, wrist_y - 0.1, 0) | paint(wood))
+        + hinge(s * shoulder_x, wrist_y, 0, 0.07),
+        elbow, s * shoulder_x, elbow_y, 0),
+    shoulder, s * shoulder_x, shoulder_y, 0)
+
+# A leg: thigh from the hip to the knee, shin from the knee to the ankle,
+# a foot pointing +z that stands on y = 0; the knee joint nested in the hip's.
+def leg(hip, knee, s) =
+  joint(
+    (capsule(0.095, hip_y - knee_y + 0.06) | move(s * leg_x, (hip_y + knee_y) / 2, 0) | paint(wood))
+    + hinge(s * leg_x, hip_y, 0, 0.12)
+    + joint(
+        (capsule(0.08, knee_y - ankle_y + 0.06) | move(s * leg_x, (knee_y + ankle_y) / 2, 0) | paint(wood))
+        + hinge(s * leg_x, knee_y, 0, 0.105)
+        + (box(0.18, 0.11, 0.36, round=0.03) | move(s * leg_x, 0.055, 0.07) | paint(wood))
+        + hinge(s * leg_x, ankle_y, 0, 0.085),
+        knee, s * leg_x, knee_y, 0),
+    hip, s * leg_x, hip_y, 0)
+
+left_arm = arm("left_shoulder", "left_elbow", 1)
+right_arm = arm("right_shoulder", "right_elbow", -1)
+left_leg = leg("left_hip", "left_knee", 1)
+right_leg = leg("right_hip", "right_knee", -1)
+
+# Torso: a rounded block from the hips to the shoulders, with a pelvis under it.
+chest = box(0.62, 0.62, 0.3, round=0.09) | move(0, 1.6, 0) | paint(wood)
+pelvis = box(0.5, 0.22, 0.26, round=0.08) | move(0, 1.22, 0) | paint(wood)
+torso = chest + pelvis
+
+# Head on a neck, with a painted face: eyes, a mouth, two cheeks.
+neck = cylinder(0.06, 0.2) | move(0, neck_y + 0.05, 0) | paint(wood)
+head_r = 0.25
+head_y = 2.5 - head_r
+skull = sphere(head_r) | move(0, head_y, 0) | paint(skin)
+eye_l = sphere(0.045) | move(0.09, head_y + 0.04, head_r)
+eye_r = sphere(0.045) | move(-0.09, head_y + 0.04, head_r)
+mouth = box(0.14, 0.03, 0.08) | move(0, head_y - 0.09, head_r)
+cheeks = mirror(sphere(0.05) | move(0.15, head_y - 0.04, head_r - 0.03), "x")
+face = skull | decal(cheeks, blush) | decal(eye_l + eye_r + mouth, ink)
+head = joint(face + neck + hinge(0, neck_y, 0, 0.075), "neck", 0, neck_y, 0)
+
+figure = torso + head + left_arm + right_arm + left_leg + right_leg
+marionette = joint(figure, "body", 0, 0, 0) | anchor("BodyBackAttachment", 0, 1.6, -0.15)
+show marionette
+
+# Poses. A hanging limb swings forward (+z) with a negative x angle; a knee
+# bends back with a positive one; a left arm raised sideways is a positive z.
+pose("stand")
+pose("wave", left_shoulder=[0, 0, 125], left_elbow=[0, 0, 65], neck=[0, 0, -8])
+# A walk's extremes: the front leg swings 30 forward with a little knee so its
+# foot stays flat, the back leg trails with its knee bent; the body drops 0.08
+# so the front foot lands on the floor, and the opposite arm swings forward.
+pose("step_left", body=xform(move=[0, -0.08, 0]), left_hip=[-30, 0, 0], left_knee=[20, 0, 0], right_hip=[25, 0, 0], right_knee=[35, 0, 0],
+     right_shoulder=[-35, 0, 0], right_elbow=[-25, 0, 0], left_shoulder=[30, 0, 0])
+pose("step_right", body=xform(move=[0, -0.08, 0]), right_hip=[-30, 0, 0], right_knee=[20, 0, 0], left_hip=[25, 0, 0], left_knee=[35, 0, 0],
+     left_shoulder=[-35, 0, 0], left_elbow=[-25, 0, 0], right_shoulder=[30, 0, 0])
+pose("crouch", body=xform(move=[0, -0.13, 0], scale=[1.06, 0.94, 1.06]),
+     left_hip=[-45, 0, 0], right_hip=[-45, 0, 0], left_knee=[80, 0, 0], right_knee=[80, 0, 0],
+     left_shoulder=[-40, 0, 0], right_shoulder=[-40, 0, 0], left_elbow=[-30, 0, 0], right_elbow=[-30, 0, 0],
+     neck=[-12, 0, 0])
+pose("jump", body=xform(move=[0, 0.5, 0], scale=[0.94, 1.1, 0.94]),
+     left_shoulder=[0, 0, 150], right_shoulder=[0, 0, -150], neck=[15, 0, 0])
+
+animation("walk", ["step_left", "step_right", "step_left"], seconds=1.2, loop=1, ease=1)
+animation("wave", ["stand", "wave", "stand"], times=[0, 0.25, 1.2], ease=1)
+animation("jump", ["crouch", "jump", "stand"], times=[0, 0.3, 0.9], loop=0, ease=1)
+
+assert pieces(marionette) == 1, "one piece: every limb overlaps its hinge"
+assert tall(marionette) < 8.59, "under the back accessory's height in every pose"

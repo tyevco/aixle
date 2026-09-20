@@ -18,8 +18,8 @@ import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedro
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
-import { anchorsOf, allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
-import { INK, interpolatePose, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
+import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
@@ -100,8 +100,9 @@ export interface RunResult {
   physics?: Physics;
 }
 
+// Three decimals, or three significant figures below 0.1, so a 0.4-unit drone's 0.006 lens is not "0.01" (round 7).
 const fmt = (v: number): string => {
-  const s = Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  const s = Number.isInteger(v) ? String(v) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.0005 ? String(Number(v.toPrecision(3))) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   return s === "-0" ? "0" : s;
 };
 
@@ -589,6 +590,12 @@ export function cellFor(evaluation: Evaluation, gridOverride?: number): { grid: 
   return { grid, cellSize: Math.max(s[0], s[1], s[2]) / grid };
 }
 
+/** The thin-part warnings a Bedrock export at `px` pixels per block gets: a part under a voxel is lost in the geometry. */
+export function minecraftThinWarnings(ev: Evaluation, px: number, grid: number): string[] {
+  const voxel = 1 / px;
+  return foldThinWarnings(thinWarnings(ev, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${px} pixels per block; set minecraft ${px * 2} halves it)`);
+}
+
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>): Evaluation {
   return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses });
@@ -619,15 +626,27 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
   const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints }) : rest;
-  const warnings = [...evaluation.warnings, ...evaluation.asserts.filter((a) => !a.passed).map(assertLine)];
+  // Asserts are the program's promises about the model as built, so they are judged at rest: a "2.5 tall" on a rig
+  // must not fail in its jump pose (round 7, twice).
+  const warnings = [...evaluation.warnings, ...rest.asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
+  // Set when the shown pose has lifted the whole model off the floor: standing is then not judged.
+  let offFloor = false;
   // A focused render's close-up mesh judged on its own (round 4: a focus sheet could not say whether the lug was sound).
   let closeUpNote: string | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
-  const shapeAt: ShapeAt = (joints) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints }).output;
+  // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips and a focused frame share it.
+  const evalCache = new Map<string, Evaluation>();
+  const evalAt = (joints: Record<string, JointPose>): Evaluation => {
+    const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
+    let ev = evalCache.get(key);
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints }); evalCache.set(key, ev); }
+    return ev;
+  };
+  const shapeAt: ShapeAt = (joints) => evalAt(joints).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
   const size = Math.max(64, Math.round(opts.size ?? (evaluation.settings.size as number | undefined) ?? 512));
   const output = evaluation.output;
@@ -669,6 +688,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let minecraftNote: string | undefined;
+  const minecraftEntity = opts.minecraftEntity ?? evaluation.settings.minecraft_entity === 1;
   let robloxNote: string | undefined;
   // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
   const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
@@ -741,6 +761,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     const views = opts.views ?? ["persp", "front", "right", "top"];
     // Views frame the surface's true extent, or the focused step's bounds.
     const focusName = opts.focus ?? (typeof evaluation.settings.focus === "string" ? evaluation.settings.focus : undefined);
+    let focusStep = false;
     let frame = trueBounds ?? bounds;
     let shownName = evaluation.outputName;
     if (focusName) {
@@ -765,6 +786,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         }
       }
       if (fs && !isEmpty(fs.bounds)) {
+        focusStep = true;
         // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the whole machine).
         // Carried through the joints and transforms above it, so a bucket inside a turned joint is framed where the
         // pose put it, not where it was built (measured: --focus in a pose framed the rest position).
@@ -835,7 +857,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         for (const j of joints) {
           const jn = j.joint!.name;
           const axis = j.joint!.axis;
-          rotations[jn] = c.samples.map((s) => { const an = s[jn]?.angles ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
+          // Only the joints a clip turns, moves or scales get channels (round 7: a lid's identity keys in the crank's clip).
+          if (c.samples.some((s) => s[jn]?.angles.some((v) => v !== 0))) rotations[jn] = c.samples.map((s) => { const an = s[jn]?.angles ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
           // Translation and scale channels only where a key moves or scales the joint: most joints only turn.
           if (c.samples.some((s) => s[jn]?.move.some((v) => v !== 0))) moves[jn] = c.samples.map((s) => [...(s[jn]?.move ?? [0, 0, 0])] as Vec3);
           if (c.samples.some((s) => s[jn]?.scale.some((v) => v !== 1))) scales[jn] = c.samples.map((s) => [...(s[jn]?.scale ?? [1, 1, 1])] as Vec3);
@@ -872,7 +895,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // texture of the materials. Written at rest, an object per bone, joints left to the game's own animation.
     const minecraftPx = opts.minecraft ?? (typeof evaluation.settings.minecraft === "number" ? evaluation.settings.minecraft : 0);
     if (minecraftPx > 0) {
-      const entity = opts.minecraftEntity ?? evaluation.settings.minecraft_entity === 1;
+      const entity = minecraftEntity;
       const bedrock = time("minecraft", () => toBedrock(rest.objects, name, { pixelsPerUnit: minecraftPx, entity }));
       write("model.geo.json", JSON.stringify(bedrock.geometry, null, 2) + "\n");
       write("model.geo.png", bedrock.texture.toPng());
@@ -882,8 +905,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // A voxel is the geometry's cell: a part thinner than one is lost there whatever the render's grid. A whole
       // voxel always holds a sample centre, so the threshold is one voxel, not the mesher's 1.2 cells: a one-pixel
       // plate is the ordinary member of a block model.
-      const voxel = 1 / minecraftPx;
-      warnings.push(...foldThinWarnings(thinWarnings(rest, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${minecraftPx} pixels per block; set minecraft ${minecraftPx * 2} halves it)`));
+      warnings.push(...minecraftThinWarnings(rest, minecraftPx, grid));
       const animNote = clips.length && bedrock.joints.length ? `; animation${clips.length === 1 ? "" : "s"} ${clips.map((c) => `animation.${name.replace(/[^A-Za-z0-9_]/g, "_")}.${c.name.replace(/[^A-Za-z0-9_]/g, "_")}`).join(", ")} in model.animation.json` : "";
       minecraftNote = `${bedrock.cubes} cube${bedrock.cubes === 1 ? "" : "s"} from ${bedrock.voxels} voxels at ${bedrock.pixelsPerUnit} pixels per block, texture ${bedrock.texture.width} × ${bedrock.texture.height}, bone${bedrock.bones.length === 1 ? "" : "s"} ${bedrock.bones.join(", ") || "none"}${bedrock.joints.length ? ` (${bedrock.joints.length} joint${bedrock.joints.length === 1 ? "" : "s"})` : ""}; identifier geometry.${name.replace(/[^A-Za-z0-9_]/g, "_")}${entity ? ", an entity facing north" : ", a block facing south"}${animNote}`;
       log(`minecraft: ${minecraftNote}, in ${timings.minecraft} ms`);
@@ -891,11 +913,39 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (joints.length > 0 && opts.poses !== false) {
       // Pose thumbnails are meshed at 1.5 cells: measured, 2 cells at a 0.35 sheet was too coarse to tell a
       // bent elbow from a broken one; a full-size check of one pose is `set pose name` or `--pose name`.
-      const poseCell = cellSize * 1.5;
-      time("poses", () => write("poses.png", renderPoses(shapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation).toPng()));
-      for (const a of evaluation.animations) {
+      let poseCell = cellSize * 1.5;
+      let poseShapeAt = shapeAt;
+      // With a focus, the sheet and the strips are close-ups of that step where each pose puts it, at the frame's
+      // own cell, so a gimbal's pan or a crank's turn is readable (round 7: a 10 px gimbal on a whole-drone strip).
+      if (focusName && focusStep) {
+        const frameAt = (ev: Evaluation): Bounds | undefined => {
+          const st = ev.steps.find((x) => x.name === focusName && isShape3(x.value));
+          const fs = st ? (st.value as Shape3) : ev.objects.find((o) => o.name === focusName)?.shape;
+          if (!fs || isEmpty(fs.bounds) || !ev.output) return undefined;
+          const own = tightBounds(fs);
+          const fb = placedBounds(ev.output, fs, own) ?? own;
+          const grow = Math.max(...boundsSize(fb)) * 0.08;
+          return { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] };
+        };
+        const restFrame = frameAt(evaluation);
+        if (restFrame) poseCell = (Math.max(...boundsSize(restFrame)) / grid) * 1.5;
+        poseShapeAt = (j) => {
+          const ev = evalAt(j);
+          const fr = frameAt(ev);
+          if (!fr || !ev.output) return ev.output;
+          const fc = boundsCenter(fr), fsz = boundsSize(fr);
+          const clipBox = move(box(fsz[0], fsz[1], fsz[2]), fc[0], fc[1], fc[2]);
+          const out = ev.output;
+          return { kind: "shape3", dist: (x, y, z) => Math.max(out.dist(x, y, z), clipBox.dist(x, y, z)), hit: (x, y, z) => { const q = out.hit(x, y, z); return { ...q, d: Math.max(q.d, clipBox.dist(x, y, z)) }; }, bounds: fr, cost: out.cost + 1 };
+        };
+      }
+      const cache: PoseCache = new Map();
+      time("poses", () => write("poses.png", renderPoses(poseShapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation, cache, !!(focusName && focusStep)).toPng()));
+      // A quick pass is for the geometry: the strips wait for the full render (round 7: 12 of a quick pass's 15 s).
+      if (opts.quick) log(`quick pass: ${evaluation.animations.length} animation strip${evaluation.animations.length === 1 ? "" : "s"} skipped; the full render draws them`);
+      else for (const a of evaluation.animations) {
         const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
-        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(shapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease }).toPng()));
+        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(poseShapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease, loop: a.loop }, cache).toPng()));
       }
     }
     if (opts.beauty || evaluation.settings.beauty === 1) {
@@ -961,7 +1011,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     }
     // A quick pass that dropped thin steps may have dropped the feet (measured: a bicycle's stand), so it does not
     // judge standing either.
+    offFloor = !!shownPose && physics.floor > cellSize * 2;
     if (quickDropped) { /* the quick note says the footprint is not judged */ }
+    else if (offFloor) { /* the pose lifts the model off the floor: nothing to stand on (round 7: a drone at take-off) */ }
     else if (!physics.stable && physics.footprint.length >= 3 && !robloxAccessory)
       warnings.push(`The centre of mass (${physics.centre.map(fmt).join(", ")}) is ${fmt(-physics.stabilityMargin)} units outside the base's footprint: the model would tip over. Widen the base or move weight over it.`);
     else if (physics.stable && physics.stabilityMargin < cellSize * 3 && !robloxAccessory)
@@ -982,12 +1034,12 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
+      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
-      ...(evaluation.asserts.length ? [`| Asserts | ${assertsRow(evaluation.asserts)} |`] : []),
+      ...(rest.asserts.length ? [`| Asserts | ${assertsRow(rest.asserts)}${shownPose ? " (judged at rest)" : ""} |`] : []),
       ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),
-      ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; x is authored mirrored, as Bedrock draws it) |`] : []),
+      ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; ${minecraftEntity ? "z is flipped: the entity's half turn and Bedrock's x mirror together" : "x is authored mirrored, as Bedrock draws it"}) |`] : []),
       "",
     );
     if (physics) {
@@ -999,10 +1051,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         "| --- | --- |",
         `| Mass | ${fmt(Math.abs(physics.volume) * density)} at density ${fmt(density)} |`,
         `| Centre of mass | (${physics.centre.map(fmt).join(", ")}) |`,
-        `| Base footprint | ${physics.footprint.length >= 3 ? `${physics.footprint.length}-sided hull of the points within ${fmt(cellSize * 1.5)} of y = ${fmt(physics.floor)}` : "none (fewer than three contact points)"} |`,
-        `| Stands | ${physics.footprint.length < 3 ? "unknown" : physics.stable ? `yes, centre of mass ${fmt(physics.stabilityMargin)} inside the footprint` : `no, centre of mass ${fmt(-physics.stabilityMargin)} outside the footprint`} |`,
+        `| Base footprint${shownPose ? ` (in pose ${shownPose})` : ""} | ${offFloor ? `none: the pose lifts the model off the floor (lowest point y = ${fmt(physics.floor)})` : physics.footprint.length >= 3 ? `${physics.footprint.length}-sided hull of the points within ${fmt(cellSize * 1.5)} of y = ${fmt(physics.floor)}` : "none (fewer than three contact points)"} |`,
+        `| Stands${shownPose ? ` (in pose ${shownPose})` : ""} | ${offFloor ? "not judged: off the floor in this pose" : physics.footprint.length < 3 ? "unknown" : physics.stable ? `yes, centre of mass ${fmt(physics.stabilityMargin)} inside the footprint` : `no, centre of mass ${fmt(-physics.stabilityMargin)} outside the footprint`} |`,
         `| Overhangs | ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface faces down more than 45° above the floor${physics.overhang > 0.005 ? " (a printer would need support there)" : ""} |`,
-        `| Pieces | ${piecesRow(physics, evaluation, cellSize)} |`,
+        `| Pieces | ${quickDropped ? `not judged on this quick pass (${quickDropped} thin step${quickDropped === 1 ? "" : "s"} dropped; the full render counts them)` : piecesRow(physics, evaluation, cellSize)} |`,
         `| Cavities | ${cavitiesRow(physics, cellSize)} |`,
         "",
       );
@@ -1029,9 +1081,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       }
       lines.push("");
     }
-    if (joints.length) lines.push(`Joints: ${joints.map((j) => `${j.joint!.name} at (${j.joint!.pivot.map(fmt).join(", ")})`).join("; ")}`, "");
+    if (joints.length && output) lines.push("Joints, each under the joint it turns with:", "", "```", ...jointTreeLines(output, fmt), "```", "");
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
-    if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.join(" → ")}, ${fmt(a.seconds)}s)`).join("; ")}`, "");
+    if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.map((pn, i) => (a.times ? `${pn} ${fmt(a.times[i])}s` : pn)).join(" → ")}, ${fmt(a.seconds)}s, ${a.loop ? "loop" : "once"}${a.ease ? `, ease ${fmt(a.ease)}` : ""})`).join("; ")}`, "");
   }
   lines.push("## Steps", "", "Sizes and spans are bounding boxes: exact for primitives and unions, loose after a cut (`a - b` keeps a's box), a rotation or a twist; `a & b` tightens to the overlap.", "", "| # | Name | Line | Size | x | y | z | In output |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   shapeSteps.forEach((st, i) => {
@@ -1083,7 +1135,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
         watertight: edgeList.length ? { clusters: edgeList } : undefined,
-        asserts: evaluation.asserts.length ? evaluation.asserts : undefined,
+        asserts: rest.asserts.length ? rest.asserts : undefined,
         joints: joints.map((j) => ({ name: j.joint!.name, pivot: j.joint!.pivot })),
         poses: evaluation.poses.map((p) => p.name),
         animations: evaluation.animations.map((a) => a.name),

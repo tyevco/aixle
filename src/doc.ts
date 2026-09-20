@@ -2,6 +2,7 @@
 import { BUILTINS } from "./lang/builtins.js";
 import { signature } from "./lang/interpreter.js";
 import { PRESETS, PATTERNS } from "./sdf/materials.js";
+import { ROBLOX_LIMITS } from "./export/roblox.js";
 
 export function referenceMarkdown(): string {
   const groups = new Map<string, typeof BUILTINS>();
@@ -69,6 +70,9 @@ export function referenceMarkdown(): string {
     "    animation(name, poses, times=[0, ...], loop=1, ease=0) -> string",
     "",
   );
+  out.push("## Roblox attachments", "", "An `anchor` with one of these names becomes the accessory's attachment in `model.roblox.glb` (`set roblox 1`), and the report checks the model against the size limit for it at the Normal body scale, in studs (width × height × depth).", "", "| Attachment | Kind | Limit |", "| --- | --- | --- |");
+  for (const [name, lim] of Object.entries(ROBLOX_LIMITS)) out.push(`| ${name} | ${lim.kind} | ${lim.size.join(" × ")} |`);
+  out.push("");
   out.push("## Material presets", "", "Use any of these by name in `paint()`. A colour name (`\"red\"`) or hex (`\"#c8342a\"`) also works.", "");
   out.push(
     "| Name | Pattern | Feature size | Colours | Notes |",

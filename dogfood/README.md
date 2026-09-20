@@ -40,6 +40,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 6 | Footbridge | [`round-6/footbridge.aix`](round-6/footbridge.aix) | [report](round-6/footbridge.report.md) | two Warren trusses with bolted gussets, watertight, in ten renders; the beauty camera left a diagonal model small and a re-import's plank edge lay on a sample plane, both fixed |
 | 6 | Café terrace | [`round-6/terrace.aix`](round-6/terrace.aix) | [report](round-6/terrace.report.md) | a terrace with the shipped plants, one piece, in 15 renders; open edges came with a where but no why (equal-radius crossings, a curve bent tighter than its tube), now said at the step or in the guide |
 | 6 | Playground | [`round-6/playground.aix`](round-6/playground.aix) | [report](round-6/playground.report.md) | seven objects and two rigs from the shipped libraries in 13 renders; the shipped chain was never watertight and a bench's slats under the scene's cell drew no warning, both fixed |
+| 7 | Marionette (Roblox rig) | [`round-7/marionette.aix`](round-7/marionette.aix) | [report](round-7/marionette.report.md) | ten joints, six poses and three clips right first time in nine renders; a rest-size assert failed in the jump pose and the joint tree was nowhere to read, both fixed |
+| 7 | Fox (Bedrock entity) | [`round-7/fox.aix`](round-7/fox.aix) | [report](round-7/fox.report.md) | eleven cubes, eight bones, three clips exported in 11 renders; decals reached no face texel and a sitting pose was judged to tip on its tail tip, both fixed |
+| 7 | Jack-in-the-box | [`round-7/jack.aix`](round-7/jack.aix) | [report](round-7/jack.report.md) | axis-joint lid and crank, a clown on a helix spring, in seven renders; the sheets re-meshed the shut box a dozen times a render and no bar said one-shot, both fixed |
+| 7 | Quadcopter | [`round-7/drone.aix`](round-7/drone.aix) | [report](round-7/drone.report.md) | eleven nested joints and four clips in 14 renders; a gimbal ten pixels wide could not be judged on any sheet and a lifted pose was told it would tip over, both fixed |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -102,6 +106,28 @@ through a face) was tried from the steps' boxes and dropped: it fired on
 nearly every model. The chess agent's export-node probe is kept as
 `chess_nodes_probe.aix` (the report calls it `chess_probe_nodes.aix`)
 so the render set skips it like the other probes.
+
+Round 7 was four rigs (a marionette for Roblox, a fox for Bedrock, a
+jack-in-the-box, a camera quadcopter) with pose transforms, timed and
+eased animations and both game exports available, to measure whether
+fresh agents can build, pose, animate and export a rig from the docs.
+All four rigs were right first time: no part swung about a wrong pivot,
+every nested joint followed its parent, and the strips showed the
+timing the programs asked for. What cost renders was around the rig:
+`check --pose` numbers printed at two decimals on a 0.4-unit drone; a
+gimbal or a crank a few pixels wide on a whole-model thumbnail; a
+promise about the model's height failing in its jump; a Bedrock decal
+that never reached the face texture; sheets that meshed the same shut
+box a dozen times a render. Their reports' three changes each are
+answered below; the marionette's re-import probe and the drone's and
+jack's are kept and skipped by the render set like the others. Not
+done: a per-pose assert (`assert ..., pose="pop"`), an `ease` that
+leaves a loop's ends alone (a low `ease` is the documented answer), a
+default import resolution that follows the grid (the grid is a setting
+of the program being evaluated), a ghosted neighbour on a focus sheet,
+an offline viewer (three.js is loaded from a CDN by design); the
+drone's report of a joint step turned by the pose getting no `posed`
+line did not reproduce on its final program (the line is there).
 
 ## What each round changed
 
@@ -210,6 +236,34 @@ than judging its pieces; `aixle doc lib.aix` for a library; docs for
 the STL and the report following the pose, the converse of the contact
 rule, equal-radius crossings, a tube ending inside a thin plate, the
 shallow wedge, and what a re-import costs.
+
+**Round 7** (rigs: marionette, fox, jack-in-the-box, quadcopter): the
+pose sheet and the strips share a cache of meshes by pose, so the rest
+pose and a held key are meshed once, and a quick pass draws the sheet
+without the strips; `--focus` applies to the pose sheet and the strips,
+each a close-up of the step where the pose puts it; `check` and the
+report print the joints as a tree, joints made inside a `def` included,
+and the pose sheet's bar names every joint, wrapped; a strip's bar says
+`once` or `loop`, and the report's animations line gives each key's
+second, the loop and the ease; asserts are judged at rest; a posed
+report's Stands, footprint and watertight rows say which pose, standing
+is not judged when the pose lifts the model off the floor, and the
+footprint is taken at y = 0 when a corner dips a little below it;
+`check --pose` says a sunk or floating pose is the pose's doing rather
+than suggesting `ground()`; `joint_move()` and `joint_scale()` read a
+joint's pose beside `angle()`; the Bedrock face texture is painted from
+the true surface behind each texel by bisection, so decals and skins
+thinner than a voxel reach it, its unused texels are transparent, a held
+value is two keys, and a clip's identity channels are left out of the
+GLB; `check` runs the Minecraft thinness warning; the report's Minecraft
+row says z flips for an entity; numbers below 0.1 print to three
+significant figures in `check`, the report and the slice labels; the
+reference lists the Roblox attachments with their limits; `xform`'s
+defaults read as triples; docs for limb and axis signs, a swung leg's
+lift, `move` after `scale` about the pivot, `at()` on a nested joint's
+step, steps inside a `def`, loops and ease, full-turn keys, a bare call
+as a statement, `--quick --no-poses`, the Bedrock lattice recipe and the
+entity's keyframe conventions, and which Roblox budget a rig gets.
 
 ## Running a round
 

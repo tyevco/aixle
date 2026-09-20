@@ -876,6 +876,18 @@ export function placedShape(root: Shape3, target: Shape3): Shape3 | undefined {
   };
 }
 
+/** The joints as a tree, one line each, indented under the joint they turn with: what `check` and the report print. */
+export function jointTreeLines(root: Shape3, num: (v: number) => string = (v) => String(v)): string[] {
+  const out: string[] = [];
+  const walk = (j: Shape3, depth: number) => {
+    const st = j.joint!;
+    out.push(`${"  ".repeat(depth)}${st.name} at (${st.pivot.map(num).join(", ")})${st.axis ? ` about [${st.axis.map(num).join(", ")}]` : ""}`);
+    for (const n of findJoints(st.child)) walk(n, depth + 1);
+  };
+  for (const j of findJoints(root)) walk(j, 0);
+  return out;
+}
+
 /** The joints anywhere inside a shape, outermost first, without descending into a joint's child. */
 export function findJoints(s: Shape3): Shape3[] {
   const out: Shape3[] = [];

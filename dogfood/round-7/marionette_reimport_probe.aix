@@ -1,0 +1,4 @@
+# Round 7 probe: re-import the marionette's own GLB (at rest) and compare
+# its size and triangle count with the report of the render that wrote it.
+m = import("../out/marionette/model.glb")
+show m

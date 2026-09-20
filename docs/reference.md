@@ -395,7 +395,7 @@ Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optiona
 
 A joint's pose in one value, for pose(): xform(rotate=[x, y, z] degrees or one angle about the joint's axis, move=[dx, dy, dz] in world units after the turn, scale=s or [sx, sy, sz] about the pivot). pose("hop", body=xform(move=[0, 0.3, 0]), lungs=xform(scale=[1, 1.02, 1])); a plain [x, y, z] in a pose is still just the angles.
 
-    xform(rotate=0, move=0, scale=1) -> transform
+    xform(rotate=?, move=?, scale=1) -> transform
 
 - `rotate`: [x, y, z] degrees, or one angle for a joint with axis=
 - `move`: [dx, dy, dz]
@@ -464,6 +464,22 @@ The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, 
 The current pose's angles for a joint, as [x, y, z] degrees (all zero at rest, or for a joint the pose does not set): what a member between two moving bodies (a hydraulic cylinder, a strut) needs to work out its end points with sin and cos. Nested joints' angles are relative to their parent.
 
     angle(joint) -> list
+
+- `joint`: the joint's name
+
+### joint_move
+
+The current pose's move for a joint, as [dx, dy, dz] (zeros at rest): with joint_scale(), what a part inside a joint a pose moves or scales needs to ride it or undo it (a clown whose spring stretches but whose head should not).
+
+    joint_move(joint) -> list
+
+- `joint`: the joint's name
+
+### joint_scale
+
+The current pose's scale for a joint, as [sx, sy, sz] (ones at rest).
+
+    joint_scale(joint) -> list
 
 - `joint`: the joint's name
 
@@ -683,6 +699,27 @@ A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], second
 
     animation(name, poses, seconds=1, loop=1, ease=0) -> string
     animation(name, poses, times=[0, ...], loop=1, ease=0) -> string
+
+## Roblox attachments
+
+An `anchor` with one of these names becomes the accessory's attachment in `model.roblox.glb` (`set roblox 1`), and the report checks the model against the size limit for it at the Normal body scale, in studs (width × height × depth).
+
+| Attachment | Kind | Limit |
+| --- | --- | --- |
+| HatAttachment | hat | 1.87 × 2.5 × 1.87 |
+| HairAttachment | hair | 1.87 × 3.12 × 2.18 |
+| FaceFrontAttachment | face | 1.87 × 1.25 × 1.25 |
+| FaceCenterAttachment | face | 1.87 × 1.25 × 1.25 |
+| NeckAttachment | neck | 2.95 × 3.68 × 2.16 |
+| LeftCollarAttachment | shoulder | 2.95 × 3.68 × 3.24 |
+| RightCollarAttachment | shoulder | 2.95 × 3.68 × 3.24 |
+| LeftShoulderAttachment | shoulder | 2.67 × 4.4 × 3.09 |
+| RightShoulderAttachment | shoulder | 2.67 × 4.4 × 3.09 |
+| BodyFrontAttachment | front | 2.95 × 3.68 × 3.24 |
+| BodyBackAttachment | back | 9.86 × 8.59 × 4.87 |
+| WaistFrontAttachment | waist | 3.94 × 4.29 × 7.57 |
+| WaistCenterAttachment | waist | 3.94 × 4.29 × 7.57 |
+| WaistBackAttachment | waist | 3.94 × 4.29 × 7.57 |
 
 ## Material presets
 

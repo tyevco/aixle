@@ -1,0 +1,3 @@
+# Re-import probe: the drone's own GLB (at rest) back in as a shape.
+m = import("../out/drone/model.glb")
+show m

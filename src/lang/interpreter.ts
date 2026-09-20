@@ -5,7 +5,7 @@
  * report says which steps ended up in the output.
  */
 import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } from "./ast.js";
-import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, toMaterial } from "./builtins.js";
+import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
 import { union2 } from "../sdf/shapes2d.js";
@@ -152,7 +152,8 @@ class Scope {
 export function evaluate(program: Program, options: EvalOptions = {}): Evaluation {
   // angle(name) reads the pose being evaluated.
   CURRENT_ANGLES.clear();
-  for (const [name, v] of Object.entries(options.jointPoses ?? {})) CURRENT_ANGLES.set(name, v.angles);
+  CURRENT_POSES.clear();
+  for (const [name, v] of Object.entries(options.jointPoses ?? {})) { CURRENT_ANGLES.set(name, v.angles); CURRENT_POSES.set(name, v); }
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
@@ -610,7 +611,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
-        for (const [name, v] of Object.entries(options.jointPoses ?? {})) CURRENT_ANGLES.set(name, v.angles);
+        for (const [name, v] of Object.entries(options.jointPoses ?? {})) { CURRENT_ANGLES.set(name, v.angles); CURRENT_POSES.set(name, v); }
         const exports = new Map<string, Value>();
         for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
         for (const d of lib.defs) exports.set(d.name, d);

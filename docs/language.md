@@ -367,7 +367,44 @@ reach` prints every step's size in it. The report and the STL describe
 the model as shown, posed if a pose is set; the GLB and the OBJ are
 always at rest, with the joints as nodes. The
 thumbnails on `poses.png` are meshed coarsely, so judge a pose that
-matters at full size with `set pose`.
+matters at full size with `set pose`; with `set focus name` (or
+`--focus`) the pose sheet and the strips are close-ups of that step
+where each pose puts it, at the frame's own cell, so a crank or a
+gimbal a few pixels wide on the whole model can be read. `check` prints
+the joints as a tree, each under the joint it turns with, pivots and
+axes included and joints made inside a `def` too, so a rig can be
+checked before any picture; the report has the same tree. An assert is
+judged at rest whatever pose is shown, so "about 2.5 tall" holds through
+a jump. `posed` lines in `check --pose` are the same rule: a step named
+inside a `def` has no name, so no line and no thumbnail; give the joint
+its own named step.
+
+Signs, in limb terms, all from `rotate`'s right-handed rule: a limb
+hanging down (a leg, an arm at rest) swings forward, to +z, with a
+*negative* x angle; a left arm at +x lifts outward with a *positive* z
+angle, a right arm at -x with a negative one; a head or a tail that
+points to +z pitches nose-down with a positive x angle, and one that
+points to -z nose-up. A straight leg of length L swung θ lifts its foot
+L(1 - cos θ): drop the root joint by that (`body=xform(move=[0, -0.08,
+0])`) or bend the knee so the foot lands. A joint about an `axis=`
+turns right-handed about the direction given: a lid on a back hinge
+along +x with its front at +z opens with a negative angle, a crank shaft
+along +x carries its arm from +y to +z with a positive one, and
+`axis=[-1, 0, 0]` reverses both. A pose's `move` adds after its `scale`
+about the pivot, so a part that must stay on its pivot (a spring on a
+box floor) wants the scale alone and a `move` only for what leaves the
+pivot; and the scale reaches everything inside the joint, a head on a
+spring included: a part that should not stretch reads
+`joint_scale("clown")` and `joint_move("clown")` and scales itself by
+the inverse, as `angle()` reads the turn. `at()` on a nested joint's own
+step is that joint's posed point; the world point is read through the
+outer step, `at(arm, "tip")`, which carries every joint above it.
+A looping cycle (a walk, a rotor) usually wants `ease=0` or a low value,
+since an ease stops at every key, its ends included; a rotor turning a
+full turn needs keys under 180 degrees apart (`[0, 120, 240, 360]`), or
+the export takes the short way round. A bare call such as
+`spin_pose("spin_120", 120)` is a statement on its own; its result need
+not be named.
 
 A pose is applied by evaluating the program again with the angles, so
 anything computed from a joint's shape (its bounds, a `ground()`) follows
@@ -532,7 +569,8 @@ anchor whose name ends in `Attachment` (`anchor(hat, "HatAttachment", 0,
 0, 0)` at the point where the hat meets the head) becomes an empty node
 named with the importer's `_Att` suffix for the Accessory Fitting Tool.
 The report says whether the model fits that attachment's size limit at
-the Normal body scale (a hat 1.87 × 2.5 × 1.87 studs, a face piece
+the Normal body scale (the reference lists every attachment name the
+export knows with its limit: a hat 1.87 × 2.5 × 1.87 studs, a face piece
 1.87 × 1.25 × 1.25, a back piece 9.86 × 8.59 × 4.87), and decimates the
 mesh to the budget: a rigid accessory's 4000 triangles when there is an
 Attachment anchor (shared across the meshes of a jointed model, each
@@ -541,7 +579,11 @@ quadric edge collapses that never cross a material seam or fold a face,
 so a hat meshed at grid 96 goes out at 4000 with its brim, band and
 crown. A jointed model exports its joints as nodes under `Handle` and
 its animations as glTF clips, which is an animated rig for Studio
-rather than a rigid accessory: `examples/roblox/hatchling.aix` is the
+rather than a rigid accessory; with an Attachment anchor it still gets
+the accessory's 4000 shared across its meshes, without one a MeshPart's
+10000 each, and its export has more triangles than the sheet because
+each joint's part is meshed on its own, overlaps at the hinges and all.
+`examples/roblox/hatchling.aix` is the
 Minecraft repo's pet dragon rebuilt cube for cube as a shoulder pet,
 with its Bedrock idle, flap and glide clips as poses and animations.
 The report says what it was decimated from. `examples/roblox/` has a
@@ -552,10 +594,25 @@ cubes are authored at -x and the model stands in the game as it does on
 the sheet, its +z front to the south, the block convention; an entity
 faces north, so `set minecraft_entity 1` (or `--minecraft-entity`)
 turns the model half a turn about y first, which with the mirror is a
-flip of z, and writes the bone rotations in the entity's frame.
+flip of z: cubes and pivots keep their x and have their z negated.
 `examples/roblox/hatchling.aix` does both: the Roblox pet and, at
 `set minecraft 8`, the Bedrock entity it was rebuilt from, with its
 clips. The geometry is the rest pose; the poses are in the animations.
+What the animation file holds, per bone and key: for an entity the
+pose's angles as they are (`[rx, ry, rz]` in degrees; Bedrock's own
+convention and the half turn cancel), for a block `[-rx, ry, -rz]`; a
+`move` in geometry pixels (sixteen to the block), z negated for an
+entity, x for a block; a `scale` as it is. A linear clip has a key per
+pose, an eased one eight per segment, and a held value is its two end
+keys. The face texture is painted from the model's own surface behind
+each texel (a decal on a face, a skin thinner than a voxel: both reach
+it) and its unused texels are transparent. A box model on the game's
+lattice is easiest built as the hatchling is: a `cube(ox, oy, oz, w, h,
+d)` helper in geometry pixels, each part grown a third of a pixel so
+touching bones fuse into one piece (grown upward only at the feet, or
+the model stands a hair below the floor), which the voxeliser rounds
+away again; `check` warns about a part thinner than a voxel as `render`
+does.
 
 ## The fast loop
 

@@ -36,7 +36,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    extent of a turned box; with `--pose`, a `posed` line is where a step
    ends up once the joints above it have turned.
 4. **`npx aixle render model.aix --quick`** while iterating (the sheet in
-   a second or two), then read `out/model/sheet.png`. Drop `--quick` for
+   a second or two; on a rig add `--no-poses` until the geometry settles,
+   the strips come with the full render), then read `out/model/sheet.png`. Drop `--quick` for
    the full render: read `slices.png` if anything is hollow or nested,
    `steps.png` if a part is missing or misplaced; `report.md` has the
    numbers, including whether the model stands and is in one piece; a
@@ -131,11 +132,15 @@ right (+x) and the slices show the wall thickness and the open top.
 For a rig: build each part in place, wrap it with `joint` at its pivot,
 nest the forearm's joint inside the upper arm's part, write poses, then
 read `poses.png` and `anim_<name>.png`: a part that swings about the
-wrong point has the wrong pivot. To judge one pose properly render it
+wrong point has the wrong pivot. `check` prints the joints as a tree
+with their pivots, so check the nesting there first. To judge one pose properly render it
 at full size with `--pose name` (or `set pose name`); `check --pose name`
-prints the posed sizes. A pose value may be `xform(rotate=, move=,
+prints the posed sizes; `--focus part` makes the pose sheet and strips
+close-ups of that part. A pose value may be `xform(rotate=, move=,
 scale=)` for a hop or a squash, and an animation takes `times=[...]`
-for uneven keys and `ease=1` to settle into each pose.
+for uneven keys and `ease=1` to settle into each pose (a looping cycle
+wants little or none). Asserts are judged at rest. The language doc's
+rig section has the limb sign rules and the axis-joint convention.
 
 ```
 upper = capsule(0.15, 1.6) | move(0, 1.8, 0) | paint("steel")

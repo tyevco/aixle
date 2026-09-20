@@ -22,6 +22,8 @@ import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param
 
 /** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
 export const CURRENT_ANGLES = new Map<string, [number, number, number]>();
+/** The whole pose per joint (angles, move, scale) being evaluated, for joint_move() and joint_scale(). */
+export const CURRENT_POSES = new Map<string, { angles: [number, number, number]; move: [number, number, number]; scale: [number, number, number] }>();
 
 const num = (name: string, doc?: string, def?: number): Param => (def === undefined ? { name, type: "number", doc } : { name, type: "number", default: def, doc });
 const str = (name: string, doc?: string, def?: string): Param => (def === undefined ? { name, type: "string", doc } : { name, type: "string", default: def, doc });
@@ -338,7 +340,7 @@ export const BUILTINS: Builtin[] = [
   def("surface", "Queries", "The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.",
     ov([shape(), num("x"), num("y"), num("z")], "list", (a) => { const p = O.surfacePoint(s3(a[0]), n(a[1]), n(a[2]), n(a[3])); return [p[0], p[1], p[2]]; })),
   def("xform", "Assembly", "A joint's pose in one value, for pose(): xform(rotate=[x, y, z] degrees or one angle about the joint's axis, move=[dx, dy, dz] in world units after the turn, scale=s or [sx, sy, sz] about the pivot). pose(\"hop\", body=xform(move=[0, 0.3, 0]), lungs=xform(scale=[1, 1.02, 1])); a plain [x, y, z] in a pose is still just the angles.",
-    ov([{ name: "rotate", type: "any", doc: "[x, y, z] degrees, or one angle for a joint with axis=", default: 0 }, { name: "move", type: "list", doc: "[dx, dy, dz]", default: 0 }, { name: "scale", type: "any", doc: "one number or [sx, sy, sz]", default: 1 }], "transform", (a) => {
+    ov([{ name: "rotate", type: "any", doc: "[x, y, z] degrees, or one angle for a joint with axis=", default: [0, 0, 0] }, { name: "move", type: "list", doc: "[dx, dy, dz]", default: [0, 0, 0] }, { name: "scale", type: "any", doc: "one number or [sx, sy, sz]", default: 1 }], "transform", (a) => {
       const r = a[0], mv = a[1], sc = a[2];
       const triple = (v: Value, what: string, fill: number): [number, number, number] => {
         if (typeof v === "number") return what === "scale" ? [v, v, v] : [v, fill, fill];
@@ -346,10 +348,14 @@ export const BUILTINS: Builtin[] = [
         throw new Error(`${what} must be [x, y, z]${what === "rotate" ? " degrees, or one angle for a joint with axis=" : what === "scale" ? " or one number" : ""}`);
       };
       const single = typeof r === "number";
-      return { kind: "xform", angles: r === 0 && !Array.isArray(r) ? [0, 0, 0] : triple(r, "rotate", 0), single: single && r !== 0, move: mv === 0 ? [0, 0, 0] : triple(mv, "move", 0), scale: triple(sc, "scale", 1) };
+      return { kind: "xform", angles: triple(r, "rotate", 0), single, move: triple(mv, "move", 0), scale: triple(sc, "scale", 1) };
     })),
   def("angle", "Queries", "The current pose's angles for a joint, as [x, y, z] degrees (all zero at rest, or for a joint the pose does not set): what a member between two moving bodies (a hydraulic cylinder, a strut) needs to work out its end points with sin and cos. Nested joints' angles are relative to their parent.",
     ov([str("joint", "the joint's name")], "list", (a) => { const v = CURRENT_ANGLES.get(a[0] as string) ?? [0, 0, 0]; return [v[0], v[1], v[2]]; })),
+  def("joint_move", "Queries", "The current pose's move for a joint, as [dx, dy, dz] (zeros at rest): with joint_scale(), what a part inside a joint a pose moves or scales needs to ride it or undo it (a clown whose spring stretches but whose head should not).",
+    ov([str("joint", "the joint's name")], "list", (a) => { const v = CURRENT_POSES.get(a[0] as string)?.move ?? [0, 0, 0]; return [v[0], v[1], v[2]]; })),
+  def("joint_scale", "Queries", "The current pose's scale for a joint, as [sx, sy, sz] (ones at rest).",
+    ov([str("joint", "the joint's name")], "list", (a) => { const v = CURRENT_POSES.get(a[0] as string)?.scale ?? [1, 1, 1]; return [v[0], v[1], v[2]]; })),
   def("len", "Numbers", "Length of a list.", ov([{ name: "list", type: "list" }], "number", (a) => (a[0] as Value[]).length)),
   def("sin", "Numbers", "Sine of an angle in degrees.", ov([num("degrees")], "number", (a) => Math.sin(rad(n(a[0]))))),
   def("cos", "Numbers", "Cosine of an angle in degrees.", ov([num("degrees")], "number", (a) => Math.cos(rad(n(a[0]))))),

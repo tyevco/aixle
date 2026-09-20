@@ -182,6 +182,13 @@ describe("physics", () => {
     expect(ph.pieces.length).toBe(2);
     const twoPieces = surfaceNets(O.union([P.sphere(0.5), O.move(P.sphere(0.5), 3, 0, 0)]), { resolution: 24 });
     expect(analyse(twoPieces.mesh, twoPieces.cellSize).pieces).toHaveLength(2);
+    // A box on the floor with a small corner dipping below it (a sitting fox's tail tip) stands on the box, not on
+    // the corner: the footprint is taken at y = 0 and everything below counts.
+    const dipped = surfaceNets(O.union([O.move(P.box(2, 1, 2), 0, 0.5, 0), O.move(P.box(0.2, 0.2, 0.2), 1.2, 0.09, 0)]), { resolution: 40 });
+    const dip = analyse(dipped.mesh, dipped.cellSize);
+    expect(dip.floor).toBe(0);
+    expect(dip.stable).toBe(true);
+    expect(dip.stabilityMargin).toBeGreaterThan(0.5);
     const tipped = O.union([O.move(P.box(1, 0.2, 1), 0, 0.1, 0), O.move(P.box(0.3, 3, 0.3), 0.4, 1.7, 0)]);
     const t = surfaceNets(tipped, { resolution: 40 });
     const pt = analyse(t.mesh, t.cellSize);
