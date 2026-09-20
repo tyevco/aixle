@@ -128,6 +128,41 @@ describe("Bedrock bones and animations", () => {
     expect(b.animations["animation.rig.once"].loop).toBeUndefined();
     expect(b.animations["animation.rig.once"].bones).toEqual({});
   });
+  it("paints a decal's texels and a thin painted skin, and leaves unused texels transparent", () => {
+    const red = materialFromString("#ff0000")!, blue = materialFromString("#0000ff")!;
+    // A cube grown a third of a pixel (so bones fuse), a decal on its top, and a skin a fifth of a pixel proud of its front.
+    const px = 8;
+    const grown = P.box(1 + 0.35 / px, 1 + 0.35 / px, 1 + 0.35 / px);
+    const top = O.move(P.box(0.5, 0.1, 0.5), 0, 0.5, 0);
+    const skin = O.move(P.box(0.5, 0.5, 0.2 / px), 0, 0, 0.5 + 0.1 / px);
+    const shape = O.union([O.decal(O.paint(grown, blue), top, red), O.paint(skin, red)]);
+    const r = toBedrock([{ name: "b", shape }], "b", { pixelsPerUnit: px });
+    const cube = (r.geometry as { "minecraft:geometry": { bones: { cubes: { uv: Record<string, { uv: number[]; uv_size: number[] }> }[] }[] }[] })["minecraft:geometry"][0].bones[0].cubes[0];
+    const texel = (face: string, u: number, v: number): [number, number, number, number] => {
+      const w = cube.uv[face];
+      const i = ((w.uv[1] + v) * r.texture.width + (w.uv[0] + u)) * 4;
+      return [r.texture.data[i], r.texture.data[i + 1], r.texture.data[i + 2], r.texture.data[i + 3]];
+    };
+    // The middle of the top window is the decal's red; its corner is the cube's blue.
+    expect(texel("up", 4, 4)).toEqual([255, 0, 0, 255]);
+    expect(texel("up", 0, 0)).toEqual([0, 0, 255, 255]);
+    // The front (south) window's middle is the skin's red although the skin is thinner than a voxel.
+    expect(texel("south", 4, 4)).toEqual([255, 0, 0, 255]);
+    expect(texel("south", 0, 0)).toEqual([0, 0, 255, 255]);
+    // Somewhere no window reaches is transparent.
+    let clear = 0;
+    for (let i = 3; i < r.texture.data.length; i += 4) if (r.texture.data[i] === 0) clear++;
+    expect(clear).toBeGreaterThan(0);
+  });
+  it("collapses a held value to its two ends", () => {
+    const clip: BedrockClip = {
+      name: "hold", seconds: 1, loop: false, times: [0, 0.2, 0.4, 0.6, 0.8, 1],
+      samples: [{}, {}, {}, { arm: jp([0, 0, 30]) }, { arm: jp([0, 0, 30]) }, { arm: jp([0, 0, 30]) }],
+      axes: {},
+    };
+    const a = toBedrockAnimations([clip], "r", ["arm"]) as { animations: Record<string, { bones: Record<string, Record<string, Record<string, number[]>>> }> };
+    expect(Object.keys(a.animations["animation.r.hold"].bones.arm.rotation)).toEqual(["0.0", "0.4", "0.6", "1.0"]);
+  });
   it("plays back, under the game's conventions, where the posed model is", () => {
     // The Minecraft repo's viewer (tools/viewer/viewer.js, copying Blockbench's Bedrock codec) draws a bone with
     // Euler(-x, -y, z) in ZYX order about its pivot, positions in the parent's frame, and the whole scene with x

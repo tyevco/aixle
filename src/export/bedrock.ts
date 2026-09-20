@@ -139,9 +139,16 @@ export function toBedrockAnimations(clips: BedrockClip[], name: string, joints: 
       if (!turns && !moves && !scales) continue;
       const b: Record<string, unknown> = {};
       const channel = (f: (pz: JointPose) => [number, number, number]): Record<string, [number, number, number]> => {
-        const out: Record<string, [number, number, number]> = {};
         // + 0 turns a -0 (a negated zero angle) into the 0 the file should show.
-        c.times.forEach((t, i) => { out[timeKey(t)] = f(poses[i]).map((v) => Math.round(v * 10000) / 10000 + 0) as [number, number, number]; });
+        const values = poses.map((pz) => f(pz).map((v) => Math.round(v * 10000) / 10000 + 0) as [number, number, number]);
+        const out: Record<string, [number, number, number]> = {};
+        // A held value is two keys, its ends: the keys inside a run of equal values say nothing Bedrock's linear
+        // interpolation does not already do (round 7: eight keys through a half-second crouch).
+        const same = (a: [number, number, number], b: [number, number, number]): boolean => a.every((v, k) => v === b[k]);
+        values.forEach((v, i) => {
+          if (i > 0 && i < values.length - 1 && same(values[i - 1], v) && same(v, values[i + 1])) return;
+          out[timeKey(c.times[i])] = v;
+        });
         return out;
       };
       if (turns) b.rotation = channel((pz) => bedrockRotation(pz.angles, entity, c.axes[j]));
@@ -223,6 +230,31 @@ export function voxelBoxes(shape: Shape3, px: number, maxPixels: number, warning
   return { boxes: best ?? [], voxels };
 }
 
+/**
+ * The material at the model's true surface behind a face texel. The face is a voxel plane, which can lie a fraction
+ * of a pixel inside the surface (a cube grown a third of a pixel so bones fuse) or a fraction outside it, and a decal
+ * is only a skin a tenth of its region deep, so a sample a quarter pixel in missed every decal on a box model
+ * (measured, round 7: paws, ear tips and eyes reached no texel). From half a pixel outside the face, where a skin
+ * thinner than a voxel may still be solid, step in to the first solid sample and bisect onto the surface.
+ */
+function surfaceHit(shape: Shape3, p: [number, number, number], axis: 0 | 1 | 2, plane: number, dir: 1 | -1, px: number): ReturnType<Shape3["hit"]> {
+  const at = (t: number): number => { p[axis] = plane + dir * t; return shape.dist(p[0] / px, p[1] / px, p[2] / px); };
+  let outside = 0.6, inside = -0.6;
+  let found = false;
+  for (let t = 0.6; t >= -0.6; t -= 0.2) {
+    if (at(t) <= 0) { inside = t; found = true; break; }
+    outside = t;
+  }
+  if (!found) { p[axis] = plane - dir * 0.25; return shape.hit(p[0] / px, p[1] / px, p[2] / px); }
+  for (let i = 0; i < 8; i++) {
+    const mid = (outside + inside) / 2;
+    if (at(mid) <= 0) inside = mid; else outside = mid;
+  }
+  // A hair inside the surface, so the hit is the solid's own and a decal's skin still covers it.
+  p[axis] = plane + dir * inside - dir * 0.02;
+  return shape.hit(p[0] / px, p[1] / px, p[2] / px);
+}
+
 /** The six faces of a box in model space: the outward axis, the two in-plane axes for u and v, and the window size. */
 const FACES: { face: BedrockFace; axis: 0 | 1 | 2; dir: 1 | -1 }[] = [
   { face: "north", axis: 2, dir: -1 },
@@ -267,7 +299,7 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
         // Which side of the model this window shows. The table's dir is the side in the world (the mirror is already
         // allowed for: the geometry's east face is the world's west side); for an entity the world is the model turned
         // half a turn, so its x and z sides are the model's opposite ones.
-        const dir = entity && f.axis !== 1 ? -f.dir : f.dir;
+        const dir: 1 | -1 = entity && f.axis !== 1 ? (f.dir === 1 ? -1 : 1) : f.dir;
         const plane = dir > 0 ? hi[f.axis] : lo[f.axis];
         // u increases with the axis on top and up faces; on the north face (seen from -z) the world's +x is on the
         // viewer's left, so u runs against x there, as it does on the east face against z. These are world directions,
@@ -284,8 +316,7 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
                 const p: [number, number, number] = [0, 0, 0];
                 p[ua] = flipU ? hi[ua] - u - 0.5 : lo[ua] + u + 0.5;
                 p[va] = fromLowV ? lo[va] + v + 0.5 : hi[va] - v - 0.5;
-                p[f.axis] = plane - dir * 0.25;
-                const hit = shape.hit(p[0] / px, p[1] / px, p[2] / px);
+                const hit = surfaceHit(shape, p, f.axis, plane, dir, px);
                 const c = albedo(hit.mat, hit.lx, hit.ly, hit.lz);
                 canvas.set(u0 + u, v0 + v, rgbf(c[0], c[1], c[2]));
               }
@@ -350,7 +381,9 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
   while (packed.height > W) { W *= 2; packed = pack(W); }
   H = 1;
   while (H < packed.height) H *= 2;
-  const texture = new Canvas(Math.max(W, 1), Math.max(H, 1), 0x000000);
+  // Unused texels are transparent, as a hand-made Bedrock texture's are, so the file reads as a picture.
+  const texture = new Canvas(Math.max(W, 1), Math.max(H, 1));
+  for (let i = 3; i < texture.data.length; i += 4) texture.data[i] = 0;
   windows.forEach((w, i) => { w.place(packed.at[i][0], packed.at[i][1]); w.paint(texture, packed.at[i][0], packed.at[i][1]); });
   const width = (size[0] || 1) / 1, height = (size[1] || 1) / 1, depth = (size[2] || 1) / 1;
   const geometry = {

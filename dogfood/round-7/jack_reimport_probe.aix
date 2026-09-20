@@ -1,0 +1,5 @@
+# Re-import probe: the jack-in-the-box's own GLB (written at rest, so the
+# box is shut) read back as a shape. What survives: the outer box, lid,
+# crank; the clown is sealed inside, so it can only show in the slices.
+m = import("../out/jack/model.glb")
+show m

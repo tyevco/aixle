@@ -9,7 +9,7 @@ import { evaluate } from "../src/lang/interpreter.js";
 import { buildHierarchy, flatten } from "../src/export/hierarchy.js";
 import { eulerToQuat, toGlbScene } from "../src/export/glb.js";
 import { toObjScene } from "../src/export/obj.js";
-import { easeBlend, interpolatePose, keyAt, renderPoses, type PoseView } from "../src/render/views.js";
+import { easeBlend, interpolatePose, keyAt, renderAnimation, renderPoses, type PoseCache, type PoseView } from "../src/render/views.js";
 import { REST_POSE, type JointPose } from "../src/sdf/types.js";
 import { run } from "../src/pipeline.js";
 import { preset } from "../src/sdf/materials.js";
@@ -175,6 +175,34 @@ describe("poses", () => {
     const c = renderPoses(shapeAt, ["elbow"], [{ name: "up", joints: { elbow: jp([0, 0, 90]) } }], 60, 0.1);
     expect(c.width).toBe(2 * 66 + 6);
   });
+  it("meshes each distinct pose once across the sheet and the strips, names every joint, and says once or loop", () => {
+    let calls = 0;
+    const shapeAt = (joints: Record<string, JointPose>) => { calls++; return O.union([P.box(0.5, 0.5, 0.5), O.joint(O.move(P.box(2, 0.3, 0.3), 1, 0, 0), "elbow", 0, 0, 0, joints.elbow?.angles ?? [0, 0, 0])]); };
+    const cache: PoseCache = new Map();
+    const up: PoseView = { name: "up", joints: { elbow: jp([0, 0, 90]) } };
+    const shut: PoseView = { name: "shut", joints: {} };
+    renderPoses(shapeAt, ["elbow"], [up, shut], 60, 0.1, undefined, undefined, cache);
+    // rest and shut are the same pose: two meshes for three thumbnails.
+    expect(calls).toBe(2);
+    // A held key: five of eight frames are the rest pose, meshed no more.
+    renderAnimation(shapeAt, ["elbow"], "pop", [shut, shut, shut, up], 1, 40, 0.1, 8, undefined, undefined, { times: [0, 0.5, 0.6, 1], loop: false }, cache);
+    expect(calls).toBeLessThan(2 + 8);
+    // Ten joints all go in the bar, wrapped, so the sheet grows rather than cutting the list at six.
+    const many = Array.from({ length: 10 }, (_, i) => `joint_number_${i}`);
+    const wide = renderPoses(shapeAt, many, [up], 60, 0.1);
+    const few = renderPoses(shapeAt, ["elbow"], [up], 60, 0.1);
+    expect(wide.height).toBeGreaterThan(few.height);
+    expect(wide.width).toBe(few.width);
+  });
+  it("joint_move and joint_scale read the current pose, and asserts are judged at rest", () => {
+    const src = 'body = joint(sphere(1), "body", 0, 0, 0)\nm = joint_move("body")\ns = joint_scale("body")\nshow body';
+    const rest = evaluate(parse(src));
+    expect(rest.steps.find((x) => x.name === "m")!.value).toEqual([0, 0, 0]);
+    expect(rest.steps.find((x) => x.name === "s")!.value).toEqual([1, 1, 1]);
+    const posed = evaluate(parse(src), { jointPoses: { body: jp([0, 0, 0], [0, 2, 0], [1, 1.5, 1]) } });
+    expect(posed.steps.find((x) => x.name === "m")!.value).toEqual([0, 2, 0]);
+    expect(posed.steps.find((x) => x.name === "s")!.value).toEqual([1, 1.5, 1]);
+  });
   it("a pose takes a transform value, and animations take times and ease", () => {
     const src = [
       'body = joint(sphere(1), "body", 0, 0, 0)',
@@ -237,7 +265,17 @@ describe("pipeline with a scene", () => {
       expect(json.accessors[json.animations[1].samplers[0].input].count).toBe(17);
       expect(json.accessors[json.animations[0].samplers[0].input].count).toBe(2);
       expect(r.files).toContain("anim_soft.png");
-      expect(r.report).toMatch(/Joints: elbow/);
+      // A promise about the model as built holds in a pose that lifts it (round 7: a rig's height assert failed in its jump).
+      const posed = run(`${src}\nassert tall(arm) < 1.4, "at rest"`, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128, pose: "up", obj: false, glb: false });
+      expect(posed.warnings.filter((w) => /assert/.test(w))).toEqual([]);
+      expect(posed.report).toMatch(/\| Asserts \| 1 pass \(judged at rest\)/);
+      expect(posed.report).toMatch(/\| Stands \(in pose up\)/);
+      // A quick pass draws the pose sheet but not the strips.
+      const quick = run(src, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128, quick: true, obj: false, glb: false });
+      expect(quick.files).toContain("poses.png");
+      expect(quick.files).not.toContain("anim_lift.png");
+      expect(r.report).toMatch(/Joints, each under the joint it turns with:\n\n```\nelbow at \(0, 1.2, 0\)\n```/);
+      expect(r.report).toMatch(/lift \(rest → up, 1s, loop\); soft \(rest 0s → up 0.25s → rest 1s, 1s, loop, ease 1\)/);
       expect(existsSync(join(dir, "model.png"))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });

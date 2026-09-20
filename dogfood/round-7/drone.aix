@@ -1,0 +1,107 @@
+# A camera quadcopter drone, about 0.38 units across, standing on two skid
+# rails on y = 0, nose to +z. Rig: root joint "body"; the two front arms
+# fold back on hinges at the body (arm_fl, arm_fr) and carry their rotor
+# joints with them; every rotor is an axis= joint about its motor's vertical
+# axis; the skids swing up (gear_l, gear_r); a pan joint under the nose
+# carries a tilt joint carrying the camera.
+set grid 200
+set azimuth 35
+set elevation 22
+set ambient 1.4
+set zoom 1.15
+
+# Materials
+shell_m = material("#3a3a3e", rough=0.9)
+rotor_m = material("#141416", rough=0.7)
+
+# Body: a rounded box with a battery hump at the back.
+by = 0.085
+shell = box(0.13, 0.045, 0.17, round=0.015) | move(0, by, 0) | paint(shell_m)
+hump = box(0.06, 0.028, 0.07, round=0.009) | move(0, by + 0.028, -0.03) | paint(shell_m)
+nose = box(0.06, 0.02, 0.03, round=0.006) | move(0, by - 0.005, 0.085) | paint(shell_m)
+body_shape = shell + hump + nose
+
+# One arm: tube from the body edge (hx, hy, hz) to a pod at (px, py, pz),
+# with the motor on top; the rotor is a named step so check can print it.
+def rotor(px, py, pz) =
+  (cylinder(0.007, 0.01) | move(px, py + 0.031, pz) | paint(shell_m))
+  + (box(0.12, 0.006, 0.014, round=0.002) | anchor("tip", 0.06, 0, 0) | move(px, py + 0.034, pz) | paint(rotor_m))
+def arm(hx, hy, hz, px, py, pz, tip) =
+  (tube(0.008, [hx, hy, hz, px, py, pz]) | paint(shell_m))
+  + (cylinder(0.018, 0.03, round=0.004) | move(px, py, pz) | paint(shell_m))
+  + (cylinder(0.019, 0.005) | move(px, py - 0.013, pz) | paint(tip))
+  + (cylinder(0.012, 0.016) | move(px, py + 0.02, pz) | paint("iron"))
+
+rotor_fl = joint(rotor(-0.13, 0.095, 0.11), "rotor_fl", -0.13, 0.129, 0.11, axis=[0, 1, 0])
+rotor_fr = joint(rotor(0.13, 0.095, 0.11), "rotor_fr", 0.13, 0.129, 0.11, axis=[0, 1, 0])
+rotor_bl = joint(rotor(-0.13, 0.075, -0.11), "rotor_bl", -0.13, 0.109, -0.11, axis=[0, 1, 0])
+rotor_br = joint(rotor(0.13, 0.075, -0.11), "rotor_br", 0.13, 0.109, -0.11, axis=[0, 1, 0])
+arm_fl_part = arm(-0.045, 0.095, 0.06, -0.13, 0.095, 0.11, "red") + rotor_fl
+arm_fr_part = arm(0.045, 0.095, 0.06, 0.13, 0.095, 0.11, "green") + rotor_fr
+arm_fl = joint(arm_fl_part, "arm_fl", -0.045, 0.095, 0.06)
+arm_fr = joint(arm_fr_part, "arm_fr", 0.045, 0.095, 0.06)
+# Blade tips, printed by check --pose spin: +x at rest; the fl/br pair turn one way, fr/bl the other.
+tip_fl = at(rotor_fl, "tip")
+tip_fr = at(rotor_fr, "tip")
+tip_bl = at(rotor_bl, "tip")
+tip_br = at(rotor_br, "tip")
+arm_bl = arm(-0.045, 0.075, -0.06, -0.13, 0.075, -0.11, shell_m) + rotor_bl
+arm_br = arm(0.045, 0.075, -0.06, 0.13, 0.075, -0.11, shell_m) + rotor_br
+
+# The same tip read through the arm's joint: this one moves when the arm folds; tip_fl does not.
+tip_fl_world = at(arm_fl, "tip")
+
+# Landing gear: a skid per side, two struts down to a rail on y = 0,
+# hinged about z at the body's underside.
+def skid(x, s) =
+  (tube(0.0065, [x, 0.07, 0.05, x + s * 0.012, 0.009, 0.05], cap="flat") | paint(shell_m))
+  + (tube(0.0065, [x, 0.07, -0.05, x + s * 0.012, 0.009, -0.05], cap="flat") | paint(shell_m))
+  + (tube(0.0075, [x + s * 0.012, 0.0075, -0.075, x + s * 0.012, 0.0075, 0.075]) | paint(shell_m))
+gear_l = joint(skid(-0.045, -1), "gear_l", -0.045, 0.068, 0)
+gear_r = joint(skid(0.045, 1), "gear_r", 0.045, 0.068, 0)
+
+# Gimbal under the nose: a pan post, a tilt yoke, the camera with a glass lens.
+cam_y = 0.036
+cam_z = 0.075
+camera_box = box(0.03, 0.022, 0.024, round=0.004) | move(0, cam_y, cam_z) | paint(shell_m)
+lens_ring = cylinder(0.008, 0.008) | rotate(x=90) | move(0, cam_y, cam_z + 0.014) | paint("iron")
+lens = cylinder(0.006, 0.006) | rotate(x=90) | move(0, cam_y, cam_z + 0.018) | paint("glass")
+axle = cylinder(0.004, 0.012) | rotate(z=90) | move(-0.017, cam_y, cam_z) | paint("iron")
+camera = camera_box + lens_ring + lens + axle
+tilt = joint(camera, "tilt", 0, cam_y, cam_z)
+post = cylinder(0.006, 0.022) | move(0, 0.055, cam_z) | paint(shell_m)
+yoke_top = box(0.04, 0.006, 0.006, round=0.002) | move(-0.008, 0.047, cam_z) | paint(shell_m)
+yoke_side = box(0.006, 0.02, 0.006, round=0.002) | move(-0.025, cam_y + 0.005, cam_z) | paint(shell_m)
+gimbal = post + yoke_top + yoke_side + tilt
+pan = joint(gimbal, "pan", 0, 0.06, cam_z)
+
+drone_parts = body_shape + arm_fl + arm_fr + arm_bl + arm_br + gear_l + gear_r + pan
+drone = joint(drone_parts, "body", 0, by, 0)
+
+# Poses
+pose("folded", arm_fl=[0, -95, 0], arm_fr=[0, 95, 0])
+pose("gear_up", gear_l=[0, 0, -85], gear_r=[0, 0, 85])
+pose("takeoff", gear_l=[0, 0, -85], gear_r=[0, 0, 85], body=xform(move=[0, 0.25, 0]))
+pose("bank", gear_l=[0, 0, -85], gear_r=[0, 0, 85], body=xform(rotate=[-12, 0, 22], move=[0, 0.25, 0]))
+pose("look_down", pan=[0, -35, 0], tilt=[55, 0, 0])
+pose("spin", rotor_fl=45, rotor_br=45, rotor_fr=-45, rotor_bl=-45)
+
+# Rotor turn in thirds, diagonal pairs opposite ways, for a looping spin.
+def spin_pose(name, a) = pose(name, rotor_fl=a, rotor_br=a, rotor_fr=-a, rotor_bl=-a)
+s1 = spin_pose("spin_120", 120)
+s2 = spin_pose("spin_240", 240)
+s3 = spin_pose("spin_360", 360)
+animation("spin_up", ["rest", "spin_120", "spin_240", "spin_360"], seconds=0.6)
+
+animation("launch", ["folded", "rest", "gear_up", "takeoff"], times=[0, 1, 1.6, 3], loop=0, ease=1)
+
+pose("hover_a", gear_l=[0, 0, -85], gear_r=[0, 0, 85], body=xform(move=[0, 0.28, 0]), pan=[0, 20, 0], tilt=[12, 0, 0])
+pose("hover_b", gear_l=[0, 0, -85], gear_r=[0, 0, 85], body=xform(move=[0, 0.22, 0]), pan=[0, -20, 0], tilt=[-8, 0, 0])
+animation("hover", ["takeoff", "hover_a", "takeoff", "hover_b", "takeoff"], seconds=3, ease=1)
+
+pose("pan_left", pan=[0, -50, 0])
+pose("pan_right", pan=[0, 50, 0])
+pose("tilt_down", tilt=[70, 0, 0])
+animation("gimbal", ["rest", "pan_left", "pan_right", "tilt_down", "rest"], seconds=4, ease=1)
+
+show drone

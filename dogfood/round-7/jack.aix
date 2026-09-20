@@ -1,0 +1,90 @@
+# A jack-in-the-box: a wooden box with painted panels, a lid hinged along
+# its back edge, a crank on the right side, and inside a clown on a coiled
+# spring. Closed it is about 1.2 tall and stands on y = 0; front is +z.
+# Joints: "lid" (axis x along the back hinge), "crank" (axis x along the
+# shaft), "clown" (the spring and clown together, pivot at the box floor,
+# posed with xform to rise and stretch), "left_arm"/"right_arm" (axis z at
+# the shoulders, nested inside the clown).
+set grid 160
+set azimuth 35
+set elevation 20
+
+# ---- materials ----
+planks = material("oak", scale=0.12)
+front_paint = material("#c8342a", "checker", "#f0e6c8", scale=0.16)
+side_paint = material("#2f66c4", "stripes", "#f0e6c8", scale=0.12)
+back_paint = material("#3f9a45", "dots", "#f0e6c8", scale=0.18)
+hat_paint = material("#2f66c4", "stripes", "#e8c53a", scale=0.06)
+skin = material("#f6e2c8")
+
+# ---- the box: hollow, open at the top, walls 0.06 ----
+wall = 0.06
+outer = box(1, 1, 1, round=0.03) | move(0, 0.5, 0)
+inner = box(1 - 2 * wall, 1.2, 1 - 2 * wall) | move(0, wall + 0.6, 0)
+shell_box = (outer - inner) | paint(planks)
+front_panel = box(0.7, 0.7, 0.1) | move(0, 0.5, 0.5)
+right_panel = box(0.1, 0.7, 0.7) | move(0.5, 0.5, 0)
+left_panel = box(0.1, 0.7, 0.7) | move(-0.5, 0.5, 0)
+back_panel = box(0.7, 0.7, 0.1) | move(0, 0.5, -0.5)
+body = shell_box | decal(front_panel, front_paint) | decal(right_panel, side_paint) | decal(left_panel, side_paint) | decal(back_panel, back_paint)
+# Hinge barrel along the back top edge, and a boss on the right wall for the crank shaft.
+hinge = cylinder(0.035, 0.9) | rotate(z=90) | move(0, 1.0, -0.5) | paint("brass")
+boss = cylinder(0.07, 0.05) | rotate(z=90) | move(0.51, 0.5, 0) | paint("brass")
+box_still = body + hinge + boss
+
+# ---- the lid: a slab on the box, its knob at the front, hinged along the back edge ----
+lid_slab = box(1, 0.12, 1, round=0.03) | move(0, 1.04, 0) | paint(planks)
+lid_top = box(0.7, 0.1, 0.7) | move(0, 1.1, 0)
+lid_painted = lid_slab | decal(lid_top, front_paint)
+knob = sphere(0.05) | move(0, 1.13, 0.35) | paint("brass")
+lid_part = lid_painted + knob
+lid = joint(lid_part, "lid", 0, 1.0, -0.5, axis=[1, 0, 0])
+
+# ---- the crank on the +x side: shaft along x, an arm up, a handle back out along x ----
+shaft = cylinder(0.03, 0.26) | rotate(z=90) | move(0.58, 0.5, 0) | paint("iron")
+crank_arm = box(0.05, 0.24, 0.05, round=0.012) | move(0.71, 0.59, 0) | paint("iron")
+handle = cylinder(0.028, 0.16) | rotate(z=90) | move(0.79, 0.68, 0) | paint("walnut")
+handle_knob = sphere(0.045) | move(0.87, 0.68, 0) | paint("walnut")
+crank_part = shaft + crank_arm + handle + handle_knob
+crank = joint(crank_part, "crank", 0.58, 0.5, 0, axis=[1, 0, 0])
+
+# ---- the clown on its spring, folded inside the box at rest ----
+spring = tube(0.02, helix(0.11, 0.35, 4, per_turn=24), smooth=2) | move(0, 0.04, 0) | paint("steel")
+ruff = extrude(star(12, 0.22, 0.17), 0.05) | move(0, 0.40, 0) | paint("#f4f0e2")
+neck = cylinder(0.06, 0.1) | move(0, 0.44, 0) | paint(skin)
+head_ball = sphere(0.16) | move(0, 0.57, 0) | paint(skin)
+eye_l = sphere(0.03) | move(-0.06, 0.61, 0.145)
+eye_r = sphere(0.03) | move(0.06, 0.61, 0.145)
+mouth = torus(0.07, 0.03) | rotate(x=90) | move(0, 0.53, 0.15) & (box(0.3, 0.1, 0.3) | move(0, 0.49, 0.15))
+head = head_ball | decal(eye_l, "black") | decal(eye_r, "black") | decal(mouth, "#c8342a")
+nose = sphere(0.035) | move(0, 0.56, 0.15) | paint("red")
+brim = cylinder(0.17, 0.025) | move(0, 0.705, 0) | paint("yellow")
+hat_cone = cone(0.15, 0.03, 0.22) | move(0, 0.81, 0) | paint(hat_paint)
+pompom = sphere(0.045) | move(0, 0.925, 0) | paint("yellow")
+right_arm_part = (tube(0.03, [0.15, 0.42, 0, 0.28, 0.28, 0]) | paint("#c8342a")) + (sphere(0.045) | move(0.28, 0.28, 0) | paint("white"))
+left_arm_part = (tube(0.03, [-0.15, 0.42, 0, -0.28, 0.28, 0]) | paint("#c8342a")) + (sphere(0.045) | move(-0.28, 0.28, 0) | paint("white"))
+right_arm = joint(right_arm_part, "right_arm", 0.15, 0.42, 0, axis=[0, 0, 1])
+left_arm = joint(left_arm_part, "left_arm", -0.15, 0.42, 0, axis=[0, 0, 1])
+clown_part = spring + ruff + neck + head + nose + brim + hat_cone + pompom + right_arm + left_arm
+clown = joint(clown_part, "clown", 0, wall, 0)
+
+jack = box_still + lid + crank + clown
+show jack
+# set pose pop   # for the beauty render of the popped toy; left off so the STL and report describe the shut box
+
+# ---- poses ----
+pose("shut")
+pose("ajar", lid=-25, clown=xform(move=[0, 0.12, 0]))
+pose("pop", lid=-115, clown=xform(move=[0, 0.04, 0], scale=[1, 2.1, 1]), right_arm=60, left_arm=-60)
+pose("pop_up", lid=-115, clown=xform(move=[0, 0.14, 0], scale=[1, 2.1, 1]), right_arm=70, left_arm=-70)
+pose("wound", crank=180)
+pose("crank_q1", crank=90)
+pose("crank_q3", crank=270)
+pose("crank_full", crank=360)
+
+# ---- animations ----
+animation("wind", ["shut", "crank_q1", "wound", "crank_q3", "crank_full"], seconds=2)
+animation("pop", ["shut", "shut", "ajar", "pop"], times=[0, 0.6, 0.75, 0.95], loop=0, ease=1)
+animation("bob", ["pop", "pop_up", "pop"], seconds=1, ease=1)
+
+assert tall(jack) < 2.3, "popped it stays under 2.3 tall (asserts run in every pose, so the closed height cannot be promised here)"

@@ -104,10 +104,14 @@ export function isSpeck(pc: Piece, physics: Physics, cellSize: number): boolean 
 export function analyse(mesh: Mesh, cellSize: number): Physics {
   const { volume, centre } = centroidAndVolume(mesh);
   const p = mesh.positions;
-  let floor = Infinity;
-  for (let i = 1; i < p.length; i += 3) floor = Math.min(floor, p[i]);
+  let floor = Infinity, top = -Infinity;
+  for (let i = 1; i < p.length; i += 3) { floor = Math.min(floor, p[i]); top = Math.max(top, p[i]); }
+  // A model built on y = 0 whose pose dips a corner a little below it (a sitting fox's tail tip) still stands on
+  // the floor, not on that corner: the footprint is taken at y = 0 then, with everything below it counted.
+  const height = top - floor;
+  const ref = floor < 0 && floor > -0.05 * height ? 0 : floor;
   const contacts: [number, number][] = [];
-  for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= floor + cellSize * 1.5) contacts.push([p[i], p[i + 2]]);
+  for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= ref + cellSize * 1.5) contacts.push([p[i], p[i + 2]]);
   const footprint = hull2(contacts);
   const stabilityMargin = insideMargin(footprint, centre[0], centre[2]);
   // Connected components over shared vertices, the copies a crease split made welded back into one.
@@ -161,5 +165,5 @@ export function analyse(mesh: Mesh, cellSize: number): Physics {
     const top = Math.max(p[a + 1], p[b + 1], p[c + 1]);
     if (ny / len < -Math.SQRT1_2 && top > floor + cellSize * 1.5) down += len;
   }
-  return { volume, centre, floor, footprint, stable: stabilityMargin > 0, stabilityMargin, pieces, overhang: area > 0 ? down / area : 0 };
+  return { volume, centre, floor: ref, footprint, stable: stabilityMargin > 0, stabilityMargin, pieces, overhang: area > 0 ? down / area : 0 };
 }

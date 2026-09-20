@@ -45,7 +45,7 @@ export interface ViewInfo {
   elevation?: number;
 }
 
-const fmt = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
+const fmt = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.005 ? String(Number(v.toPrecision(2))) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 /** A cell size to three significant figures, so 0.007 and 0.014 do not both read 0.01. */
 export function fmtCell(v: number): string {
@@ -345,12 +345,41 @@ export interface Timing {
   times?: number[];
   /** 0 is linear; 1 slows to a stop at every key (a cosine blend). */
   ease?: number;
+  /** Whether the animation loops, for the strip's bar; a one-shot says ONCE. */
+  loop?: boolean;
 }
 
 export type ShapeAt = (joints: Record<string, JointPose>) => Shape3 | undefined;
 
+/**
+ * Meshes already made for a pose in this render, keyed by the pose's values and the cell. A pose sheet and every
+ * strip share one, so the rest pose (REST, then SHUT, then CRANK_FULL) and a held key (five identical frames of a
+ * pop) are meshed once (measured, round 7: 60 of 82 seconds of a full render went to re-meshing the same poses).
+ */
+export type PoseCache = Map<string, Mesh | undefined>;
+
+function poseKey(joints: Record<string, JointPose>, cellSize: number): string {
+  const names = Object.keys(joints).sort();
+  const parts: string[] = [];
+  for (const n of names) {
+    const j = joints[n];
+    // A joint at rest is the same as one not named.
+    if (j.angles.every((v) => v === 0) && j.move.every((v) => v === 0) && j.scale.every((v) => v === 1)) continue;
+    parts.push(`${n}:${j.angles.map((v) => v.toFixed(6)).join(",")}|${j.move.map((v) => v.toFixed(6)).join(",")}|${j.scale.map((v) => v.toFixed(6)).join(",")}`);
+  }
+  return `${cellSize}#${parts.join(";")}`;
+}
+
 /** The mesh of the model in one pose, at about `cellSize`; undefined when the pose has no shape. */
-function poseMesh(shapeAt: ShapeAt, joints: Record<string, JointPose>, cellSize: number): Mesh | undefined {
+function poseMesh(shapeAt: ShapeAt, joints: Record<string, JointPose>, cellSize: number, cache?: PoseCache): Mesh | undefined {
+  const key = cache ? poseKey(joints, cellSize) : "";
+  if (cache && cache.has(key)) return cache.get(key);
+  const m = poseMeshUncached(shapeAt, joints, cellSize);
+  if (cache) cache.set(key, m);
+  return m;
+}
+
+function poseMeshUncached(shapeAt: ShapeAt, joints: Record<string, JointPose>, cellSize: number): Mesh | undefined {
   const shape = shapeAt(joints);
   if (!shape || isEmpty(shape.bounds)) return undefined;
   const s = boundsSize(shape.bounds);
@@ -384,20 +413,40 @@ function framingFor(meshes: (Mesh | undefined)[]): Bounds {
   return isEmpty(b) ? { min: [-1, -1, -1], max: [1, 1, 1] } : b;
 }
 
+/** A bar's text broken into lines that fit `width` at text size 2, so a long list wraps rather than being cut off. */
+function barLines(text: string, width: number): string[] {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (line && textWidth(next, 2) > width - 20) { lines.push(line); line = w; } else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+const BAR_LINE = 18;
+
 /** One thumbnail per pose, the rest pose first, all framed alike. `shapeAt` rebuilds the model for a set of angles. */
-export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseView[], thumb: number, cellSize: number, azimuth?: number, elevation?: number): Canvas {
+export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseView[], thumb: number, cellSize: number, azimuth?: number, elevation?: number, cache?: PoseCache, frameEach = false): Canvas {
   const all: PoseView[] = [{ name: "rest", joints: {} }, ...poses.filter((p) => p.name !== "rest")];
   const cols = Math.min(5, all.length);
   const rows = Math.ceil(all.length / cols);
-  const gutter = 6, bar = 30;
-  const out = new Canvas(cols * (thumb + gutter) + gutter, bar + rows * (thumb + gutter) + gutter, INK.page);
+  const gutter = 6;
+  const width = cols * (thumb + gutter) + gutter;
+  // Every joint is named, wrapped onto more bar lines when there are many (round 7: a ten-joint rig's legs were "...").
+  const lines = barLines(`POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${jointNames.join(", ")}`, width);
+  const bar = 12 + lines.length * BAR_LINE;
+  const out = new Canvas(width, bar + rows * (thumb + gutter) + gutter, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
-  const listed = jointNames.length > 6 ? `${jointNames.slice(0, 6).join(", ")}, ...` : jointNames.join(", ");
-  drawText(out, 10, 8, `POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${listed}`, INK.barText, 2);
-  const meshes = all.map((p) => poseMesh(shapeAt, p.joints, cellSize));
+  lines.forEach((l, i) => drawText(out, 10, 8 + i * BAR_LINE, l, INK.barText, 2));
+  const meshes = all.map((p) => poseMesh(shapeAt, p.joints, cellSize, cache));
+  // One framing for every pose, so sizes compare; a focused sheet frames each close-up on its own, since the
+  // focused step is wherever each pose put it (a gimbal under a drone at take-off is far from one at rest).
   const framing = framingFor(meshes);
   all.forEach((p, i) => {
-    const c = poseThumb(meshes[i], framing, thumb, p.name, azimuth, elevation);
+    const c = poseThumb(meshes[i], frameEach ? framingFor([meshes[i]]) : framing, thumb, p.name, azimuth, elevation);
     out.blit(c, gutter + (i % cols) * (thumb + gutter), bar + gutter + Math.floor(i / cols) * (thumb + gutter));
   });
   return out;
@@ -442,14 +491,18 @@ export function interpolatePose(keys: PoseView[], jointNames: string[], t: numbe
 }
 
 /** A strip of frames through an animation's keyframes, with the time under each. */
-export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number, timing: Timing = {}): Canvas {
-  const gutter = 4, bar = 24, labelH = 12;
-  const out = new Canvas(frames * (frame + gutter) + gutter, frame + gutter * 2 + bar + labelH, INK.page);
-  out.fill(0, 0, out.width, bar, INK.bar);
+export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number, timing: Timing = {}, cache?: PoseCache): Canvas {
+  const gutter = 4, labelH = 12;
+  const width = frames * (frame + gutter) + gutter;
   const keyList = keys.map((k, i) => (timing.times ? `${k.name} ${fmt(timing.times[i])}s` : k.name)).join(" → ");
-  drawText(out, 10, 6, `${name.toUpperCase()}   ${fmt(seconds)}s${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}   keyframes: ${keyList}`, INK.barText, 2);
+  // The bar says whether it loops (round 7: a one-shot's bar read like a loop's) and wraps a long key list.
+  const lines = barLines(`${name.toUpperCase()}   ${fmt(seconds)}s   ${timing.loop === false ? "once" : "loop"}${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}   keyframes: ${keyList}`, width);
+  const bar = 6 + lines.length * BAR_LINE;
+  const out = new Canvas(width, frame + gutter * 2 + bar + labelH, INK.page);
+  out.fill(0, 0, out.width, bar, INK.bar);
+  lines.forEach((l, i) => drawText(out, 10, 6 + i * BAR_LINE, l, INK.barText, 2));
   const meshes: (Mesh | undefined)[] = [];
-  for (let i = 0; i < frames; i++) meshes.push(poseMesh(shapeAt, interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1), timing), cellSize));
+  for (let i = 0; i < frames; i++) meshes.push(poseMesh(shapeAt, interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1), timing), cellSize, cache));
   const framing = framingFor(meshes);
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : i / (frames - 1);
