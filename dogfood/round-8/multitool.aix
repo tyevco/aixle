@@ -1,0 +1,88 @@
+# A folding pocket multi-tool, 0.9 long along x, lying flat on y = 0.
+# Two walnut scales on steel liners with a slot between them; on a brass
+# pin at the +x end three tools fold out about the pin's axis (y): a knife
+# blade, a flat screwdriver and a corkscrew; on a second pin at the -x end a
+# bottle opener. Raised lettering on the top scale, a lanyard ring at the rear.
+#
+# Layers, bottom to top: wood 0..0.03, liner 0.03..0.045, slot 0.045..0.175,
+# liner 0.175..0.19, wood 0.19..0.22. Tools are built folded (pointing to -x
+# from the front pin, +x from the rear pin) and swing out through the open
+# +z side of the slot.
+
+set grid 220
+
+L = 0.9            # handle length
+W = 0.22           # handle width (z)
+T = 0.22           # handle thickness (y)
+pin_x = 0.38       # front pin
+rear_x = -0.36     # rear pin
+
+# --- the handle: scales, liners, spine and bolster ---------------------------
+wood = material("walnut", scale=0.08)
+scale_lo = box(L, 0.03, W, round=0.01) | move(0, 0.015, 0) | paint(wood)
+scale_hi = box(L, 0.03, W, round=0.01) | move(0, 0.205, 0) | paint(wood)
+liner_lo = box(L, 0.015, W) | move(0, 0.0375, 0) | paint("steel")
+liner_hi = box(L, 0.015, W) | move(0, 0.1825, 0) | paint("steel")
+spine = box(L, 0.14, 0.03) | move(0, 0.11, -0.095) | paint("steel")          # backspacer along -z
+bolster = box(0.06, 0.14, W) | move(-0.42, 0.11, 0) | paint("steel")         # solid rear end block
+pin = cylinder(0.02, T + 0.01) | move(pin_x, T / 2 + 0.005, 0) | paint("brass")
+rear_pin = cylinder(0.018, T + 0.01) | move(rear_x, T / 2 + 0.005, 0) | paint("brass")
+ring = torus(0.04, 0.01) | move(-0.48, 0.11, 0) | paint("steel")             # lanyard ring through the bolster
+
+# Raised brand name on the top scale, sunk half its thickness into the wood.
+brand = extrude(text("AIXLE", 0.07, weight=0.014, align="center"), 0.02) | move(-0.03, 0.22, 0.035) | paint("brass")
+
+handle = scale_lo + scale_hi + liner_lo + liner_hi + spine + bolster + pin + rear_pin + ring + brand
+
+# --- the tools, each built with its pin at the origin, then moved onto it ----
+# Blade: a drop-point outline (x along x, profile y along -z) with a round
+# tang; the edge with its belly is on +y (so towards the spine, -z, when
+# folded), the straight back on -y; the tip is blunted to a cell.
+blade_profile = circle(0.05) + polygon(0,0.045, -0.3,0.045, -0.5,0.036, -0.6,0.02, -0.66,0.004, -0.66,-0.004, -0.6,-0.025, -0.45,-0.045, 0,-0.045)
+blade_body = extrude(blade_profile, 0.02) | anchor("tip", -0.66, 0, 0) | move(pin_x, 0.06, 0) | paint("chrome")
+blade = joint(blade_body, "blade", pin_x, 0.06, 0, axis=[0, 1, 0])
+
+# Flat screwdriver: a round tang, a bar, a wider flat tip.
+driver_body = (cylinder(0.05, 0.02) + (box(0.45, 0.02, 0.035) | move(-0.225, 0, 0)) + (box(0.08, 0.02, 0.055) | move(-0.49, 0, 0))) | anchor("tip", -0.53, 0, 0) | move(pin_x, 0.09, 0) | paint("steel")
+driver = joint(driver_body, "driver", pin_x, 0.09, 0, axis=[0, 1, 0])
+
+# Corkscrew: a shank from the tang to a helix laid along -x (rotate(z=90) turns +y to -x).
+shank = tube(0.007, [0,0,0, -0.04,0,0, -0.06,0.016,0])
+coil = tube(0.007, curve(helix(0.016, 0.3, 4))) | rotate(z=90) | move(-0.06, 0, 0)   # exact curve: a polyline tube leaves open rings at every join
+corkscrew_body = (cylinder(0.05, 0.02) + shank + coil) | anchor("tip", -0.37, 0, 0) | move(pin_x, 0.135, 0) | paint("steel")
+corkscrew = joint(corkscrew_body, "corkscrew", pin_x, 0.135, 0, axis=[0, 1, 0])
+
+# Bottle opener on the rear pin, pointing to +x when folded; its axis is -y so
+# a positive angle swings it out through the open +z side like the others.
+opener_bar = cylinder(0.04, 0.02) + (box(0.32, 0.02, 0.06) | move(0.16, 0, 0))
+opener_notch = box(0.05, 0.04, 0.04) | move(0.27, 0, -0.02)
+opener_body = (opener_bar - opener_notch) | anchor("tip", 0.32, 0, 0) | move(rear_x, 0.135, 0) | paint("steel")
+opener = joint(opener_body, "opener", rear_x, 0.135, 0, axis=[0, -1, 0])
+
+tool = handle + blade + driver + corkscrew + opener
+
+# --- poses --------------------------------------------------------------------
+pose("closed")
+pose("knife", blade=180)
+pose("driver_out", driver=180)
+pose("half", blade=90)
+pose("two_out", blade=180, driver=135)
+pose("three_out", blade=180, driver=135, corkscrew=90)
+pose("all_out", blade=180, driver=135, corkscrew=90, opener=160)
+
+# --- promises -----------------------------------------------------------------
+assert pieces(tool, resolution=160) == 1, "one piece at rest"
+assert tall(tool) < 0.25, "closed, nothing stands above the scales", pose=closed
+assert width(tool) < 1.0, "closed, nothing pokes out past the handle and ring", pose=closed
+assert at(blade, "tip")[0] > -0.45, "closed, the blade tip is inside the handle", pose=closed
+assert at(blade, "tip")[0] > 0.45, "knife: the blade tip is beyond the handle's end", pose=knife
+assert clearance(blade, driver) > 0.005, "all_out: the blade and the driver clear each other", pose=all_out
+
+# --- animations ---------------------------------------------------------------
+# flick: two keys give ease_ends=0 nothing to ease, so a third key holds "knife"
+# and the ease at the middle key is the settle.
+animation("flick", ["closed", "knife", "knife"], times=[0, 0.45, 0.6], loop=0, ease=1, ease_ends=0)
+animation("unfold", ["closed", "knife", "two_out", "three_out", "all_out"], times=[0, 0.5, 0.9, 1.3, 1.8], loop=0, ease=1)
+animation("fidget", ["closed", "half", "closed"], seconds=1.2, ease=1, ease_ends=0)
+
+show tool

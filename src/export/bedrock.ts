@@ -82,6 +82,8 @@ export interface BedrockResult {
   joints: string[];
   pixelsPerUnit: number;
   warnings: string[];
+  /** Texels painted per material name, so a decal that reached no texel can be named. */
+  painted: Record<string, number>;
 }
 
 /** One animation as the exporter samples it: a pose per joint at each time, already blended and eased. */
@@ -270,6 +272,7 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
   const maxPixels = opts.maxPixels ?? 256;
   const entity = opts.entity ?? false;
   const warnings: string[] = [];
+  const painted: Record<string, number> = {};
   const bones: BedrockBone[] = [];
   const jointBones: string[] = [];
   let cubes = 0, voxels = 0;
@@ -322,6 +325,7 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
                 p[va] = fromLowV ? lo[va] + v + 0.5 : hi[va] - v - 0.5;
                 const hit = surfaceHit(shape, p, f.axis, plane, dir, px);
                 const c = albedo(hit.mat, hit.lx, hit.ly, hit.lz);
+                painted[hit.mat.name] = (painted[hit.mat.name] ?? 0) + 1;
                 canvas.set(u0 + u, v0 + v, rgbf(c[0], c[1], c[2]));
               }
           },
@@ -406,5 +410,5 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
       },
     ],
   };
-  return { geometry, texture, cubes, voxels, bones: bones.map((b) => b.name), joints: jointBones, pixelsPerUnit: px, warnings };
+  return { geometry, texture, cubes, voxels, bones: bones.map((b) => b.name), joints: jointBones, pixelsPerUnit: px, warnings, painted };
 }

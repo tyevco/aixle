@@ -140,8 +140,11 @@ prints the posed sizes; `--focus part` makes the pose sheet and strips
 close-ups of that part. A pose value may be `xform(rotate=, move=,
 scale=)` for a hop or a squash, and an animation takes `times=[...]`
 for uneven keys and `ease=1` to settle into each pose (a looping cycle
-adds `ease_ends=0` so its seam runs through). Asserts are judged at
-rest unless one names its pose: `assert ..., pose=reach`. The language doc's
+adds `ease_ends=0` so its seam runs through; a two-key one-shot that
+should settle holds its last pose as a third key). Asserts are judged at
+rest unless one names its pose: `assert ..., pose=reach`, where a step
+is measured where the pose puts it. `pose("hold", from="reach", ...)`
+adds to a pose. The language doc's
 rig section has the limb sign rules and the axis-joint convention.
 
 ```

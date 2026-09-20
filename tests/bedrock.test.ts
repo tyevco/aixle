@@ -29,6 +29,12 @@ describe("Minecraft Bedrock geometry", () => {
   it("paints each window with the model's material, and a sphere becomes stepped cubes within its bounds", () => {
     const red = materialFromString("#ff0000")!;
     const r = toBedrock([{ name: "ball", shape: O.paint(P.sphere(1), red) }], "ball", { pixelsPerUnit: 8 });
+    // Every texel took the ball's one material; a decal too small to cover a texel centre would take none.
+    expect(Object.keys(r.painted)).toEqual([red.name]);
+    const tiny = toBedrock([{ name: "b", shape: O.decal(P.box(1, 1, 1), O.move(P.sphere(0.01), 0, 0, 0.5), materialFromString("black")!) }], "b", { pixelsPerUnit: 16 });
+    expect(tiny.painted.black ?? 0).toBe(0);
+    const spot = toBedrock([{ name: "b", shape: O.decal(P.box(1, 1, 1), O.move(P.sphere(0.12), 0, 0, 0.5), materialFromString("black")!) }], "b", { pixelsPerUnit: 16 });
+    expect(spot.painted.black).toBeGreaterThan(0);
     expect(r.cubes).toBeGreaterThan(10);
     // About the sphere's volume in voxels (4/3 pi r^3 at 8 per unit is 2145), within a few percent.
     expect(Math.abs(r.voxels - 2145) / 2145).toBeLessThan(0.05);

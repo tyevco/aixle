@@ -103,5 +103,8 @@ export function toRoblox(h: SceneHierarchy, name: string, opts: RobloxOptions): 
     if (over) warnings.push(`roblox: ${over} mesh${over === 1 ? " has" : "es have"} more than a MeshPart's ${MESHPART_TRIANGLES} triangles; lower the grid.`);
   }
   parts.push(`${opts.size.map(fmt).join(" × ")} studs, turned to face -Z`);
+  // The rig: the joints are nodes and every animation a clip in the file, which Studio's importer keeps (round 8 asked).
+  const clips = opts.animations ?? [];
+  if (clips.length) parts.push(`${clips.length} animation clip${clips.length === 1 ? "" : "s"} (${clips.map((c) => c.name).join(", ")})`);
   return { glb, attachments: attachmentNames.map((n) => `${n}_Att`), note: parts.join("; "), warnings };
 }

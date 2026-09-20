@@ -876,6 +876,31 @@ export function placedShape(root: Shape3, target: Shape3): Shape3 | undefined {
   };
 }
 
+/** A point in `target`'s own frame carried to where `root` puts it, through every transform and posed joint above; undefined when not under the root. */
+export function placedPoint(root: Shape3, target: Shape3, p: Vec3): Vec3 | undefined {
+  const maps = placementChain(root, target);
+  if (!maps) return undefined;
+  let q: Vec3 = [p[0], p[1], p[2]];
+  for (let k = maps.length - 1; k >= 0; k--) q = maps[k].warp!(q[0], q[1], q[2]);
+  return q;
+}
+
+/**
+ * The shape as it sits under the first of `roots` that holds it (the output first, then the steps newest to oldest):
+ * placed through every transform and posed joint above it, or itself when nothing above it moves it. A measurement
+ * in a pose reads a nested step through this, so `clearance(wrist, base)` in a tucked pose measures the wrist where
+ * the shoulder and elbow put it (round 8: it measured the rest position and passed).
+ */
+export function placedUnder(roots: Shape3[], target: Shape3): Shape3 {
+  for (const root of roots) {
+    if (root === target) return target;
+    const maps = placementChain(root, target);
+    if (!maps) continue;
+    return maps.length ? (placedShape(root, target) ?? target) : target;
+  }
+  return target;
+}
+
 /** The joints as a tree, one line each, indented under the joint they turn with: what `check` and the report print. */
 export function jointTreeLines(root: Shape3, num: (v: number) => string = (v) => String(v)): string[] {
   const out: string[] = [];

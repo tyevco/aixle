@@ -4,14 +4,15 @@
  *   aixle check  <file.aix>
  *   aixle doc    [--write FILE]
  */
-import { anchorsOf, hasLooseBounds, jointTreeLines, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
+import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
 import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
-import { assertLine } from "./lang/interpreter.js";
+import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
+import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
 import { isShape2, isShape3, typeName } from "./lang/values.js";
 import { parse } from "./lang/parser.js";
@@ -52,13 +53,15 @@ function usage(): never {
       "usage:",
       "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
+      "                          [--no-anims | --anim NAME[,NAME]]  skip the animation strips, or draw only these (poses.png stays)",
+      "                          [--no-asserts]                     skip the program's asserts (a pieces() promise on a big rig can cost more than the render)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
-      "  aixle check  <file.aix> [--pose NAME]   parse and evaluate; print sizes and warnings, render nothing",
+      "  aixle check  <file.aix> [--pose NAME] [--no-asserts]   parse and evaluate; print sizes and warnings, render nothing",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
@@ -110,11 +113,11 @@ function main(argv: string[]): number {
   }
   if (cmd === "check") {
     try {
-      const rest = check(source, file, (l) => console.log(l));
+      const rest = check(source, file, (l) => console.log(l), undefined, undefined, !!opts["no-asserts"]);
       // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.joints, pose.name) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints, pose.name, !!opts["no-asserts"]) : rest;
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
@@ -149,27 +152,40 @@ function main(argv: string[]): number {
         // Named anchors, where they are in this step's frame.
         const anchors = Object.entries(anchorsOf(st.value));
         if (anchors.length) console.log(`${"  anchors".padEnd(18)} ${anchors.map(([k, p]) => `${k} (${p.map(short).join(", ")})`).join("  ")}`);
+        // In a pose, the anchors where the joints above put them too (round 8: a gondola's floor read in its own frame).
+        if (anchors.length && pose && ev.output) {
+          const shape = st.value as Shape3;
+          const placed: [string, Vec3][] = [];
+          for (const [k, p] of anchors) { const q = placedPoint(ev.output, shape, p); if (q) placed.push([k, q]); }
+          if (placed.some(([k, q]) => { const p = anchorsOf(shape)[k]; return q.some((v, i) => Math.abs(v - p[i]) > 1e-6); }))
+            console.log(`${"  anchors posed".padEnd(18)} ${placed.map(([k, q]) => `${k} (${q.map(short).join(", ")})`).join("  ")}`);
+        }
         // In a pose, where the step ends up once the joints above it have turned: the surface itself, measured
         // through the joints' inverses, so a turned wheel's posed line says whether it still touches the floor.
         if (pose && ev.output) {
           const placedS = placedShape(ev.output, st.value);
           const placed = placedS ? surfaceExtent(placedS, 48) : undefined;
           if (placed && !isEmpty(placed) && [0, 1, 2].some((k) => Math.abs(placed.min[k] - own.min[k]) > 1e-6 || Math.abs(placed.max[k] - own.max[k]) > 1e-6))
-            console.log(`${"  posed".padEnd(18)} ${spanBox(placed)}`);
+            console.log(`${`  posed ${st.name}`.padEnd(18)} ${spanBox(placed)}`);
         }
       }
-      if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
+      // In a pose the output's box is the box of turned boxes; its surface is the size the sheet shows (round 8: a
+      // sitting dog's output line said 1.84 tall for a 1.18 surface).
+      if (ev.output && pose && !isEmpty(ev.output.bounds)) { const e = surfaceExtent(ev.output, 48); console.log(`output: ${ev.outputName} ${isEmpty(e) ? dimsLabel(ev.output.bounds) : `${dimsLabel(e)} (the surface in pose ${pose.name}; its box is ${dimsLabel(ev.output.bounds)})`}`); }
+      else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
       const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
       if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units`);
       if (ev.output && !isEmpty(ev.output.bounds)) {
         // The surface's lowest point, not the bounds': the note a render would make, without the render.
         const bottom = surfaceBottom(ev.output);
+        // A hair below the floor prints as a hair, not as 0 (round 8: "at y = 0; pipe it through ground()").
+        const shortY = (v: number): string => (v !== 0 && Math.abs(v) < 0.01 ? String(Number(v.toPrecision(2))) : short(v));
         // In a pose the floor is the pose's doing: ground() would move the rest model and the exports too.
-        if (pose && bottom < -cellSize) console.log(`note: in pose ${pose.name} the lowest point of the surface is at y = ${short(bottom)}, below the floor: raise the root joint with xform(move=) in the pose, or bend it less`);
-        else if (pose && bottom > cellSize * 2) console.log(`note: in pose ${pose.name} the model is off the floor: its lowest point is at y = ${short(bottom)} (standing is not judged in this pose)`);
-        else if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${short(bottom)}; pipe the model through ground() to rest it on y = 0`);
-        else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${short(bottom)}; ground() rests it on y = 0`);
+        if (pose && bottom < -cellSize) console.log(`note: in pose ${pose.name} the lowest point of the surface is at y = ${shortY(bottom)}, below the floor: raise the root joint with xform(move=) in the pose, or bend it less`);
+        else if (pose && bottom > cellSize * 2) console.log(`note: in pose ${pose.name} the model is off the floor: its lowest point is at y = ${shortY(bottom)} (standing is not judged in this pose)`);
+        else if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${shortY(bottom)}; pipe the model through ground() to rest it on y = 0`);
+        else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${shortY(bottom)}; ground() rests it on y = 0`);
       }
       // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
       const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
@@ -178,8 +194,11 @@ function main(argv: string[]): number {
       if (warnings.length === 0) console.log("no warnings");
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
-      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn)) : undefined; });
+      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"])) : undefined; });
       const failed = all.filter((a) => !a.passed);
+      // A passing promise prints its numbers too, so how close it came is on the terminal and not only in
+      // report.json (round 8: the gap between closed fingers).
+      for (const a of all) if (a.passed) console.log(assertPassLine(a));
       for (const a of failed) console.log(assertLine(a));
       if (all.length) console.log(`asserts: ${failed.length ? `${all.length - failed.length} pass, ${failed.length} fail` : `${all.length} pass`}${all.some((a) => a.pose) ? " (at rest, or in the pose each names)" : pose ? " (judged at rest)" : ""}`);
       return failed.length ? 1 : 0;
@@ -301,6 +320,8 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       views: typeof opts.views === "string" ? opts.views.split(",") : undefined,
       steps: opts["no-steps"] ? false : undefined,
       poses: opts["no-poses"] ? false : undefined,
+      animations: opts["no-anims"] ? false : typeof opts.anim === "string" ? opts.anim.split(",") : undefined,
+      asserts: opts["no-asserts"] ? false : undefined,
       slices: opts["no-slices"] ? false : undefined,
       turntable: opts["no-turntable"] ? false : undefined,
       obj: opts["no-export"] ? false : undefined,

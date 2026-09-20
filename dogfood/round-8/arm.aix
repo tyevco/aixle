@@ -1,0 +1,101 @@
+# A six-axis robot arm with a parallel gripper, about 1.2 tall at rest,
+# standing on a round base on y = 0 and facing +z. One unit is a metre.
+# Joints, each nested in the one above it:
+#   base (about y) > shoulder (about x) > elbow (about x)
+#   > wrist (about the forearm's own axis) > finger_l, finger_r (slides)
+# A hydraulic cylinder runs up the +x side from a pin on the upper arm to
+# an eye on the forearm; angle("elbow") keeps it pin to pin in every pose.
+
+set grid 200
+set roblox 1
+
+sh = 0.30          # shoulder pivot height
+el = 0.72          # elbow pivot height
+wr = 1.06          # wrist pivot height
+
+orange = material("#e8721c", rough=0.45)
+grey = "charcoal"
+
+# ---- base plate (fixed) and the turntable body -------------------------
+base_plate = cylinder(0.24, 0.06, round=0.01) | move(0, 0.03, 0) | paint(grey)
+turntable = cylinder(0.17, 0.10, round=0.01) | move(0, 0.10, 0) | paint(grey)
+neck = box(0.16, 0.20, 0.14, round=0.02) | move(0, 0.24, 0) | paint(orange)
+housing = cylinder(0.09, 0.20) | rotate(z=90) | move(0, sh, 0) | paint(grey)
+
+# ---- gripper: palm, two sliding fingers with rubber pads ---------------
+palm = box(0.20, 0.05, 0.08, round=0.01) | move(0, wr + 0.055, 0) | paint(grey)
+palm = palm | anchor("tip", 0, wr + 0.18, 0)
+wrist_cap = cylinder(0.05, 0.06) | move(0, wr + 0.01, 0) | paint(grey)
+finger_bar_l = box(0.025, 0.12, 0.04) | move(-0.0525, wr + 0.13, 0) | paint("steel")
+pad_l = box(0.015, 0.03, 0.036) | move(-0.0355, wr + 0.165, 0) | paint("rubber")
+finger_l = joint(finger_bar_l + pad_l, "finger_l", -0.0525, wr + 0.08, 0)
+finger_r = joint((finger_bar_l + pad_l) | flip("x"), "finger_r", 0.0525, wr + 0.08, 0)
+gripper = palm + wrist_cap + finger_l + finger_r
+wrist = joint(gripper, "wrist", 0, wr, 0, axis=[0, 1, 0])
+
+# ---- forearm, carrying the wrist ---------------------------------------
+fore_body = box(0.09, wr - el + 0.04, 0.08, round=0.02) | move(0, (el + wr) / 2 + 0.01, 0) | paint(orange)
+elbow_cap = cylinder(0.065, 0.15) | rotate(z=90) | move(0, el, 0) | paint(grey)
+eye_lug = box(0.09, 0.06, 0.06, round=0.01) | move(0.08, el + 0.14, -0.06) | paint(orange)   # buried 0.01 into the forearm
+eye_r = [0.115, el + 0.14, -0.08]                  # rod pin on the forearm, at rest
+fore = (fore_body + elbow_cap + eye_lug) | anchor("eye", eye_r[0], eye_r[1], eye_r[2])
+
+# ---- the cylinder: pin on the upper arm, eye on the forearm ------------
+def turnx(p, c, a) = [p[0],
+                      c[1] + (p[1] - c[1]) * cos(a) - (p[2] - c[2]) * sin(a),
+                      c[2] + (p[1] - c[1]) * sin(a) + (p[2] - c[2]) * cos(a)]
+pin = [0.115, sh + 0.08, -0.09]                     # barrel pin on the upper arm
+e = angle("elbow")[0]
+eye_p = turnx(eye_r, [0, el, 0], e)                # the eye where the elbow put it
+ram = sqrt((eye_p[0] - pin[0]) ^ 2 + (eye_p[1] - pin[1]) ^ 2 + (eye_p[2] - pin[2]) ^ 2)
+d = [(eye_p[0] - pin[0]) / ram, (eye_p[1] - pin[1]) / ram, (eye_p[2] - pin[2]) / ram]
+barrel_len = 0.26
+barrel = tube(0.03, [pin, [pin[0] + d[0] * barrel_len, pin[1] + d[1] * barrel_len, pin[2] + d[2] * barrel_len]], cap="flat") | paint("iron")
+# the rod lives in the forearm's frame: the pin turned back by -e
+pin_f = turnx(pin, [0, el, 0], -e)
+rod_len = ram - barrel_len + 0.04
+rd = [(pin_f[0] - eye_r[0]) / ram, (pin_f[1] - eye_r[1]) / ram, (pin_f[2] - eye_r[2]) / ram]
+rod = tube(0.016, [eye_r, [eye_r[0] + rd[0] * rod_len, eye_r[1] + rd[1] * rod_len, eye_r[2] + rd[2] * rod_len]], cap="flat") | paint("chrome")
+
+elbow = joint(fore + rod + wrist, "elbow", 0, el, 0)
+eye_check = at(elbow, "eye")                       # should equal eye_p in every pose
+
+# ---- upper arm, carrying the elbow -------------------------------------
+upper_body = box(0.11, el - sh + 0.06, 0.09, round=0.02) | move(0, (sh + el) / 2, 0) | paint(orange)
+shoulder_cap = cylinder(0.075, 0.26) | rotate(z=90) | move(0, sh, 0) | paint(grey)
+pin_lug = box(0.09, 0.06, 0.06, round=0.01) | move(0.08, sh + 0.08, -0.07) | paint(orange)   # buried 0.02 into the upper arm
+shoulder = joint(upper_body + shoulder_cap + pin_lug + barrel + elbow, "shoulder", 0, sh, 0)
+
+# ---- turntable joint about y, carrying everything ----------------------
+base = joint(turntable + neck + housing + shoulder, "base", 0, 0.05, 0)
+arm = base_plate + base
+
+# ---- poses -------------------------------------------------------------
+pose("rest")
+pose("reach", shoulder=[60, 0, 0], elbow=[30, 0, 0])
+pose("tucked", shoulder=[-45, 0, 0], elbow=[140, 0, 0])   # 150 put the forearm through the upper arm
+pose("grip_open", finger_l=xform(move=[-0.06, 0, 0]), finger_r=xform(move=[0.06, 0, 0]))
+pose("grip_closed", finger_l=xform(move=[0.026, 0, 0]), finger_r=xform(move=[-0.026, 0, 0]))
+pose("wave", base=[0, 60, 0], shoulder=[-30, 0, 0], elbow=[50, 0, 0], wrist=45)
+# A pose sets every joint it does not name to rest, so "reach then close the
+# fingers" needs a pose that carries both: one def, a line per combined pose.
+def arm_pose(name, s, e, f) = pose(name, shoulder=[s, 0, 0], elbow=[e, 0, 0], finger_l=xform(move=[f, 0, 0]), finger_r=xform(move=[-f, 0, 0]))
+arm_pose("hold", 60, 30, 0.026)         # reach with the fingers closed
+arm_pose("carry", -45, 140, 0.026)      # tucked with the fingers closed
+
+# ---- promises ----------------------------------------------------------
+assert tall(arm) < 1.3, "under 1.3 tall at rest"
+assert clearance(finger_l, finger_r) > 0.15, "fingers open", pose=grip_open
+assert clearance(finger_l, finger_r) < 0.01, "fingers nearly touching", pose=grip_closed
+# clearance(wrist, turntable) here measured the wrist at REST (0.89), not where
+# tucked puts it: a step under outer joints is not posed for clearance. An
+# anchor read through the outer step is.
+assert at(arm, "tip")[1] > top(turntable) + 0.02, "the gripper clears the base when tucked", pose=tucked
+assert at(arm, "tip")[2] > 0.8, "the gripper tip is well ahead of the base", pose=reach
+
+# ---- animations --------------------------------------------------------
+animation("pick", ["rest", "reach", "hold", "carry"], times=[0, 1.0, 1.5, 2.5], loop=0, ease=1, ease_ends=0)
+animation("wave", ["rest", "wave", "rest"], seconds=1.6, ease=1, ease_ends=0)
+animation("open_close", ["grip_open", "grip_closed", "grip_open"], seconds=1.2, ease=1)
+
+show arm

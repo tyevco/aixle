@@ -177,11 +177,14 @@ function outline(target: RenderTarget): void {
       const d = depth[i];
       const nb = [x + 1 < W ? i + 1 : -1, y + 1 < H ? i + W : -1, x > 0 ? i - 1 : -1, y > 0 ? i - W : -1];
       let mark = 0;
+      // A feature one or two pixels wide (a blade edge-on in a strip) has background on both sides: a full outline
+      // would paint it black, so it keeps the light one (round 8: a chrome blade read as black at 35 degrees).
+      const thin = Number.isFinite(d) && ((x + 1 < W && x > 0 && !Number.isFinite(depth[i + 1]) && !Number.isFinite(depth[i - 1])) || (y + 1 < H && y > 0 && !Number.isFinite(depth[i + W]) && !Number.isFinite(depth[i - W])));
       for (const j of nb) {
         if (j < 0) continue;
         const dj = depth[j];
         const a = Number.isFinite(d), b = Number.isFinite(dj);
-        if (a !== b) { mark = 2; break; }
+        if (a !== b) { mark = thin ? 1 : 2; break; }
         if (!a) continue;
         if (Math.abs(d - dj) > range * 0.04) { mark = 2; break; }
         const dotp = normal[i * 3] * normal[j * 3] + normal[i * 3 + 1] * normal[j * 3 + 1] + normal[i * 3 + 2] * normal[j * 3 + 2];

@@ -1,0 +1,110 @@
+# A fairground Ferris wheel: the wheel turns on an axis joint about z,
+# eight gondolas each hang from the rim on their own joint so a pose can
+# keep them level, on a ground slab with a ticket booth and a lamp post.
+# Units: metres-ish, the whole scene about 4 tall. Front is +z.
+set grid 200
+set azimuth 30
+set elevation 15
+set zoom 1.25
+
+R = 1.4          # rim radius
+AY = 2.35        # axle height
+G = 0.1          # top of the ground slab
+
+# --- ground ---
+ground = box(6.0, 0.1, 3.4) | move(0, 0.05, 0) | paint(material("#a9a8a4"))
+
+# --- gondola, built hanging from the origin (its hanger axle), facing +z ---
+yoke = tube(0.025, [0, 0, -0.2, 0, -0.16, -0.2]) + tube(0.025, [0, 0, 0.2, 0, -0.16, 0.2])
+roof = box(0.44, 0.06, 0.5, round=0.01) | move(0, -0.17, 0)
+tub = box(0.44, 0.2, 0.48, round=0.01) | move(0, -0.5, 0)
+tub_hole = box(0.24, 0.2, 0.28) | move(0, -0.45, 0)
+posts = cylinder(0.025, 0.3) | move(0.17, -0.3, 0.19) | mirror("x") | mirror("z")
+seat = box(0.3, 0.06, 0.12) | move(0, -0.47, -0.11) | paint("oak")
+car_frame = (yoke + posts) | paint("iron")
+
+# i is 1..8; gondola 1 hangs at the bottom, the numbers go round anticlockwise.
+def car_angle(i) = -90 + 45 * (i - 1)
+# name is the joint's name and the name of an anchor on the gondola's floor
+# ("gondola_" + i would be nicer, but a string and a number do not join).
+def car(i, name, colour) =
+  joint(
+    (((roof + (tub - tub_hole)) | paint(colour)) + seat + car_frame)
+      | anchor(name, 0, -0.55, 0)
+      | move(R * cos(car_angle(i)), AY + R * sin(car_angle(i)), 0),
+    name, R * cos(car_angle(i)), AY + R * sin(car_angle(i)), 0, axis=[0, 0, 1])
+
+gondola_1 = car(1, "gondola_1", "red")
+gondola_2 = car(2, "gondola_2", "cream")
+gondola_3 = car(3, "gondola_3", "red")
+gondola_4 = car(4, "gondola_4", "cream")
+gondola_5 = car(5, "gondola_5", "red")
+gondola_6 = car(6, "gondola_6", "cream")
+gondola_7 = car(7, "gondola_7", "red")
+gondola_8 = car(8, "gondola_8", "cream")
+
+# --- the wheel: hub, two rims, spokes and hanger rods, all about the axle ---
+hub = cylinder(0.14, 0.7) | rotate(x=90) | move(0, AY, 0) | paint("iron")
+rim = torus(R, 0.04) | rotate(x=90)
+rims = ((rim | move(0, 0, -0.285)) + (rim | move(0, 0, 0.285))) | move(0, AY, 0) | paint("steel")
+spoke = cylinder(0.03, R) | move(0, R / 2, 0) | ring(8, 0, axis="z")
+spokes = ((spoke | move(0, 0, -0.28)) + (spoke | move(0, 0, 0.28))) | move(0, AY, 0) | paint("steel")
+hangers = cylinder(0.03, 0.72) | rotate(x=90) | move(0, R, 0) | ring(8, 0, axis="z") | move(0, AY, 0) | paint("iron")
+# one gold lamp on the front rim, between two hangers, so a turned pose can be told from rest
+beacon = sphere(0.09) | move(R * cos(112.5), AY + R * sin(112.5), 0.285) | paint(material("#ffd040", glow=1))
+wheel_body = hub + rims + spokes + hangers + beacon
+wheel = joint(wheel_body + gondola_1 + gondola_2 + gondola_3 + gondola_4
+              + gondola_5 + gondola_6 + gondola_7 + gondola_8,
+              "wheel", 0, AY, 0, axis=[0, 0, 1])
+
+# --- supports: two A-frames, an axle through them, a motor on the front bearing ---
+leg = tube(0.05, [1.0, G, 0.5, 0, AY, 0.5]) + tube(0.05, [-1.0, G, 0.5, 0, AY, 0.5])
+tie = box(1.12, 0.08, 0.08) | move(0, 1.1, 0.5)
+bearing = box(0.3, 0.3, 0.16, round=0.03) | move(0, AY, 0.5)
+frame = (leg + tie + bearing) | paint("navy")
+frames = frame | mirror("z")
+feet = box(2.3, 0.08, 0.2) | move(0, G + 0.04, 0.5) | mirror("z") | paint("charcoal")
+axle = cylinder(0.06, 1.4) | rotate(x=90) | move(0, AY, 0) | paint("steel")
+motor = box(0.34, 0.34, 0.26, round=0.03) | move(0, AY, 0.68) | paint("iron")
+motor_vent = box(0.2, 0.04, 0.06) | array(3, 0, 0.08, 0) | move(0, AY - 0.08, 0.81) | paint("charcoal")
+ride = frames + feet + axle + motor + motor_vent + wheel
+
+# --- ticket booth on the left ---
+hut = box(0.8, 1.2, 0.8) | move(0, G + 0.6, 0) | paint(material("cream", "stripes", "#c8342a", scale=0.2, axis="x"))
+window = box(0.5, 0.4, 0.3) | move(0, G + 0.85, 0.4)
+counter = box(0.9, 0.05, 0.22) | move(0, G + 0.63, 0.45) | paint("oak")
+booth_roof = loft(rect(1.0, 1.0), rect(0.12, 0.12), 0.4) | move(0, G + 1.38, 0) | paint("maroon")
+sign_board = box(1.2, 0.3, 0.08) | move(0, G + 1.12, 0.44) | paint("ivory")
+sign_text = extrude(text("TICKETS", 0.2, weight=0.05, align="center"), 0.08, "z") | move(0, G + 1.0, 0.48) | paint("red")
+booth = ((hut - window) + counter + booth_roof + sign_board + sign_text) | move(-2.3, 0, 0)
+
+# --- lamp post on the right ---
+post = cylinder(0.05, 2.0) | move(0, G + 1.0, 0) | paint("iron")
+post_base = cone(0.16, 0.07, 0.2) | move(0, G + 0.1, 0) | paint("iron")
+lamp_cap = cone(0.2, 0.05, 0.14) | move(0, G + 2.16, 0) | paint("iron")
+lamp = sphere(0.15) | move(0, G + 2.05, 0) | paint(material("#ffe9a0", glow=1.5))
+lamp_post = (post + post_base + lamp_cap + lamp) | move(2.3, 0, 0.9)
+
+# --- poses: the wheel turns, every gondola counter-turns to hang level ---
+def spin(name, a) = pose(name, wheel=a, gondola_1=-a, gondola_2=-a, gondola_3=-a, gondola_4=-a,
+                         gondola_5=-a, gondola_6=-a, gondola_7=-a, gondola_8=-a)
+spin("quarter", 90)
+spin("half", 180)
+spin("three_quarter", 270)
+spin("full", 360)
+wheel_turn = angle("wheel")[0]
+
+animation("turn", ["rest", "quarter", "half", "three_quarter", "full"], seconds=8, ease=0, ease_ends=0)
+animation("start", ["rest", "quarter"], seconds=2, loop=0, ease=1, ease_ends=0)
+
+# --- promises ---
+assert bottom(gondola_1) > G + 0.2, "the bottom gondola clears the ground at rest"
+assert at(ride, "gondola_1")[1] > G + 0.2, "the bottom gondola's floor clears the ground at rest"
+assert at(ride, "gondola_7")[1] > G + 0.2, "the bottom gondola's floor clears the ground at a quarter turn", pose=quarter
+assert at(ride, "gondola_5")[1] > G + 0.2, "the bottom gondola's floor clears the ground at a half turn", pose=half
+assert at(ride, "gondola_3")[1] > G + 0.2, "the bottom gondola's floor clears the ground at three quarters", pose=three_quarter
+assert bottom(rims) > G + 0.5, "the rim clears the ground"
+assert pieces(ride, resolution=200) == 1, "the ride is one piece"
+assert pieces(booth, resolution=100) == 1, "the booth is one piece"
+
+scene ride, ground, booth, lamp_post

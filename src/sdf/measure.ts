@@ -17,6 +17,27 @@ import type { Vec3 } from "../core/vec.js";
  * promise is better made with the parts themselves than with a whole
  * model.
  */
+/**
+ * Whether any point of `shape`'s surface lies inside `region`: what a decal needs to paint anything. Sampled on a
+ * lattice over the region's box, each sample slid onto the surface (round 8: a tag region beside the wrong part
+ * painted nothing and nothing said so).
+ */
+export function regionTouches(shape: Shape3, region: Shape3, n = 12): boolean {
+  if (isEmpty(shape.bounds) || isEmpty(region.bounds)) return false;
+  for (let k = 0; k < 3; k++) if (region.bounds.max[k] < shape.bounds.min[k] || region.bounds.min[k] > shape.bounds.max[k]) return false;
+  const bb = region.bounds, size = boundsSize(bb);
+  const tol = Math.max(size[0], size[1], size[2], 1e-6) * 0.02;
+  for (let i = 0; i <= n; i++)
+    for (let j = 0; j <= n; j++)
+      for (let k = 0; k <= n; k++) {
+        const x = bb.min[0] + (size[0] * i) / n, y = bb.min[1] + (size[1] * j) / n, z = bb.min[2] + (size[2] * k) / n;
+        if (region.dist(x, y, z) > 0) continue;
+        const q = surfacePoint(shape, x, y, z);
+        if (Math.abs(shape.dist(q[0], q[1], q[2])) <= tol && region.dist(q[0], q[1], q[2]) <= 0) return true;
+      }
+  return false;
+}
+
 export function clearance(a: Shape3, b: Shape3, n = 12): number {
   if (isEmpty(a.bounds) || isEmpty(b.bounds)) return Infinity;
   let best = Infinity;

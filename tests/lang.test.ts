@@ -205,6 +205,41 @@ describe("interpreter", () => {
     expect(() => run("assert sphere(1)")).toThrow(/assert tests a number/);
     expect(() => run("assert 1 < 2, 3")).toThrow(/message is a string/);
   });
+  it("measures a step under other joints where the pose puts it, inside an assert only", () => {
+    // A lid on a hinge, the hinge inside a body joint that lifts everything: the lid's own step is at rest in its
+    // own frame, and a pose assert reads it through the body joint (round 8: a tucked wrist measured at rest).
+    const src = 'lid = joint(box(1, 0.2, 1) | move(0, 1.1, 0), "hinge", 0, 1, 0.5)\nbody = joint(box(1) | move(0, 0.5, 0) + lid, "body", 0, 0, 0)\nb = bottom(lid)\nassert bottom(lid) > 2, "lifted", pose=up\nassert bottom(lid) < 2, "at rest"\npose("up", body=xform(move=[0, 2, 0]))\nshow body';
+    const rest = run(src);
+    expect(rest.asserts.map((a) => [a.line, a.passed, a.pending])).toEqual([[4, true, true], [5, true, undefined]]);
+    const up = evaluate(parse(src), { jointPoses: rest.poses[0].joints, poseName: "up" });
+    // The assert saw the lifted lid; the step computed outside an assert did not move.
+    expect(up.asserts[0]).toMatchObject({ passed: true, detail: "3 > 2" });
+    expect(up.steps.find((s) => s.name === "b")?.value).toBeCloseTo(1, 6);
+    // Without a pose there is nothing to place.
+    expect(rest.asserts[1].detail).toBe("1 < 2");
+  });
+  it("starts a pose from another with from=, and warns about a two-key clip that eases nothing at its ends", () => {
+    const src = 'a = joint(box(1), "a", 0, 0, 0)\nb = joint(box(1) | move(2, 0, 0), "b", 2, 0, 0)\nm = a + b\npose("reach", a=[0, 0, 60])\npose("hold", from="reach", b=xform(move=[0, 0.1, 0]))\npose("open", from="rest", b=[10, 0, 0])\nanimation("flick", ["rest", "reach"], loop=0, ease=1, ease_ends=0)\nanimation("wave", ["rest", "reach", "rest"], ease=1, ease_ends=0)\nshow m';
+    const ev = run(src);
+    expect(ev.poses.find((p) => p.name === "hold")?.joints).toEqual({ a: { angles: [0, 0, 60], move: [0, 0, 0], scale: [1, 1, 1] }, b: { angles: [0, 0, 0], move: [0, 0.1, 0], scale: [1, 1, 1] } });
+    expect(Object.keys(ev.poses.find((p) => p.name === "open")!.joints)).toEqual(["b"]);
+    expect(ev.warnings).toContainEqual(expect.stringMatching(/animation "flick" \(line 7\): with two keys both are ends, so ease_ends=0 leaves nothing for ease=1 to do; hold the last pose as a third key \(\["rest", "reach", "reach"\]/));
+    expect(ev.warnings.filter((w) => /"wave"/.test(w))).toEqual([]);
+    expect(() => run('pose("x", from="nope", a=[1, 0, 0])')).toThrow(/from="nope" names no pose defined above/);
+    expect(() => run('pose("x", from=3)')).toThrow(/from= names a pose defined above, as a string/);
+  });
+  it("warns about a decal whose region touches none of the surface, counts pieces at the program's grid, and does not double a prefix", () => {
+    const miss = run('m = sphere(1)\nspot = box(0.2, 0.2, 0.2) | move(3, 0, 0)\nd = decal(m, spot, "black")\nshow d');
+    expect(miss.warnings).toContainEqual('line 3: decal(): the region `spot` touches none of the shape\'s surface, so it paints nothing; the region must cross the surface (a sphere centred on the skin, a box through it)');
+    const hit = run('m = sphere(1)\nspot = sphere(0.2) | move(1, 0, 0)\nd = decal(m, spot, "black")\nshow d');
+    expect(hit.warnings.filter((w) => /decal/.test(w))).toEqual([]);
+    // Two balls on a rod thinner than a coarse cell: one piece at 64 cells, two at the program's 24.
+    const bridge = 'a = sphere(0.5) | move(-1.5, 0, 0)\nb = sphere(0.5) | move(1.5, 0, 0)\nrod = box(3, 0.08, 0.08)\nm = a + b + rod\n';
+    expect(run(`${bridge}n = pieces(m)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(1);
+    expect(run(`set grid 24\n${bridge}n = pieces(m)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(2);
+    expect(run(`set grid 24\n${bridge}n = pieces(m, resolution=64)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(1);
+    expect(() => run('s = sphere(1)\np = at(s, "tp")')).toThrow(/^line 2: at\(\): no anchor "tp"/);
+  });
   it("judges an assert that names a pose only in that pose's evaluation", () => {
     const src = 'lid = joint(box(1, 0.2, 1) | move(0, 1.1, 0), "hinge", 0, 1, 0.5)\npose("open", hinge=[-90, 0, 0])\nassert tall(lid) < 0.5, "lies flat", pose=open\nassert tall(lid) < 0.5, "at rest"\nassert tall(lid) < 0.5, pose=rest';
     const rest = run(src);

@@ -13,9 +13,9 @@ table = (top + table_legs) | paint("walnut")
 def chair() =
   (box(0.9, 0.08, 0.9, round=0.03) | move(0, 0.9, 0))
   + (leg(0.9, 0.08) | move(-0.38, 0, -0.38) | grid(2, 2, 0.76, 0.76))
-  + (box(0.06, 0.9, 0.06) | move(-0.38, 0.9, -0.38) | array(2, 0.76, 0, 0))
+  + (box(0.06, 0.9, 0.06) | move(-0.38, 1.3, -0.38) | array(2, 0.76, 0, 0))
   + (box(0.9, 0.12, 0.05) | move(0, 1.7, -0.38))
-  + (box(0.06, 0.7, 0.06) | move(-0.2, 1.3, -0.38) | array(3, 0.2, 0, 0))
+  + (box(0.06, 0.8, 0.06) | move(-0.2, 1.3, -0.38) | array(3, 0.2, 0, 0))
 
 # Chairs around the table, each turned to face it: a chair faces +z as
 # defined, so the one on the +z side turns 180 degrees.
