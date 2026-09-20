@@ -289,6 +289,8 @@ export interface StepView {
   name: string;
   shape: Shape3;
   used: boolean;
+  /** part, cut or region; undefined for a step the output never reads. */
+  role?: "part" | "cut" | "region";
   line: number;
   /** The step's mesh, if already extracted; otherwise it is extracted here. */
   mesh?: Mesh;
@@ -341,11 +343,16 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
         else drawText(canvas, 8, thumb / 2 - 4, "NO SURFACE", INK.warn, 1);
       }
     }
-    if (!st.used) canvas.rect(0, 0, thumb, thumb, INK.warn);
+    // A red frame is a step the output never reads; a region (an assert's, a decal's, a camera's) is framed grey
+    // and said so; a cutter is tagged, since the sheet draws it as the solid it subtracts (round 9 asked for both).
+    const region = st.role === "region";
+    if (!st.used && !region) canvas.rect(0, 0, thumb, thumb, INK.warn);
+    if (region) canvas.rect(0, 0, thumb, thumb, INK.dim);
     out.blit(canvas, x, y);
     const name = `${i + 1}. ${st.name}`;
-    drawText(out, x, y + thumb + 3, name.length > thumb / 6 ? name.slice(0, Math.floor(thumb / 6) - 1) + "…" : name, st.used ? INK.text : INK.warn, 1);
-    drawText(out, x, y + thumb + 13, isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds) + (st.used ? "" : "  unused"), INK.dim, 1);
+    drawText(out, x, y + thumb + 3, name.length > thumb / 6 ? name.slice(0, Math.floor(thumb / 6) - 1) + "…" : name, st.used || region ? INK.text : INK.warn, 1);
+    const tag = st.role === "cut" ? "  cut" : region ? "  region" : st.used ? "" : "  unused";
+    drawText(out, x, y + thumb + 13, isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds) + tag, INK.dim, 1);
   });
   return out;
 }

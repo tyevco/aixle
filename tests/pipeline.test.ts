@@ -38,6 +38,12 @@ describe("pipeline", () => {
       expect(shots.report).toMatch(/Environment: night/);
       expect(shots.report).toMatch(/`beauty_knob\.png`: the beauty render from camera knob, framed on k/);
       expect(shots.timings["beauty:knob"]).toBeDefined();
+      // One camera and another sky from the command line: only that shot, its view on beauty.png, the sky noted.
+      const one = run('m = box(1)\ncamera("hero", azimuth=20)\ncamera("side", azimuth=90)\nset environment night\nshow m', "one.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, camera: "side", environment: "sunset" });
+      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_side.png"]);
+      expect(one.report).toMatch(/\(the sheet and beauty\.png use "side"\)/);
+      expect(one.report).toMatch(/Environment: sunset/);
+      expect(run('m = box(1)\nshow m', "bad.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, camera: "nope", environment: "mars" }).warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera \(declare one/), expect.stringMatching(/^--environment mars: no such environment; the skies are studio/)]));
       expect(r.files).toContain("viewer.html");
       expect(r.files).toContain("beauty.png");
       const html = readFileSync(join(dir, "viewer.html"), "utf8");

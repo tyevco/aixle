@@ -28,14 +28,21 @@ the inside is cut open.
    then `slices.png` if anything is hollow or nested, then `steps.png` if a
    part is missing or misplaced, to see which step went wrong,
    `callouts.png` when you are not sure which step a thing in the picture
-   is (the perspective view with the largest visible steps named), and
+   is (the perspective view with the largest visible steps named: a
+   surface gets the innermost part whose surface it is, the later of two
+   in the same box, so a shell or a painted cut is named rather than its
+   primitive; a cut face is the cutter's, as `slot (cut)`), and
    `report.md` for the numbers (does it stand, is it one piece).
 5. **Say what the model promises**, with `assert`: one piece, a gap
    that must stay open, a size that must hold (`assert pieces(model) ==
    1`, `assert clearance(handle, rim) > 0.05`), a void that must stay
    empty and parts that must not sink into each other (`assert
    void(cavity, mug)`, `assert overlap(frog, pad) < 0.001`, `assert
-   inside(spring, box) == 1`), and for a rig a promise
+   inside(spring, box) == 1`; a hole that must go through is `void` on
+   a thinner rod reaching past both faces, never on the cutter, which is
+   empty by construction; `inside` wants the solid, not a shell; a
+   failing `void`, `inside` or `overlap` says where and in which step;
+   `assert overhang(part) < 0.05` for a print), and for a rig a promise
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing
@@ -122,7 +129,15 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
 | the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
 | the beauty render leaves the model small in the frame | the camera fits the box's corners, so a diagonal model has empty corners | `set zoom 1.2` or `--zoom 1.2` (it stops where the box would touch the edge) |
-| the beauty render is flat, or one side is black | one key light from the upper left | `light("key", ...)` and `light("rim", azimuth=150, elevation=20, power=0.5)`; `set environment sunset` or `night` for a mood; `camera("detail", focus="part", zoom=1.5)` for a second shot |
+| the beauty render is flat, or one side is black | one key light from the upper left | `light("key", ...)` and `light("rim", azimuth=150, elevation=20, power=0.5)`; `set environment sunset` or `night` for a mood; `camera("detail", focus="part", zoom=1.5)` for a second shot; `--camera NAME` and `--environment NAME` to try one shot or one sky without editing |
+| a night scene is black but for the flame | `night` scales the ambient down to 0.4 | `set ambient 1.6` and a moon at `power=0.9`; a glow lights itself only, never its neighbours |
+| a low shot still looks down on the base; a fire cannot be a light | elevation is about the model's centre; a light is a direction | `camera(..., elevation=-8)`; a warm light from above and in front (`azimuth=20, elevation=35`) |
+| chrome or silver is a white blob | `studio` and `overcast` are white skies, and a mirror reflects them | `sunset` or `night` for a mirror metal, or `steel`, `iron`, `brass` |
+| glass reads frosted and opaque in `--quick --beauty` | the quick grid is 64 cells and the wall is under a cell | judge glass at the full grid; keep a glowing part a cell clear of its glass |
+| contour lines behind glass | a `loft` or a smooth union is a bound, not a distance; or two faces coincide | a rounded box or an exact primitive under `transmit`; grow a liquid a cell into its cavity and promise `inside(liquid, cavity) > 0.9` |
+| "is not part of the output" for a probe or a cavity region | it was warned as unused | it no longer is: a step an assert, a decal or a camera reads is a region, tagged `(region)` in `check` and on the steps sheet |
+| a fine speckle renders as square blocks | `speckle` is a cubic block pattern at `scale` | `"noise"` at a small scale for a soft mottle; `scale` is the block size |
+| a part stuck on a curved body reads as a disc | two convex surfaces meeting | a skin of the body's own surface: `(offset(body, 0.05) - offset(body, -0.012)) & oval`, `intersect(..., k=)` for the rim |
 | a material boundary speckles in the views | two painted surfaces nearly coincide (under 35 degrees apart), so each vertex picks either | give them a clear angle, or one shape with a `decal`; a seam at a crease is clean, and the beauty render is unaffected |
 | a box or a join reads soft, as if bevelled, in the viewer or a GLB | one smooth normal per vertex, from `set crease 0` | leave `crease` at its default (35), which splits vertices at edges |
 | a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |

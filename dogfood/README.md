@@ -48,6 +48,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 8 | Walking dog (Bedrock entity) | [`round-8/dog.aix`](round-8/dog.aix) | [report](round-8/dog.report.md) | nine bones, a walk with an unhitched seam and eighteen promises in nine renders; eyes smaller than a texel vanished from the texture and a decal beside the wrong part painted nothing, both silent, both now warned |
 | 8 | Pocket multi-tool | [`round-8/multitool.aix`](round-8/multitool.aix) | [report](round-8/multitool.report.md) | four axis joints and raised lettering right first time in eleven renders; `pieces()` at its default flipped a promise the report contradicted, and a two-key flick could not settle, both fixed |
 | 8 | Ferris wheel scene | [`round-8/ferris.aix`](round-8/ferris.aix) | [report](round-8/ferris.report.md) | eight level gondolas on a turning wheel in seven renders; a name could not be built from a def's index and the strips were two thirds of a four-minute render, both fixed |
+| 9 | Machined bracket | [`round-9/bracket.aix`](round-9/bracket.aix) | [report](round-9/bracket.report.md) | counterbored holes, a slot, pins and an engraving with fourteen promises in six renders; `void()` read a counterbore as solid because a union's box cull skipped a member once an earlier one was inside, bisected in four probes, fixed |
+| 9 | Perfume bottle | [`round-9/bottle.aix`](round-9/bottle.aix) | [report](round-9/bottle.report.md) | glass, a liquid, brass and four shots in thirteen renders; glass on a loft banded and chrome blew out under a white sky, both now documented, and a bare `void` failure now says where |
+| 9 | Campsite at night | [`round-9/campsite.aix`](round-9/campsite.aix) | [report](round-9/campsite.report.md) | seven objects, two lights and three shots in twelve renders; eight assert-only regions were warned as unused and a focus shot was blocked by a pole, the first fixed |
+| 9 | Owl money box | [`round-9/owl.aix`](round-9/owl.aix) | [report](round-9/owl.report.md) | a shelled body with a coin slot, decal eyes and three poses in seven renders; the callouts named decal regions, a cutter and a shell's primitive, all three now fixed |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -154,6 +158,32 @@ negative clearance between siblings, proposed by the arm's report), a
 such on the steps sheet, and a focus strip that both holds its camera
 and keeps a far-travelling part large (one camera per strip was the
 choice, since a fixed frame is what makes motion readable).
+
+Round 9 was presentation and promises (a machined bracket, a perfume
+bottle, a campsite at night, an owl money box), briefed on the three
+things round 8 had built: lights, cameras and environments declared in
+the program, the callouts picture, and the void, overlap and inside
+queries. The queries carried every promise the briefs asked for, and
+the round's one real bug was under them: a union's box cull skipped
+every later member once an earlier one had returned zero or less, so
+inside two overlapping cutters the union was the shallower distance and
+on the first cutter's face it reported a surface that was not there;
+`void(counterbore, plate)` failed on a clean hole and the bracket's
+agent bisected it in four probe files. The rest was the tool not saying
+enough: a failing `void` said only "fails"; a probe region an assert
+read was warned as unused and framed red; the callouts named decal
+regions, cutters and a shell's primitive, credited a slot's cut faces to
+the plate, and labelled the campfire as the firewood stack because the
+stack was built at the origin and moved; `night` was black until the
+ambient was raised; a low light meant "from the horizon"; chrome was
+white under a white sky; glass could not be judged in a quick pass;
+glass on a loft banded; a focus shot's marcher stopped at the frame so a
+through hole read as blind. Their reports' three changes each are
+answered below. Not done: a point light, a per-light contribution
+picture, an occlusion warning for a focus shot, a warning when
+`transmit` sits on a loft or a blend, a pattern plate and environment
+thumbnails in the reference, `arc(axis=)`, a posed line for a joint step
+itself, and loop variables kept out of the step list.
 
 ## What each round changed
 
@@ -323,6 +353,33 @@ sliding joint's pivot, declaring "rest", a focus title being the frame,
 a texel-centre decal, a tilted Bedrock part, `at()` on a top-level
 joint, `loop=0`, copies that must move on their own, and `helix()` into
 `curve()`.
+
+**Round 9** (presentation and promises: bracket, bottle, campsite, owl):
+a union's box cull evaluates every member whose box holds the point, so
+the union is the deeper distance inside overlaps and a member's face
+inside another is no surface (the same rule in the spatial index, the
+2D union and a tube's segments); a failing `void`, `inside` or
+`overlap` says where and, for `void`, in which step; each step has a
+role (part, cut, region) that `check` tags, the steps sheet tags and
+frames (a region grey, an unused step red), the report's In output
+column names and the unused warning respects, so a probe an assert
+reads is not an error; the callouts label only parts and cutters, credit
+a cut face to its cutter as `slot (cut)`, prefer the later of two steps
+in one box (a shell or a painted cut over its primitive), skip a step
+every reader moved, push clashing labels along their own leaders, and
+report the unlabelled steps and a `callouts` entry in `report.json`;
+`overhang(shape)` exists; a focus shot's beauty render marches the
+whole model; the floor's lit and far shading blend; `check` prints the
+lights, cameras and environment, the asserts in line order and the
+report's note on parts between 1.2 and 2 cells; `--camera NAME` and
+`--environment NAME`; the watertight "alone" note mentions two copies of
+one step touching; docs on a region past both faces for "goes through",
+overlap as a volume, `inside` against the solid, night's ambient,
+lights as directions, glow lighting nothing, a glowing part clear of
+its glass, quick's grid and glass, lofts and coincident faces under
+transmit, chrome under neutral skies, negative and plan elevations,
+zoom's frame cap, dof's scale, the command line overriding only the
+render's own view, speckle's blocks and a skin that hugs a curved body.
 
 ## Running a round
 

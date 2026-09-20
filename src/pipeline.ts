@@ -26,7 +26,7 @@ import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertResult, evaluate, type Evaluation } from "./lang/interpreter.js";
+import { assertLine, type AssertResult, evaluate, type Evaluation, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
@@ -57,6 +57,10 @@ export interface RunOptions {
   steps?: boolean;
   /** false skips callouts.png, the perspective view with its visible steps named. */
   callouts?: boolean;
+  /** A sky for the beauty render, over the program's `set environment`. */
+  environment?: string;
+  /** Render this declared camera only (beauty.png and the sheet take its view), over the program's `set camera`. */
+  camera?: string;
   slices?: boolean;
   turntable?: boolean;
   obj?: boolean;
@@ -507,7 +511,7 @@ function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): 
  * wall that thin often meshes with open edges, so when the mesh is not watertight they are the first suspects
  * (measured: a bicycle's spokes and stays at 1.3 to 1.8 cells carried the edges; at 2 cells they were clean).
  */
-function nearlyThin(evaluation: Evaluation, cellSize: number): string {
+export function nearlyThin(evaluation: Evaluation, cellSize: number): string {
   const geometry = geometrySteps(evaluation);
   const seen = new Set<number>();
   const names: string[] = [];
@@ -557,7 +561,7 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
     const twice = names.length === 1 && names[0].parents.length >= 2 ? names[0].parents.slice(0, 2) : undefined;
     // One name alone: the step's own surface folds or creases there, or a sample-plane coincidence; a straight
     // tube has no second surface to cross, so it is not called "with itself" (round 6: that read as nonsense).
-    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
+    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
     edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name) });
     if (index >= 3) return "";
     // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
@@ -742,6 +746,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let ghosted: string | undefined;
   // Which steps callouts.png labelled, for the report.
   let calloutNote: string | undefined;
+  let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[] } | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
@@ -787,11 +792,14 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       return { name: a.name, seconds: a.seconds, loop: a.loop, times, samples, axes };
     });
   // `set camera hero` makes a declared shot the sheet's and the beauty render's view; the CLI still overrides.
-  const shotName = typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined;
+  const shotName = opts.camera ?? (typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined);
   const shot = shotName ? evaluation.cameras.find((c) => c.name === shotName) : undefined;
+  if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; every shot is rendered`);
   const azimuth = opts.azimuth ?? shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
-  const environment: Environment | undefined = ENVIRONMENTS.includes(evaluation.settings.environment as Environment) ? (evaluation.settings.environment as Environment) : undefined;
+  const environmentName = opts.environment ?? evaluation.settings.environment;
+  const environment: Environment | undefined = ENVIRONMENTS.includes(environmentName as Environment) ? (environmentName as Environment) : undefined;
+  if (opts.environment && !environment) warnings.push(`--environment ${opts.environment}: no such environment; the skies are ${ENVIRONMENTS.join(", ")}`);
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let minecraftNote: string | undefined;
@@ -949,12 +957,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The perspective view with the largest visible steps named, a leader line each: what maps a picture back to
     // the program (roadmap 9: "the thing at the top left is lantern_ring" as a fact). Not on a quick pass.
     if (!opts.quick && opts.callouts !== false) {
-      // Every used shape step but the output: a union a later union flattened is still a name the program reads.
-      const named = evaluation.steps.filter((s) => isShape3(s.value) && evaluation.used.has(s.name) && s.value !== output && !isEmpty((s.value as Shape3).bounds)).map((s) => ({ name: s.name, shape: s.value as Shape3 }));
+      // Every part and cutter but the output (a union a later union flattened is still a name the program reads);
+      // a region only an assert or a decal reads is not geometry and gets no label (round 9: eye regions labelled).
+      const named = evaluation.steps.filter((s) => isShape3(s.value) && evaluation.used.has(s.name) && !evaluation.displaced.has(s.name) && s.value !== output && !isEmpty((s.value as Shape3).bounds)).map((s) => ({ name: s.name, shape: s.value as Shape3, cut: evaluation.roles.get(s.name) === "cut", derived: s.cuts === true }));
       if (named.length) {
         const co = time("callouts", () => renderCallouts(viewMesh, named, info, size, viewCell, 20, azimuth, elevation, output));
         write("callouts.png", co.canvas.toPng());
-        calloutNote = co.labelled.length ? `${co.labelled.map((l) => l.name).join(", ")}${co.unlabelled.length ? ` (in view but smaller, not labelled: ${co.unlabelled.join(", ")})` : ""}` : "no named step has a visible surface from this view";
+        const label = (l: { name: string; cut?: boolean }) => (l.cut ? `${l.name} (cut)` : l.name);
+        calloutNote = co.labelled.length ? `${co.labelled.map(label).join(", ")}${co.unlabelled.length ? ` (in view but smaller, not labelled: ${co.unlabelled.map(label).join(", ")})` : ""}` : "no named step has a visible surface from this view";
+        calloutData = { labelled: co.labelled.map((l) => ({ name: l.name, cut: l.cut || undefined, visible: l.visible })), unlabelled: co.unlabelled.map(label) };
       }
     }
     for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(viewMesh, info, v, size, { azimuth, elevation, ghost: viewGhost, ghostMargin: ghostCell }).toPng()));
@@ -1102,12 +1113,16 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const beautyFrame = focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
       // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
       // (measured: a focused beauty render fitted every point and framed the whole mug).
+      // A focus shot frames its part but marches the whole model, so a hole under a counterbore still reads as
+      // through and the floor's shadow is the model's (round 9: a focused counterbore looked blind).
+      const modelBounds = triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
-        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, label }).toPng());
+        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label }).toPng());
       time("beauty", () => shoot("beauty.png", beautyFrame, !!focusName, azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}  ${dimsLabel(beautyFrame)}`));
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
       // Every declared camera is a shot of its own, framed on its focus= when it has one.
       for (const c of evaluation.cameras) {
+        if (shot && opts.camera && c.name !== shot.name) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         const b = r ? r.frame : beautyFrame;
         time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(b)}`));
@@ -1119,7 +1134,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   if (opts.steps !== false && shapeSteps.length > 0) {
     const views: StepView[] = time("steps:mesh", () =>
       meshSteps(
-        shapeSteps.map((s) => ({ name: s.name, shape: s.value as Shape3, used: evaluation.used.has(s.name), line: s.line })),
+        shapeSteps.map((s) => ({ name: s.name, shape: s.value as Shape3, used: evaluation.used.has(s.name), role: evaluation.roles.get(s.name), line: s.line })),
         cellSize,
         96,
         output && mesh ? { shape: output, mesh } : undefined,
@@ -1237,15 +1252,13 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   }
   if (calloutNote) lines.push(`Callouts (callouts.png, the largest visible steps named): ${calloutNote}`, "");
   if (evaluation.images.length) lines.push(`Images: ${evaluation.images.map((i) => `${i.name} ${i.width} × ${i.height} (${i.projection === "box" ? i.size : `${i.projection}, ${i.size}`}; line ${i.line})`).join("; ")}`, "");
-  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`, "");
-  if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shot ? ` (the sheet and beauty.png use "${shot.name}")` : ""}`, "");
-  if (environment) lines.push(`Environment: ${environment}`, "");
-  lines.push("## Steps", "", "Sizes and spans are bounding boxes: exact for primitives and unions, loose after a cut (`a - b` keeps a's box), a rotation or a twist; `a & b` tightens to the overlap.", "", "| # | Name | Line | Size | x | y | z | In output |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const l of presentationLines(evaluation, shot?.name, environment, opts.azimuth !== undefined || opts.elevation !== undefined || opts.zoom !== undefined)) lines.push(l, "");
+  lines.push("## Steps", "", "Sizes and spans are bounding boxes: exact for primitives and unions, loose after a cut (`a - b` keeps a's box), a rotation or a twist; `a & b` tightens to the overlap. In output: yes for a part, cut for a shape subtracted from one, region for a shape only an assert, a decal or a camera reads.", "", "| # | Name | Line | Size | x | y | z | In output |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   shapeSteps.forEach((st, i) => {
     const sh = st.value as Shape3;
     const b = sh.bounds;
     const span = (k: number) => (isEmpty(b) ? "" : `${fmt(b.min[k])}..${fmt(b.max[k])}`);
-    lines.push(`| ${i + 1} | ${st.name} | ${st.line} | ${isEmpty(b) ? "empty" : dimsLabel(b)} | ${span(0)} | ${span(1)} | ${span(2)} | ${evaluation.used.has(st.name) ? "yes" : "no"} |`);
+    lines.push(`| ${i + 1} | ${st.name} | ${st.line} | ${isEmpty(b) ? "empty" : dimsLabel(b)} | ${span(0)} | ${span(1)} | ${span(2)} | ${roleLabel(evaluation.roles.get(st.name))} |`);
   });
   lines.push("");
   if (warnings.length) {
@@ -1304,7 +1317,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
           line: st.line,
           bounds: isEmpty((st.value as Shape3).bounds) ? null : (st.value as Shape3).bounds,
           used: evaluation.used.has(st.name),
+          role: evaluation.roles.get(st.name) ?? "unused",
         })),
+        callouts: calloutData,
         warnings,
         files,
         timings,
@@ -1342,4 +1357,18 @@ export function diff(a: { source: string; name: string }, b: { source: string; n
   right.canvases.forEach((c, i) => out.blit(c, size + 8, 64 + i * (size + 4)));
   writeFileSync(outFile, out.toPng());
   return { warnings };
+}
+
+/** The report's In output column for a step's role. */
+export function roleLabel(role: StepRole | undefined): string {
+  return role === "part" ? "yes" : role === "cut" ? "cut" : role === "region" ? "region" : "no";
+}
+
+/** The Lights, Cameras and Environment lines of the report, printed by `check` too. */
+export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false): string[] {
+  const lines: string[] = [];
+  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`);
+  if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
+  if (environment) lines.push(`Environment: ${environment}`);
+  return lines;
 }

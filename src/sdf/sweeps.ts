@@ -154,7 +154,8 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
       if (index) return index.min(x, y, z, capsule, boxDist, Infinity);
       let best = Infinity;
       for (let i = 0; i < n; i++) {
-        if (boxDist(i, x, y, z) >= best) continue;
+        const bd = boxDist(i, x, y, z);
+        if (bd > 0 && bd >= best) continue;
         const d = capsule(i, x, y, z);
         if (d < best) best = d;
       }
@@ -188,7 +189,8 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
     if (index) return index.min(x, y, z, cone, boxDist, Infinity);
     let best = Infinity;
     for (let i = 0; i < n; i++) {
-      if (boxDist(i, x, y, z) >= best) continue;
+      const bd = boxDist(i, x, y, z);
+      if (bd > 0 && bd >= best) continue;
       const d = cone(i, x, y, z);
       if (d < best) best = d;
     }
@@ -310,7 +312,8 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
     if (index) return index.min(x, y, z, piece, boxDist, 1e6);
     let best = 1e6;
     for (let i = 0; i < n; i++) {
-      if (boxDist(i, x, y, z) >= best) continue;
+      const bd = boxDist(i, x, y, z);
+      if (bd > 0 && bd >= best) continue;
       const d = piece(i, x, y, z);
       if (d < best) best = d;
     }

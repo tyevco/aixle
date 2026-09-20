@@ -53,6 +53,26 @@ describe("booleans", () => {
       expect(u.dist(p[0], p[1], p[2])).toBeCloseTo(Math.min(a.dist(p[0], p[1], p[2]), b.dist(p[0], p[1], p[2])), 9);
     }
   });
+  it("is the deeper distance inside two overlapping members, and no surface on the first member's face inside the second", () => {
+    // Round 9: a union's box cull skipped every later member once an earlier one was at or below zero, so a
+    // counterbore's floor read as a surface inside the through hole it overlapped and void() saw solid there.
+    const thru = O.move(P.cylinder(0.06, 0.5), 0.55, 0.075, 0.35);
+    const cb = O.move(P.cylinder(0.11, 0.2), 0.55, 0.19, 0.35);
+    for (const u of [O.union([thru, cb]), O.union([cb, thru])]) {
+      expect(u.dist(0.55, 0.19, 0.35)).toBeCloseTo(-0.1, 9);
+      // On the counterbore's floor (y = 0.09) inside the through hole: well inside the union, not on its surface.
+      expect(u.dist(0.55, 0.09, 0.35)).toBeCloseTo(-0.06, 9);
+    }
+    const plate = O.difference(O.move(P.box(1.5, 0.15, 1), 0, 0.075, 0), O.union([thru, cb]));
+    expect(C_.isVoid(thru, plate)).toBe(true);
+    expect(C_.isVoid(cb, plate)).toBe(true);
+    expect(C_.voidWitness(O.move(P.cylinder(0.12, 0.2), 0.55, 0.19, 0.35), plate)).toBeDefined();
+    // The same rule in a spatial-indexed union and a tube's segments.
+    const many = O.union(Array.from({ length: 16 }, (_, i) => O.move(P.sphere(0.6), i * 0.5, 0, 0)));
+    expect(many.dist(0.25, 0, 0)).toBeCloseTo(Math.min(...Array.from({ length: 16 }, (_, i) => Math.hypot(0.25 - i * 0.5) - 0.6)), 9);
+    const tube = W.tube([[0, 0, 0], [1, 0, 0], [1, 1, 0]], 0.2);
+    expect(tube.dist(1, 0, 0)).toBeCloseTo(-0.2, 6);
+  });
   it("many-part unions cull without changing the result near the surface, and never overestimate", () => {
     const parts = Array.from({ length: 40 }, (_, i) => O.move(P.box(0.5, 0.5, 0.5), i * 0.7, 0, 0));
     const u = O.union(parts);

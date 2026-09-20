@@ -1,0 +1,19 @@
+# Probe 4: which members of a cutter union does void() misread?
+set grid 200
+base = box(1.5, 0.15, 1.0) | move(0, 0.075, 0)
+thru = cylinder(0.06, 0.5) | move(0.55, 0.075, 0.35)
+cb   = cylinder(0.11, 0.2) | move(0.55, 0.19, 0.35)
+cb2  = cylinder(0.11, 0.2) | move(-0.55, 0.19, 0.35)
+cb3  = cylinder(0.11, 0.2) | move(-0.55, 0.19, -0.35)
+h2 = base - (cb + thru)
+h3 = base - (cb + cb2 + cb3)
+h6 = base - cb - cb2 - cb3
+assert void(cb, h2), "h2 first member (cb)"
+assert void(thru, h2), "h2 second member (thru)"
+assert void(cb, h3), "h3 first member"
+assert void(cb2, h3), "h3 second member, far from the first"
+assert void(cb3, h3), "h3 third member"
+assert void(cb2, h6), "h6 chained differences, second"
+assert void(cb3, h6), "h6 chained differences, third"
+assert clearance(cb2, h3) > -0.001, "h3 clearance on the second member"
+show h3

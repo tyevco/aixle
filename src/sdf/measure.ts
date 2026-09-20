@@ -72,6 +72,22 @@ export function overlapVolume(a: Shape3, b: Shape3, n = 24): number {
   return count * dx * dy * dz;
 }
 
+/** The point deepest inside both shapes, or undefined when no sample is in both: where an overlap is, for a failure. */
+export function overlapWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
+  const box = sharedBox(a, b);
+  if (!box) return undefined;
+  const size = boundsSize(box);
+  let best: Vec3 | undefined, bd = 0;
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      for (let k = 0; k < n; k++) {
+        const x = box.min[0] + ((i + 0.5) * size[0]) / n, y = box.min[1] + ((j + 0.5) * size[1]) / n, z = box.min[2] + ((k + 0.5) * size[2]) / n;
+        const d = Math.max(a.dist(x, y, z), b.dist(x, y, z));
+        if (d < bd) { bd = d; best = [x, y, z]; }
+      }
+  return best;
+}
+
 /**
  * The fraction of `a`'s volume that lies inside `b`, 0 to 1, sampled over a's box: 1 for a spring that must stay
  * in its box, 0 for a handle that must stay out of the cup.
@@ -93,27 +109,55 @@ export function insideFraction(a: Shape3, b: Shape3, n = 24): number {
   return all ? within / all : 0;
 }
 
+/** The point of `a` farthest outside `b`, or undefined when every sample of `a` is inside `b`: for a failed inside(). */
+export function outsideWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
+  if (isEmpty(a.bounds)) return undefined;
+  const bb = a.bounds, size = boundsSize(bb);
+  let best: Vec3 | undefined, bd = 0;
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      for (let k = 0; k < n; k++) {
+        const x = bb.min[0] + ((i + 0.5) * size[0]) / n, y = bb.min[1] + ((j + 0.5) * size[1]) / n, z = bb.min[2] + ((k + 0.5) * size[2]) / n;
+        if (a.dist(x, y, z) >= 0) continue;
+        const d = isEmpty(b.bounds) ? Infinity : b.dist(x, y, z);
+        if (d >= 0 && (best === undefined || d > bd)) { bd = d; best = [x, y, z]; }
+      }
+  return best;
+}
+
 /**
  * Whether `region` holds no solid of `shape` at all: no lattice sample inside both, and no point of the shape's
  * surface inside the region (which catches an intrusion thinner than the lattice). For `assert void(cavity, mug)`.
  */
 export function isVoid(region: Shape3, shape: Shape3, n = 24): boolean {
-  if (isEmpty(region.bounds) || isEmpty(shape.bounds)) return true;
-  if (!sharedBox(region, shape)) return true;
+  return voidWitness(region, shape, n) === undefined;
+}
+
+/**
+ * Where `shape` is solid inside `region`: the deepest solid lattice sample, or a surface point of the shape inside
+ * the region when the solid is thinner than the lattice; undefined when the region is void.
+ */
+export function voidWitness(region: Shape3, shape: Shape3, n = 24): Vec3 | undefined {
+  if (isEmpty(region.bounds) || isEmpty(shape.bounds)) return undefined;
+  if (!sharedBox(region, shape)) return undefined;
   const bb = region.bounds, size = boundsSize(bb);
   // The region's own boundary does not count: a cavity's wall is the cup's inner surface, exactly on it.
   const tol = Math.max(size[0], size[1], size[2], 1e-6) * 0.005;
+  let best: Vec3 | undefined, bd = 0;
+  let thin: Vec3 | undefined;
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++)
       for (let k = 0; k <= n; k++) {
         const x = bb.min[0] + (size[0] * i) / n, y = bb.min[1] + (size[1] * j) / n, z = bb.min[2] + (size[2] * k) / n;
         if (region.dist(x, y, z) >= -tol) continue;
-        if (shape.dist(x, y, z) < 0) return false;
+        const d = shape.dist(x, y, z);
+        if (d < 0) { if (d < bd) { bd = d; best = [x, y, z]; } continue; }
+        if (thin) continue;
         // A sample in the void slid onto the shape's surface: solid inside the region thinner than the lattice.
         const q = surfacePoint(shape, x, y, z);
-        if (Math.abs(shape.dist(q[0], q[1], q[2])) <= tol && region.dist(q[0], q[1], q[2]) < -tol) return false;
+        if (Math.abs(shape.dist(q[0], q[1], q[2])) <= tol && region.dist(q[0], q[1], q[2]) < -tol) thin = q;
       }
-  return true;
+  return best ?? thin;
 }
 
 export function clearance(a: Shape3, b: Shape3, n = 12): number {

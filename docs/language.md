@@ -557,9 +557,56 @@ and floor where a `glow` material carries the picture. A named shot,
 `camera("detail", focus="nameplate", zoom=2)`, is written by `render
 --beauty` as `beauty_<name>.png`, framed on its `focus=` step or object
 when it has one and taking the render's own view for whatever it leaves
-out; `set camera hero` makes that shot the sheet's and `beauty.png`'s
-view as well. The report lists the lights, the cameras and the
-environment.
+out; `set camera hero` makes that shot the sheet's perspective view and
+`beauty.png` as well (the front, right and top views are unchanged).
+`check` and the report list the lights, the cameras and the
+environment, so a misspelt name is a warning before any render.
+
+What the lights and the skies can and cannot do, measured in round 9:
+
+- A light is a direction, not a place. `elevation=8` means "from the
+  horizon", whatever stands there; a campfire's warmth on the things
+  round it is best faked with a warm light from above and in front
+  (`azimuth=20, elevation=35`), and a low light throws a long shadow
+  across a top-down shot. A `glow` material lights itself only: a flame
+  does not light the stones round it or the ground under it.
+- `night` scales the ambient light to 0.4 of the studio's, so a first
+  render is dark: start from `set ambient 1.6` with a moon of
+  `power=0.9`, and let a glow carry the picture. `sunset` is a warm
+  band at the horizon under a blue sky, but only a camera near the
+  horizon (`elevation` under about 10) sees the band; from above, the
+  backdrop is the warm ground, and a brown model disappears into it.
+  `overcast` and `studio` are neutral skies, so `chrome` and `silver`
+  reflect a white sky and blow out to white under them: give a mirror
+  metal a `sunset` or a `night`, or use `steel`, `iron` or `brass`.
+- A camera's `elevation` is about the model's centre and may be
+  negative: at 0 a perspective camera still looks down on the floor
+  round a low model, so a low shot is `elevation=-8`. `elevation=90` is
+  a plan view. `zoom` stops where the frame's corners would leave the
+  picture, so a wide scene on a slab never gets closer than the slab;
+  a camera with `focus=` frames that step instead (with `zoom=0.8` to
+  step back from it), and a step in the middle of a scene makes a good
+  framing proxy for a composition. A focus shot marches the whole
+  model, so a hole under a counterbore reads as through, and the rest
+  of the model stays in the picture at its true depth. `dof` scales a
+  blur that grows with a surface's distance from the focus: 0.3 to 0.5
+  is a gentle falloff, 1 blurs everything off the focus plane hard.
+- `--azimuth`, `--elevation` and `--zoom` on the command line override
+  the sheet's view and `beauty.png` only; a declared camera keeps its
+  own angles. `--camera NAME` renders one declared shot (the sheet and
+  `beauty.png` take its view) while a lighting loop runs, and
+  `--environment NAME` tries a sky without editing the program.
+- `--quick` meshes at 64 cells, so a glass wall thinner than that cell
+  renders as a frosted solid and a `transmit` material cannot be judged
+  there; judge glass at the full grid. A glowing part inside a glass
+  shell must clear the glass by a cell, or the refraction draws rings
+  and bars where the two surfaces touch. A `loft` or a smooth `union(k=)`
+  is a bound rather than a distance, and glass on one bands the picture
+  behind it (a liquid seen through a lofted flacon drew contour lines;
+  a rounded box rendered clean); two coincident faces band too, so a
+  liquid filling a cavity is grown a cell into the wall, and its promise
+  is `inside(liquid, cavity) > 0.9`, not `== 1`. `glow` on a `transmit`
+  material is not visible.
 
 ## Settings
 
@@ -719,7 +766,9 @@ box's faces, so a plate thinner than the rays' spacing can slip between
 them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
 also writes the warnings into `report.md` and counts them on the sheet's title bar.
 Warnings cover: a shape computed but never assigned; a step that is not part
-of the output; an empty output (a difference that removed everything, an
+of the output (a step an assert, a decal or a camera reads is a region
+and is not warned about; `check` tags each step `(cut)`, `(region)` or
+`(not in output)`); an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
 still catch it, below it they may not; between 1.2 and 2 cells a tube
@@ -810,7 +859,11 @@ its longest side, the program's `set grid` when none is given (64
 without one), as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
-chair's floating back once passed); `clearance(a, b)` is
+chair's floating back once passed); `overhang(shape, resolution)` is
+the fraction of the surface that faces down more than 45° with the
+floor faces left out, the report's Overhangs row, for `assert
+overhang(part) < 0.05` on something to be printed without support (it
+meshes too); `clearance(a, b)` is
 the smallest gap between two surfaces, negative by how deep they overlap,
 zero when they touch, sampled from the fields at twelve points per side
 of each shape's box and then tightened, so it is exact for parts that
@@ -819,20 +872,35 @@ part. Measure parts rather than the whole model: `clearance(handle,
 body)`, not `clearance(handle, model)` (the handle is in the model, so
 that is zero). `void(region, shape)` is 1 when the region holds no
 solid of the shape: `assert void(cavity, mug)` promises nothing pokes
-into the cup (the mug example's handle once reached inside it), and
-the same form promises a hole goes through or a slot stays open, with
-the region the shape you subtracted or a box you name for it.
+into the cup (the mug example's handle once reached inside it), and a
+failure says where the solid is and in which step (`void(cavity, mug),
+solid at (0.44, 1.3, 0) in 'handle'`). The region is a shape of its
+own, never the cutter: a cutter's volume is empty by construction, so
+`void(slot, plate)` holds whether or not the slot went through; "the
+hole goes through" is a thinner rod reaching past both faces,
+`rod = cylinder(0.04, 0.3) | move(...)` and `assert void(rod, plate)`.
 `overlap(a, b)` is the volume two parts share, zero when they only
 touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
 rather than sunk into it, and `assert overlap(handle, body) > 0.001`
-says a handle is joined to its wall, not just touching. `inside(a,
-b)` is the fraction of a's volume inside b: `== 1` for a spring that
-must stay in its housing, `== 0` for a handle that must stay out of the
-cavity. All three sample a lattice (24 cells along the longest side,
-and `void` walks the surface too, so a pin thinner than the lattice is
-caught), so measure parts, not a scene. The bound queries (`width`,
-`tall`, `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are
-the rest.
+says a handle is joined to its wall, not just touching; a volume is
+small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take a "joined"
+threshold from the part's size, and a failure says where the two
+overlap. `inside(a, b)` is the fraction of a's volume inside b: `== 1`
+for a spring that must stay in its housing, `== 0` for a handle that
+must stay out of the cavity, and a failure says where a is outside b.
+`b` is the solid volume: a mantle hangs in the air inside a shelled
+shade, so `inside(mantle, shade)` is 0; keep the un-shelled shape as a
+step (`shade = shade_space | shell(0.05)`) and test against that. All
+three sample a lattice (24 cells along the longest side, and `void`
+walks the surface too, so a pin thinner than the lattice is caught), so
+measure parts, not a scene. The bound queries (`width`, `tall`,
+`depth`, `top`, `bottom`, `height`) and the anchors (`at`) are the
+rest. A step only an assert reads (a probe rod, a cavity's region, a
+union of the neighbours) is a *region*: not part of the output, not
+warned about, framed grey and tagged on the steps sheet, and never
+labelled in the callouts; a shape subtracted from a part is a *cut*,
+tagged so on the steps sheet, which draws it as the solid it removes.
+`check` prints the asserts in line order, failures among the passes.
 
 ## Limits worth knowing
 

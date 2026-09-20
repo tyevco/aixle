@@ -4,11 +4,12 @@
  * renders each so an agent can see how the model was built up, and the
  * report says which steps ended up in the output.
  */
+import type { Vec3 } from "../core/vec.js";
 import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
-import { regionTouches } from "../sdf/measure.js";
+import { regionTouches, voidWitness, outsideWitness, overlapWitness } from "../sdf/measure.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -35,7 +36,21 @@ export interface Step {
   line: number;
   /** Names this step's expression read, directly. */
   deps: Set<string>;
+  /** True when a shape was cut from another while this step was computed: its surface can be a cut face. */
+  cuts?: boolean;
+  /** The names subtracted while this step was computed: cuts below it, unless another step joins them. */
+  cutDeps?: Set<string>;
+  /** The steps this one moved (move, rotate, place, ground, ...): their surfaces are elsewhere in this step. */
+  movedDeps?: Set<string>;
+  /** The steps this one read as they are (joined, cut, painted, shelled, measured): their surface stays put. */
+  keptDeps?: Set<string>;
 }
+
+/**
+ * What a step is to the output: a `part` of its geometry, a `cut` (subtracted from a part, so its surface is a cut
+ * face at most), or a `region` that only an assert, a decal or a camera reads. A step with no role is unused.
+ */
+export type StepRole = "part" | "cut" | "region";
 
 export interface Settings {
   grid?: number;
@@ -140,8 +155,12 @@ export interface Evaluation {
   cameras: CameraShot[];
   /** What the output was called: the shown name(s), or the last assignment. */
   outputName: string;
-  /** Names the output depends on, transitively (itself included). */
+  /** Names the output depends on, transitively (itself included): the parts and the cuts. */
   used: Set<string>;
+  /** Each step's role; a step missing here is unused. */
+  roles: Map<string, StepRole>;
+  /** Steps every reader of which moved them (built at the origin, then placed): their surface is not where they are. */
+  displaced: Set<string>;
   steps: Step[];
   /** The libraries this program uses, in order. */
   modules: UsedModule[];
@@ -180,15 +199,20 @@ export interface AssertResult {
   pose?: string;
   /** True when this evaluation is not the assert's pose, so it was not tested here. */
   pending?: boolean;
+  /** Where a void, inside or overlap query found the offending point, and in which step, for a failure. */
+  where?: string;
 }
 
 /** One line for a failed assert, the same in `check`, the render's warnings and the report. */
 export function assertLine(a: AssertResult): string {
-  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.where ? `, ${a.where}` : ""}${a.message ? `: ${a.message}` : ""}`;
 }
 
+/** The builtins that move a shape's surface somewhere else: a step read only through one is not where it was built. */
+const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
+
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
@@ -231,6 +255,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // Inside an assert's test, where a query in a pose reads a step where the pose put it; geometry built from a
   // query keeps the step's own frame, since it is built inside that frame.
   let assertDepth = 0;
+  // Names subtracted from a shape (`a - b`, difference(a, b)), and names only read as a region (an assert, a decal's
+  // region, a camera's focus): they are not parts of the output and the unused warning leaves them alone.
+  const cutNames = new Set<string>();
+  const regionNames = new Set<string>();
+  // The decal regions among them: a dep of a part through decal() is a region, not a part.
+  const decalRegions = new Set<string>();
+  // The step being computed at top level, to note a cut in it.
+  let currentStep: Step | undefined;
+  // Each top-level shape step by its value, so a transform of exactly that value is known to move the step.
+  const stepOfValue = new Map<Shape3, string>();
+  // Where the last void, inside or overlap query in an assert found its offending point.
+  let witness: string | undefined;
   // The shown shape, set once the program has run; a root for placing a measured step.
   let output: Shape3 | undefined;
   const warnings: string[] = [...(program.warnings ?? [])];
@@ -300,8 +336,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         if (typeof v !== "number") throw new RuntimeError(`cannot negate a ${typeName(v)}`, e.line);
         return -v;
       }
-      case "binary":
-        return binary(e.op, evalExpr(e.left, scope), evalExpr(e.right, scope), e.line);
+      case "binary": {
+        const l = evalExpr(e.left, scope), r = evalExpr(e.right, scope);
+        if (currentStep) for (const v of [l, r]) if (isShape3(v)) { const nm = stepOfValue.get(v); if (nm) (currentStep.keptDeps ??= new Set()).add(nm); }
+        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident") noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
+        return binary(e.op, l, r, e.line);
+      }
       case "call":
         return call(e.callee, e.args, scope, e.line);
     }
@@ -611,6 +651,35 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    // A step built at the origin and moved into place by a later step has its surface there, not at its own
+    // place: noted per reader, so the callouts label the placed step and not the campfire that happens to sit
+    // where the unplaced one was (round 9).
+    if (currentStep) {
+      for (const v of values) {
+        if (!isShape3(v.value)) continue;
+        if (MOVERS.has(callee) && v === values[0]) {
+          // Every step inside what is moved goes with it: `(seat + feet) | move(...)` moves the seat, which the
+          // union had just read as it is.
+          const step = currentStep;
+          const seen = new Set<Shape3>();
+          const walk = (s: Shape3, depth: number) => {
+            if (seen.has(s) || depth > 64) return;
+            seen.add(s);
+            const name = stepOfValue.get(s);
+            if (name) { (step.movedDeps ??= new Set()).add(name); step.keptDeps?.delete(name); }
+            for (const c of s.inner ?? []) walk(c, depth + 1);
+          };
+          walk(v.value, 0);
+        } else {
+          const name = stepOfValue.get(v.value);
+          if (name) (currentStep.keptDeps ??= new Set()).add(name);
+        }
+      }
+    }
+    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") noteCut(args[1].value.name);
+    if (callee === "difference" && currentStep) currentStep.cuts = true;
+    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
+    if (assertDepth > 0) for (const a of args) if (!a.name && a.value.type === "ident") regionNames.add(a.value.name);
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
@@ -623,8 +692,19 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     // pieces() counts at the program's grid unless told otherwise, so a promise made at rest and the report's Pieces
     // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
-    if (callee === "pieces" && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
+    if ((callee === "pieces" || callee === "overhang") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
     const result = callBuiltin(builtin, values, line);
+    // A failing void, inside or overlap says where (round 9: three agents bisected a bare 0 by hand).
+    if (assertDepth > 0 && (callee === "void" || callee === "inside" || callee === "overlap") && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
+      const a = values[0].value, b = values[1].value;
+      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? outsideWitness(a, b) : result === 0 ? undefined : overlapWitness(a, b);
+      if (p) {
+        const at = `(${p.map(fmt3).join(", ")})`;
+        const first = args[0].value, second = args[1].value;
+        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a, b])}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
+        witness = what;
+      }
+    }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
     // beside the wrong part).
     if (callee === "decal" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value) && !regionTouches(values[0].value, values[1].value))
@@ -763,12 +843,45 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return close.length ? ` (did you mean ${close.slice(0, 3).join(", ")}?)` : "";
   }
 
+  /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
+  function noteCut(name: string): void {
+    cutNames.add(name);
+    if (!currentStep) return;
+    currentStep.cuts = true;
+    (currentStep.cutDeps ??= new Set()).add(name);
+  }
+
+  /** The innermost named part with solid at `p`, as " in 'name'", for a failed void; none when no step holds it. */
+  function stepAt(p: Vec3, exclude: Shape3[]): string {
+    const roots = posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [];
+    let best: string | undefined, bv = Infinity;
+    for (const st of steps.values()) {
+      if (!isShape3(st.value) || exclude.includes(st.value) || cutNames.has(st.name) || regionNames.has(st.name) || isEmpty(st.value.bounds)) continue;
+      const s = posed ? placedUnder(roots, st.value) : st.value;
+      const b = s.bounds;
+      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
+      if (s.dist(p[0], p[1], p[2]) > 0) continue;
+      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
+      if (v < bv) { bv = v; best = st.name; }
+    }
+    return best ? ` in '${best}'` : "";
+  }
+
   function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {
     switch (stmt.type) {
       case "assign": {
         const collecting = topLevel && reads === undefined;
         if (collecting) reads = new Set();
-        let value = evalExpr(stmt.value, scope);
+        // A cut made while this step is computed (inside a def it calls too) marks the step: its surface can be a cut face.
+        const outerStep = currentStep;
+        const here: Step = { name: stmt.name, value: 0, line: stmt.line, deps: new Set() };
+        if (topLevel) currentStep = here;
+        let value: Value;
+        try { value = evalExpr(stmt.value, scope); } finally { currentStep = outerStep; }
+        const cutHere = topLevel && here.cuts === true;
+        const cutDeps = topLevel ? here.cutDeps : undefined;
+        const movedDeps = topLevel ? here.movedDeps : undefined;
+        const keptDeps = topLevel ? here.keptDeps : undefined;
         // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
         // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
         if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
@@ -781,10 +894,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (prev) {
             prev.value = value;
             prev.deps = deps;
+            if (cutHere) prev.cuts = true;
+            if (cutDeps) prev.cutDeps = new Set([...(prev.cutDeps ?? []), ...cutDeps]);
+            if (movedDeps) prev.movedDeps = new Set([...(prev.movedDeps ?? []), ...movedDeps]);
+            if (keptDeps) prev.keptDeps = new Set([...(prev.keptDeps ?? []), ...keptDeps]);
           } else {
-            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps });
+            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps });
           }
-          if (isShape3(value)) lastShape = { name: stmt.name };
+          if (isShape3(value)) { lastShape = { name: stmt.name }; stepOfValue.set(value, stmt.name); }
         }
         if (collecting) reads = undefined;
         return;
@@ -869,6 +986,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const t = stmt.test;
         let value: Value, detail: string | undefined;
         assertDepth++;
+        witness = undefined;
         try {
         if (t.type === "binary" && (COMPARE_OPS as readonly string[]).includes(t.op)) {
           const a = evalExpr(t.left, scope), b = evalExpr(t.right, scope);
@@ -886,7 +1004,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
           message = m;
         }
-        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose });
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined });
         return;
       }
     }
@@ -937,23 +1055,37 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       for (const pn of new Set(a.poses))
         if (pn !== "rest" && !poses.some((p) => p.name === pn)) warnings.push(`animation "${a.name}" (line ${a.line}) uses pose "${pn}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}`);
   }
-  const used = new Set<string>();
-  const stack = [...roots];
-  while (stack.length) {
-    const nme = stack.pop()!;
-    if (used.has(nme)) continue;
-    used.add(nme);
+  // Roles: a part is anything the output is built from; below a cut name the subtree is a cut; a name only an
+  // assert, a decal or a camera reads is a region. A part stays a part however else it is read.
+  for (const c of cameras) if (c.focus) regionNames.add(c.focus);
+  const roles = new Map<string, StepRole>();
+  const rank = (r: StepRole | undefined) => (r === "part" ? 3 : r === "cut" ? 2 : r === "region" ? 1 : 0);
+  const visit = (nme: string, role: StepRole) => {
+    if (rank(roles.get(nme)) >= rank(role)) return;
+    roles.set(nme, role);
     const st = steps.get(nme);
-    if (st) for (const d of st.deps) stack.push(d);
-  }
+    if (st) for (const d of st.deps) visit(d, role === "region" ? role : st.cutDeps?.has(d) ? "cut" : decalRegions.has(d) ? "region" : role);
+  };
+  for (const r of roots) visit(r, "part");
+  for (const r of regionNames) visit(r, "region");
+  const used = new Set<string>([...roles.entries()].filter(([, r]) => r !== "region").map(([n]) => n));
   const stepList = [...steps.values()];
+  // A step is displaced when every step that reads it moves it, and nothing shows it as it is.
+  const readers = new Map<string, Step[]>();
+  for (const st of stepList) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
+  const displaced = new Set<string>();
+  for (const st of stepList) {
+    if (!isShape3(st.value) || roots.has(st.name)) continue;
+    const rs = readers.get(st.name) ?? [];
+    if (rs.length && rs.every((r) => r.movedDeps?.has(st.name) && !r.keptDeps?.has(st.name))) displaced.add(st.name);
+  }
   for (const st of stepList)
-    if (isShape3(st.value) && !used.has(st.name) && output)
+    if (isShape3(st.value) && !roles.has(st.name) && output)
       warnings.push(`'${st.name}' (line ${st.line}) is not part of the output; add it to the model or remove it`);
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
 }
 
 export function signature(name: string, ov: Overload): string {

@@ -1,0 +1,36 @@
+# Probe 2: which part of the bracket makes void(cbore, model) fail?
+set grid 200
+base    = box(1.5, 0.15, 1.0) | move(0, 0.075, 0)
+upright = box(1.5, 1.0, 0.15) | move(0, 0.5, -0.425)
+cove_bar = box(1.5, 0.11, 0.11) | move(0, 0.195, -0.305)
+cove_cut = cylinder(0.1, 1.6) | rotate(z=90) | move(0, 0.25, -0.25)
+fillet   = cove_bar - cove_cut
+gusset = extrude(polygon(0.42,0.1, -0.32,0.1, 0.42,0.82), 0.12, "x")
+thru = cylinder(0.06, 0.5) | move(0.55, 0.35 * 0 + 0.075, 0.35)
+cb   = cylinder(0.11, 0.2) | move(0.55, 0.19, 0.35)
+cb_bl = cylinder(0.11, 0.2) | move(-0.55, 0.19, -0.1)
+thru_bl = cylinder(0.06, 0.5) | move(-0.55, 0.075, -0.1)
+slot = box(0.5, 0.12, 0.4, round=0.05) | move(0, 0.6, -0.425)
+label  = extrude(text("BRK-2041", 0.12, weight=0.03, align="center"), 0.06, "z") | move(0, 0.78, -0.35)
+pin_r = cylinder(0.05, 0.37) | move(0.3, 0.265, 0.32) | paint("silver")
+
+a = base - thru - cb
+b = (base + upright) - thru - cb
+c = (base + upright + fillet) - thru - cb
+d = (base + upright + fillet + gusset) - thru - cb
+e = ((base + upright + fillet + gusset) | paint("steel")) - thru - cb
+f = e - slot - label
+g = f + pin_r
+h = base - (thru + cb)
+i = base - (thru + cb + thru_bl + cb_bl)
+assert void(cb, a), "a: base only"
+assert void(cb, b), "b: + upright"
+assert void(cb, c), "c: + fillet"
+assert void(cb, d), "d: + gusset"
+assert void(cb, e), "e: painted"
+assert void(cb, f), "f: - slot - label"
+assert void(cb, g), "g: + pin"
+assert void(cb, h), "h: cutters unioned first"
+assert void(cb, i), "i: four cutters unioned first"
+assert void(cb_bl, i), "i: back-left, four cutters unioned first"
+show g

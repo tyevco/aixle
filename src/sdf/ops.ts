@@ -60,7 +60,8 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
         if (index) return index.min(x, y, z, piece, boxDist, FAR);
         let best = FAR;
         for (let i = 0; i < n; i++) {
-          if (boxDist(i, x, y, z) >= best) continue;
+          const bd = boxDist(i, x, y, z);
+          if (bd > 0 && bd >= best) continue;
           const d = fns[i](x, y, z);
           if (d < best) best = d;
         }
@@ -69,7 +70,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       hit: (x, y, z) => {
         let best: Hit | undefined;
         for (let i = 0; i < n; i++) {
-          if (best && boxDist(i, x, y, z) >= best.d) continue;
+          if (best) { const bd = boxDist(i, x, y, z); if (bd > 0 && bd >= best.d) continue; }
           const h = hits[i](x, y, z);
           if (!best || h.d < best.d) best = h;
         }
@@ -89,7 +90,8 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     dist: (x, y, z) => {
       let best = FAR;
       for (let i = 0; i < n; i++) {
-        if (boxDist(i, x, y, z) >= best + k) continue;
+        const bd = boxDist(i, x, y, z);
+        if (bd > 0 && bd >= best + k) continue;
         best = smin(best, fns[i](x, y, z), k);
       }
       return best;

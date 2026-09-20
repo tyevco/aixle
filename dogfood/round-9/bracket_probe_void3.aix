@@ -1,0 +1,28 @@
+# Probe 3: void() on a counterbore cut as part of a union of cutters.
+set grid 200
+base = box(1.5, 0.15, 1.0) | move(0, 0.075, 0)
+thru = cylinder(0.06, 0.5) | move(0.55, 0.075, 0.35)
+cb   = cylinder(0.11, 0.2) | move(0.55, 0.19, 0.35)
+cb2  = cylinder(0.11, 0.2) | move(-0.55, 0.19, 0.35)
+cb_short = cylinder(0.11, 0.1) | move(0.55, 0.19, 0.35)
+cb_in = cb | offset(-0.01)
+h1 = base - (thru + cb)
+h2 = base - (cb + thru)
+h3 = base - (cb + cb2)
+h4 = base - union(thru, cb)
+h5 = base - thru - cb
+assert void(cb, h1), "h1: base - (thru + cb)"
+assert void(cb, h2), "h2: base - (cb + thru)"
+assert void(cb, h3), "h3: base - (cb + cb2), two blind cuts"
+assert void(cb, h4), "h4: base - union(thru, cb)"
+assert void(cb_short, h1), "h1 with a region clear of the floor"
+assert void(cb_in, h1), "h1 with the region shrunk 0.01"
+assert inside(cb, h1) < 0.001, "h1: fraction of cb inside"
+assert inside(cb, h5) < 0.001, "h5: fraction of cb inside"
+assert overlap(cb, h1) < 0.00001, "h1: shared volume"
+assert clearance(cb, h1) > -0.001, "h1: clearance"
+assert clearance(cb, h5) > -0.001, "h5: clearance"
+show h1
+set slice_x 0.55
+set slice_z 0.35
+set slice_y 0.12

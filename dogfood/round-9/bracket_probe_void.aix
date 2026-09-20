@@ -1,0 +1,17 @@
+# Probe: void() on a blind cut (a counterbore) versus a through cut.
+set grid 200
+base = box(1.5, 0.15, 1.0) | move(0, 0.075, 0)
+thru = cylinder(0.06, 0.5) | move(0.55, 0.075, 0.35)
+cb   = cylinder(0.11, 0.2) | move(0.55, 0.19, 0.35)            # floor at y = 0.09, exactly on the cut face
+cb_short = cylinder(0.11, 0.1) | move(0.55, 0.19, 0.35)        # y 0.14..0.24: clear of the floor
+cb_in  = cb | offset(-0.01)                                      # a cell inside the cut
+cb_up  = cylinder(0.11, 0.2) | move(0.55, 0.195, 0.35)          # floor 0.005 above the cut face
+cb_big = cylinder(0.12, 0.2) | move(0.55, 0.19, 0.35)           # a wider region: solid really is in it
+plate = base - thru - cb
+assert void(thru, plate), "through hole, region = cutter"
+assert void(cb, plate), "counterbore, region = cutter"
+assert void(cb_short, plate), "counterbore, region clear of the floor"
+assert void(cb_in, plate), "counterbore, region shrunk 0.01"
+assert void(cb_up, plate), "counterbore, region floor 0.005 above the cut"
+assert void(cb_big, plate) == 0, "a wider region does hold solid"
+show plate

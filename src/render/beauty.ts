@@ -82,6 +82,8 @@ export interface BeautyOptions {
   environment?: Environment;
   /** The points the camera fits instead of the whole mesh: a camera framed on one step fits that step's points. */
   fitPoints?: Float32Array;
+  /** The whole model's box when `bounds` is a focus frame: the march, the shadows and the floor reach all of it. */
+  reachBounds?: Bounds;
 }
 
 /** The default key light: upper left, from the front. */
@@ -114,9 +116,10 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   const ambient = Math.max(0, opts.ambient ?? 1) * pal.ambient;
   const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, opts.fitPoints ?? mesh.positions);
   const cell = Math.max(opts.cellSize, 1e-4);
-  const floorY = Math.min(0, bounds.min[1]);
-  const shadowBox = boundsGrow(bounds, cell);
-  const reach = Math.hypot(...boundsSize(bounds)) * 1.5;
+  const model = opts.reachBounds ?? bounds;
+  const floorY = Math.min(0, model.min[1]);
+  const shadowBox = boundsGrow(model, cell);
+  const reach = Math.hypot(...boundsSize(model)) * 1.5;
   const dist = shape.dist;
 
   // Prime with the mesh: view depth per pixel.
@@ -388,9 +391,15 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const t = (floorY - eye[1]) / dir[1];
       const p: Vec3 = [eye[0] + dir[0] * t, floorY, eye[2] + dir[2] * t];
       const n: Vec3 = [0, 1, 0];
-      const near = boundsDistance(bounds, p[0], p[1], p[2]) < reach;
-      const lit: Vec3 = near ? floorLight([p[0], p[1] + cell, p[2]]) : [0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[0]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[1]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[2]) / totalPower, 0)];
-      const ao = near ? occlusion(p, n) : 1;
+      // Near the model the floor is lit and shadowed properly; far off a flat estimate stands in. The two are
+      // blended over the last third of the reach, since a hard switch drew a seam across a top-down shot (round 9).
+      const away = boundsDistance(model, p[0], p[1], p[2]);
+      const w = away >= reach ? 0 : away <= reach * 0.66 ? 1 : (reach - away) / (reach * 0.34);
+      const far: Vec3 = [0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[0]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[1]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[2]) / totalPower, 0)];
+      const nearLit: Vec3 = w > 0 ? floorLight([p[0], p[1] + cell, p[2]]) : far;
+      const nearAo = w > 0 ? occlusion(p, n) : 1;
+      const lit: Vec3 = [far[0] + (nearLit[0] * nearAo - far[0]) * w, far[1] + (nearLit[1] * nearAo - far[1]) * w, far[2] + (nearLit[2] * nearAo - far[2]) * w];
+      const ao = 1;
       const fade = Math.min(1, t / (reach * 4));
       const c: Vec3 = [FLOOR[0] * lit[0] * ao, FLOOR[1] * lit[1] * ao, FLOOR[2] * lit[2] * ao];
       return { color: [c[0] + (GROUND[0] - c[0]) * fade, c[1] + (GROUND[1] - c[1]) * fade, c[2] + (GROUND[2] - c[2]) * fade], depth: t, normal: n, matId: -2 };

@@ -8,7 +8,8 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { ENVIRONMENTS } from "./render/beauty.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
@@ -61,6 +62,7 @@ function usage(): never {
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
+      "                          [--camera NAME] [--environment NAME]  one declared shot only (the sheet takes its view); a sky over the program's",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix> [--pose NAME] [--no-asserts]   parse and evaluate; print sizes and warnings, render nothing",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
@@ -138,7 +140,10 @@ function main(argv: string[]): number {
           continue;
         }
         if (!isShape3(st.value)) continue;
-        const used = ev.used.has(st.name) ? "" : "   (not in output)";
+        // A cutter is drawn as the solid it removes and a region is read by an assert, a decal or a camera: neither is
+        // a part, and the tag says which (round 9: agents took a region's warning for a mistake).
+        const role = ev.roles.get(st.name);
+        const used = role === "part" ? "" : role === "cut" ? "   (cut)" : role === "region" ? "   (region)" : "   (not in output)";
         const b = st.value.bounds;
         console.log(`${st.name.padEnd(18)} ${isEmpty(b) ? "empty" : spanBox(b)}${used}`);
         if (isEmpty(b)) continue;
@@ -193,14 +198,18 @@ function main(argv: string[]): number {
       const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
+      // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike.
+      const nearly = cellSize > 0 ? nearlyThin(ev, cellSize).trim() : "";
+      if (nearly) console.log(`note: ${nearly}`);
+      // The lights, the shots and the sky, as the report will list them: a typo in a name is a warning above.
+      for (const l of presentationLines(ev, typeof ev.settings.camera === "string" ? ev.settings.camera : undefined, ENVIRONMENTS.includes(ev.settings.environment as never) ? String(ev.settings.environment) : undefined)) console.log(l);
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
       const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"])) : undefined; });
       const failed = all.filter((a) => !a.passed);
       // A passing promise prints its numbers too, so how close it came is on the terminal and not only in
-      // report.json (round 8: the gap between closed fingers).
-      for (const a of all) if (a.passed) console.log(assertPassLine(a));
-      for (const a of failed) console.log(assertLine(a));
+      // report.json (round 8: the gap between closed fingers), in line order, failures among the passes.
+      for (const a of [...all].sort((x, y) => (x.file ?? "").localeCompare(y.file ?? "") || x.line - y.line)) console.log(a.passed ? assertPassLine(a) : assertLine(a));
       if (all.length) console.log(`asserts: ${failed.length ? `${all.length - failed.length} pass, ${failed.length} fail` : `${all.length} pass`}${all.some((a) => a.pose) ? " (at rest, or in the pose each names)" : pose ? " (judged at rest)" : ""}`);
       return failed.length ? 1 : 0;
     } catch (err) {
@@ -256,7 +265,10 @@ function main(argv: string[]): number {
       if (!roots.length) { console.log("no output: nothing to explain"); return 0; }
       if (pose) console.log(`pose: ${pose.name} (sizes in this pose)`);
       for (const r of roots) walk(r, 0);
-      const unused = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value))).map((st) => st.name);
+      const left = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value)));
+      const regions = left.filter((st) => ev.roles.get(st.name) === "region").map((st) => st.name);
+      const unused = left.filter((st) => !ev.roles.has(st.name)).map((st) => st.name);
+      if (regions.length) console.log(`\nregions (read by an assert, a decal or a camera, not geometry): ${regions.join(", ")}`);
       if (unused.length) console.log(`\nnot in the output: ${unused.join(", ")}`);
       if (ev.poses.length) console.log(`\nposes: ${ev.poses.map((p) => p.name).join(", ")}`);
       for (const m of ev.modules) console.log(`\nuse ${m.prefix} (${m.path}): ${m.names.join(", ")}`);
@@ -342,6 +354,8 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
       focus: typeof opts.focus === "string" ? opts.focus : undefined,
       pose: typeof opts.pose === "string" ? opts.pose : undefined,
+      camera: typeof opts.camera === "string" ? opts.camera : undefined,
+      environment: typeof opts.environment === "string" ? opts.environment : undefined,
     };
     for (const k of Object.keys(given)) if (given[k] === undefined) delete given[k];
     const result = run(source, file, outDir, { ...quick, ...given, log: (l) => console.log(l) });

@@ -447,21 +447,29 @@ How many separate pieces the shape meshes into at `resolution` cells on its long
 
 - `resolution`: cells on the longest side
 
+### overhang
+
+The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment.
+
+    overhang(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
 ### void
 
-1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a hole that goes through, a slot a lid must not fill. Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught.
+1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught; a failure says where the solid is and in which step.
 
     void(region, shape) -> number
 
 ### overlap
 
-The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene.
+The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene; a failure says where.
 
     overlap(a, b) -> number
 
 ### inside
 
-The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. Sampled at 24 cells along a's longest side.
+The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; a failure says where `a` is outside.
 
     inside(a, b) -> number
 

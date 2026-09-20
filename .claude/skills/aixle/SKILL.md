@@ -55,8 +55,13 @@ Reference: `docs/reference.md` (every function, generated from the code),
    pieces(model) == 1`, `assert clearance(handle, rim) > 0.05`, `assert
    void(cavity, mug)` (nothing pokes into the cup), `assert overlap(frog,
    pad) < 0.001` (on the pad, not sunk in), `assert
-   tall(model) < 2.2`. `check` then fails, with the numbers, when a later
-   edit breaks it.
+   tall(model) < 2.2`, `assert overhang(part) < 0.05` (printable without
+   support). A hole that must go through is `void` on a thin rod past
+   both faces, not on the cutter (empty by construction); `inside` wants
+   the solid, not a shell; a probe step only an assert reads is a region
+   and is not warned about. `check` then fails, with the numbers and
+   where, when a later edit breaks it. Edit `.aix` files with the Edit
+   tool: `sed` trips on their `|` pipes.
 6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
    `--beauty` for the presentation picture, and `--minecraft` when the
@@ -100,11 +105,11 @@ import("part.obj", size=2)                                                      
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
-pieces(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b     # measure for assert (1 or 0)
+pieces(s)  overhang(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b   # measure for assert
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")  light("rim", azimuth=150, elevation=20, power=0.5)   # several lights
-camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky
+camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky (--camera NAME, --environment NAME try one)
 decal(part, label_box, image="label.png")   material("cream", image="skin.png", projection="cylindrical", scale=0.6)   # a PNG as a label or a skin
 
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends
@@ -182,7 +187,8 @@ show arm
 | a limb has no knee | one rotated capsule | `tube(r, [hip, knee])` then `tube(r, [knee, ankle])` |
 | a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
 | stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
-| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty` is a few seconds) |
+| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty` is a few seconds, but it cannot judge glass: its grid is coarse) |
+| chrome is a white blob; a night scene is black; a low shot looks down | neutral skies reflect white; `night` cuts the ambient; elevation is about the centre | `sunset`/`night` or `steel` for a mirror; `set ambient 1.6`; `elevation=-8`; a light is a direction, a glow lights only itself |
 | a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
 
 ## Style that renders well

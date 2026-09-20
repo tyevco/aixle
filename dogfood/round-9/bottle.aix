@@ -1,0 +1,74 @@
+# A perfume bottle for a product shot, about 1.2 units tall, standing on a
+# shallow walnut tray at y = 0, front to +z. A rounded-square glass body
+# holds a coloured liquid up to five sixths of its cavity; a bronze collar
+# sits on the neck and a brass cap with a dip-stem closes it; an ivory label
+# with raised brass lettering on the front. Dogfood round 9: presentation
+# and promises (lights, cameras, environments, callouts, void/overlap/inside).
+set grid 200
+
+# The tray: a coaster with a shallow recess the bottle sits in.
+tray = (cylinder(0.5, 0.05, round=0.015) | move(0, 0.025, 0)
+        - (cylinder(0.42, 0.05) | move(0, 0.05, 0)))
+       | paint(material("walnut", scale=0.12))
+
+# The glass body: a rounded box, from y = 0.015 (sunk a cell into the tray's
+# recess floor) to 0.735. It was a loft of two rounded rectangles first; the
+# beauty render banded through the loft's approximate field, and the same
+# bottle with an exact rounded box rendered clean (out/probe/boxbody).
+body = box(0.62, 0.72, 0.42, round=0.16) | move(0, 0.375, 0)
+# The cavity: the same form inset, floor 0.06 above the body's bottom, top at 0.675.
+cavity = box(0.50, 0.60, 0.30, round=0.12) | move(0, 0.375, 0)
+neck = cylinder(0.09, 0.12) | move(0, 0.78, 0)
+bore = cylinder(0.05, 0.4) | move(0, 0.85, 0)
+glass = (body + neck - cavity - bore) | paint("glass")
+
+# The liquid: the cavity below y = 0.575, grown 0.01 (nearly two cells) into
+# the glass wall so its surface does not coincide with the cavity's (the
+# beauty render banded on the coincident faces).
+liquid = ((cavity | offset(0.01)) & (box(1, 0.5, 1) | move(0, 0.325, 0)))
+         | paint(material("#d8582c", transmit=0.55, rough=0.05))
+
+# The bronze collar round the neck, sunk into the shoulder, bored for the cap.
+collar = (cylinder(0.12, 0.2, round=0.015) | move(0, 0.82, 0) - bore) | paint("bronze")
+
+# The cap: a rounded brass cylinder on the collar with a dip-stem down the
+# bore. Chrome was tried and was a white blob under both studio and overcast.
+cap_head = cylinder(0.11, 0.28, round=0.03) | move(0, 1.04, 0)
+stem = cylinder(0.03, 0.22) | move(0, 0.81, 0)
+cap = (cap_head + stem) | paint("brass")
+
+# The label: an ivory plate sunk into the front face with raised lettering.
+plate = box(0.28, 0.18, 0.05, round=0.008) | move(0, 0.30, 0.195) | paint("ivory")
+letters = extrude(text("AIX", 0.08, weight=0.02, align="center"), 0.03, "z")
+          | move(0, 0.26, 0.225) | paint("brass")
+label = plate + letters
+
+bottle = tray + glass + liquid + collar + cap + label
+show bottle
+
+# Promises.
+assert inside(liquid, body) == 1, "the liquid never leaves the glass envelope"
+assert inside(liquid, cavity) > 0.85, "the liquid sits in the cavity (bar the skin sunk into the wall)"
+assert void(cavity, cap), "the cap stays out of the cavity"
+assert overlap(collar, glass) > 0.001, "the collar is joined to the neck, not just touching"
+assert pieces(bottle) == 1, "one piece"
+assert clearance(letters, collar) > 0.2, "the lettering clears the collar"
+
+# Lighting: a warm key high on the front left, large so the glass and brass
+# get soft highlights; a cool rim low behind the right shoulder (behind the
+# hero camera's far side) meant to edge the glass against the backdrop. A
+# quick shot without it (out/probe/norim) looked the same: it adds nothing
+# the hero camera can see.
+light("key", azimuth=-35, elevation=50, size=1.5, color="#fff1dc")
+light("rim", azimuth=140, elevation=15, size=1, power=0.9, color="#bcd4ff")
+
+# Shots: the hero three-quarter, close-ups on the cap and the label, and a
+# low wide one. The camera's elevation is about the model's centre, so at
+# elevation 4 a perspective eye still looked down on the tray; -8 puts the
+# eye near tray height.
+camera("hero", azimuth=30, elevation=18, zoom=1.3)
+camera("cap", focus="cap", azimuth=40, elevation=25, zoom=1.4)
+camera("label", focus="label", azimuth=20, elevation=10, zoom=1.2, dof=0.3)
+camera("low", azimuth=-25, elevation=-8, zoom=1.1)
+set camera hero
+set environment overcast

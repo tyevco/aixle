@@ -206,31 +206,37 @@ describe("pictures", () => {
 });
 
 describe("callouts", () => {
-  it("attributes vertices to the smallest step they lie on, never to a cutter, and labels the visible ones", () => {
+  it("attributes vertices to the smallest step they lie on, the later of two the same size, cut faces to the cutter, and labels the visible ones", () => {
     const slab = O.move(P.box(2, 0.4, 2), 0, 0.2, 0);
     const knob = O.move(P.sphere(0.3), 0.5, 0.6, 0.5);
     const hole = O.move(P.cylinder(0.25, 1), -0.5, 0.2, -0.5);
     const cut = O.difference(slab, hole);
     const model = O.union([cut, knob]);
     const nets = surfaceNets(model, { resolution: 40 });
-    const steps = [{ name: "slab", shape: slab }, { name: "knob", shape: knob }, { name: "hole", shape: hole }, { name: "cut", shape: cut }];
+    // The hole is a cutter and the cut was computed with it, as the interpreter marks them.
+    const steps = [{ name: "slab", shape: slab }, { name: "knob", shape: knob }, { name: "hole", shape: hole, cut: true }, { name: "cut", shape: cut, derived: true }];
     const owner = attributeVertices(nets.mesh, steps, nets.cellSize, 1, model);
     const counts = [0, 0, 0, 0, 0];
     for (const o of owner) counts[o < 0 ? 4 : o]++;
-    // The knob's vertices are the knob's, the slab's faces the slab's; the hole's wall is the cut's, never the hole's.
+    // The knob's vertices are the knob's; the slab's faces are the cut's, the later step in the same box (a shell or
+    // a painted cut is named, not the primitive it came from); the hole's wall is the hole's, as a cut face.
     expect(counts[1]).toBeGreaterThan(50);
-    expect(counts[0]).toBeGreaterThan(counts[1]);
-    expect(counts[2]).toBe(0);
-    expect(counts[3]).toBeGreaterThan(50);
+    expect(counts[3]).toBeGreaterThan(counts[1]);
+    expect(counts[0]).toBe(0);
+    expect(counts[2]).toBeGreaterThan(20);
+    // A cutter not marked as one never owns a face: the wall stays the cut's.
+    const plain = attributeVertices(nets.mesh, steps.map((st) => ({ name: st.name, shape: st.shape })), nets.cellSize, 1, model);
+    expect([...plain].filter((o) => o === 2).length).toBe(0);
     const r = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 20, undefined, undefined, model);
-    expect(r.labelled.map((l) => l.name).sort()).toEqual(["cut", "knob", "slab"]);
-    expect(r.labelled[0].name).toBe("slab");
+    expect(r.labelled.map((l) => l.name).sort()).toEqual(["cut", "hole", "knob"]);
+    expect(r.labelled[0].name).toBe("cut");
+    expect(r.labelled.find((l) => l.name === "hole")?.cut).toBe(true);
     expect(r.unlabelled).toEqual([]);
     expect([r.canvas.width, r.canvas.height]).toEqual([160, 186]);
-    // With one label allowed, the smaller step is reported as in view but not labelled.
+    // With one label allowed, the smaller steps are reported as in view but not labelled.
     const one = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 1, undefined, undefined, model);
-    expect(one.labelled.map((l) => l.name)).toEqual(["slab"]);
-    expect([...one.unlabelled].sort()).toEqual(["cut", "knob"]);
+    expect(one.labelled.map((l) => l.name)).toEqual(["cut"]);
+    expect(one.unlabelled.map((u) => u.name).sort()).toEqual(["hole", "knob"]);
   });
 });
 

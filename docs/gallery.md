@@ -603,3 +603,67 @@ round 8: A folding pocket multi-tool, 0.9 long along x, lying flat on y = 0.
 ![round-8_multitool, beauty render](../dogfood/renders/round-8_multitool_beauty.png) ![round-8_multitool, contact sheet](../dogfood/renders/round-8_multitool.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-8/multitool.aix) · <a href="/aixle/viewers/round-8_multitool.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-8/multitool.report.md)
+
+### round-9_bottle
+
+round 9: A perfume bottle for a product shot, about 1.2 units tall, standing on a
+
+![round-9_bottle, beauty render](../dogfood/renders/round-9_bottle_beauty.png) ![round-9_bottle, contact sheet](../dogfood/renders/round-9_bottle.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bottle.aix) · <a href="/aixle/viewers/round-9_bottle.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/bottle.report.md)
+
+### round-9_bracket
+
+round 9: A machined L-bracket for a print: a base plate on y = 0, an upright at the
+
+![round-9_bracket, beauty render](../dogfood/renders/round-9_bracket_beauty.png) ![round-9_bracket, contact sheet](../dogfood/renders/round-9_bracket.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket.aix) · <a href="/aixle/viewers/round-9_bracket.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/bracket.report.md)
+
+### round-9_bracket_probe_void
+
+round 9: Probe: void() on a blind cut (a counterbore) versus a through cut.
+
+![round-9_bracket_probe_void, beauty render](../dogfood/renders/round-9_bracket_probe_void_beauty.png) ![round-9_bracket_probe_void, contact sheet](../dogfood/renders/round-9_bracket_probe_void.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_bracket_probe_void2
+
+round 9: Probe 2: which part of the bracket makes void(cbore, model) fail?
+
+![round-9_bracket_probe_void2, beauty render](../dogfood/renders/round-9_bracket_probe_void2_beauty.png) ![round-9_bracket_probe_void2, contact sheet](../dogfood/renders/round-9_bracket_probe_void2.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void2.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void2.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_bracket_probe_void3
+
+round 9: Probe 3: void() on a counterbore cut as part of a union of cutters.
+
+![round-9_bracket_probe_void3, beauty render](../dogfood/renders/round-9_bracket_probe_void3_beauty.png) ![round-9_bracket_probe_void3, contact sheet](../dogfood/renders/round-9_bracket_probe_void3.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void3.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void3.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_bracket_probe_void4
+
+round 9: Probe 4: which members of a cutter union does void() misread?
+
+![round-9_bracket_probe_void4, beauty render](../dogfood/renders/round-9_bracket_probe_void4_beauty.png) ![round-9_bracket_probe_void4, contact sheet](../dogfood/renders/round-9_bracket_probe_void4.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void4.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void4.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_campsite
+
+round 9: A campsite at night, about 6 units across on a ground slab whose top is y = 0.
+
+![round-9_campsite, beauty render](../dogfood/renders/round-9_campsite_beauty.png) ![round-9_campsite, contact sheet](../dogfood/renders/round-9_campsite.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/campsite.aix) · <a href="/aixle/viewers/round-9_campsite.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/campsite.report.md)
+
+### round-9_owl
+
+round 9: An owl money box perched on a branch, about 1.4 tall, facing +z.
+
+![round-9_owl, beauty render](../dogfood/renders/round-9_owl_beauty.png) ![round-9_owl, contact sheet](../dogfood/renders/round-9_owl.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/owl.aix) · <a href="/aixle/viewers/round-9_owl.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/owl.report.md)

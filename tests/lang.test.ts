@@ -278,6 +278,37 @@ describe("interpreter", () => {
   it("promises a void, a bounded overlap and containment", () => {
     const ev = run('cup = cylinder(1, 2) - (cylinder(0.85, 2) | move(0, 0.2, 0))\ncavity = cylinder(0.85, 2) | move(0, 0.2, 0)\nhandle = torus(0.6, 0.15) | rotate(x=90) | move(1.2, 1, 0)\nmug = cup + handle\nassert void(cavity, mug), "nothing pokes in"\nassert overlap(handle, cup) > 0\nassert inside(handle, cavity) < 0.5\nshow mug');
     expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual([[false, undefined], [true, expect.stringMatching(/^0\.\d+ > 0$/)], [true, expect.stringMatching(/^0\.\d+ < 0\.5$/)]]);
+    // A failing void says where the solid is and in which part; the region is not a warning, it is a region.
+    expect(ev.asserts[0].where).toMatch(/^solid at \(0\.\d+, [\d.]+, -?[\d.]+\) in 'handle'$/);
+    expect(assertLine(ev.asserts[0])).toMatch(/^assert \(line 5\) fails: void\(cavity, mug\), solid at \(.*\) in 'handle': nothing pokes in$/);
+    expect(ev.roles.get("cavity")).toBe("region");
+    expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    // inside and overlap failures say where too; a passing query leaves no witness.
+    const f = run('a = sphere(1)\nb = sphere(1) | move(1.5, 0, 0)\nassert inside(a, b) == 1\nassert overlap(a, b) < 0.001\nassert overlap(a, b) > 0\nshow a + b');
+    expect(f.asserts.map((x) => [x.passed, x.where])).toEqual([[false, expect.stringMatching(/^a is outside b at \(-0\.\d+, -?[\d.]+, -?[\d.]+\)$/)], [false, expect.stringMatching(/^they overlap at \(0\.7\d, -?[\d.]+, -?[\d.]+\)$/)], [true, undefined]]);
+  });
+  it("gives each step a role: a part, a cut, a region, or none, and the unused warning only to the last", () => {
+    const ev = run('base = box(2, 0.2, 2)\nhole = cylinder(0.1, 1)\nrod = cylinder(0.05, 2)\nplate = base - hole\npeg = cylinder(0.05, 0.5) | move(0.5, 0.2, 0)\nspare = sphere(0.1)\neye = sphere(0.2) | move(0.5, 0.1, 0)\nmodel = decal(plate + peg, eye, "black")\ncamera("c", focus="rod")\nassert void(rod, model)\nshow model');
+    expect([...ev.roles.entries()].sort()).toEqual([["base", "part"], ["eye", "region"], ["hole", "cut"], ["model", "part"], ["peg", "part"], ["plate", "part"], ["rod", "region"]]);
+    expect(ev.used.has("hole")).toBe(true);
+    expect(ev.used.has("rod")).toBe(false);
+    expect(ev.steps.find((s) => s.name === "plate")?.cuts).toBe(true);
+    expect(ev.steps.find((s) => s.name === "peg")?.cuts).toBeUndefined();
+    expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual(["'spare' (line 6) is not part of the output; add it to the model or remove it"]);
+    // A shape cut from one part and joined by another step is a part; a cut inside a def marks the step that called it.
+    const both = run('a = box(1, 1, 1)\nb = sphere(0.6)\ndef notch(s) = s - b\nc = notch(a)\nd = difference(a, b)\ne = b | move(3, 0, 0)\nshow c + d + e');
+    expect(both.roles.get("b")).toBe("part");
+    expect(run('a = box(1, 1, 1)\nb = sphere(0.6)\ndef notch(s) = s - b\nc = notch(a)\nshow c').roles.get("b")).toBe("cut");
+    // A step every reader moves is displaced (its surface is elsewhere); one also joined as it is, is not.
+    const moved = run('log = cylinder(0.1, 1)\nstack = log + (log | move(0.2, 0, 0))\ndef place(s) = s | rotate(y=30) | move(2, 0, 0)\npile = place(stack)\nseat = box(1, 0.2, 0.3)\nfeet = box(1, 0.1, 0.3)\nbench = (seat + feet) | move(0, 0, 1.5)\nshow pile + bench');
+    expect([...moved.displaced].sort()).toEqual(["feet", "seat", "stack"]);
+    expect(both.steps.find((s) => s.name === "c")?.cuts).toBe(true);
+    expect(both.steps.find((s) => s.name === "d")?.cuts).toBe(true);
+  });
+  it("measures overhangs like the report's row", () => {
+    // A table: the underside of its top faces down and is not on the floor.
+    const ev = run('top = box(2, 0.1, 2) | move(0, 1, 0)\nleg = cylinder(0.1, 1) | move(0, 0.5, 0)\ntable = top + leg\nassert overhang(table) > 0.2\nassert overhang(leg) < 0.01\nshow table');
+    expect(ev.asserts.map((a) => a.passed)).toEqual([true, true]);
   });
   it("judges an assert that names a pose only in that pose's evaluation", () => {
     const src = 'lid = joint(box(1, 0.2, 1) | move(0, 1.1, 0), "hinge", 0, 1, 0.5)\npose("open", hinge=[-90, 0, 0])\nassert tall(lid) < 0.5, "lies flat", pose=open\nassert tall(lid) < 0.5, "at rest"\nassert tall(lid) < 0.5, pose=rest';

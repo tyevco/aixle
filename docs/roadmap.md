@@ -206,6 +206,14 @@ It is a printer over the dependencies the evaluation records. Not built:
 - An APNG turntable, since the PNG writer is there.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
+- A point light (`light(..., position=[x, y, z])`) for a campfire or a
+  lamp lighting its neighbours, and a per-light strip so a rim light's
+  contribution can be seen (round 9 asked for both).
+- A warning when a `transmit` material sits on a `loft`, a smooth union
+  or a scaled shape, whose field is a bound, and a note when a camera's
+  focus is mostly hidden by another step (round 9).
+- A plate of the patterns and a thumbnail per environment in the
+  reference; `arc(axis=)`; a `posed` line for a joint step itself.
 
 ## What was considered and set aside
 
