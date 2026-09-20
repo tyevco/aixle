@@ -528,6 +528,27 @@ robot = body + eyes
 A pattern is anchored to the frame where `paint` was applied, so it moves
 with the part: paint, then `move`.
 
+## Lights, cameras and environments
+
+The beauty render has one key light unless the program declares its
+own: `light("key", azimuth=-40, elevation=55, size=1.5,
+color="#fff2e0")` and `light("rim", azimuth=150, elevation=20,
+power=0.5, color="#cfe0ff")` are a warm key and a cool rim, each
+casting its own soft shadow (azimuth about y, 0 from the front and 90
+from +x; `size` 0.5 is a lamp and 3 a window; `power` 1 is the default
+key's strength; the colour is a name, a hex or a material). Three
+lights cost about half again the time of one. `set environment sunset`
+puts the model under an evening sky; `studio` is the default grey-white
+backdrop, `overcast` a white sky with even light, `night` a dark sky
+and floor where a `glow` material carries the picture. A named shot,
+`camera("hero", azimuth=30, elevation=20, zoom=1.4)` or
+`camera("detail", focus="nameplate", zoom=2)`, is written by `render
+--beauty` as `beauty_<name>.png`, framed on its `focus=` step or object
+when it has one and taking the render's own view for whatever it leaves
+out; `set camera hero` makes that shot the sheet's and `beauty.png`'s
+view as well. The report lists the lights, the cameras and the
+environment.
+
 ## Settings
 
 `set light_size 2.5` widens the key light in the beauty render (softer

@@ -21,6 +21,44 @@ import { drawText } from "./font.js";
 import { createTarget, renderMesh } from "./raster.js";
 import { INK } from "./views.js";
 
+/** One light in the beauty render: a direction, an apparent size, a colour and a power. */
+export interface BeautyLight {
+  name?: string;
+  /** Degrees about y (0 is +z, the front; 90 is +x) and above the floor. */
+  azimuth: number;
+  elevation: number;
+  /** Apparent size: 0.5 is a small lamp with crisp shadows, 3 a window. */
+  size: number;
+  color: Vec3;
+  /** 1 is the default key light's strength. */
+  power: number;
+}
+
+/** The procedural skies the metals reflect and the floor sits in. */
+export type Environment = "studio" | "overcast" | "sunset" | "night";
+export const ENVIRONMENTS: Environment[] = ["studio", "overcast", "sunset", "night"];
+
+interface Palette {
+  sky: Vec3;
+  /** A band at the horizon between ground and sky; absent, the sky fades straight from the ground colour. */
+  horizon?: Vec3;
+  ground: Vec3;
+  floor: Vec3;
+  /** Multiplier on the sky and ground light. */
+  ambient: number;
+}
+
+const PALETTES: Record<Environment, Palette> = {
+  // The studio: the grey-white backdrop every render has had.
+  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], ambient: 1 },
+  // A white sky: soft, even light with little shadow contrast.
+  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], ambient: 1.25 },
+  // Evening: a warm band at the horizon under a blue sky, warm ground.
+  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], ambient: 0.9 },
+  // Night: a dark blue sky and a dark floor, so a glow material carries the picture.
+  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], ambient: 0.4 },
+};
+
 export interface BeautyOptions {
   size: number;
   /** Cell size of the extraction, for step tolerances. */
@@ -39,13 +77,21 @@ export interface BeautyOptions {
   ambient?: number;
   /** Camera zoom: 1 fits the model's bounding sphere, 1.4 fills the frame with a box-shaped model. */
   zoom?: number;
+  /** The lights, when the program declares them; otherwise the one key light the light* options describe. */
+  lights?: BeautyLight[];
+  environment?: Environment;
+  /** The points the camera fits instead of the whole mesh: a camera framed on one step fits that step's points. */
+  fitPoints?: Float32Array;
 }
 
 /** The default key light: upper left, from the front. */
 const DEFAULT_LIGHT: Vec3 = normalize([-0.55, 0.9, 0.65]);
-const SKY: Vec3 = [0.78, 0.83, 0.9];
-const GROUND: Vec3 = [0.93, 0.92, 0.9];
-const FLOOR: Vec3 = [0.88, 0.87, 0.85];
+
+/** A light's direction from its azimuth about y (0 is +z, 90 is +x) and elevation, in degrees. */
+export function lightDirection(azimuth: number, elevation: number): Vec3 {
+  const az = (azimuth * Math.PI) / 180, el = (elevation * Math.PI) / 180;
+  return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
+}
 
 interface Sample {
   color: Vec3;
@@ -56,15 +102,17 @@ interface Sample {
 
 export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: BeautyOptions): Canvas {
   const size = opts.size;
-  const LIGHT: Vec3 =
-    opts.lightAzimuth === undefined && opts.lightElevation === undefined
-      ? DEFAULT_LIGHT
-      : (() => {
-          const az = ((opts.lightAzimuth ?? -40) * Math.PI) / 180, el = ((opts.lightElevation ?? 55) * Math.PI) / 180;
-          return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
-        })();
-  const ambient = Math.max(0, opts.ambient ?? 1);
-  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, mesh.positions);
+  const pal = PALETTES[opts.environment ?? "studio"];
+  const SKY = pal.sky, GROUND = pal.ground, FLOOR = pal.floor;
+  // The lights: the program's, or the one key light the settings describe (its default direction kept as it was).
+  type Lit = { dir: Vec3; softness: number; color: Vec3; power: number };
+  const lights: Lit[] = (opts.lights && opts.lights.length
+    ? opts.lights.map((l) => ({ dir: lightDirection(l.azimuth, l.elevation), size: l.size, color: l.color, power: l.power }))
+    : [{ dir: opts.lightAzimuth === undefined && opts.lightElevation === undefined ? DEFAULT_LIGHT : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55), size: opts.lightSize ?? 1, color: [1, 1, 1] as Vec3, power: 1 }]
+  ).map((l) => ({ dir: l.dir, softness: 6 / Math.max(0.1, l.size), color: l.color, power: Math.max(0, l.power) }));
+  const totalPower = Math.max(1e-6, lights.reduce((s, l) => s + l.power, 0));
+  const ambient = Math.max(0, opts.ambient ?? 1) * pal.ambient;
+  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, opts.fitPoints ?? mesh.positions);
   const cell = Math.max(opts.cellSize, 1e-4);
   const floorY = Math.min(0, bounds.min[1]);
   const shadowBox = boundsGrow(bounds, cell);
@@ -89,9 +137,8 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   const gradient = (x: number, y: number, z: number): Vec3 =>
     normalize([dist(x + eps, y, z) - dist(x - eps, y, z), dist(x, y + eps, z) - dist(x, y - eps, z), dist(x, y, z + eps) - dist(x, y, z - eps)]);
 
-  /** 0 = fully shadowed, 1 = lit; skipped when the ray cannot reach the model's box. */
-  const softness = 6 / Math.max(0.1, opts.lightSize ?? 1);
-  const shadow = (p: Vec3): number => {
+  /** 0 = fully shadowed, 1 = lit, towards one light; skipped when the ray cannot reach the model's box. */
+  const shadow = (p: Vec3, LIGHT: Vec3 = lights[0].dir, softness: number = lights[0].softness): number => {
     // Ray-box test against the shadow box.
     let tmin = 0, tmax = reach;
     for (let a = 0; a < 3; a++) {
@@ -136,9 +183,18 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     return Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
   };
 
+  /** The light on the floor at p: the ambient floor plus each light's share, shadowed, in the light's colour. */
+  const floorLight = (p: Vec3): Vec3 => {
+    const out: Vec3 = [0.62 * pal.ambient, 0.62 * pal.ambient, 0.62 * pal.ambient];
+    for (const l of lights) {
+      const sh = shadow(p, l.dir, l.softness);
+      const k = (0.38 * sh * Math.max(0, l.dir[1]) * l.power) / totalPower;
+      out[0] += k * l.color[0]; out[1] += k * l.color[1]; out[2] += k * l.color[2];
+    }
+    return out;
+  };
+
   const shadePoint = (p: Vec3, n: Vec3, base: Vec3, metal: number, rough: number, view: Vec3, depth = 0, glow = 0): Vec3 => {
-    const nl = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
-    const sh = nl > 0 ? shadow([p[0] + n[0] * cell, p[1] + n[1] * cell, p[2] + n[2] * cell]) : 1;
     const ao = occlusion(p, n);
     const hemi = 0.5 + 0.5 * n[1];
     const amb: Vec3 = [
@@ -146,13 +202,21 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       (GROUND[1] + (SKY[1] - GROUND[1]) * hemi) * 0.42 * ao * ambient,
       (GROUND[2] + (SKY[2] - GROUND[2]) * hemi) * 0.42 * ao * ambient,
     ];
-    const diff = nl * sh * 0.85 * (1 - metal * 0.6);
-    // Blinn highlight.
-    const hx = LIGHT[0] - view[0], hy = LIGHT[1] - view[1], hz = LIGHT[2] - view[2];
-    const hl = Math.hypot(hx, hy, hz) || 1;
-    const nh = Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl);
+    // Each light adds its diffuse and its Blinn highlight in its own colour, shadowed towards itself.
+    const diff: Vec3 = [0, 0, 0], spec: Vec3 = [0, 0, 0];
     const gloss = 1 - rough;
-    const spec = Math.pow(nh, 4 + gloss * gloss * 160) * (0.05 + gloss * 0.7) * sh * (0.4 + nl);
+    for (const l of lights) {
+      const LIGHT = l.dir;
+      const nl = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
+      const sh = nl > 0 ? shadow([p[0] + n[0] * cell, p[1] + n[1] * cell, p[2] + n[2] * cell], LIGHT, l.softness) : 1;
+      const d = nl * sh * 0.85 * (1 - metal * 0.6) * l.power;
+      const hx = LIGHT[0] - view[0], hy = LIGHT[1] - view[1], hz = LIGHT[2] - view[2];
+      const hl = Math.hypot(hx, hy, hz) || 1;
+      const nh = Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl);
+      const s = Math.pow(nh, 4 + gloss * gloss * 160) * (0.05 + gloss * 0.7) * sh * (0.4 + nl) * l.power;
+      diff[0] += d * l.color[0]; diff[1] += d * l.color[1]; diff[2] += d * l.color[2];
+      spec[0] += s * l.color[0]; spec[1] += s * l.color[1]; spec[2] += s * l.color[2];
+    }
     const fres = Math.pow(1 - Math.max(0, -(n[0] * view[0] + n[1] * view[1] + n[2] * view[2])), 4) * 0.08 * ao;
     const tint = (c: number) => (metal > 0 ? c * (0.3 + 0.7 * metal) + (1 - metal) : 1);
     // A metal is mostly what it reflects: the environment along the mirrored view ray, tinted by its own colour.
@@ -173,9 +237,9 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     }
     // Glow: light the surface gives off, unshadowed; a flame reads as a flame inside a dark lantern.
     return [
-      Math.min(1, base[0] * (amb[0] + diff + refl[0] + glow) + spec * tint(base[0]) + fres * SKY[0]),
-      Math.min(1, base[1] * (amb[1] + diff + refl[1] + glow) + spec * tint(base[1]) + fres * SKY[1]),
-      Math.min(1, base[2] * (amb[2] + diff + refl[2] + glow) + spec * tint(base[2]) + fres * SKY[2]),
+      Math.min(1, base[0] * (amb[0] + diff[0] + refl[0] + glow) + spec[0] * tint(base[0]) + fres * SKY[0]),
+      Math.min(1, base[1] * (amb[1] + diff[1] + refl[1] + glow) + spec[1] * tint(base[1]) + fres * SKY[1]),
+      Math.min(1, base[2] * (amb[2] + diff[2] + refl[2] + glow) + spec[2] * tint(base[2]) + fres * SKY[2]),
     ];
   };
 
@@ -216,6 +280,13 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       return [FLOOR[0] * 0.95 + (GROUND[0] - FLOOR[0] * 0.95) * fade, FLOOR[1] * 0.95 + (GROUND[1] - FLOOR[1] * 0.95) * fade, FLOOR[2] * 0.95 + (GROUND[2] - FLOOR[2] * 0.95) * fade];
     }
     const k = Math.min(1, Math.max(0, dir[1] * 2.5));
+    if (pal.horizon) {
+      // A band at the horizon: ground to the band low down, the band to the sky above.
+      const H = pal.horizon;
+      if (k < 0.3) { const u = k / 0.3; return [GROUND[0] + (H[0] - GROUND[0]) * u, GROUND[1] + (H[1] - GROUND[1]) * u, GROUND[2] + (H[2] - GROUND[2]) * u]; }
+      const u = (k - 0.3) / 0.7;
+      return [H[0] + (SKY[0] - H[0]) * u, H[1] + (SKY[1] - H[1]) * u, H[2] + (SKY[2] - H[2]) * u];
+    }
     return [GROUND[0] + (SKY[0] - GROUND[0]) * k, GROUND[1] + (SKY[1] - GROUND[1]) * k, GROUND[2] + (SKY[2] - GROUND[2]) * k];
   };
   const refract = (d: Vec3, n: Vec3, eta: number): Vec3 | undefined => {
@@ -248,9 +319,8 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     if (dir[1] < -1e-6) {
       const tf = (floorY - from[1]) / dir[1];
       const p: Vec3 = [from[0] + dir[0] * tf, floorY, from[2] + dir[2] * tf];
-      const sh = shadow([p[0], p[1] + cell, p[2]]);
-      const light = 0.62 + 0.38 * sh * LIGHT[1];
-      return [FLOOR[0] * light, FLOOR[1] * light, FLOOR[2] * light];
+      const light = floorLight([p[0], p[1] + cell, p[2]]);
+      return [FLOOR[0] * light[0], FLOOR[1] * light[1], FLOOR[2] * light[2]];
     }
     return backdrop(dir);
   };
@@ -319,15 +389,13 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const p: Vec3 = [eye[0] + dir[0] * t, floorY, eye[2] + dir[2] * t];
       const n: Vec3 = [0, 1, 0];
       const near = boundsDistance(bounds, p[0], p[1], p[2]) < reach;
-      const sh = near ? shadow([p[0], p[1] + cell, p[2]]) : 1;
+      const lit: Vec3 = near ? floorLight([p[0], p[1] + cell, p[2]]) : [0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[0]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[1]) / totalPower, 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (Math.max(0, l.dir[1]) * l.power * l.color[2]) / totalPower, 0)];
       const ao = near ? occlusion(p, n) : 1;
-      const light = 0.62 + 0.38 * sh * LIGHT[1];
       const fade = Math.min(1, t / (reach * 4));
-      const c: Vec3 = [FLOOR[0] * light * ao, FLOOR[1] * light * ao, FLOOR[2] * light * ao];
+      const c: Vec3 = [FLOOR[0] * lit[0] * ao, FLOOR[1] * lit[1] * ao, FLOOR[2] * lit[2] * ao];
       return { color: [c[0] + (GROUND[0] - c[0]) * fade, c[1] + (GROUND[1] - c[1]) * fade, c[2] + (GROUND[2] - c[2]) * fade], depth: t, normal: n, matId: -2 };
     }
-    const k = Math.min(1, Math.max(0, dir[1] * 2.5));
-    return { color: [GROUND[0] + (SKY[0] - GROUND[0]) * k, GROUND[1] + (SKY[1] - GROUND[1]) * k, GROUND[2] + (SKY[2] - GROUND[2]) * k], depth: Infinity, normal: [0, 0, 0], matId: -3 };
+    return { color: backdrop(dir), depth: Infinity, normal: [0, 0, 0], matId: -3 };
   };
 
   const canvas = new Canvas(size, size, INK.page);

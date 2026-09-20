@@ -155,32 +155,20 @@ beauty render need nothing else.
 atlas aliases; a box filter over the texel's footprint is probably
 enough.
 
-## 8. Lights, cameras and environments in the language
+## 8. Lights, cameras and environments: built
 
-**Why.** The beauty render has one key light with a size and direction,
-and one camera set by azimuth, elevation and zoom. A presentation needs
-a rim light, a coloured fill, an evening sky, and two or three named
-shots.
-
-**What.**
-
-```
-light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")
-light("rim", azimuth=150, elevation=20, power=0.5)
-set environment "studio"          # or "overcast", "sunset", "night"
-camera("hero", azimuth=30, elevation=20, zoom=1.4)
-camera("detail", focus="nameplate", zoom=2)
-```
-
-`render` writes `beauty_hero.png` and `beauty_detail.png`; `set camera
-hero` picks one for the sheet.
-
-**How.** The ray marcher already loops over one light; several are a
-loop. Environments are procedural sky functions the metals already
-reflect. Cameras reuse `--focus` and `--zoom`.
-
-**Must prototype.** Render time with three lights and soft shadows on
-the market scene.
+`light(name, azimuth, elevation, size, color, power)` declares the
+beauty render's lights, each with its own soft shadow, the first
+replacing the default key; `set environment studio|overcast|sunset|night`
+picks a procedural sky, ground and floor the metals reflect, with its
+own ambient scale; `camera(name, azimuth, elevation, zoom, focus, dof)`
+is a shot written as `beauty_<name>.png`, framed on its focus, and `set
+camera name` makes it the sheet's view. Prototyped as asked: the market
+scene at 512 px took 4.1 s with one light and 5.9 s with three. Found
+on the way: a `--focus` beauty render fitted the camera to every vertex
+of the model and framed the whole mug; it now fits the points inside
+the frame. Not built: a light's position (they are directions), an
+image environment, and a camera path.
 
 ## 9. Callouts: the picture labelled with the program's names
 

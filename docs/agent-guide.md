@@ -56,6 +56,7 @@ npx aixle render model.aix --no-anims      skip the animation strips (--anim tur
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
 npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
+                                           with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png, a sky
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
@@ -118,6 +119,7 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
 | the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
 | the beauty render leaves the model small in the frame | the camera fits the box's corners, so a diagonal model has empty corners | `set zoom 1.2` or `--zoom 1.2` (it stops where the box would touch the edge) |
+| the beauty render is flat, or one side is black | one key light from the upper left | `light("key", ...)` and `light("rim", azimuth=150, elevation=20, power=0.5)`; `set environment sunset` or `night` for a mood; `camera("detail", focus="part", zoom=1.5)` for a second shot |
 | a material boundary speckles in the views | two painted surfaces nearly coincide (under 35 degrees apart), so each vertex picks either | give them a clear angle, or one shape with a `decal`; a seam at a crease is clean, and the beauty render is unaffected |
 | a box or a join reads soft, as if bevelled, in the viewer or a GLB | one smooth normal per vertex, from `set crease 0` | leave `crease` at its default (35), which splits vertices at edges |
 | a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |

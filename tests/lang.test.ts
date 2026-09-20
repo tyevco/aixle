@@ -240,6 +240,25 @@ describe("interpreter", () => {
     expect(run(`set grid 24\n${bridge}n = pieces(m, resolution=64)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(1);
     expect(() => run('s = sphere(1)\np = at(s, "tp")')).toThrow(/^line 2: at\(\): no anchor "tp"/);
   });
+  it("declares lights, cameras and an environment for the beauty render", () => {
+    const ev = run('m = box(1)\nlight("key", azimuth=-35, elevation=50, size=1.5, color="#fff1dc")\nlight("rim", azimuth=150, elevation=20, power=0.5)\ncamera("hero", azimuth=30, elevation=20, zoom=1.4)\ncamera("detail", focus="m", zoom=2, dof=1)\nset camera hero\nset environment sunset\nshow m');
+    expect(ev.lights.map((l) => [l.name, l.azimuth, l.elevation, l.size, l.power, l.colorName])).toEqual([["key", -35, 50, 1.5, 1, "#fff1dc"], ["rim", 150, 20, 1, 0.5, "white"]]);
+    expect(ev.lights[0].color[0]).toBeCloseTo(1, 1);
+    expect(ev.cameras).toEqual([{ name: "hero", azimuth: 30, elevation: 20, zoom: 1.4, dof: undefined, line: 4 }, { name: "detail", azimuth: undefined, elevation: undefined, zoom: 2, dof: 1, focus: "m", line: 5 }]);
+    expect(ev.settings.camera).toBe("hero");
+    expect(ev.settings.environment).toBe("sunset");
+    expect(ev.warnings).toEqual([]);
+    // A sky the renderer does not have, a shot never declared, a focus on nothing: warnings that name the options.
+    const w = run('m = box(1)\ncamera("x", focus="nope")\nset camera hero\nset environment dusk\nshow m').warnings;
+    expect(w).toContainEqual("set environment dusk: no such environment; the skies are studio, overcast, sunset, night (studio is the default)");
+    expect(w).toContainEqual("set camera hero: no such camera; cameras: x; the render uses its own view");
+    expect(w).toContainEqual('camera "x" (line 2): focus="nope" names no step or object; the shot frames the whole model');
+    expect(() => run('light("k", size=0)')).toThrow(/size is the light's apparent size, above 0/);
+    expect(() => run('light("k", colour="red")')).toThrow(/no parameter named 'colour'/);
+    expect(() => run('light("k", color="nope")')).toThrow(/light\("k"\): color: "nope" is not a material preset or a colour/);
+    expect(() => run('camera("c", zoom=0)')).toThrow(/zoom is above 0/);
+    expect(() => run('camera(3)')).toThrow(/camera\(name, azimuth=35/);
+  });
   it("promises a void, a bounded overlap and containment", () => {
     const ev = run('cup = cylinder(1, 2) - (cylinder(0.85, 2) | move(0, 0.2, 0))\ncavity = cylinder(0.85, 2) | move(0, 0.2, 0)\nhandle = torus(0.6, 0.15) | rotate(x=90) | move(1.2, 1, 0)\nmug = cup + handle\nassert void(cavity, mug), "nothing pokes in"\nassert overlap(handle, cup) > 0\nassert inside(handle, cavity) < 0.5\nshow mug');
     expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual([[false, undefined], [true, expect.stringMatching(/^0\.\d+ > 0$/)], [true, expect.stringMatching(/^0\.\d+ < 0\.5$/)]]);

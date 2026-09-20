@@ -71,6 +71,28 @@ export function referenceMarkdown(): string {
     "    animation(name, poses, times=[0, ...], loop=1, ease=0, ease_ends=ease) -> string",
     "",
   );
+  out.push(
+    "## Lights, cameras and environments",
+    "",
+    "The beauty render's lighting and shots, declared in the program. Without a `light()` the render has one key light, placed by `set light_azimuth`, `set light_elevation` and `set light_size`.",
+    "",
+    "### light",
+    "",
+    "A light in the beauty render: `light(\"key\", azimuth=-40, elevation=55, size=1.5, color=\"#fff2e0\")` and `light(\"rim\", azimuth=150, elevation=20, power=0.5, color=\"#cfe0ff\")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's apparent size (0.5 a lamp with crisp shadows, 3 a window); `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's. Each light casts its own soft shadow, so three lights cost about half again the time of one (measured on the market scene: 4.1 s to 5.9 s at 512 px). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them.",
+    "",
+    "    light(name, azimuth=-40, elevation=55, size=1, color=\"white\", power=1) -> string",
+    "",
+    "### camera",
+    "",
+    "A named shot: `camera(\"hero\", azimuth=30, elevation=20, zoom=1.4)` and `camera(\"detail\", focus=\"nameplate\", zoom=2)`. `render --beauty` writes `beauty_<name>.png` for each, framed on `focus=` (a step or object, as `--focus` frames it) when given, with the render's own azimuth, elevation, zoom and dof for whatever a shot leaves out. `set camera hero` makes that shot the sheet's and `beauty.png`'s view too (the command line's `--azimuth`, `--elevation` and `--zoom` still override).",
+    "",
+    "    camera(name, azimuth=35, elevation=25, zoom=1, focus=\"step\", dof=0) -> string",
+    "",
+    "### set environment",
+    "",
+    "The sky the beauty render sits in and the metals reflect: `set environment sunset`. `studio` (the default) is the grey-white backdrop; `overcast` a white sky with soft, even light; `sunset` a warm band at the horizon under a blue sky on warm ground; `night` a dark blue sky and a dark floor, where a `glow` material carries the picture. An environment sets the sky, ground and floor colours and scales the ambient light; the lights are yours.",
+    "",
+  );
   out.push("## Roblox attachments", "", "An `anchor` with one of these names becomes the accessory's attachment in `model.roblox.glb` (`set roblox 1`), and the report checks the model against the size limit for it at the Normal body scale, in studs (width × height × depth).", "", "| Attachment | Kind | Limit |", "| --- | --- | --- |");
   for (const [name, lim] of Object.entries(ROBLOX_LIMITS)) out.push(`| ${name} | ${lim.kind} | ${lim.size.join(" × ")} |`);
   out.push("");

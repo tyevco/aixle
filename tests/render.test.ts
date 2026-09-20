@@ -156,6 +156,43 @@ describe("canvas and font", () => {
   });
 });
 
+describe("beauty lights and environments", () => {
+  it("shadows towards each light, darkens at night and warms a sunset horizon, and is unchanged without lights", () => {
+    const nets = surfaceNets(sphere, { resolution: 24 });
+    const lum = (p: number) => ((p >> 16) & 255) + ((p >> 8) & 255) + (p & 255);
+    const base = { size: 96, cellSize: nets.cellSize };
+    const plain = renderBeauty(sphere, nets.mesh, sphere.bounds, base);
+    // One white light at the default direction, declared, matches the default key light's picture.
+    const declared = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }] });
+    expect(declared.get(48, 44)).not.toBe(plain.get(0, 95));
+    // A second light from the right lifts the sphere's right side.
+    const two = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }, { azimuth: 120, elevation: 30, size: 1, color: [1, 1, 1], power: 1 }] });
+    expect(lum(two.get(70, 48))).toBeGreaterThan(lum(declared.get(70, 48)));
+    // Night is darker than the studio everywhere in the sky; a sunset's horizon is warmer than its zenith.
+    const night = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, environment: "night" });
+    expect(lum(night.get(48, 2))).toBeLessThan(lum(plain.get(48, 2)) / 3);
+    const sunset = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, environment: "sunset" });
+    // The far floor fades to the sunset's warm ground; in the studio it fades to a near-grey.
+    const far = sunset.get(48, 2), farPlain = plain.get(48, 2);
+    expect(((far >> 16) & 255) - (far & 255)).toBeGreaterThan(((farPlain >> 16) & 255) - (farPlain & 255) + 20);
+    // Somewhere down the left edge the backdrop passes through the warm band.
+    let warmest = -255;
+    for (let y = 0; y < 96; y++) { const c = sunset.get(1, y); warmest = Math.max(warmest, ((c >> 16) & 255) - (c & 255)); }
+    expect(warmest).toBeGreaterThan(40);
+    // A camera fitted to the points of one part fills the frame with it.
+    const two_ = O.union([sphere, O.move(P.sphere(0.3), 3, 0, 0)]);
+    const n2 = surfaceNets(two_, { resolution: 40 });
+    const pts: number[] = [];
+    for (let i = 0; i < n2.mesh.positions.length; i += 3) if (n2.mesh.positions[i] > 2) pts.push(n2.mesh.positions[i], n2.mesh.positions[i + 1], n2.mesh.positions[i + 2]);
+    const small = { min: [2.6, -0.4, -0.4] as [number, number, number], max: [3.4, 0.4, 0.4] as [number, number, number] };
+    const whole = renderBeauty(two_, n2.mesh, small, base);
+    const fitted = renderBeauty(two_, n2.mesh, small, { ...base, fitPoints: new Float32Array(pts) });
+    // Fitted, the small sphere is at the centre; fitted to everything, the centre pixel sees past it to the sky.
+    expect(fitted.get(48, 48)).not.toBe(fitted.get(48, 2));
+    expect(whole.get(48, 48)).not.toBe(fitted.get(48, 48));
+  });
+});
+
 describe("beauty", () => {
   it("ray-marches the field: the model in the middle, a shadow on the floor beside it, open floor behind", () => {
     const nets = surfaceNets(sphere, { resolution: 24 });

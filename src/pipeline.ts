@@ -23,7 +23,7 @@ import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, typ
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
-import { renderBeauty } from "./render/beauty.js";
+import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { assertLine, type AssertResult, evaluate, type Evaluation } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
@@ -602,6 +602,17 @@ export function minecraftThinWarnings(ev: Evaluation, px: number, grid: number):
   return foldThinWarnings(thinWarnings(ev, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${px} pixels per block; set minecraft ${px * 2} halves it)`);
 }
 
+/** The mesh's vertices inside a box, for a camera that fits one part; undefined when too few to fit (the box's corners then do). */
+function pointsWithin(mesh: Mesh, b: Bounds): Float32Array | undefined {
+  const pos = mesh.positions;
+  const out: number[] = [];
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+    if (x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1] && z >= b.min[2] && z <= b.max[2]) out.push(x, y, z);
+  }
+  return out.length >= 24 ? new Float32Array(out) : undefined;
+}
+
 /** A ghost is meshed at this many times the close-up's cell. */
 const GHOST_CELL = 2;
 
@@ -748,8 +759,12 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       for (const j of joints) axes[j.joint!.name] = j.joint!.axis;
       return { name: a.name, seconds: a.seconds, loop: a.loop, times, samples, axes };
     });
-  const azimuth = opts.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
-  const elevation = opts.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  // `set camera hero` makes a declared shot the sheet's and the beauty render's view; the CLI still overrides.
+  const shotName = typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined;
+  const shot = shotName ? evaluation.cameras.find((c) => c.name === shotName) : undefined;
+  const azimuth = opts.azimuth ?? shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
+  const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  const environment: Environment | undefined = ENVIRONMENTS.includes(evaluation.settings.environment as Environment) ? (evaluation.settings.environment as Environment) : undefined;
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let minecraftNote: string | undefined;
@@ -833,39 +848,41 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The focused step as it sits in the output (through the joints and moves above it), for the close-up's split
     // into the part itself and the ghost of everything else the frame holds.
     let focusShape: Shape3 | undefined;
-    if (focusName) {
-      let st = evaluation.steps.find((x) => x.name === focusName && isShape3(x.value));
-      let obj = evaluation.objects.find((o) => o.name === focusName);
+    // A step or object to frame, as `--focus` and a camera's focus= do: its surface where the output puts it, grown
+    // a little; `name_3` is one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
+    // placed group framed the whole span between its copies).
+    const resolveFocus = (name: string): { frame: Bounds; shape: Shape3 } | undefined => {
+      let st = evaluation.steps.find((x) => x.name === name && isShape3(x.value));
+      let obj = evaluation.objects.find((o) => o.name === name);
       let fs = st ? (st.value as Shape3) : obj?.shape;
-      // `--focus w_pawns_3`: one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
-      // placed group framed the whole span between its copies).
-      const copy = /^(.+)_(\d+)$/.exec(focusName);
+      const copy = /^(.+)_(\d+)$/.exec(name);
       if (!fs && copy) {
         const setStep = evaluation.steps.find((x) => x.name === copy[1] && isShape3(x.value) && (x.value as Shape3).instanced);
         const setObj = evaluation.objects.find((o) => o.name === copy[1] && o.shape.instanced);
         const set = setStep ? (setStep.value as Shape3) : setObj?.shape;
-        const p = set?.instanced?.placements[Number(copy[2]) - 1];
-        if (set && p) {
-          let s = set.instanced!.base;
-          if (p.scale !== 1) s = scaleShape(s, p.scale, p.scale, p.scale);
-          if (p.yaw !== 0) s = rotateShape(s, 0, p.yaw, 0);
-          fs = move(s, p.x, p.y, p.z);
+        const pl = set?.instanced?.placements[Number(copy[2]) - 1];
+        if (set && pl) {
+          let sh = set.instanced!.base;
+          if (pl.scale !== 1) sh = scaleShape(sh, pl.scale, pl.scale, pl.scale);
+          if (pl.yaw !== 0) sh = rotateShape(sh, 0, pl.yaw, 0);
+          fs = move(sh, pl.x, pl.y, pl.z);
           st = setStep;
           obj = setObj;
         }
       }
-      if (fs && !isEmpty(fs.bounds)) {
-        focusStep = true;
-        // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the whole machine).
-        // Carried through the joints and transforms above it, so a bucket inside a turned joint is framed where the
-        // pose put it, not where it was built (measured: --focus in a pose framed the rest position).
-        const own = tightBounds(fs);
-        const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
-        const grow = Math.max(...boundsSize(fb)) * 0.08;
-        frame = { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] };
-        focusShape = (output && st ? placedShape(output, fs) : undefined) ?? fs;
-        shownName = `${shownName} → ${focusName}`;
-      } else warnings.push(`focus ${focusName}: no such step or object; framing the whole model`);
+      if (!fs || isEmpty(fs.bounds)) return undefined;
+      // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the
+      // whole machine); carried through the joints and transforms above it, so a bucket inside a turned joint is
+      // framed where the pose put it (measured: --focus in a pose framed the rest position).
+      const own = tightBounds(fs);
+      const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
+      const grow = Math.max(...boundsSize(fb)) * 0.08;
+      return { frame: { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] }, shape: (output && st ? placedShape(output, fs) : undefined) ?? fs };
+    };
+    if (focusName) {
+      const r = resolveFocus(focusName);
+      if (r) { focusStep = true; frame = r.frame; focusShape = r.shape; shownName = `${shownName} → ${focusName}`; }
+      else warnings.push(`focus ${focusName}: no such step or object; framing the whole model`);
     }
     // A focused sheet is a close-up: the model clipped to the frame and re-extracted at the frame's own cell, so a
     // lantern in a market is drawn with a lantern's detail rather than the market's (measured: a blob of six cells).
@@ -1038,13 +1055,25 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const lightAzimuth = typeof evaluation.settings.light_azimuth === "number" ? evaluation.settings.light_azimuth : undefined;
       const lightElevation = typeof evaluation.settings.light_elevation === "number" ? evaluation.settings.light_elevation : undefined;
       const ambient = typeof evaluation.settings.ambient === "number" ? evaluation.settings.ambient : undefined;
-      const zoom = opts.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      // The program's lights, when it declares any; else the one key light the settings describe.
+      const lights: BeautyLight[] | undefined = evaluation.lights.length ? evaluation.lights.map((l) => ({ name: l.name, azimuth: l.azimuth, elevation: l.elevation, size: l.size, color: l.color, power: l.power })) : undefined;
       // Framed like the views: on the focused step when there is one.
       // Framed on the surface the mesh found, not the box a blend or a displace padded (measured: a tree's box was
       // 10% wider than its surface on every side, and the zoom could not reach past it).
       const beautyFrame = focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
-      time("beauty", () => write("beauty.png", renderBeauty(output, mesh!, beautyFrame, { size: bsize, cellSize, azimuth, elevation, lightSize, dof, lightAzimuth, lightElevation, ambient, zoom, label: `${shownName}  ${dimsLabel(beautyFrame)}` }).toPng()));
+      // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
+      // (measured: a focused beauty render fitted every point and framed the whole mug).
+      const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
+        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, label }).toPng());
+      time("beauty", () => shoot("beauty.png", beautyFrame, !!focusName, azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}  ${dimsLabel(beautyFrame)}`));
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
+      // Every declared camera is a shot of its own, framed on its focus= when it has one.
+      for (const c of evaluation.cameras) {
+        const r = c.focus ? resolveFocus(c.focus) : undefined;
+        const b = r ? r.frame : beautyFrame;
+        time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(b)}`));
+      }
     }
   }
 
@@ -1168,6 +1197,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
     if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.map((pn, i) => (a.times ? `${pn} ${fmt(a.times[i])}s` : pn)).join(" → ")}, ${fmt(a.seconds)}s, ${a.loop ? "loop" : "once"}${a.ease ? `, ease ${fmt(a.ease)}` : ""}${a.easeEnds !== a.ease ? `, ends ${fmt(a.easeEnds)}` : ""})`).join("; ")}`, "");
   }
+  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`, "");
+  if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shot ? ` (the sheet and beauty.png use "${shot.name}")` : ""}`, "");
+  if (environment) lines.push(`Environment: ${environment}`, "");
   lines.push("## Steps", "", "Sizes and spans are bounding boxes: exact for primitives and unions, loose after a cut (`a - b` keeps a's box), a rotation or a twist; `a & b` tightens to the overlap.", "", "| # | Name | Line | Size | x | y | z | In output |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   shapeSteps.forEach((st, i) => {
     const sh = st.value as Shape3;
@@ -1183,6 +1215,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   }
   lines.push("## Files", "");
   const focusNote = ghosted ? `, a close-up on ${ghosted}: the rest of the model in the frame is drawn faint` : "";
+  const cameraFiles: Record<string, string> = {};
+  for (const c of evaluation.cameras) cameraFiles[`beauty_${c.name}.png`] = `the beauty render from camera ${c.name}${c.focus ? `, framed on ${c.focus}` : ""}`;
   const descriptions: Record<string, string> = {
     "sheet.png": `perspective, front, right and top views with grids${focusNote}`,
     "persp.png": "perspective view", "front.png": "front view (from +z)", "right.png": "right view (from +x)", "top.png": "top view (from +y)",
@@ -1199,6 +1233,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
+    ...cameraFiles,
   };
   for (const f of files) lines.push(`- \`${f}\`: ${descriptions[f] ?? (f.startsWith("anim_") ? "frames through the animation" : "")}`);
   lines.push("", `Timings (ms): ${Object.entries(timings).map(([k, v]) => `${k} ${v}`).join(", ")}`, "");

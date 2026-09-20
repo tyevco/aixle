@@ -16,7 +16,9 @@ import { isEmpty, REST_POSE, type JointPose, type Shape3 } from "../sdf/types.js
 import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
-const NAME_SETTINGS = new Set(["pose", "focus"]);
+const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment"]);
+/** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
+export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
 const dimsLabel = (b: { min: number[]; max: number[] }): string => [0, 1, 2].map((k) => fmt3(b.max[k] - b.min[k])).join(" × ");
 
@@ -73,6 +75,34 @@ export interface SceneObject {
   shape: Shape3;
 }
 
+/** A light in the beauty render, from `light()`. */
+export interface Light {
+  name: string;
+  /** Degrees about y (0 is +z, the front; 90 is +x) and above the floor. */
+  azimuth: number;
+  elevation: number;
+  /** Apparent size: 0.5 a lamp with crisp shadows, 3 a window. */
+  size: number;
+  color: [number, number, number];
+  /** The colour as written, for the report. */
+  colorName: string;
+  /** 1 is the default key light's strength. */
+  power: number;
+  line: number;
+}
+
+/** A named shot for the beauty render, from `camera()`; what it leaves out takes the render's own. */
+export interface CameraShot {
+  name: string;
+  azimuth?: number;
+  elevation?: number;
+  zoom?: number;
+  /** A step or object to frame, as `--focus` does. */
+  focus?: string;
+  dof?: number;
+  line: number;
+}
+
 export interface Pose {
   name: string;
   /** Joint name to its angles (degrees about x, y, z), move and scale. */
@@ -102,6 +132,10 @@ export interface Evaluation {
   objects: SceneObject[];
   poses: Pose[];
   animations: Animation[];
+  /** The beauty render's lights, in order; none means the one default key light (or the light_* settings). */
+  lights: Light[];
+  /** Named shots for the beauty render, each written as beauty_<name>.png. */
+  cameras: CameraShot[];
   /** What the output was called: the shown name(s), or the last assignment. */
   outputName: string;
   /** Names the output depends on, transitively (itself included). */
@@ -192,6 +226,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let shown: { names: string[]; shapes: Shape3[]; scene: boolean } | undefined;
   const poses: Pose[] = [];
   const animations: Animation[] = [];
+  const lights: Light[] = [];
+  const cameras: CameraShot[] = [];
   let lastShape: { name: string } | undefined;
   let depth = 0;
   let loops = 0;
@@ -366,6 +402,54 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return nameArg.value;
   }
 
+  function callLight(args: Arg[], scope: Scope, line: number): Value {
+    const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    const nameArg = values.find((v) => !v.name);
+    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`light(): light(name, azimuth=-40, elevation=55, size=1, color="white", power=1)`, line);
+    const name = nameArg.value;
+    for (const v of values) if (v.name && !["azimuth", "elevation", "size", "color", "power"].includes(v.name)) throw new RuntimeError(`light("${name}"): no parameter named '${v.name}'; it takes azimuth, elevation, size, color and power`, line);
+    const num = (key: string, def: number): number => {
+      const v = values.find((x) => x.name === key)?.value ?? def;
+      if (typeof v !== "number") throw new RuntimeError(`light("${name}"): ${key} is a number`, line);
+      return v;
+    };
+    const azimuth = num("azimuth", -40), elevation = num("elevation", 55), size = num("size", 1), power = num("power", 1);
+    if (size <= 0) throw new RuntimeError(`light("${name}"): size is the light's apparent size, above 0 (0.5 a lamp, 3 a window)`, line);
+    if (power < 0) throw new RuntimeError(`light("${name}"): power is 0 or more (1 is the default key light)`, line);
+    if (elevation < -90 || elevation > 90) throw new RuntimeError(`light("${name}"): elevation is degrees above the floor, -90 to 90`, line);
+    const colorV = values.find((x) => x.name === "color")?.value ?? "white";
+    let color: [number, number, number], colorName: string;
+    try { const m = toMaterial(colorV); color = [m.color[0], m.color[1], m.color[2]]; colorName = typeof colorV === "string" ? colorV : m.name; } catch (err) { throw new RuntimeError(`light("${name}"): color: ${(err as Error).message}`, line); }
+    const lightDef: Light = { name, azimuth, elevation, size, color, colorName, power, line };
+    const existing = lights.findIndex((l) => l.name === name);
+    if (existing >= 0) lights[existing] = lightDef; else lights.push(lightDef);
+    return name;
+  }
+
+  function callCamera(args: Arg[], scope: Scope, line: number): Value {
+    const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    const nameArg = values.find((v) => !v.name);
+    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`camera(): camera(name, azimuth=35, elevation=25, zoom=1, focus="step", dof=0)`, line);
+    const name = nameArg.value;
+    for (const v of values) if (v.name && !["azimuth", "elevation", "zoom", "focus", "dof"].includes(v.name)) throw new RuntimeError(`camera("${name}"): no parameter named '${v.name}'; it takes azimuth, elevation, zoom, focus and dof`, line);
+    const num = (key: string): number | undefined => {
+      const v = values.find((x) => x.name === key)?.value;
+      if (v !== undefined && typeof v !== "number") throw new RuntimeError(`camera("${name}"): ${key} is a number`, line);
+      return v as number | undefined;
+    };
+    const shot: CameraShot = { name, azimuth: num("azimuth"), elevation: num("elevation"), zoom: num("zoom"), dof: num("dof"), line };
+    if (shot.zoom !== undefined && shot.zoom <= 0) throw new RuntimeError(`camera("${name}"): zoom is above 0 (1 fits the model, 1.4 fills the frame)`, line);
+    if (shot.dof !== undefined && shot.dof < 0) throw new RuntimeError(`camera("${name}"): dof is 0 or more`, line);
+    const focus = values.find((x) => x.name === "focus")?.value;
+    if (focus !== undefined) {
+      if (typeof focus !== "string") throw new RuntimeError(`camera("${name}"): focus names a step or object, as a string`, line);
+      shot.focus = focus;
+    }
+    const existing = cameras.findIndex((c) => c.name === name);
+    if (existing >= 0) cameras[existing] = shot; else cameras.push(shot);
+    return name;
+  }
+
   function callAnimation(args: Arg[], scope: Scope, line: number): Value {
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
     const positional = values.filter((v) => !v.name).map((v) => v.value);
@@ -455,6 +539,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "joint") return callJoint(args, scope, line);
     if (callee === "pose") return callPose(args, scope, line);
     if (callee === "animation") return callAnimation(args, scope, line);
+    if (callee === "light") return callLight(args, scope, line);
+    if (callee === "camera") return callCamera(args, scope, line);
     const user = scope.get(callee);
     if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
@@ -780,6 +866,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     for (const a of asserts)
       if (a.pose && a.pose !== "rest" && !poses.some((p) => p.name === a.pose)) warnings.push(`assert (line ${a.line}) is for pose "${a.pose}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}; it is never tested`);
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
+    // A sky the renderer has, a shot the program declared.
+    if (settings.environment !== undefined && !ENVIRONMENT_NAMES.includes(String(settings.environment))) warnings.push(`set environment ${settings.environment}: no such environment; the skies are ${ENVIRONMENT_NAMES.join(", ")} (studio is the default)`);
+    if (typeof settings.camera === "string" && !cameras.some((c) => c.name === settings.camera)) warnings.push(`set camera ${settings.camera}: no such camera${cameras.length ? `; cameras: ${cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; the render uses its own view`);
+    for (const c of cameras) if (c.focus && !steps.has(c.focus) && !(shown?.names ?? []).includes(c.focus)) warnings.push(`camera "${c.name}" (line ${c.line}): focus="${c.focus}" names no step or object; the shot frames the whole model`);
     for (const a of animations) {
       // Two keys are both ends: ease_ends=0 leaves nothing eased (round 8: a flick expected to settle ran linear).
       if (a.poses.length === 2 && a.easeEnds === 0 && a.ease > 0) warnings.push(`animation "${a.name}" (line ${a.line}): with two keys both are ends, so ease_ends=0 leaves nothing for ease=${a.ease} to do; hold the last pose as a third key (["${a.poses[0]}", "${a.poses[1]}", "${a.poses[1]}"], times=[0, t, seconds]) to leave at once and settle, or drop ease_ends`);
@@ -804,7 +894,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, used, steps: stepList, settings, warnings, modules: moduleList, defs, asserts };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, steps: stepList, settings, warnings, modules: moduleList, defs, asserts };
 }
 
 export function signature(name: string, ov: Overload): string {

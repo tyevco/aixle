@@ -102,6 +102,8 @@ height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow") 
 pieces(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b     # measure for assert (1 or 0)
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
+light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")  light("rim", azimuth=150, elevation=20, power=0.5)   # several lights
+camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky
 
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)

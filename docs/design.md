@@ -116,7 +116,16 @@ material with their neighbours) are sampled four times. A 512-pixel render
 of the mug takes under a second. The rasteriser is a plain z-buffered
 triangle filler with perspective-correct attributes and per-pixel shading;
 an outline pass darkens depth and normal discontinuities, which is what
-keeps a 384-pixel thumbnail readable.
+keeps a 384-pixel thumbnail readable. The lights are a loop over the
+one the render always had: each adds its diffuse and its highlight in
+its own colour, shadowed towards itself, and the floor takes each
+light's share by power, so a program with no `light()` renders byte for
+byte as before. An environment is a palette (sky, an optional horizon
+band, ground, floor, an ambient scale) that the backdrop, the floor and
+the metals' reflections all read, so a sunset tints a chrome ball's
+rim the way the sky does. A camera is a set of framing choices the
+render already took; its `focus=` reuses the close-up's frame and fits
+the camera to the mesh's points inside it.
 
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.
