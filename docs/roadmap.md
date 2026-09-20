@@ -199,10 +199,8 @@ It is a printer over the dependencies the evaluation records. Not built:
 - `aixle fmt`: one layout for programs, comments kept, so diffs are
   about the model.
 - Records: `p = {x: 1, y: 2}` with `p.x`, for readable parameters.
-- `distance(a, b)` between two shapes from the field, for fits.
 - An import cache keyed by the file's hash, so `check` and `render` do
   not both sample a large mesh.
-- `def` bodies listed in `check`.
 - An APNG turntable, since the PNG writer is there.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.

@@ -11,6 +11,7 @@ import { referenceMarkdown } from "./doc.js";
 import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
+import { exprText } from "./lang/ast.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
@@ -177,6 +178,8 @@ function main(argv: string[]): number {
       }
       // In a pose the output's box is the box of turned boxes; its surface is the size the sheet shows (round 8: a
       // sitting dog's output line said 1.84 tall for a 1.18 surface).
+      // The program's own defs, with their parameters, so a program's vocabulary is on the terminal with its steps.
+      if (ev.defs.length) console.log(`defs: ${ev.defs.map((d) => `${d.name}(${d.params.map((p) => (p.default ? `${p.name}=${exprText(p.default)}` : p.name)).join(", ")})`).join("  ")}`);
       if (ev.output && pose && !isEmpty(ev.output.bounds)) { const e = surfaceExtent(ev.output, 48); console.log(`output: ${ev.outputName} ${isEmpty(e) ? dimsLabel(ev.output.bounds) : `${dimsLabel(e)} (the surface in pose ${pose.name}; its box is ${dimsLabel(ev.output.bounds)})`}`); }
       else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
