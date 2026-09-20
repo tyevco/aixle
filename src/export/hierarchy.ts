@@ -57,7 +57,7 @@ export interface HierarchyOptions {
   /** Atlas size in pixels; 0 for none. */
   texture: number;
   maxResolution?: number;
-  /** Decimate each mesh to at most this many triangles (a Roblox budget), before the atlas is baked. */
+  /** Decimate the meshes to at most this many triangles in all (a Roblox budget), each taking its share, before the atlas is baked. */
   maxTriangles?: number;
 }
 
@@ -66,8 +66,7 @@ function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
   const longest = Math.max(s[0], s[1], s[2]);
   if (!(longest > 0) || isEmpty(shape.bounds)) return surfaceNets(shape, { resolution: 8 }).mesh;
   const resolution = Math.max(8, Math.min(opts.maxResolution ?? 512, Math.ceil(longest / opts.cellSize)));
-  const mesh = surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
-  return opts.maxTriangles && triangleCount(mesh) > opts.maxTriangles ? decimate(mesh, opts.maxTriangles, opts.crease ?? 35) : mesh;
+  return surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
 }
 
 function shifted(mesh: Mesh, origin: Vec3): Mesh {
@@ -75,6 +74,31 @@ function shifted(mesh: Mesh, origin: Vec3): Mesh {
   const p = new Float32Array(mesh.positions);
   for (let i = 0; i < p.length; i += 3) { p[i] -= origin[0]; p[i + 1] -= origin[1]; p[i + 2] -= origin[2]; }
   return { ...mesh, positions: p };
+}
+
+/** The translation the transforms between a root and a joint add up to, and whether any of them is not a plain move. */
+export function offsetToJoint(root: Shape3, j: Shape3): { offset: Vec3; rigid: boolean } {
+  const chain: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const find = (n: Shape3): boolean => {
+    if (n === j) return true;
+    if (seen.has(n) || n.joint) return false;
+    seen.add(n);
+    chain.push(n);
+    for (const k of n.parts ?? n.inner ?? []) if (find(k)) return true;
+    chain.pop();
+    return false;
+  };
+  if (!find(root)) return { offset: [0, 0, 0], rigid: true };
+  let rigid = true;
+  let p: Vec3 = [0, 0, 0], q: Vec3 = [1, 2, 3];
+  for (let k = chain.length - 1; k >= 0; k--) {
+    const w = chain[k].warp;
+    if (!w) continue;
+    p = w(p[0], p[1], p[2]); q = w(q[0], q[1], q[2]);
+  }
+  if (Math.abs(q[0] - p[0] - 1) > 1e-6 || Math.abs(q[1] - p[1] - 2) > 1e-6 || Math.abs(q[2] - p[2] - 3) > 1e-6) rigid = false;
+  return { offset: p, rigid };
 }
 
 export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts: HierarchyOptions): SceneHierarchy {
@@ -154,30 +178,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     };
     return node;
   };
-  /** The translation the transforms between a root and a joint add up to, and whether any of them is not a plain move. */
-  const offsetTo = (root: Shape3, j: Shape3): { offset: Vec3; rigid: boolean } => {
-    const chain: Shape3[] = [];
-    const seen = new Set<Shape3>();
-    const find = (n: Shape3): boolean => {
-      if (n === j) return true;
-      if (seen.has(n) || n.joint) return false;
-      seen.add(n);
-      chain.push(n);
-      for (const k of n.parts ?? n.inner ?? []) if (find(k)) return true;
-      chain.pop();
-      return false;
-    };
-    if (!find(root)) return { offset: [0, 0, 0], rigid: true };
-    let rigid = true;
-    let p: Vec3 = [0, 0, 0], q: Vec3 = [1, 2, 3];
-    for (let k = chain.length - 1; k >= 0; k--) {
-      const w = chain[k].warp;
-      if (!w) continue;
-      p = w(p[0], p[1], p[2]); q = w(q[0], q[1], q[2]);
-    }
-    if (Math.abs(q[0] - p[0] - 1) > 1e-6 || Math.abs(q[1] - p[1] - 2) > 1e-6 || Math.abs(q[2] - p[2] - 3) > 1e-6) rigid = false;
-    return { offset: p, rigid };
-  };
+  const offsetTo = offsetToJoint;
 
   for (const obj of objects) {
     if (obj.shape.instanced) {
@@ -237,6 +238,14 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
 
   let triangles = 0;
   for (const m of meshes) triangles += triangleCount(m);
+  // A budget is for the whole export: each mesh gives up the same share, so a jointed pet's ten bones together
+  // come in under an accessory's four thousand rather than each taking four thousand of its own.
+  if (opts.maxTriangles && triangles > opts.maxTriangles) {
+    const share = opts.maxTriangles / triangles;
+    for (let i = 0; i < meshes.length; i++) meshes[i] = decimate(meshes[i], Math.max(4, Math.floor(triangleCount(meshes[i]) * share)), opts.crease ?? 35);
+    triangles = 0;
+    for (const m of meshes) triangles += triangleCount(m);
+  }
   const out: SceneHierarchy = { roots, meshes, triangles, notes };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);

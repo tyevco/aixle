@@ -57,7 +57,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    `--beauty` for the presentation picture, and `--minecraft` when the
    model is for Bedrock: `model.geo.json` and its texture, the model
    voxelised at 16 pixels to the block (one unit is a block; keep every
-   member at least 1/16 thick, or `set minecraft 32`); `--roblox` when it
+   member at least 1/16 thick, or `set minecraft 32`; `--minecraft-entity`
+   for an entity, which faces north; a rig's joints are bones and its
+   animations go to `model.animation.json`); `--roblox` when it
    is for Roblox Studio: `model.roblox.glb` facing -Z with an
    `anchor(m, "HatAttachment", ...)` as the attachment, one mesh under
    4000 triangles for an accessory (`set grid 40`), a unit a stud.
@@ -91,7 +93,7 @@ helix(r, h, turns)  arc(r, from, to)  spline(points)                            
 bezier(points)  curve(points)   tube(r, c)  sweep(profile, c)   text("Ab", 1, face="serif") # exact curves, serifs
 import("part.obj", size=2)                                                               # a mesh as a shape
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
-pose("reach", elbow=[0, 0, 40])   animation("wave", ["rest", "reach", "rest"], seconds=2)
+pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
 pieces(s)  clearance(a, b)   a < b  a == b  a != b                                        # measure for assert (1 or 0)
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
@@ -131,7 +133,9 @@ nest the forearm's joint inside the upper arm's part, write poses, then
 read `poses.png` and `anim_<name>.png`: a part that swings about the
 wrong point has the wrong pivot. To judge one pose properly render it
 at full size with `--pose name` (or `set pose name`); `check --pose name`
-prints the posed sizes.
+prints the posed sizes. A pose value may be `xform(rotate=, move=,
+scale=)` for a hop or a squash, and an animation takes `times=[...]`
+for uneven keys and `ease=1` to settle into each pose.
 
 ```
 upper = capsule(0.15, 1.6) | move(0, 1.8, 0) | paint("steel")

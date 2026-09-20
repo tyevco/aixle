@@ -292,7 +292,7 @@ describe("anchors", () => {
     const lamp = ev.steps.find((s) => s.name === "lamp")!.value as Shape3;
     expect(lamp.bounds.min[1]).toBeCloseTo(2, 6);
     // In the pose the joint turns the arm about (0, 1, 0), so the tip swings out to x = 1.
-    const posed = evaluate(parse(src), { jointAngles: { swing: [0, 0, -90] } });
+    const posed = evaluate(parse(src), { jointPoses: { swing: { angles: [0, 0, -90], move: [0, 0, 0], scale: [1, 1, 1] } } });
     const q = posed.steps.find((s) => s.name === "q")!.value as number[];
     expect(q[0]).toBeCloseTo(1, 6);
     expect(q[1]).toBeCloseTo(1, 6);
@@ -316,9 +316,9 @@ describe("joints about an axis", () => {
     ].join("\n");
     const ev = run(src);
     expect(ev.warnings).toEqual([]);
-    expect(ev.poses[0].angles.steer).toEqual([25, 0, 0]);
+    expect(ev.poses[0].joints.steer.angles).toEqual([25, 0, 0]);
     // Turned 90 about the axis through the origin: a point on the fork's bottom (0, -2, 0) sweeps about the raked axis.
-    const posed = evaluate(parse(src), { jointAngles: { steer: [90, 0, 0] } });
+    const posed = evaluate(parse(src), { jointPoses: { steer: { angles: [90, 0, 0], move: [0, 0, 0], scale: [1, 1, 1] } } });
     const j = posed.steps.find((s) => s.name === "steer")!.value as Shape3;
     const p = j.warp!(0, -2, 0);
     const ax = Math.cos(Math.PI * 0.4), ay = Math.sin(Math.PI * 0.4);

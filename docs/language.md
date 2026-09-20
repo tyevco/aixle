@@ -346,11 +346,21 @@ slanted hinge or a tilted rotor: a pose then gives it one angle
 (`steer=25`), `angle("steer")[0]` reads it, and the GLB animation turns
 about that axis rather than through an Euler triple.
 `pose("reach", shoulder=[0, 0, 25], elbow=[0, 0, -40])` names a set of
-angles (degrees about x, then y, then z; unnamed joints rest);
+angles (degrees about x, then y, then z; unnamed joints rest). A joint
+can move and scale as well as turn: `pose("hop", body=xform(move=[0,
+0.3, 0], scale=[1, 1.1, 1]), head=xform(rotate=[-10, 0, 0]))` gives the
+joint a whole transform, scaled about its pivot, then turned, then moved
+(the glTF order, so the export plays what the sheet shows); `rotate=`
+takes the same triple or single angle a bare pose value does.
 `animation("wave", ["rest", "reach", "rest"], seconds=2)` strings poses
-into evenly spaced keyframes. Every pose is drawn on `poses.png`, every
-animation on `anim_<name>.png`, and the GLB carries the joints as nodes
-with the animations as glTF channels, which the viewer page plays. `set
+into evenly spaced keyframes; `times=[0, 0.15, 0.6]` puts each pose at
+its own second instead, the last being the length, and `ease=1` slows
+to a stop at every pose (0 is linear, a value between blends the two).
+Every pose is drawn on `poses.png`, every
+animation on `anim_<name>.png` (an eased or timed one says so in its
+bar), and the GLB carries the joints as nodes with the animations as
+glTF rotation, translation and scale channels, which the viewer page
+plays with loop, speed and a scrub bar, or all in turn. `set
 pose reach` (or `--pose reach` on the command line) makes the sheet, the
 views, the slices and the beauty render show that pose, and `check --pose
 reach` prints every step's size in it. The report and the STL describe
@@ -499,10 +509,15 @@ vertex colours instead). `set minecraft 16` also writes Minecraft Bedrock
 geometry (`--minecraft` on the command line, with an optional pixel
 count): the field is sampled at that many pixels per unit, a unit being
 one block, every filled voxel is a pixel of solid, and the voxels are
-merged into as few cuboids as they allow, a bone per scene object, each
-cube face with its own window in `model.geo.png` painted from the
-materials; `model.geo.json` is the geometry, identifier
-`geometry.<name>`. A curved thing comes out stepped, which is what a
+merged into as few cuboids as they allow, a bone per scene object and
+per joint (a joint's bone sits under the joint above it, at its pivot,
+with the joint's part as its cubes), each cube face with its own window
+in `model.geo.png` painted from the materials; `model.geo.json` is the
+geometry, identifier `geometry.<name>`. With joints and animations the
+render also writes `model.animation.json`: every animation as Bedrock
+keyframes (`animation.<name>.<animation>`, rotation, position and
+scale per bone at the sampled times, `loop` when it loops), which is the
+rig back in the game it may have come from. A curved thing comes out stepped, which is what a
 block model is; a mug at 16 is about 250 cubes, and `set minecraft 8` is
 a chunkier, cheaper model. A part thinner than a voxel (a sixteenth of a
 block at 16: a chair leg 0.04 across) is lost, and the render warns which;
@@ -520,17 +535,27 @@ The report says whether the model fits that attachment's size limit at
 the Normal body scale (a hat 1.87 × 2.5 × 1.87 studs, a face piece
 1.87 × 1.25 × 1.25, a back piece 9.86 × 8.59 × 4.87), and decimates the
 mesh to the budget: a rigid accessory's 4000 triangles when there is an
-Attachment anchor, a MeshPart's 10000 per mesh otherwise, by quadric
-edge collapses that never cross a material seam or fold a face, so a
-hat meshed at grid 96 goes out at 4000 with its brim, band and crown.
+Attachment anchor (shared across the meshes of a jointed model, each
+giving up the same share), a MeshPart's 10000 per mesh otherwise, by
+quadric edge collapses that never cross a material seam or fold a face,
+so a hat meshed at grid 96 goes out at 4000 with its brim, band and
+crown. A jointed model exports its joints as nodes under `Handle` and
+its animations as glTF clips, which is an animated rig for Studio
+rather than a rigid accessory: `examples/roblox/hatchling.aix` is the
+Minecraft repo's pet dragon rebuilt cube for cube as a shoulder pet,
+with its Bedrock idle, flap and glide clips as poses and animations.
 The report says what it was decimated from. `examples/roblox/` has a
-hat, glasses, a backpack, wings, a café set, a lamp, a plant and a
-sign; a Roblox accessory hangs on its attachment, so an accessory gets
+hat, glasses, a backpack, wings, the hatchling, a café set, a lamp, a
+plant and a sign; a Roblox accessory hangs on its attachment, so an accessory gets
 no warning about standing. Bedrock draws geometry with x mirrored, so
 cubes are authored at -x and the model stands in the game as it does on
 the sheet, its +z front to the south, the block convention; an entity
-faces north, so turn an entity model `rotate(y=180)` first. Joints are
-not carried: the geometry is the rest pose.
+faces north, so `set minecraft_entity 1` (or `--minecraft-entity`)
+turns the model half a turn about y first, which with the mirror is a
+flip of z, and writes the bone rotations in the entity's frame.
+`examples/roblox/hatchling.aix` does both: the Roblox pet and, at
+`set minecraft 8`, the Bedrock entity it was rebuilt from, with its
+clips. The geometry is the rest pose; the poses are in the animations.
 
 ## The fast loop
 

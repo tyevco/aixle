@@ -122,7 +122,8 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 
 When the model is right, `npx aixle render model.aix --beauty` adds
 `beauty.png`, the field ray-marched with shadows, for showing rather than
-checking; `viewer.html` next to it orbits the mesh in a browser, and
+checking; `viewer.html` next to it orbits the mesh in a browser and
+plays a rig's animations (loop, speed, a scrub bar, all in turn), and
 `model.glb` carries the materials as a baked texture (`model.png`), so it
 looks the same wherever it is loaded.
 
@@ -140,7 +141,11 @@ show arm
 ```
 
 Angles are degrees about x, then y, then z, right-handed, and a nested
-joint's angles are relative to its parent. `angle("elbow")` reads the
+joint's angles are relative to its parent. A pose value can be a whole
+transform, `hand=xform(rotate=[0, 0, 20], move=[0, 0.2, 0], scale=1.1)`,
+for a hop, a squash or a breath; an animation takes `times=[0, 0.15,
+0.6]` for uneven keys and `ease=1` to settle into each pose instead of
+turning sharply, and the strip's bar says which. `angle("elbow")` reads the
 current pose's angles, which is how a member between two moving parts (a
 hydraulic cylinder) finds its end points; the language doc has the
 cylinder written out. Sizes printed by `check` and

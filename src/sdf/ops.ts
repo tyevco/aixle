@@ -653,15 +653,25 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
  * subtree reads as empty, which is how a parent's own geometry is meshed
  * without the parts that hang off it.
  */
-export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0], axis?: Vec3): Shape3 {
-  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], hidden: false, axis };
+export function joint(child: Shape3, name: string, px: number, py: number, pz: number, angles: Vec3 = [0, 0, 0], axis?: Vec3, offset: Vec3 = [0, 0, 0], scl: Vec3 = [1, 1, 1]): Shape3 {
+  const state: JointState = { name, pivot: [px, py, pz], child, angles: [angles[0], angles[1], angles[2]], move: [offset[0], offset[1], offset[2]], scale: [scl[0], scl[1], scl[2]], hidden: false, axis };
   // About one axis when given (a steering column raked 18 degrees is one number, not an Euler triple worked out
-  // elsewhere: round 5), else x, then y, then z.
+  // elsewhere: round 5), else x, then y, then z. A pose may also scale the part about the pivot (a breathing body)
+  // and move it after the turn (a hop), the order a glTF node applies its scale, rotation and translation.
   const m = axis ? rotAxis(axis, angles[0]) : rotXYZ(angles[0], angles[1], angles[2]);
-  const still = axis ? angles[0] === 0 : angles[0] === 0 && angles[1] === 0 && angles[2] === 0;
-  const turned = still ? child : move(rotateBy(move(child, -px, -py, -pz), m), px, py, pz);
+  const turns = axis ? angles[0] !== 0 : angles[0] !== 0 || angles[1] !== 0 || angles[2] !== 0;
+  const scaled = scl[0] !== 1 || scl[1] !== 1 || scl[2] !== 1;
+  const moved = offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0;
+  let turned = child;
+  if (turns || scaled || moved) {
+    let inner = move(child, -px, -py, -pz);
+    if (scaled) inner = scale(inner, scl[0], scl[1], scl[2]);
+    if (turns) inner = rotateBy(inner, m);
+    turned = move(inner, px + offset[0], py + offset[1], pz + offset[2]);
+  }
   const d = turned.dist, h = turned.hit;
   const [a, b, c, e, f, g, i, j, l] = transpose(m);
+  const [ox, oy, oz] = offset, [sx, sy, sz] = scl;
   return {
     kind: "shape3",
     dist: (x, y, z) => (state.hidden ? FAR : d(x, y, z)),
@@ -669,14 +679,15 @@ export function joint(child: Shape3, name: string, px: number, py: number, pz: n
     bounds: turned.bounds,
     cost: child.cost,
     inner: [child],
-    // The child is authored in place; a world point on the posed part is pulled back through the turn about the pivot.
+    // The child is authored in place; a world point on the posed part is pulled back through the move, the turn
+    // about the pivot and the scale.
     unwarp: (x, y, z) => {
-      const qx = x - px, qy = y - py, qz = z - pz;
-      return [a * qx + b * qy + c * qz + px, e * qx + f * qy + g * qz + py, i * qx + j * qy + l * qz + pz];
+      const qx = x - px - ox, qy = y - py - oy, qz = z - pz - oz;
+      return [(a * qx + b * qy + c * qz) / sx + px, (e * qx + f * qy + g * qz) / sy + py, (i * qx + j * qy + l * qz) / sz + pz];
     },
     warp: (x, y, z) => {
-      const q = apply(m, [x - px, y - py, z - pz]);
-      return [q[0] + px, q[1] + py, q[2] + pz];
+      const q = apply(m, [(x - px) * sx, (y - py) * sy, (z - pz) * sz]);
+      return [q[0] + px + ox, q[1] + py + oy, q[2] + pz + oz];
     },
     loose: turned !== child,
     joint: state,

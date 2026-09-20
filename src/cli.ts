@@ -51,7 +51,8 @@ function usage(): never {
       "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
-      "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png)",
+      "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
+      "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
@@ -111,7 +112,7 @@ function main(argv: string[]): number {
       // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.angles) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints) : rest;
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
@@ -184,7 +185,7 @@ function main(argv: string[]): number {
       const rest = check(source, file);
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.angles) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints) : rest;
       const lines = source.split(/\r?\n/);
       const byName = new Map(ev.steps.map((st) => [st.name, st]));
       const memo = new Map<Shape3, PaintState>();
@@ -300,6 +301,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,
       roblox: opts.roblox ? true : undefined,
       minecraft: opts.minecraft === true ? 16 : typeof opts.minecraft === "string" ? Number(opts.minecraft) : undefined,
+      minecraftEntity: opts["minecraft-entity"] ? true : undefined,
       texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,
       azimuth: typeof opts.azimuth === "string" ? Number(opts.azimuth) : undefined,
       zoom: typeof opts.zoom === "string" ? Number(opts.zoom) : undefined,

@@ -85,7 +85,7 @@ export function toRoblox(h: SceneHierarchy, name: string, opts: RobloxOptions): 
   const warnings: string[] = [];
   const parts: string[] = [];
   const decimated = opts.before !== undefined && opts.before > h.triangles ? `, decimated from ${opts.before}` : "";
-  parts.push(single ? `one mesh, Handle, ${h.triangles} triangles${decimated}` : `${h.roots.length} objects, ${h.triangles} triangles${decimated}`);
+  parts.push(single ? `${h.meshes.length === 1 ? "one mesh, Handle" : `Handle with ${h.meshes.length} meshes (one per joint)`}, ${h.triangles} triangles${decimated}` : `${h.roots.length} objects, ${h.triangles} triangles${decimated}`);
   if (attachmentNames.length) {
     parts.push(`attachment${attachmentNames.length === 1 ? "" : "s"} ${attachmentNames.map((n) => `${n} at (${opts.anchors[n].map(fmt).join(", ")})`).join(", ")}`);
     if (h.triangles > ACCESSORY_TRIANGLES) warnings.push(`roblox: ${h.triangles} triangles, more than a rigid accessory's ${ACCESSORY_TRIANGLES}; lower the grid (set grid ${Math.max(8, Math.floor(Math.sqrt(ACCESSORY_TRIANGLES / h.triangles) * 100) )} or so, since triangles grow with its square).`);

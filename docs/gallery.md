@@ -212,6 +212,14 @@ Round glasses for a Roblox avatar, in studs; a face accessory may be
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/roblox/glasses.aix) · <a href="/aixle/viewers/roblox_glasses.html" target="_blank" rel="noopener">viewer</a>
 
+### roblox_hatchling
+
+The hatchling from tyevco/minecraft-qol as a Roblox shoulder pet: the
+
+![roblox_hatchling, beauty render](../examples/renders/roblox_hatchling_beauty.png) ![roblox_hatchling, contact sheet](../examples/renders/roblox_hatchling.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/roblox/hatchling.aix) · <a href="/aixle/viewers/roblox_hatchling.html" target="_blank" rel="noopener">viewer</a>
+
 ### roblox_lamp
 
 A floor lamp for a Roblox place, in studs: 6 tall, a weighted base, a

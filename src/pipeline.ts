@@ -14,12 +14,12 @@ import { box, primitive } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
-import { toBedrock } from "./export/bedrock.js";
+import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedrock.js";
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
 import { anchorsOf, allJoints, intersect, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
-import { INK, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
+import { INK, interpolatePose, renderAnimation, renderPoses, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
@@ -31,7 +31,7 @@ import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, t
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, dimsLabel, type StepView, type ViewName } from "./render/views.js";
-import { boundsCenter, boundsSize, isEmpty, type Bounds, type Shape3 } from "./sdf/types.js";
+import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
 
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
 export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
@@ -69,6 +69,8 @@ export interface RunOptions {
   roblox?: boolean;
   /** Also write Minecraft Bedrock geometry (model.geo.json and its texture) at this many pixels per unit, a unit being a block; 16 is the game's own (or `set minecraft 16`). */
   minecraft?: number;
+  /** The Bedrock geometry is an entity's, which faces north: turn the model half a turn about y (or `set minecraft_entity 1`). */
+  minecraftEntity?: boolean;
   /** Perspective camera direction in degrees; defaults 35 and 25, or `set azimuth` / `set elevation`. */
   azimuth?: number;
   elevation?: number;
@@ -588,8 +590,8 @@ export function cellFor(evaluation: Evaluation, gridOverride?: number): { grid: 
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointAngles?: Record<string, [number, number, number]>): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointAngles });
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses });
 }
 
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
@@ -615,8 +617,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const modules = moduleResolver(sourceName);
   const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
-  const shownAngles = shownPose ? rest.poses.find((p) => p.name === shownPose)?.angles : undefined;
-  const evaluation = shownAngles ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: shownAngles }) : rest;
+  const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints }) : rest;
   const warnings = [...evaluation.warnings, ...evaluation.asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
@@ -624,8 +626,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let closeUpNote: string | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
-  if (shownPose && !shownAngles && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
-  const shapeAt: ShapeAt = (angles) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointAngles: angles }).output;
+  if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
+  const shapeAt: ShapeAt = (joints) => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints }).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
   const size = Math.max(64, Math.round(opts.size ?? (evaluation.settings.size as number | undefined) ?? 512));
   const output = evaluation.output;
@@ -644,7 +646,24 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Joints and poses: the sheet shows `set pose` (rest by default); exports are always at rest.
   const joints = output ? allJoints(output) : [];
   const jointNames = joints.map((j) => j.joint!.name);
-  const poseViews: PoseView[] = evaluation.poses.map((p) => ({ name: p.name, angles: p.angles }));
+  const poseViews: PoseView[] = evaluation.poses.map((p) => ({ name: p.name, joints: p.joints }));
+  // Every animation sampled once, for the GLB and the Bedrock file alike: glTF samplers and Bedrock keyframes are
+  // both linear, so an eased animation is sampled a few times per segment and a linear one at its keys.
+  const clips: BedrockClip[] = evaluation.animations
+    .filter((a) => a.poses.every((pn) => pn === "rest" || poseViews.some((v) => v.name === pn)))
+    .map((a) => {
+      const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
+      const timing = { times: a.times, ease: a.ease };
+      const keyTimes = a.times ?? keys.map((_, i) => (keys.length === 1 ? 0 : (i / (keys.length - 1)) * a.seconds));
+      const times: number[] = [];
+      const sub = a.ease > 0 ? 8 : 1;
+      for (let i = 0; i < keyTimes.length - 1; i++) for (let k = 0; k < sub; k++) times.push(keyTimes[i] + ((keyTimes[i + 1] - keyTimes[i]) * k) / sub);
+      times.push(keyTimes[keyTimes.length - 1]);
+      const samples = times.map((t) => interpolatePose(keys, jointNames, a.seconds > 0 ? t / a.seconds : 0, timing));
+      const axes: Record<string, Vec3 | undefined> = {};
+      for (const j of joints) axes[j.joint!.name] = j.joint!.axis;
+      return { name: a.name, seconds: a.seconds, loop: a.loop, times, samples, axes };
+    });
   const azimuth = opts.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
 
@@ -809,19 +828,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const nodes = flatten(hierarchy).length;
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
       if (hierarchy.atlas) write("model.png", hierarchy.atlas.toPng());
-      const glbAnimations: GlbAnimation[] = evaluation.animations
-        .filter((a) => a.poses.every((pn) => pn === "rest" || poseViews.some((v) => v.name === pn)))
-        .map((a) => {
-          const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", angles: {} });
-          const times = keys.map((_, i) => (keys.length === 1 ? 0 : (i / (keys.length - 1)) * a.seconds));
-          const rotations: Record<string, [number, number, number, number][]> = {};
-          for (const j of joints) {
-            const jn = j.joint!.name;
-            const axis = j.joint!.axis;
-            rotations[jn] = keys.map((k) => { const an = k.angles[jn] ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
-          }
-          return { name: a.name, times, rotations };
-        });
+      const glbAnimations: GlbAnimation[] = clips.map((c) => {
+        const rotations: Record<string, [number, number, number, number][]> = {};
+        const moves: Record<string, Vec3[]> = {};
+        const scales: Record<string, Vec3[]> = {};
+        for (const j of joints) {
+          const jn = j.joint!.name;
+          const axis = j.joint!.axis;
+          rotations[jn] = c.samples.map((s) => { const an = s[jn]?.angles ?? [0, 0, 0]; return axis ? axisAngleToQuat(axis, an[0]) : eulerToQuat(an[0], an[1], an[2]); });
+          // Translation and scale channels only where a key moves or scales the joint: most joints only turn.
+          if (c.samples.some((s) => s[jn]?.move.some((v) => v !== 0))) moves[jn] = c.samples.map((s) => [...(s[jn]?.move ?? [0, 0, 0])] as Vec3);
+          if (c.samples.some((s) => s[jn]?.scale.some((v) => v !== 1))) scales[jn] = c.samples.map((s) => [...(s[jn]?.scale ?? [1, 1, 1])] as Vec3);
+        }
+        return { name: c.name, times: c.times, rotations, moves, scales };
+      });
       if (opts.obj !== false) {
         const { obj, mtl } = toObjScene(hierarchy, name, "model.mtl", hierarchy.atlas ? "model.png" : undefined);
         write("model.obj", obj);
@@ -852,16 +872,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // texture of the materials. Written at rest, an object per bone, joints left to the game's own animation.
     const minecraftPx = opts.minecraft ?? (typeof evaluation.settings.minecraft === "number" ? evaluation.settings.minecraft : 0);
     if (minecraftPx > 0) {
-      const bedrock = time("minecraft", () => toBedrock(rest.objects, name, { pixelsPerUnit: minecraftPx }));
+      const entity = opts.minecraftEntity ?? evaluation.settings.minecraft_entity === 1;
+      const bedrock = time("minecraft", () => toBedrock(rest.objects, name, { pixelsPerUnit: minecraftPx, entity }));
       write("model.geo.json", JSON.stringify(bedrock.geometry, null, 2) + "\n");
       write("model.geo.png", bedrock.texture.toPng());
       warnings.push(...bedrock.warnings);
+      // The animations as Bedrock keyframes on the joint bones, when the model has both.
+      if (clips.length && bedrock.joints.length) write("model.animation.json", JSON.stringify(toBedrockAnimations(clips, name, bedrock.joints, { entity }), null, 2) + "\n");
       // A voxel is the geometry's cell: a part thinner than one is lost there whatever the render's grid. A whole
       // voxel always holds a sample centre, so the threshold is one voxel, not the mesher's 1.2 cells: a one-pixel
       // plate is the ordinary member of a block model.
       const voxel = 1 / minecraftPx;
       warnings.push(...foldThinWarnings(thinWarnings(rest, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${minecraftPx} pixels per block; set minecraft ${minecraftPx * 2} halves it)`));
-      minecraftNote = `${bedrock.cubes} cube${bedrock.cubes === 1 ? "" : "s"} from ${bedrock.voxels} voxels at ${bedrock.pixelsPerUnit} pixels per block, texture ${bedrock.texture.width} × ${bedrock.texture.height}, bone${bedrock.bones.length === 1 ? "" : "s"} ${bedrock.bones.join(", ") || "none"}; identifier geometry.${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
+      const animNote = clips.length && bedrock.joints.length ? `; animation${clips.length === 1 ? "" : "s"} ${clips.map((c) => `animation.${name.replace(/[^A-Za-z0-9_]/g, "_")}.${c.name.replace(/[^A-Za-z0-9_]/g, "_")}`).join(", ")} in model.animation.json` : "";
+      minecraftNote = `${bedrock.cubes} cube${bedrock.cubes === 1 ? "" : "s"} from ${bedrock.voxels} voxels at ${bedrock.pixelsPerUnit} pixels per block, texture ${bedrock.texture.width} × ${bedrock.texture.height}, bone${bedrock.bones.length === 1 ? "" : "s"} ${bedrock.bones.join(", ") || "none"}${bedrock.joints.length ? ` (${bedrock.joints.length} joint${bedrock.joints.length === 1 ? "" : "s"})` : ""}; identifier geometry.${name.replace(/[^A-Za-z0-9_]/g, "_")}${entity ? ", an entity facing north" : ", a block facing south"}${animNote}`;
       log(`minecraft: ${minecraftNote}, in ${timings.minecraft} ms`);
     }
     if (joints.length > 0 && opts.poses !== false) {
@@ -870,8 +894,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const poseCell = cellSize * 1.5;
       time("poses", () => write("poses.png", renderPoses(shapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation).toPng()));
       for (const a of evaluation.animations) {
-        const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", angles: {} });
-        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(shapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation).toPng()));
+        const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
+        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(shapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease }).toPng()));
       }
     }
     if (opts.beauty || evaluation.settings.beauty === 1) {
@@ -1033,8 +1057,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
     "model.roblox.glb": "the GLB for Roblox Studio's 3D Importer: a Handle node facing -Z with _Att attachment nodes from the anchors",
-    "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object",
+    "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object and per joint",
     "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
+    "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": "every pose, rest first",
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",

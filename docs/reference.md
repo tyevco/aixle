@@ -391,6 +391,16 @@ Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optiona
 - `placements`: [x,y,z,yaw, x,y,z,yaw, ...]
 - `fields`: 4 for x,y,z,yaw or 5 to add a scale
 
+### xform
+
+A joint's pose in one value, for pose(): xform(rotate=[x, y, z] degrees or one angle about the joint's axis, move=[dx, dy, dz] in world units after the turn, scale=s or [sx, sy, sz] about the pivot). pose("hop", body=xform(move=[0, 0.3, 0]), lungs=xform(scale=[1, 1.02, 1])); a plain [x, y, z] in a pose is still just the angles.
+
+    xform(rotate=0, move=0, scale=1) -> transform
+
+- `rotate`: [x, y, z] degrees, or one angle for a joint with axis=
+- `move`: [dx, dy, dz]
+- `scale`: one number or [sx, sy, sz]
+
 ## Queries
 
 ### height
@@ -662,15 +672,17 @@ Make a part turn about a pivot under poses: `joint(part, "elbow", x, y, z)` with
 
 ### pose
 
-Name a set of joint angles: `pose("wave", shoulder=[0, 0, 70], elbow=[0, 0, 40])`, degrees about x, y, z per joint, or one number for a joint declared with axis=. Joints not named stay at rest. Every pose is drawn on `poses.png`; `set pose wave` makes the sheet and exports show it.
+Name a set of joint angles: `pose("wave", shoulder=[0, 0, 70], elbow=[0, 0, 40])`, degrees about x, y, z per joint, or one number for a joint declared with axis=. A joint can also move and scale: `pose("hop", body=xform(move=[0, 0.3, 0], scale=[1, 1.1, 1]))` (see xform under Assembly; scale is about the pivot, then the turn, then the move). Joints not named stay at rest. Every pose is drawn on `poses.png`; `set pose wave` makes the sheet and exports show it.
 
     pose(name, joint=[x, y, z], ...) -> string
+    pose(name, joint=xform(rotate=[x, y, z], move=[dx, dy, dz], scale=[sx, sy, sz]), ...) -> string
 
 ### animation
 
-A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. A rest pose is any pose with no angles, or the name "rest". Each animation gets a frame strip `anim_<name>.png`.
+A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. `times=[0, 0.2, 1.2]` puts each pose at its own second instead (the last is the length, so leave seconds out); `ease=1` slows to a stop at every pose (0 is linear, between is a blend), which the GLB carries as a few keys per segment. A rest pose is any pose with no angles, or the name "rest". Each animation gets a frame strip `anim_<name>.png`, and the viewer page plays them with loop, speed and a scrub bar.
 
-    animation(name, poses, seconds=1, loop=1) -> string
+    animation(name, poses, seconds=1, loop=1, ease=0) -> string
+    animation(name, poses, times=[0, ...], loop=1, ease=0) -> string
 
 ## Material presets
 

@@ -11,8 +11,8 @@ import { union, scale as scaleShape, allJoints, joint as jointShape } from "../s
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import { isEmpty, type Shape3 } from "../sdf/types.js";
-import { isCurve, isMaterial, isShape2, isShape3, isUserFn, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { isEmpty, REST_POSE, type JointPose, type Shape3 } from "../sdf/types.js";
+import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus"]);
@@ -51,8 +51,8 @@ export interface EvalOptions {
   resolveModule?: (path: string, from?: string) => { source: string; file: string };
   /** The file this program was read from, passed to resolveModule as `from`. */
   moduleFrom?: string;
-  /** Angles per joint name for this evaluation: a pose. Joints not named are at rest. */
-  jointAngles?: Record<string, [number, number, number]>;
+  /** The pose per joint name for this evaluation. Joints not named are at rest. */
+  jointPoses?: Record<string, JointPose>;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -70,16 +70,20 @@ export interface SceneObject {
 
 export interface Pose {
   name: string;
-  /** Joint name to degrees about x, y, z. */
-  angles: Record<string, [number, number, number]>;
+  /** Joint name to its angles (degrees about x, y, z), move and scale. */
+  joints: Record<string, JointPose>;
   line: number;
 }
 
 export interface Animation {
   name: string;
-  /** Pose names in order; keyframes evenly spaced over `seconds`. */
+  /** Pose names in order; keyframes evenly spaced over `seconds` unless `times` says otherwise. */
   poses: string[];
   seconds: number;
+  /** When set, one time in seconds per pose, ascending from 0; the last is `seconds`. */
+  times?: number[];
+  /** 0 is linear between poses; 1 is a full ease in and out at every keyframe. */
+  ease: number;
   loop: boolean;
   line: number;
 }
@@ -148,7 +152,7 @@ class Scope {
 export function evaluate(program: Program, options: EvalOptions = {}): Evaluation {
   // angle(name) reads the pose being evaluated.
   CURRENT_ANGLES.clear();
-  for (const [name, v] of Object.entries(options.jointAngles ?? {})) CURRENT_ANGLES.set(name, v);
+  for (const [name, v] of Object.entries(options.jointPoses ?? {})) CURRENT_ANGLES.set(name, v.angles);
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
@@ -300,19 +304,24 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   function callPose(args: Arg[], scope: Scope, line: number): Value {
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
     const nameArg = values.find((v) => !v.name);
-    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`pose(): the first argument is the pose's name, a string; then joint = [x, y, z] degrees per joint`, line);
-    const angles: Record<string, [number, number, number]> = {};
+    if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`pose(): the first argument is the pose's name, a string; then joint = [x, y, z] degrees or joint = xform(...) per joint`, line);
+    const joints: Record<string, JointPose> = {};
     for (const v of values) {
       if (!v.name) continue;
       const a = v.value;
       // One number is an angle about the joint's axis (a joint declared with axis=); it is checked against the joint below.
-      if (typeof a === "number") { angles[v.name] = [a, 0, 0]; singles.add(`${nameArg.value}:${v.name}`); continue; }
+      if (typeof a === "number") { joints[v.name] = { ...REST_POSE, angles: [a, 0, 0] }; singles.add(`${nameArg.value}:${v.name}`); continue; }
+      if (isXform(a)) {
+        joints[v.name] = { angles: [...a.angles], move: [...a.move], scale: [...a.scale] };
+        if (a.single) singles.add(`${nameArg.value}:${v.name}`);
+        continue;
+      }
       if (!Array.isArray(a) || a.length !== 3 || a.some((n) => typeof n !== "number"))
-        throw new RuntimeError(`pose("${nameArg.value}"): ${v.name} must be [x, y, z] degrees`, line);
-      angles[v.name] = [a[0] as number, a[1] as number, a[2] as number];
+        throw new RuntimeError(`pose("${nameArg.value}"): ${v.name} must be [x, y, z] degrees, one angle for a joint with axis=, or xform(rotate=, move=, scale=)`, line);
+      joints[v.name] = { ...REST_POSE, angles: [a[0] as number, a[1] as number, a[2] as number] };
     }
     const existing = poses.findIndex((p) => p.name === nameArg.value);
-    const pose: Pose = { name: nameArg.value, angles, line };
+    const pose: Pose = { name: nameArg.value, joints, line };
     if (existing >= 0) poses[existing] = pose; else poses.push(pose);
     return nameArg.value;
   }
@@ -323,11 +332,30 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const name = positional[0];
     const list = positional[1] ?? values.find((v) => v.name === "poses")?.value;
     if (typeof name !== "string" || !Array.isArray(list) || list.some((p) => typeof p !== "string"))
-      throw new RuntimeError(`animation(): animation(name, [pose, pose, ...], seconds=1, loop=1)`, line);
-    const seconds = values.find((v) => v.name === "seconds")?.value ?? positional[2] ?? 1;
+      throw new RuntimeError(`animation(): animation(name, [pose, pose, ...], seconds=1, loop=1, times=[...], ease=0)`, line);
+    for (const v of values) if (v.name && !["poses", "seconds", "loop", "times", "ease"].includes(v.name)) throw new RuntimeError(`animation("${name}"): no parameter named '${v.name}'; it takes poses, seconds, loop, times and ease`, line);
+    let seconds = values.find((v) => v.name === "seconds")?.value ?? positional[2] ?? 1;
     const loop = values.find((v) => v.name === "loop")?.value ?? 1;
-    if (typeof seconds !== "number" || typeof loop !== "number") throw new RuntimeError(`animation(): seconds and loop must be numbers`, line);
-    const anim: Animation = { name, poses: list as string[], seconds, loop: loop !== 0, line };
+    const ease = values.find((v) => v.name === "ease")?.value ?? 0;
+    if (typeof seconds !== "number" || typeof loop !== "number") throw new RuntimeError(`animation("${name}"): seconds and loop must be numbers`, line);
+    if (typeof ease !== "number" || ease < 0 || ease > 1) throw new RuntimeError(`animation("${name}"): ease is a number from 0 (linear) to 1 (a full ease in and out at every pose)`, line);
+    let times: number[] | undefined;
+    const t = values.find((v) => v.name === "times")?.value;
+    if (t !== undefined) {
+      if (!Array.isArray(t) || t.some((x) => typeof x !== "number")) throw new RuntimeError(`animation("${name}"): times must be a list of seconds, one per pose`, line);
+      times = t as number[];
+      if (times.length !== list.length) throw new RuntimeError(`animation("${name}"): times has ${times.length} entries for ${list.length} poses; it needs one per pose`, line);
+      if (times[0] !== 0) throw new RuntimeError(`animation("${name}"): times must start at 0 (the first pose is the start)`, line);
+      for (let i = 1; i < times.length; i++) if (times[i] <= times[i - 1]) throw new RuntimeError(`animation("${name}"): times must increase; ${times[i - 1]} is followed by ${times[i]}`, line);
+      // The last time is the length: seconds= is not needed with times=, and must agree when given.
+      const last = times[times.length - 1];
+      if (values.some((v) => v.name === "seconds") || positional[2] !== undefined) {
+        if (Math.abs((seconds as number) - last) > 1e-9) throw new RuntimeError(`animation("${name}"): seconds=${seconds} but times ends at ${last}; with times= the last time is the length, so leave seconds out`, line);
+      }
+      seconds = last;
+    }
+    if ((seconds as number) <= 0) throw new RuntimeError(`animation("${name}"): seconds must be positive`, line);
+    const anim: Animation = { name, poses: list as string[], seconds: seconds as number, times, ease, loop: loop !== 0, line };
     const existing = animations.findIndex((a) => a.name === name);
     if (existing >= 0) animations[existing] = anim; else animations.push(anim);
     return name;
@@ -346,7 +374,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (!isShape3(part as Value)) throw new RuntimeError(`joint(): the first argument is the part, a 3D shape\nusage:\n  joint(part, name, x, y, z) -> shape`, line);
     if (typeof name !== "string") throw new RuntimeError(`joint(): name must be a string`, line);
     for (const k of ["x", "y", "z"]) if (typeof got[k] !== "number") throw new RuntimeError(`joint("${name}"): missing '${k}', the pivot in world units`, line);
-    const a = options.jointAngles?.[name] ?? [0, 0, 0];
+    const jp = options.jointPoses?.[name] ?? REST_POSE;
     let axis: [number, number, number] | undefined;
     if (got.axis !== undefined) {
       const ax = got.axis;
@@ -354,7 +382,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         throw new RuntimeError(`joint("${name}"): axis must be a direction [x, y, z] (e.g. [cos(72), sin(72), 0] for a head tube raked 18 degrees)`, line);
       axis = [ax[0] as number, ax[1] as number, ax[2] as number];
     }
-    return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, a, axis);
+    return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, jp.angles, axis, jp.move, jp.scale);
   }
 
   /** `prefix.name` from a used library: its def or constant, with the message naming what the library has. */
@@ -578,11 +606,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // scope as their closure, so a library def sees its helpers and constants and nothing of the caller's.
         let lib: Evaluation;
         try {
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointAngles: options.jointAngles });
+          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
-        for (const [name, v] of Object.entries(options.jointAngles ?? {})) CURRENT_ANGLES.set(name, v);
+        for (const [name, v] of Object.entries(options.jointPoses ?? {})) CURRENT_ANGLES.set(name, v.angles);
         const exports = new Map<string, Value>();
         for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
         for (const d of lib.defs) exports.set(d.name, d);
@@ -677,12 +705,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const jointNames = new Set(jointList.map((j) => j.joint!.name));
     const axisJoints = new Set(jointList.filter((j) => j.joint!.axis).map((j) => j.joint!.name));
     for (const p of poses)
-      for (const j of Object.keys(p.angles)) {
+      for (const j of Object.keys(p.joints)) {
         if (!jointNames.has(j)) { warnings.push(`pose "${p.name}" (line ${p.line}) sets joint "${j}", which is not in the output${jointNames.size ? `; joints: ${[...jointNames].join(", ")}` : ""}`); continue; }
         // A single angle belongs to an axis joint; an [x, y, z] triple to one without; the wrong kind is a mistake to name.
         const single = singles.has(`${p.name}:${j}`);
         if (single && !axisJoints.has(j)) warnings.push(`pose "${p.name}" (line ${p.line}): ${j} is one number, but joint "${j}" has no axis=, so it takes [x, y, z] degrees`);
-        if (!single && axisJoints.has(j) && (p.angles[j][1] !== 0 || p.angles[j][2] !== 0)) warnings.push(`pose "${p.name}" (line ${p.line}): joint "${j}" turns about its axis, so it takes one angle, not [x, y, z]; only the first number is used`);
+        if (!single && axisJoints.has(j) && (p.joints[j].angles[1] !== 0 || p.joints[j].angles[2] !== 0)) warnings.push(`pose "${p.name}" (line ${p.line}): joint "${j}" turns about its axis, so it takes one angle, not [x, y, z]; only the first number is used`);
       }
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
     for (const a of animations)

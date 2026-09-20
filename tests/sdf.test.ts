@@ -613,6 +613,21 @@ describe("round-4 findings", () => {
     const u = j.unwarp!(-2.6, 0, 0);
     expect(u[0]).toBeCloseTo(0, 5);
     expect(u[1]).toBeCloseTo(2.6, 5);
+    // A joint can also move and scale its part: scale about the pivot, then turn, then move (the glTF order).
+    const k = O.joint(boom, "hinge", 0, 1, 0, [0, 0, 90], undefined, [0.5, 0, 0], [1, 2, 1]);
+    // The lug at y 2.6 is 1.6 above the pivot, doubled to 3.2, turned to x -3.2, moved by 0.5: (-2.7, 1).
+    const w = k.warp!(0, 2.6, 0);
+    expect(w[0]).toBeCloseTo(-2.7, 5);
+    expect(w[1]).toBeCloseTo(1, 5);
+    expect(k.dist(-2.7, 1, 0)).toBeLessThan(0);
+    const back = k.unwarp!(-2.7, 1, 0);
+    expect(back[0]).toBeCloseTo(0, 5);
+    expect(back[1]).toBeCloseTo(2.6, 5);
+    const kb = O.placedBounds(k, lug, lug.bounds)!;
+    expect(kb.min[0]).toBeLessThanOrEqual(-2.7 - 0.2 + 1e-9);
+    expect(kb.max[1]).toBeGreaterThanOrEqual(1 + 0.2 - 1e-9);
+    expect(k.joint!.move).toEqual([0.5, 0, 0]);
+    expect(k.joint!.scale).toEqual([1, 2, 1]);
   });
   it("a sweep's box allows for the mitres at sharp joins", () => {
     const straight = W.sweep(S.circle(0.3), [[0, 0, 0], [2, 0, 0]]);

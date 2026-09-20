@@ -137,7 +137,28 @@ use, so a decal and a wood pattern come through, and the windows are
 shelf-packed into a power-of-two texture. Bedrock draws geometry with x
 mirrored (measured in the Minecraft repo this tool grew up beside: a
 cube authored on +x lands on the block's west), so cubes are authored at
--x and the model stands in the game as on the sheet.
+-x and the model stands in the game as on the sheet. An entity faces
+north, so its model is turned half a turn about y first, which with the
+mirror is a flip of z.
+
+A joint is a bone: its pivot in geometry pixels, its parent the joint
+above it, its cubes the joint's part with the joints inside it left out,
+the same walk the GLB's node tree makes. The animations are the same
+samples the GLB gets (a linear clip at its keys, an eased one at eight
+per segment, since Bedrock interpolates linearly too), written as
+keyframes per bone. Bedrock's bone rotation is an Euler triple applied
+z, y, x (x first, as `rotate` does) with the x and y angles negated in
+geometry space, and geometry space is the mirror of the world: the
+convention Blockbench's Bedrock codec and the Minecraft repo's viewer
+render with, and the one under which that repo's hatchling flaps the
+way its file says. Conjugating through the mirror, a right-handed
+rotation (rx, ry, rz) in the world is written (-rx, ry, -rz) for a
+block, and for an entity, turned half a turn, it is written as it is:
+the Aixle hatchling, built from the Bedrock file's numbers with z
+flipped, exports the file's numbers back. A test pushes a cube's centre
+through that convention for the exported numbers and checks it lands
+inside the posed shape, for both orientations. What the game does with
+the texture windows' orientation is still to be seen in it.
 
 ## Roblox
 
@@ -195,15 +216,25 @@ made relative to the pivot, and a placed shape is a node per copy over one
 mesh. Every mesh is extracted at the same cell size and all of them share
 one atlas: they are merged for baking and split again with their UVs.
 
-A joint is a plain rotation of its part about the pivot, built with the
-angles a pose gives it, and a pose is applied by evaluating the program
-again with those angles: an evaluation takes milliseconds, every joint
-then has exact rotated bounds, and nested joints are turned by their own
-angles before the parent is built, so they follow it. The first design had
+A joint is a plain transform of its part about the pivot, built with
+what a pose gives it (a scale about the pivot, then the turn, then a
+move: glTF's own order, so a viewer composes the channels the way the
+sheet drew them), and a pose is applied by evaluating the program
+again with those values: an evaluation takes milliseconds, every joint
+then has exact transformed bounds, and nested joints are set before the
+parent is built, so they follow it. The first design had
 a joint read live angles from a mutable state instead; its bounds then had
 to cover every rotation, which made a five-unit arm sixteen units across
 and wasted most of the extraction grid on air. Exports are at rest, with
-the poses as glTF rotation channels on the joint nodes.
+the poses as glTF rotation channels on the joint nodes, and translation
+and scale channels only on the joints a pose moves or scales.
+
+An animation's keys are evenly spaced unless it gives times, and blend
+linearly unless it gives an ease, a cosine blend that slows to a stop
+at each key. glTF samplers are linear (its cubic spline needs tangents
+a pose does not have), so an eased animation is written as eight linear
+keys per segment: the file grows a little and every viewer plays the
+same curve the strip shows.
 
 ## Twist, taper, text
 
@@ -387,7 +418,12 @@ glyph was rendered and read to check it.
 
 `viewer.html` embeds the GLB as base64 so it opens from disk with no
 server, and loads three.js from a CDN, so it needs a network connection
-once. It exists for people; an agent verifies from the PNGs.
+once. It exists for people; an agent verifies from the PNGs. With
+animations it grows a bar along the bottom: loop, speed, a scrub bar
+that pauses the clip at a moment, and a button that plays every clip
+once in turn, so a person can check a rig's timing without a second
+tool. The page keeps its own paused and finished flags because
+three.js's action reports a clip that ran to its end as paused.
 
 ## Libraries
 

@@ -57,7 +57,18 @@ export function rotZ(deg: number): Mat3 {
   return [c, -s, 0, s, c, 0, 0, 0, 1];
 }
 
-/** Rotation applying x, then y, then z (R = Rz * Ry * Rx). */
+/**
+ * The x, y, z angles in degrees that `rotXYZ` would need to make this rotation (x applied first): what a format
+ * that only takes Euler triples needs for a joint declared about an axis. At the gimbal lock (y at 90 degrees) the
+ * x angle is folded into z.
+ */
+export function eulerXYZ(m: Mat3): Vec3 {
+  const deg = 180 / Math.PI;
+  const sy = -m[6];
+  if (Math.abs(sy) > 1 - 1e-9) return [0, Math.asin(Math.max(-1, Math.min(1, sy))) * deg, Math.atan2(-m[1], m[4]) * deg];
+  return [Math.atan2(m[7], m[8]) * deg, Math.asin(sy) * deg, Math.atan2(m[3], m[0]) * deg];
+}
+
 /** Rotation by `deg` degrees about a unit axis (Rodrigues), right-handed. */
 export function rotAxis(axis: Vec3, deg: number): Mat3 {
   const len = Math.hypot(axis[0], axis[1], axis[2]) || 1;
