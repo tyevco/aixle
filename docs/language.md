@@ -199,7 +199,9 @@ on the same path. `taper=` scales the end relative to the start (a horn,
 a tapering tail) and `sweep` also takes `twist=` degrees over the whole
 path, so three circles swept along `helix(r, h, turns)` with
 `twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to)` and
-`spline(points)` make point lists (a helix starts at `(r, 0, 0)` and rises
+`spline(points)` make point lists, and any of them can feed `curve()`
+for a smooth tube (a tight helix as a polyline has a join wedge at
+every segment; `tube(r, curve(helix(...)))` has none; a helix starts at `(r, 0, 0)` and rises
 from y = 0 to `h`, an arc lies on y = 0; move the result afterwards);
 `spline` is the one to reach for on a curve: it passes through the points and subdivides until no piece turns
 more than three degrees, so the sweep shows no facets. Any list of
@@ -321,7 +323,12 @@ sheet shows them together, and the GLB has a node per object (the OBJ a
 group). `place(shape, [x,y,z,yaw, x,y,z,yaw, ...])` puts copies of a shape
 at each position and yaw (degrees about y; `fields=5` adds a scale per
 copy): the render is the union, the export is one mesh with a node per
-copy, so a forest costs one tree. A placed set keeps its copies' nodes
+copy, so a forest costs one tree. A placed copy has its yaw and nothing
+else: no joint of its own, no pose. Copies that must move on their own
+(a Ferris wheel's gondolas, each hanging level) are a `def` called once
+per copy with a named step each, `gondola_1 = car(1, "gondola_1")`,
+where the joint's name is built from the index: `"gondola_" + i` joins
+a string and a number (`str(i)` is the number as text). A placed set keeps its copies' nodes
 wherever it sits: joined to a board with `+`, inside a joint's part, or
 as a scene object of its own (round 6: joined by `+`, an army became one
 mesh). `--focus pawns_3` frames the third copy of a placed set on its
@@ -360,7 +367,8 @@ to a stop at every pose (0 is linear, a value between blends the two);
 straight through its seam while easing at the keys between.
 Every pose is drawn on `poses.png`, every
 animation on `anim_<name>.png` (an eased or timed one says so in its
-bar), and the GLB carries the joints as nodes with the animations as
+bar; one camera holds still over every frame of a strip, so a swing
+reads as motion and a slide moves), and the GLB carries the joints as nodes with the animations as
 glTF rotation, translation and scale channels, which the viewer page
 plays with loop, speed and a scrub bar, or all in turn. `set
 pose reach` (or `--pose reach` on the command line) makes the sheet, the
@@ -378,9 +386,13 @@ the joints as a tree, each under the joint it turns with, pivots and
 axes included and joints made inside a `def` too, so a rig can be
 checked before any picture; the report has the same tree. An assert is
 judged at rest whatever pose is shown, so "about 2.5 tall" holds through
-a jump. `posed` lines in `check --pose` are the same rule: a step named
-inside a `def` has no name, so no line and no thumbnail; give the joint
-its own named step.
+a jump. `posed` lines in `check --pose` say where the output puts a
+step, through every joint and move above it (a part with no joint of
+its own gets one too when a parent's joint carries it; a `def`'s step
+used in several copies gets its first placement); a step named inside a
+`def` has no name, so no line and no thumbnail; give the joint its own
+named step. Under a pose an `anchors posed` line gives each anchor's
+world point beside its own-frame one.
 
 Signs, in limb terms, all from `rotate`'s right-handed rule: a limb
 hanging down (a leg, an arm at rest) swings forward, to +z, with a
@@ -401,11 +413,24 @@ spring included: a part that should not stretch reads
 `joint_scale("clown")` and `joint_move("clown")` and scales itself by
 the inverse, as `angle()` reads the turn. `at()` on a nested joint's own
 step is that joint's posed point; the world point is read through the
-outer step, `at(arm, "tip")`, which carries every joint above it.
-A looping cycle (a walk, a rotor) wants `ease_ends=0`, since an ease
+outer step, `at(arm, "tip")`, which carries every joint above it, and
+on a top-level joint's step (`at(blade, "tip")`) the two are the same.
+A pose rests every joint it does not name, so a pose that adds to
+another starts from it: `pose("hold", from="reach", finger_l=xform(
+move=[0.03, 0, 0]))` is the reach with the fingers closed, and an
+animation through it keeps the arm out. "rest" needs no `pose()` of its
+own (every joint at zero); declaring one adds a second rest thumbnail.
+A joint that only slides (`xform(move=)`) turns about nothing, so its
+pivot is any point on the part. A tail that both lifts and wags wants a
+plain joint, not `axis=`: its x angle lifts, its y angle wags. A
+looping cycle (a walk, a rotor) wants `ease_ends=0`, since an ease
 stops at every key, its ends included, and a loop's ends are one
-moment; a one-shot that must start at once and settle takes
-`ease_ends=0` with `ease=1` at the keys between. A rotor turning a
+moment. `loop=0` makes a one-shot; one that must start at once and
+settle takes `ease_ends=0` with `ease=1` at the keys between, and with
+only two keys there are none between, so hold the last pose as a third
+key: `animation("flick", ["closed", "open", "open"], times=[0, 0.45,
+0.6], loop=0, ease=1, ease_ends=0)` (a two-key clip with `ease_ends=0`
+is warned about). A rotor turning a
 full turn needs keys under 180 degrees apart (`[0, 120, 240, 360]`), or
 the export takes the short way round. A bare call such as
 `spin_pose("spin_120", 120)` is a statement on its own; its result need
@@ -467,7 +492,9 @@ for printing: the void is open, so it is not counted as a cavity and
 resin or support can escape; `model.stl` is written next to the OBJ and
 GLB, the model as shown. `decal(shape, region, m)` paints only the surface inside `region`, adding
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
-a jar; `region` is any shape. A decal is a skin: the cross-sections show
+a jar; `region` is any shape, and it must cross the surface (a sphere
+centred on the skin, a box through it): a region that touches none of
+the shape's surface paints nothing, and `check` warns. A decal is a skin: the cross-sections show
 the base material underneath, and a step used only as a region is not
 geometry, so it gets no thin-part warning and is never named as a loose
 piece. Patterns are laid out in the frame the part is painted in, along the
@@ -533,7 +560,9 @@ detail, the slices cut through it, and the beauty render is framed on it.
 Whatever else the frame holds is drawn faint and see-through, with a
 note under each caption, so a neighbour the frame clips reads as the
 context it is and not as a part (a drone's body over its gimbal); the
-slices draw the cut through it faint too.
+slices draw the cut through it faint too. The sheet's title gives the
+frame's size (the step's box grown a little), not the step's own;
+`check` has the step's.
 `--out DIR` puts a render somewhere other than `out/<name>/`, so a focus
 render does not overwrite the main one. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
@@ -617,7 +646,12 @@ keys. The face texture is painted from the model's own surface behind
 each texel (a decal on a face, a skin thinner than a voxel: both reach
 it), with each window's u and v running as the game reads them (checked
 against the Minecraft repo's viewer), and its unused texels are
-transparent. A box model on the game's
+transparent. A texel takes the material at its own centre, so a decal
+must cover a texel centre to reach the texture: make its region about a
+pixel across and on the lattice (an eye as a one-pixel box, not a 0.5
+pixel sphere between two centres); a material that paints no texel is
+warned about. A part built tilted (a tail at 35 degrees) voxelises to a
+stair of cubes; build it axis-aligned and tilt it in a pose. A box model on the game's
 lattice is easiest built as the hatchling is: a `cube(ox, oy, oz, w, h,
 d)` helper in geometry pixels, each part grown a third of a pixel so
 touching bones fuse into one piece (grown upward only at the feet, or
@@ -725,22 +759,47 @@ shows, because it is a promise about the model as built and a pose is a
 view of it; a promise about a pose names it, `assert clearance(hand,
 face) > 0.02, "the wave clears the face", pose=reach` (a bare word or a
 string), and is judged with the program evaluated in that pose, on every
-`check` and `render`. A pose that is not defined is a warning and the
-assert is never tested. A used library's asserts run with it and are
-reported with the library's path.
+`check` and `render`. Inside such an assert a query on a step under
+other joints (`bottom(paw)`, `clearance(wrist, base)`, `at(foot,
+"sole")`) measures the step where the pose puts it, through every joint
+above it, so a foot-on-the-floor promise is `assert abs(at(dog,
+"sole")[1]) < 0.01, pose=walk_a` or `assert bottom(paw_fl) < 0.01,
+pose=walk_a` alike; outside an assert a step's own queries stay in its
+own frame, since geometry is built there. `check` prints every passing
+assert with its numbers too, so how close a promise came is on the
+terminal. A pose that is not defined is a warning and the assert is
+never tested. A used library's asserts run with it and are reported
+with the library's path.
 
-The queries that make it useful: `pieces(shape, resolution=64)` is the
-number of separate pieces the shape meshes into at that grid, as the
-report's Pieces row counts them (it meshes the shape, so it costs a
-moment; a whole scene wants the report instead); `clearance(a, b)` is
+The queries that make it useful: `pieces(shape, resolution)` is the
+number of separate pieces the shape meshes into at that many cells on
+its longest side, the program's `set grid` when none is given (64
+without one), as the report's Pieces row counts them (it meshes the
+shape, so it costs a moment; a whole scene wants the report instead; a
+count at 64 cells bridges a gap a finer grid opens, which is how a
+chair's floating back once passed); `clearance(a, b)` is
 the smallest gap between two surfaces, negative by how deep they overlap,
 zero when they touch, sampled from the fields at twelve points per side
 of each shape's box and then tightened, so it is exact for parts that
 face each other and can miss a feature narrower than a twelfth of the
 part. Measure parts rather than the whole model: `clearance(handle,
 body)`, not `clearance(handle, model)` (the handle is in the model, so
-that is zero). The bound queries (`width`, `tall`, `depth`, `top`,
-`bottom`, `height`) and the anchors (`at`) are the rest.
+that is zero). `void(region, shape)` is 1 when the region holds no
+solid of the shape: `assert void(cavity, mug)` promises nothing pokes
+into the cup (the mug example's handle once reached inside it), and
+the same form promises a hole goes through or a slot stays open, with
+the region the shape you subtracted or a box you name for it.
+`overlap(a, b)` is the volume two parts share, zero when they only
+touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
+rather than sunk into it, and `assert overlap(handle, body) > 0.001`
+says a handle is joined to its wall, not just touching. `inside(a,
+b)` is the fraction of a's volume inside b: `== 1` for a spring that
+must stay in its housing, `== 0` for a handle that must stay out of the
+cavity. All three sample a lattice (24 cells along the longest side,
+and `void` walks the surface too, so a pin thinner than the lattice is
+caught), so measure parts, not a scene. The bound queries (`width`,
+`tall`, `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are
+the rest.
 
 ## Limits worth knowing
 

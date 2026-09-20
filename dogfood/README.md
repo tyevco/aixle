@@ -44,6 +44,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 7 | Fox (Bedrock entity) | [`round-7/fox.aix`](round-7/fox.aix) | [report](round-7/fox.report.md) | eleven cubes, eight bones, three clips exported in 11 renders; decals reached no face texel and a sitting pose was judged to tip on its tail tip, both fixed |
 | 7 | Jack-in-the-box | [`round-7/jack.aix`](round-7/jack.aix) | [report](round-7/jack.report.md) | axis-joint lid and crank, a clown on a helix spring, in seven renders; the sheets re-meshed the shut box a dozen times a render and no bar said one-shot, both fixed |
 | 7 | Quadcopter | [`round-7/drone.aix`](round-7/drone.aix) | [report](round-7/drone.report.md) | eleven nested joints and four clips in 14 renders; a gimbal ten pixels wide could not be judged on any sheet and a lifted pose was told it would tip over, both fixed |
+| 8 | Robot arm with a gripper | [`round-8/arm.aix`](round-8/arm.aix) | [report](round-8/arm.report.md) | six joints, a pin-to-pin cylinder and five promises in ten renders; a pose assert on a nested wrist measured the rest position and a fingers-only pose rested the arm mid-clip, both fixed |
+| 8 | Walking dog (Bedrock entity) | [`round-8/dog.aix`](round-8/dog.aix) | [report](round-8/dog.report.md) | nine bones, a walk with an unhitched seam and eighteen promises in nine renders; eyes smaller than a texel vanished from the texture and a decal beside the wrong part painted nothing, both silent, both now warned |
+| 8 | Pocket multi-tool | [`round-8/multitool.aix`](round-8/multitool.aix) | [report](round-8/multitool.report.md) | four axis joints and raised lettering right first time in eleven renders; `pieces()` at its default flipped a promise the report contradicted, and a two-key flick could not settle, both fixed |
+| 8 | Ferris wheel scene | [`round-8/ferris.aix`](round-8/ferris.aix) | [report](round-8/ferris.report.md) | eight level gondolas on a turning wheel in seven renders; a name could not be built from a def's index and the strips were two thirds of a four-minute render, both fixed |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -125,6 +129,31 @@ done: a default import resolution that follows the grid (the grid is a setting
 of the program being evaluated), an offline viewer (three.js is loaded from a CDN by design); the
 drone's report of a joint step turned by the pose getting no `posed`
 line did not reproduce on its final program (the line is there).
+
+Round 8 was four rigs with promises (a six-axis arm with a parallel
+gripper, a walking dog for Bedrock, a folding multi-tool, a Ferris
+wheel scene), briefed on the three things round 7 had left undone and
+since built: per-pose asserts, an animation eased everywhere but its
+ends, and a focus close-up with the rest of the model faint. All three
+did what the docs said, and every agent used them without a doc gap
+that stopped it. What the round found was underneath them: a pose
+assert on a step under other joints measured the rest position, so a
+promise passed for the wrong reason; a pose rests every joint it does
+not name, so an animation through a fingers-only pose swung the arm
+home between keys; `pieces()` at its default 64 cells bridged a gap the
+report's grid opened, and the same default was hiding a floating chair
+back in an example; a two-key one-shot with `ease_ends=0` had nothing
+left to ease; each strip frame was fitted by its own camera, so a
+swing read as a zoom and a slide stood still; decals smaller than a
+texel or beside the wrong part painted nothing, silently; and a Ferris
+wheel's two strips were two thirds of a four-minute render. Their
+reports' three changes each are answered below. Not done: a collision
+warning for two rigid parts passing through each other in a pose (a
+negative clearance between siblings, proposed by the arm's report), a
+`pieces()` failure that names the loose piece, decal regions marked as
+such on the steps sheet, and a focus strip that both holds its camera
+and keeps a far-travelling part large (one camera per strip was the
+choice, since a fixed frame is what makes motion readable).
 
 ## What each round changed
 
@@ -266,6 +295,34 @@ lift, `move` after `scale` about the pivot, `at()` on a nested joint's
 step, steps inside a `def`, loops and ease, full-turn keys, a bare call
 as a statement, `--quick --no-poses`, the Bedrock lattice recipe and the
 entity's keyframe conventions, and which Roblox budget a rig gets.
+
+**Round 8** (rigs with promises: arm, dog, multi-tool, Ferris wheel):
+inside a pose assert a query on a step under other joints (`bottom`,
+`clearance`, `at`, the sizes) measures the step where the pose puts it,
+through every joint above, while geometry built from a query keeps its
+own frame; `pose("hold", from="reach", ...)` starts a pose from another;
+`pieces()` counts at the program's `set grid` unless given a resolution
+(which exposed the table example's floating chair back, now attached);
+a two-key clip with `ease_ends=0` is warned about, with the hold-key
+idiom; one camera fits every frame of a strip and of the pose sheet, so
+a swing is motion and a slide moves; each cross-section is framed on
+its own two axes; a feature a pixel or two wide keeps a light outline
+instead of being painted black by a dark one; `check` prints every
+passing assert with its numbers, prefixes each `posed` line with its
+step, prints an `anchors posed` line under a pose, gives the output's
+posed surface size, and prints a hair below the floor as a hair; a
+decal whose region touches none of the surface is warned about at
+`check`, and a material that paints no Bedrock texel at the export; a
+focused or posed sheet's title names the pose; a pose thumbnail says
+which joints the pose moves; the posed watertight row no longer
+prescribes a grid nudge; the Roblox row counts the clips; `"gondola_" +
+i` joins a string and a number, and `str()` exists; `--no-anims`,
+`--anim NAME` and `--no-asserts` cut a big rig's loop; an error's
+builtin prefix is no longer doubled; docs for the tail's axes, a
+sliding joint's pivot, declaring "rest", a focus title being the frame,
+a texel-centre decal, a tilted Bedrock part, `at()` on a top-level
+joint, `loop=0`, copies that must move on their own, and `helix()` into
+`curve()`.
 
 ## Running a round
 

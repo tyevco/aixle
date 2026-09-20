@@ -22,6 +22,8 @@ describe("asserts", () => {
   it("check prints each failed assert with its numbers and exits with a failure; a passing program says so", { timeout: 60000 }, () => {
     const out = cli("check", "examples/table.aix");
     expect(out).toMatch(/\nasserts: 3 pass\n$/);
+    // A passing promise prints its numbers too (round 8: the gap between closed fingers was only in report.json).
+    expect(out).toMatch(/\nassert \(line 34\) holds: pieces\(chair\(\)\) == 1 is 1 == 1: a chair is one piece\n/);
     let failed = "";
     try {
       cli("check", "tests/fixtures/broken_promise.aix");

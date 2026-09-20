@@ -1,0 +1,127 @@
+# A walking dog as a Minecraft Bedrock entity. One unit is a block, sixteen
+# pixels; every part is a box on the pixel lattice so it voxelises cleanly.
+# Stands on four paws on y = 0, faces +z, about 1.2 blocks long.
+set minecraft 16
+set minecraft_entity 1
+set grid 128
+set azimuth -40
+set elevation 20
+set zoom 1.15
+
+px = 1 / 16
+# A box from its low corner (x0, y0, z0) and size (w, h, d), all in pixels.
+def pbox(x0, y0, z0, w, h, d) = box(w * px, h * px, d * px) | move((x0 + w / 2) * px, (y0 + h / 2) * px, (z0 + d / 2) * px)
+
+coat = material("#c9a97a", rough=0.8)
+cream = material("#f0e6c8", rough=0.8)
+collar_red = material("#c8342a", rough=0.6)
+tag_brass = material("brass")
+dark = material("#1a1a1c", rough=0.4)
+
+# Body: 8 wide, 6 tall, 8 deep, its underside at 5 px. Chest and belly are a cream decal.
+body_box = pbox(-4, 5, -4, 8, 6, 8) | paint(coat)
+chest_region = pbox(-5, 4, 1, 10, 5, 5)
+body_part = body_box | decal(chest_region, cream)
+  | anchor("rump", 0, 5 * px, -4 * px)
+  | anchor("core", 0, 8 * px, 0)
+
+# Legs: 3 px square, from 1 px up to 6 px (a pixel into the body), each on a
+# hip or shoulder pivot at 5.5 px; a 2 px paw under each, a pixel forward.
+leg_fl_box = pbox(1, 1, 1, 3, 5, 3) | paint(coat)
+paw_fl = pbox(1, 0, 1, 3, 2, 4) | paint(cream) | anchor("sole_fl", 2.5 * px, 0, 3 * px)
+leg_fl = joint(leg_fl_box + paw_fl, "leg_fl", 2.5 * px, 5.5 * px, 2.5 * px)
+
+leg_fr_box = pbox(-4, 1, 1, 3, 5, 3) | paint(coat)
+paw_fr = pbox(-4, 0, 1, 3, 2, 4) | paint(cream) | anchor("sole_fr", -2.5 * px, 0, 3 * px)
+leg_fr = joint(leg_fr_box + paw_fr, "leg_fr", -2.5 * px, 5.5 * px, 2.5 * px)
+
+leg_bl_box = pbox(1, 1, -4, 3, 5, 3) | paint(coat)
+paw_bl = pbox(1, 0, -4, 3, 2, 4) | paint(cream) | anchor("sole_bl", 2.5 * px, 0, -2 * px)
+leg_bl = joint(leg_bl_box + paw_bl, "leg_bl", 2.5 * px, 5.5 * px, -2.5 * px)
+
+leg_br_box = pbox(-4, 1, -4, 3, 5, 3) | paint(coat)
+paw_br = pbox(-4, 0, -4, 3, 2, 4) | paint(cream) | anchor("sole_br", -2.5 * px, 0, -2 * px)
+leg_br = joint(leg_br_box + paw_br, "leg_br", -2.5 * px, 5.5 * px, -2.5 * px)
+
+# Head: a neck rising from the body's front, a 6 px cube skull, a muzzle,
+# two ears on their own hinges. Eyes, nose, collar and tag are decals, each
+# region a whole texel on the pixel lattice so the Bedrock texture catches it
+# (a sphere smaller than a texel painted the sheet and missed the texture).
+neck = pbox(-2, 7, 3, 4, 5, 3) | paint(coat)
+skull = pbox(-3, 10, 4, 6, 6, 6) | paint(coat) | anchor("chin", 0, 10 * px, 7 * px)
+muzzle = pbox(-2, 10, 9, 4, 3, 4) | paint(coat)
+eye_l = pbox(1, 13, 9, 1, 1, 2)
+eye_r = pbox(-2, 13, 9, 1, 1, 2)
+nose = pbox(-1, 11, 12, 2, 1, 2)
+collar_region = box(0.4, 2 * px, 0.4) | move(0, 9 * px, 4.5 * px)
+tag_region = pbox(-1, 7, 5, 2, 1, 2)
+
+ear_l_box = pbox(1, 15, 5, 2, 3, 2) | paint(coat)
+ear_l = joint(ear_l_box, "ear_l", 2 * px, 15.5 * px, 6 * px)
+ear_r_box = pbox(-3, 15, 5, 2, 3, 2) | paint(coat)
+ear_r = joint(ear_r_box, "ear_r", -2 * px, 15.5 * px, 6 * px)
+
+head_part = (neck + skull + muzzle)
+  | decal(eye_l + eye_r, dark)
+  | decal(nose, dark)
+  | decal(collar_region, collar_red)
+  | decal(tag_region, tag_brass)
+head = joint(head_part + ear_l + ear_r, "head", 0, 7.5 * px, 4 * px)
+
+# Tail: a 2 px bar built pointing -z from its root, tilted up 35 degrees, then
+# carried to the rump. Its joint is about x for up and down; a wag is a turn
+# about y in the same pose triple.
+tail_bar = pbox(-1, -1, -5, 2, 2, 6) | rotate(x=35) | move(0, 10 * px, -4 * px) | paint(coat)
+tail = joint(tail_bar, "tail", 0, 10 * px, -4 * px)
+
+dog_parts = body_part + leg_fl + leg_fr + leg_bl + leg_br + head + tail
+dog = joint(dog_parts, "body", 0, 8 * px, 0)
+show dog
+
+# Poses. Signs: a leg hanging down swings forward (+z) with a negative x
+# angle; the body and head point +z, so nose-up is a negative x angle.
+pose("rest")
+pose("sit", body=xform(rotate=[-35, 0, 0], move=[0, -0.118, 0]),
+     leg_bl=[-45, 0, 0], leg_br=[-45, 0, 0],
+     leg_fl=[35, 0, 0], leg_fr=[35, 0, 0],
+     head=[15, 0, 0], tail=[-10, 0, 0])
+pose("beg", body=xform(rotate=[-55, 0, 0], move=[0, -0.12, 0]),
+     leg_bl=[-30, 0, 0], leg_br=[-30, 0, 0],
+     leg_fl=[-110, 0, 0], leg_fr=[-110, 0, 0],
+     head=[55, 0, 0], ear_l=[-15, 0, 0], ear_r=[-15, 0, 0], tail=[30, 0, 0])
+# The walk: diagonal legs swing together, the body dips when the legs are
+# spread, the head bobs at the passing phases, the tail wags about y.
+pose("walk_a", leg_fl=[-25, 0, 0], leg_br=[-25, 0, 0], leg_fr=[25, 0, 0], leg_bl=[25, 0, 0],
+     body=xform(move=[0, -0.02, 0]), tail=[0, 20, 0])
+pose("walk_b", head=[6, 0, 0], tail=[0, 0, 0])
+pose("walk_c", leg_fl=[25, 0, 0], leg_br=[25, 0, 0], leg_fr=[-25, 0, 0], leg_bl=[-25, 0, 0],
+     body=xform(move=[0, -0.02, 0]), tail=[0, -20, 0])
+pose("walk_d", head=[6, 0, 0], tail=[0, 0, 0])
+pose("look_up", head=[-30, 0, 0], ear_l=[-20, 0, 0], ear_r=[-20, 0, 0])
+pose("wag_l", tail=[0, 30, 0])
+pose("wag_r", tail=[0, -30, 0])
+
+animation("walk", ["walk_a", "walk_b", "walk_c", "walk_d", "walk_a"], seconds=1, ease=1, ease_ends=0)
+animation("wag", ["wag_l", "wag_r", "wag_l"], seconds=0.6, ease=1, ease_ends=0)
+animation("sit_down", ["rest", "sit"], seconds=1, loop=0, ease=1)
+animation("beg", ["sit", "beg"], seconds=0.8, loop=0, ease=1)
+
+# Promises.
+assert tall(dog) < 1.25, "stands under 1.25"
+assert pieces(dog) == 1, "one piece"
+assert abs(at(dog, "sole_fl")[1]) < 0.01, "front left paw on the floor"
+assert abs(at(dog, "sole_fr")[1]) < 0.01, "front right paw on the floor"
+assert abs(at(dog, "sole_bl")[1]) < 0.01, "back left paw on the floor"
+assert abs(at(dog, "sole_br")[1]) < 0.01, "back right paw on the floor"
+assert at(dog, "core")[1] < 0.45, "sitting lowers the body", pose=sit
+assert at(dog, "rump")[1] < 0.12, "sitting puts the rump near the floor", pose=sit
+assert at(dog, "sole_fl")[1] > at(dog, "chin")[1], "begging raises the front paws above the chin", pose=beg
+assert at(dog, "sole_fr")[1] > at(dog, "chin")[1], "both of them", pose=beg
+assert at(dog, "sole_fl")[1] > -0.03, "no paw under the floor", pose=walk_a
+assert at(dog, "sole_br")[1] > -0.03, "no paw under the floor", pose=walk_a
+assert at(dog, "sole_fr")[1] > -0.03, "no paw under the floor", pose=walk_a
+assert at(dog, "sole_bl")[1] > -0.03, "no paw under the floor", pose=walk_a
+assert at(dog, "sole_fl")[1] > -0.03, "no paw under the floor", pose=walk_c
+assert at(dog, "sole_br")[1] > -0.03, "no paw under the floor", pose=walk_c
+assert at(dog, "sole_fr")[1] > -0.03, "no paw under the floor", pose=walk_c
+assert at(dog, "sole_bl")[1] > -0.03, "no paw under the floor", pose=walk_c

@@ -103,6 +103,16 @@ describe("views", () => {
     expect(dist(corner, INK.view)).toBeLessThan(dist(centre, INK.view));
     expect(renderSlices(sphere, boxInfo, 80).get(4 + 12, 34 + 68)).not.toBe(corner);
   });
+  it("frames each cross-section on its own two axes", () => {
+    // A long flat bar: its end cut is 0.4 wide, and framed on the bar's 4-unit length it was a sliver (round 8).
+    const bar = P.box(4, 0.4, 0.4);
+    const slices = renderSlices(bar, { name: "bar", bounds: bar.bounds }, 100);
+    // In the X cut (the first tile) the bar spans 0.4 / (0.4 * 1.15) of the tile: a pixel 40% out from the centre is inside.
+    expect(slices.get(4 + 50 + 40, 34 + 50)).not.toBe(INK.view);
+    expect(slices.get(4 + 50 + 40, 34 + 50)).not.toBe(INK.grid);
+    // In the Y cut (the second tile) the length runs along x and fills the tile, the 0.4 depth a tenth of it.
+    expect(slices.get(4 + 104 + 50, 34 + 50 + 20)).not.toBe(slices.get(4 + 104 + 50, 34 + 50));
+  });
   it("composes the sheet, slices, steps and turntable at the expected sizes", () => {
     const sheet = renderSheet(mesh, { ...info, triangles: 10, cellSize: 0.1, warnings: 1 }, 100);
     expect([sheet.width, sheet.height]).toEqual([212, 242]);

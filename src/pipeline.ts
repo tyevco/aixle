@@ -41,6 +41,10 @@ export interface RunOptions {
   quick?: boolean;
   /** Write poses.png and the animation strips (default true when the model has joints). */
   poses?: boolean;
+  /** false skips the animation strips (the pose sheet stays); a list draws only those animations. */
+  animations?: boolean | string[];
+  /** false skips the program's asserts. */
+  asserts?: boolean;
   /** Cells along the longest side of the model; overrides a `set grid` in the file. Default 128. */
   grid?: number;
   /** Used only when neither `grid` nor the file's `set grid` is given. */
@@ -513,7 +517,7 @@ function cavitiesRow(physics: Physics, cellSize: number): string {
  * A tally per step follows, so one construct carrying every edge shows
  * in one read.
  */
-export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[] }[] = []): string {
+export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[] }[] = [], posed = false): string {
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
   const tally = new Map<string, number>();
   let planar = 0;
@@ -540,7 +544,9 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
     return `${cl.count} at (${cl.at.map(fmt).join(", ")})${label}${plane}`;
   });
   const byStep = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, c]) => `'${n}' ${c}`).join(", ");
-  const planeNote = planar ? " Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part or the grid by a fraction of a cell, or change the radius a little." : "";
+  // In a pose the sample planes fall where the pose puts the part, so a nudge that clears them at rest need not hold
+  // and one that clears them here need not hold at rest (round 8: a lug blamed on a plane in two poses).
+  const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : " Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part or the grid by a fraction of a cell, or change the radius a little.") : "";
   const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
   return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${planeNote}`;
 }
@@ -631,8 +637,8 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName });
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
 }
 
 /**
@@ -672,17 +678,18 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const resolver = importResolver(sourceName, log);
   const program = parse(source);
   const modules = moduleResolver(sourceName);
-  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName }));
+  const skipAsserts = opts.asserts === false;
+  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, skipAsserts }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
-  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose }) : rest;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts }) : rest;
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
   // asserts for a pose share it.
   const evalCache = new Map<string, Evaluation>();
   const evalAt = (joints: Record<string, JointPose>, poseName?: string): Evaluation => {
     const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
     let ev = evalCache.get(key);
-    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name }); evalCache.set(key, ev); }
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts }); evalCache.set(key, ev); }
     return ev;
   };
   // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"
@@ -821,7 +828,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     const focusName = opts.focus ?? (typeof evaluation.settings.focus === "string" ? evaluation.settings.focus : undefined);
     let focusStep = false;
     let frame = trueBounds ?? bounds;
-    let shownName = evaluation.outputName;
+    // The sheet's title names the pose it shows (round 8: two focus renders of a wheel read alike).
+    let shownName = shownJoints ? `${evaluation.outputName} in pose ${shownPose}` : evaluation.outputName;
     // The focused step as it sits in the output (through the joints and moves above it), for the close-up's split
     // into the part itself and the ghost of everything else the frame holds.
     let focusShape: Shape3 | undefined;
@@ -856,7 +864,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const grow = Math.max(...boundsSize(fb)) * 0.08;
         frame = { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] };
         focusShape = (output && st ? placedShape(output, fs) : undefined) ?? fs;
-        shownName = `${evaluation.outputName} → ${focusName}`;
+        shownName = `${shownName} → ${focusName}`;
       } else warnings.push(`focus ${focusName}: no such step or object; framing the whole model`);
     }
     // A focused sheet is a close-up: the model clipped to the frame and re-extracted at the frame's own cell, so a
@@ -968,6 +976,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       write("model.geo.json", JSON.stringify(bedrock.geometry, null, 2) + "\n");
       write("model.geo.png", bedrock.texture.toPng());
       warnings.push(...bedrock.warnings);
+      // A material the mesh shows but no face texel took is a decal smaller than a texel or off the lattice (round 8:
+      // two 0.035 eyes painted the sheet and reached no texel, found only by reading the PNG texel by texel).
+      if (mesh) for (const m of mesh.materials) if (!(bedrock.painted[m.name] > 0)) warnings.push(`minecraft: material "${m.name}" paints no texel of model.geo.png; a decal region must cover a texel centre (about a pixel across, on the ${bedrock.pixelsPerUnit}-pixel lattice), or the part it is on is thinner than a voxel`);
       // The animations as Bedrock keyframes on the joint bones, when the model has both.
       if (clips.length && bedrock.joints.length) write("model.animation.json", JSON.stringify(toBedrockAnimations(clips, name, bedrock.joints, { entity }), null, 2) + "\n");
       // A voxel is the geometry's cell: a part thinner than one is lost there whatever the render's grid. A whole
@@ -1014,7 +1025,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       time("poses", () => write("poses.png", renderPoses(poseShapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation, cache, !!(focusName && focusStep), poseGhostAt).toPng()));
       // A quick pass is for the geometry: the strips wait for the full render (round 7: 12 of a quick pass's 15 s).
       if (opts.quick) log(`quick pass: ${evaluation.animations.length} animation strip${evaluation.animations.length === 1 ? "" : "s"} skipped; the full render draws them`);
-      else for (const a of evaluation.animations) {
+      else if (opts.animations === false) log(`${evaluation.animations.length} animation strip${evaluation.animations.length === 1 ? "" : "s"} skipped (--no-anims)`);
+      else for (const a of evaluation.animations.filter((a) => !Array.isArray(opts.animations) || opts.animations.includes(a.name))) {
         const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
         time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(poseShapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease, easeEnds: a.easeEnds, loop: a.loop }, cache, poseGhostAt).toPng()));
       }
@@ -1105,7 +1117,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
+      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList, !!shownJoints) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),

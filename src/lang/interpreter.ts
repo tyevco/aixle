@@ -7,7 +7,8 @@
 import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
-import { union, scale as scaleShape, allJoints, joint as jointShape } from "../sdf/ops.js";
+import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
+import { regionTouches } from "../sdf/measure.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -55,6 +56,8 @@ export interface EvalOptions {
   jointPoses?: Record<string, JointPose>;
   /** The name of that pose, so an `assert ..., pose=name` knows whether this is its evaluation. */
   poseName?: string;
+  /** Skip every assert (`--no-asserts`): a pieces() promise on a big rig can cost more than the render. */
+  skipAsserts?: boolean;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -135,6 +138,14 @@ export function assertLine(a: AssertResult): string {
   return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
 }
 
+/** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces"]);
+
+/** One line for a passing assert with the numbers it saw, for `check`. */
+export function assertPassLine(a: AssertResult): string {
+  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+}
+
 const MAX_LOOP = 20000;
 const MAX_DEPTH = 64;
 
@@ -166,6 +177,13 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
   const settings: Settings = {};
+  // Whether this evaluation is a pose: any joint given a pose that is not rest.
+  const posed = Object.values(options.jointPoses ?? {}).some((j) => j.angles.some((v) => v !== 0) || j.move.some((v) => v !== 0) || j.scale.some((v) => v !== 1));
+  // Inside an assert's test, where a query in a pose reads a step where the pose put it; geometry built from a
+  // query keeps the step's own frame, since it is built inside that frame.
+  let assertDepth = 0;
+  // The shown shape, set once the program has run; a root for placing a measured step.
+  let output: Shape3 | undefined;
   const warnings: string[] = [...(program.warnings ?? [])];
   const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
@@ -240,6 +258,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       }
     }
     if (typeof a === "string" && typeof b === "string" && op === "+") return a + b;
+    // A name per copy from a def's index: "gondola_" + i (round 8).
+    if (op === "+" && ((typeof a === "string" && typeof b === "number") || (typeof a === "number" && typeof b === "string"))) return String(a) + String(b);
     if (Array.isArray(a) && Array.isArray(b) && op === "+") return [...a, ...b];
     if (isShape3(a) && isShape3(b)) {
       switch (op) {
@@ -315,8 +335,19 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const nameArg = values.find((v) => !v.name);
     if (!nameArg || typeof nameArg.value !== "string") throw new RuntimeError(`pose(): the first argument is the pose's name, a string; then joint = [x, y, z] degrees or joint = xform(...) per joint`, line);
     const joints: Record<string, JointPose> = {};
+    // `from="reach"` starts from another pose's joints, so a grip closing at the end of a reach is one line rather
+    // than the reach's joints written again (round 8: a pose rests every joint it does not name, so an animation
+    // through a fingers-only pose swung the arm back to rest between its keys).
+    const from = values.find((v) => v.name === "from");
+    if (from) {
+      if (typeof from.value !== "string") throw new RuntimeError(`pose("${nameArg.value}"): from= names a pose defined above, as a string`, line);
+      const base = poses.find((p) => p.name === from.value);
+      if (!base && from.value !== "rest") throw new RuntimeError(`pose("${nameArg.value}"): from="${from.value}" names no pose defined above${poses.length ? ` (poses so far: ${poses.map((p) => p.name).join(", ")})` : ""}`, line);
+      if (base) for (const [j, jp] of Object.entries(base.joints)) joints[j] = { angles: [...jp.angles], move: [...jp.move], scale: [...jp.scale] };
+      for (const key of [...singles]) if (base && key.startsWith(`${base.name}:`)) singles.add(`${nameArg.value}:${key.slice(base.name.length + 1)}`);
+    }
     for (const v of values) {
-      if (!v.name) continue;
+      if (!v.name || v.name === "from") continue;
       const a = v.value;
       // One number is an angle about the joint's axis (a joint declared with axis=); it is checked against the joint below.
       if (typeof a === "number") { joints[v.name] = { ...REST_POSE, angles: [a, 0, 0] }; singles.add(`${nameArg.value}:${v.name}`); continue; }
@@ -438,7 +469,22 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
-    return callBuiltin(builtin, values, line);
+    // In a pose, a query measures a step where the pose put it: the shape is read through the joints and transforms
+    // above it in the output, or in the newest step that holds it (round 8: clearance on a nested wrist in a tucked
+    // pose measured the rest position and the promise passed for the wrong reason).
+    if (POSED_QUERIES.has(callee) && posed && assertDepth > 0) {
+      const roots = [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()];
+      for (const v of values) if (isShape3(v.value)) v.value = placedUnder(roots, v.value);
+    }
+    // pieces() counts at the program's grid unless told otherwise, so a promise made at rest and the report's Pieces
+    // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
+    if (callee === "pieces" && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
+    const result = callBuiltin(builtin, values, line);
+    // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
+    // beside the wrong part).
+    if (callee === "decal" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value) && !regionTouches(values[0].value, values[1].value))
+      warnings.push(`line ${line}: decal(): the region \`${exprText(args[1].value)}\` touches none of the shape's surface, so it paints nothing; the region must cross the surface (a sphere centred on the skin, a box through it)`);
+    return result;
   }
 
   function callUser(fn: UserFn, args: Arg[], scope: Scope, line: number): Value {
@@ -471,7 +517,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       try {
         return ov.impl(bound.values, bound.rest);
       } catch (err) {
-        throw new RuntimeError(`${b.name}(): ${(err as Error).message}`, line);
+        const msg = (err as Error).message;
+        throw new RuntimeError(msg.startsWith(`${b.name}(): `) ? msg : `${b.name}(): ${msg}`, line);
       }
     }
     // Report only the overloads whose first parameter accepts the first argument (a shape versus a
@@ -670,17 +717,23 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "assert": {
+        if (options.skipAsserts) return;
         // A promise about a pose is tested in that pose's evaluation and only noted in any other.
         if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true }); return; }
         // A comparison is evaluated side by side, so a failure can say what the two numbers were.
         const t = stmt.test;
         let value: Value, detail: string | undefined;
+        assertDepth++;
+        try {
         if (t.type === "binary" && (COMPARE_OPS as readonly string[]).includes(t.op)) {
           const a = evalExpr(t.left, scope), b = evalExpr(t.right, scope);
           value = compare(t.op, a, b, t.line);
           const show = (v: Value) => (typeof v === "number" ? String(Number(v.toPrecision(4))) : typeof v === "string" ? JSON.stringify(v) : typeName(v));
           detail = `${show(a)} ${t.op} ${show(b)}`;
         } else value = evalExpr(t, scope);
+        } finally {
+          assertDepth--;
+        }
         if (typeof value !== "number") throw new RuntimeError(`assert tests a number (a comparison such as width(m) < 5, or 1 and 0), not a ${typeName(value)}`, stmt.line);
         let message: string | undefined;
         if (stmt.message) {
@@ -697,7 +750,6 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let showDeps: Set<string> = new Set();
   for (const stmt of program.body) exec(stmt, global, true);
 
-  let output: Shape3 | undefined;
   let outputName = "model";
   let objects: SceneObject[] = [];
   const roots = new Set<string>();
@@ -728,6 +780,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     for (const a of asserts)
       if (a.pose && a.pose !== "rest" && !poses.some((p) => p.name === a.pose)) warnings.push(`assert (line ${a.line}) is for pose "${a.pose}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}; it is never tested`);
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
+    for (const a of animations) {
+      // Two keys are both ends: ease_ends=0 leaves nothing eased (round 8: a flick expected to settle ran linear).
+      if (a.poses.length === 2 && a.easeEnds === 0 && a.ease > 0) warnings.push(`animation "${a.name}" (line ${a.line}): with two keys both are ends, so ease_ends=0 leaves nothing for ease=${a.ease} to do; hold the last pose as a third key (["${a.poses[0]}", "${a.poses[1]}", "${a.poses[1]}"], times=[0, t, seconds]) to leave at once and settle, or drop ease_ends`);
+    }
     for (const a of animations)
       for (const pn of new Set(a.poses))
         if (pn !== "rest" && !poses.some((p) => p.name === pn)) warnings.push(`animation "${a.name}" (line ${a.line}) uses pose "${pn}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}`);

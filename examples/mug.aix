@@ -1,8 +1,14 @@
 # A coffee mug: a rounded cup, hollowed and opened at the top, a torus handle.
+# Built standing on y = 0, so the cavity step is where the cup's void is and can be promised empty.
 r = 1.2
-body = cylinder(r=r, h=2.4, round=0.12)
-cavity = cylinder(r - 0.14, 2.4) | move(0, 0.2, 0)
+body = cylinder(r=r, h=2.4, round=0.12) | move(0, 1.2, 0)
+cavity = cylinder(r - 0.14, 2.4) | move(0, 1.4, 0)
 cup = body - cavity
-handle = torus(0.75, 0.16) | rotate(x=90) | move(r + 0.45, 0.1, 0)
-mug = (cup + handle) | paint("porcelain") | ground()
+# The handle is a ring through the wall with the part inside the cup cut away, so it joins at two points and
+# nothing pokes into the cup (it once did: the ring reached 0.32 inside).
+handle = (torus(0.75, 0.16) | rotate(x=90) | move(r + 0.45, 1.3, 0)) - cavity
+mug = (cup + handle) | paint("porcelain")
 show mug
+
+assert void(cavity, mug), "nothing pokes into the cup"
+assert overlap(handle, body) > 0.001, "the handle is joined to the wall"

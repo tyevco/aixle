@@ -442,6 +442,29 @@ describe("clearance", () => {
   });
 });
 
+describe("void, overlap and inside", () => {
+  it("find solid in a region, the shared volume of two parts, and how much of one lies in another", () => {
+    const cup = O.difference(P.cylinder(1, 2), O.move(P.cylinder(0.85, 2), 0, 0.2, 0));
+    const cavity = O.move(P.cylinder(0.85, 2), 0, 0.2, 0);
+    // The cup's wall holds nothing in the cavity; a handle reaching to x = 0.5 does.
+    expect(C_.isVoid(cavity, cup)).toBe(true);
+    const intruder = O.move(P.box(0.6, 0.2, 0.2), 0.8, 0.5, 0);
+    expect(C_.isVoid(cavity, O.union([cup, intruder]))).toBe(false);
+    // A thin pin through the void, thinner than the lattice, is still caught through the surface.
+    const pin = O.move(P.box(2, 0.01, 0.01), 0, 0.5, 0);
+    expect(C_.isVoid(cavity, O.union([cup, pin]))).toBe(false);
+    expect(C_.isVoid(P.empty(), cup)).toBe(true);
+    // Two unit boxes overlapping by half share half a unit of volume; touching, none.
+    expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);
+    expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 1, 0, 0))).toBe(0);
+    expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 3, 0, 0))).toBe(0);
+    // A small box wholly inside a big one is all inside; half out is half.
+    expect(C_.insideFraction(P.box(0.5, 0.5, 0.5), P.box(2, 2, 2))).toBe(1);
+    expect(C_.insideFraction(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);
+    expect(C_.insideFraction(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 5, 0, 0))).toBe(0);
+  });
+});
+
 describe("curves", () => {
   it("measures the tightest bend and notes a tube thicker than it", () => {
     expect(C.minBendRadius(C.bezierCurve([[0, 0, 0], [1, 0, 0], [3, 0, 0], [4, 0, 0]]))).toBe(Infinity);

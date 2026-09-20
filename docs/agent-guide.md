@@ -30,8 +30,14 @@ the inside is cut open.
    `report.md` for the numbers (does it stand, is it one piece).
 5. **Say what the model promises**, with `assert`: one piece, a gap
    that must stay open, a size that must hold (`assert pieces(model) ==
-   1`, `assert clearance(handle, rim) > 0.05`). `check` fails when one is
-   broken and says by how much, so the next edit cannot silently undo
+   1`, `assert clearance(handle, rim) > 0.05`), a void that must stay
+   empty and parts that must not sink into each other (`assert
+   void(cavity, mug)`, `assert overlap(frog, pad) < 0.001`, `assert
+   inside(spring, box) == 1`), and for a rig a promise
+   about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
+   in a pose assert a step is measured where the pose puts it). `check`
+   fails when one is broken and says by how much, prints every passing
+   promise with its numbers, so the next edit cannot silently undo
    what the pictures once showed.
 6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
@@ -46,6 +52,7 @@ npx aixle render model.aix --quick         the sheet only, small grid, fast; --w
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
+npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises: both for a big rig's loop
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
 npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)

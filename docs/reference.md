@@ -441,11 +441,29 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.
 
     pieces(shape, resolution=64) -> number
 
 - `resolution`: cells on the longest side
+
+### void
+
+1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a hole that goes through, a slot a lid must not fill. Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught.
+
+    void(region, shape) -> number
+
+### overlap
+
+The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene.
+
+    overlap(a, b) -> number
+
+### inside
+
+The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. Sampled at 24 cells along a's longest side.
+
+    inside(a, b) -> number
 
 ### clearance
 
@@ -580,6 +598,12 @@ Square root.
 
     sqrt(x) -> number
 
+### str
+
+A number as text, for a name built from a def's index: str(3) is "3" ("gondola_" + i joins the same way).
+
+    str(x) -> string
+
 ### abs
 
 Absolute value.
@@ -688,14 +712,15 @@ Make a part turn about a pivot under poses: `joint(part, "elbow", x, y, z)` with
 
 ### pose
 
-Name a set of joint angles: `pose("wave", shoulder=[0, 0, 70], elbow=[0, 0, 40])`, degrees about x, y, z per joint, or one number for a joint declared with axis=. A joint can also move and scale: `pose("hop", body=xform(move=[0, 0.3, 0], scale=[1, 1.1, 1]))` (see xform under Assembly; scale is about the pivot, then the turn, then the move). Joints not named stay at rest. Every pose is drawn on `poses.png`; `set pose wave` makes the sheet and exports show it.
+Name a set of joint angles: `pose("wave", shoulder=[0, 0, 70], elbow=[0, 0, 40])`, degrees about x, y, z per joint, or one number for a joint declared with axis=. A joint can also move and scale: `pose("hop", body=xform(move=[0, 0.3, 0], scale=[1, 1.1, 1]))` (see xform under Assembly; scale is about the pivot, then the turn, then the move). Joints not named stay at rest; `from="reach"` starts from another pose's joints, so `pose("hold", from="reach", finger_l=xform(move=[0.03, 0, 0]))` is the reach with a finger closed. Every pose is drawn on `poses.png`; `set pose wave` makes the sheet and exports show it.
 
     pose(name, joint=[x, y, z], ...) -> string
     pose(name, joint=xform(rotate=[x, y, z], move=[dx, dy, dz], scale=[sx, sy, sz]), ...) -> string
+    pose(name, from="other", joint=..., ...) -> string
 
 ### animation
 
-A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. `times=[0, 0.2, 1.2]` puts each pose at its own second instead (the last is the length, so leave seconds out); `ease=1` slows to a stop at every pose (0 is linear, between is a blend), which the GLB carries as a few keys per segment; `ease_ends=0` leaves the first and last pose alone, so a loop runs through its seam. A rest pose is any pose with no angles, or the name "rest". Each animation gets a frame strip `anim_<name>.png`, and the viewer page plays them with loop, speed and a scrub bar.
+A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], seconds=1.2)`; keyframes are spaced evenly and interpolate linearly. `times=[0, 0.2, 1.2]` puts each pose at its own second instead (the last is the length, so leave seconds out); `ease=1` slows to a stop at every pose (0 is linear, between is a blend), which the GLB carries as a few keys per segment; `ease_ends=0` leaves the first and last pose alone, so a loop runs through its seam (a two-key clip has no pose between, so a one-shot that should settle holds its last pose as a third key). `loop=0` is a one-shot. A rest pose is any pose with no angles, or the name "rest". Each animation gets a frame strip `anim_<name>.png`, and the viewer page plays them with loop, speed and a scrub bar.
 
     animation(name, poses, seconds=1, loop=1, ease=0, ease_ends=ease) -> string
     animation(name, poses, times=[0, ...], loop=1, ease=0, ease_ends=ease) -> string

@@ -118,6 +118,8 @@ export interface ViewOptions {
   ghost?: Mesh;
   /** How far in front of the solid mesh a ghost surface must be to be drawn, in world units (about a cell). */
   ghostMargin?: number;
+  /** The points the perspective camera fits, instead of this mesh's own: every frame of a strip, so the camera holds still. */
+  fitPoints?: Float32Array;
 }
 
 /** The ghost's note under a view's caption, so a faint slab is read as a clipped neighbour and not a part. */
@@ -130,7 +132,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
   const ghost = opts.ghost && triangleCount(opts.ghost) > 0 ? opts.ghost : undefined;
   if (view === "persp") {
     const az = opts.azimuth ?? info.azimuth ?? 35, el = opts.elevation ?? info.elevation ?? 25;
-    const cam = perspective(bounds, size, size, az, el, 30, 1, mesh.positions);
+    const cam = perspective(bounds, size, size, az, el, 30, 1, opts.fitPoints ?? mesh.positions);
     const target = createTarget(size, size, INK.viewPersp);
     renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor });
     floorGrid(cam, target, bounds, label);
@@ -230,8 +232,6 @@ export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: P
   const b = isEmpty(info.bounds) ? { min: [-1, -1, -1] as Vec3, max: [1, 1, 1] as Vec3 } : info.bounds;
   const c = boundsCenter(b);
   const s = boundsSize(b);
-  const span = Math.max(s[0], s[1], s[2]) * 1.15;
-  const upp = span / size;
   const planes: { axis: "x" | "y" | "z"; h: number; v: number; vSign: number; label: string }[] = [
     { axis: "x", h: 2, v: 1, vSign: 1, label: "-z→ y↑" }, // seen from +x: screen right is -z
     { axis: "y", h: 0, v: 2, vSign: -1, label: "x→ -z↑" }, // seen from above: up is -z
@@ -240,6 +240,9 @@ export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: P
   planes.forEach((pl, i) => {
     const canvas = new Canvas(size, size, INK.view);
     const level = at?.[pl.axis] ?? defaultLevel(b, pl.axis);
+    // Each cut is framed on its own two axes (round 8: a long flat tool's end cut was a sliver at the long side's span).
+    const span = Math.max(s[pl.h], s[pl.v], 1e-6) * 1.15;
+    const upp = span / size;
     const step = gridStep(span);
     const hSign = pl.axis === "x" ? -1 : 1;
     // Grid.
@@ -419,15 +422,36 @@ function poseMeshUncached(shapeAt: ShapeAt, joints: Record<string, JointPose>, c
   return surfaceNets(shape, { resolution }).mesh;
 }
 
-function poseThumb(mesh: Mesh | undefined, framing: Bounds, thumb: number, label: string, azimuth?: number, elevation?: number, ghost?: Mesh, ghostMargin?: number): Canvas {
+function poseThumb(mesh: Mesh | undefined, framing: Bounds, thumb: number, label: string, azimuth?: number, elevation?: number, ghost?: Mesh, ghostMargin?: number, fitPoints?: Float32Array, sub?: string): Canvas {
   if (!mesh || triangleCount(mesh) === 0) {
     const c = new Canvas(thumb, thumb, INK.viewPersp);
     drawText(c, 6, 6, label, INK.text, 1);
     return c;
   }
-  const c = renderView(mesh, { name: label, bounds: framing }, "persp", thumb, { label: false, azimuth, elevation, ghost, ghostMargin });
+  const c = renderView(mesh, { name: label, bounds: framing }, "persp", thumb, { label: false, azimuth, elevation, ghost, ghostMargin, fitPoints });
   drawText(c, 6, 6, label, INK.text, 1);
+  if (sub) drawText(c, 6, 16, sub, INK.dim, 1);
   return c;
+}
+
+/** What a pose does, in a line under its thumbnail: `wheel 90  gondola_1 -90  +6 more`, so alike thumbnails still say which pose they are (round 8: a symmetric wheel's four poses read the same). */
+function poseSummary(joints: Record<string, JointPose>, width: number): string {
+  const one = (v: number) => String(Number(v.toPrecision(3)));
+  const entries = Object.entries(joints).filter(([, j]) => j.angles.some((v) => v !== 0) || j.move.some((v) => v !== 0) || j.scale.some((v) => v !== 1)).map(([name, j]) => {
+    const parts: string[] = [];
+    if (j.angles.some((v) => v !== 0)) parts.push(j.angles[1] === 0 && j.angles[2] === 0 ? one(j.angles[0]) : `[${j.angles.map(one).join(",")}]`);
+    if (j.move.some((v) => v !== 0)) parts.push(`move [${j.move.map(one).join(",")}]`);
+    if (j.scale.some((v) => v !== 1)) parts.push(`scale [${j.scale.map(one).join(",")}]`);
+    return `${name} ${parts.join(" ")}`;
+  });
+  let out = "";
+  for (let i = 0; i < entries.length; i++) {
+    const next = out ? `${out}  ${entries[i]}` : entries[i];
+    const more = entries.length - i - 1;
+    if (textWidth(next + (more ? `  +${more} more` : ""), 1) > width - 12) return out ? `${out}  +${entries.length - i} more` : `${entries[i].slice(0, 20)}…`;
+    out = next;
+  }
+  return out;
 }
 
 /**
@@ -435,6 +459,19 @@ function poseThumb(mesh: Mesh | undefined, framing: Bounds, thumb: number, label
  * a turned joint are a box around the turned box, so a framing from bounds
  * left a lamp using a fifth of its thumbnail (measured on a three-joint rig).
  */
+/**
+ * Every vertex of every mesh in one array, for a camera that fits a whole strip at once: the camera then holds
+ * still from frame to frame, so a swing reads as motion and a slide moves (round 8: each frame was fitted on its
+ * own, so a tool shrank as its blades came out and a sliding finger sat still while its ghost palm moved).
+ */
+function allPoints(meshes: (Mesh | undefined)[]): Float32Array {
+  const present = meshes.filter((m): m is Mesh => !!m && triangleCount(m) > 0);
+  const out = new Float32Array(present.reduce((n, m) => n + m.positions.length, 0));
+  let at = 0;
+  for (const m of present) { out.set(m.positions, at); at += m.positions.length; }
+  return out;
+}
+
 function framingFor(meshes: (Mesh | undefined)[]): Bounds {
   let b: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   for (const m of meshes) {
@@ -484,8 +521,9 @@ export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseV
   // One framing for every pose, so sizes compare; a focused sheet frames each close-up on its own, since the
   // focused step is wherever each pose put it (a gimbal under a drone at take-off is far from one at rest).
   const framing = framingFor(meshes);
+  const fit = frameEach ? undefined : allPoints(meshes);
   all.forEach((p, i) => {
-    const c = poseThumb(meshes[i], frameEach ? framingFor([meshes[i]]) : framing, thumb, p.name, azimuth, elevation, ghosts[i], cellSize * GHOST_CELL);
+    const c = poseThumb(meshes[i], frameEach ? framingFor([meshes[i]]) : framing, thumb, p.name, azimuth, elevation, ghosts[i], cellSize * GHOST_CELL, fit, i === 0 ? undefined : poseSummary(p.joints, thumb));
     out.blit(c, gutter + (i % cols) * (thumb + gutter), bar + gutter + Math.floor(i / cols) * (thumb + gutter));
   });
   return out;
@@ -562,9 +600,10 @@ export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: st
     if (ghostAt) ghosts.push(poseMesh(ghostAt, at, cellSize * GHOST_CELL, cache, "ghost"));
   }
   const framing = framingFor(meshes);
+  const fit = allPoints(meshes);
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : i / (frames - 1);
-    const c = poseThumb(meshes[i], framing, frame, "", azimuth, elevation, ghosts[i], cellSize * GHOST_CELL);
+    const c = poseThumb(meshes[i], framing, frame, "", azimuth, elevation, ghosts[i], cellSize * GHOST_CELL, fit);
     out.blit(c, gutter + i * (frame + gutter), bar + gutter);
     drawText(out, gutter + i * (frame + gutter), bar + gutter + frame + 2, `${fmt(t * seconds)}s`, INK.dim, 1);
   }

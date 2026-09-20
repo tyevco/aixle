@@ -247,7 +247,12 @@ them too: the model clipped to the focused step's frame where each pose
 puts it, at the frame's cell. Asserts are judged at rest, because they
 are promises about the model as built and a pose is a view of it,
 unless one names its pose (`pose=reach`), which is judged in that pose's
-own evaluation, the same one the pose sheet draws from; a posed report says on its Stands, footprint and watertight rows which
+own evaluation, the same one the pose sheet draws from, and inside such
+an assert a query on a step under other joints reads the step placed
+through every joint above it (the same placement chain `check --pose`
+prints), while geometry built from a query keeps the step's own frame,
+since it is built inside that frame (round 8: a tucked wrist's
+clearance measured the rest position); a posed report says on its Stands, footprint and watertight rows which
 pose it measured, does not judge standing when the pose lifts the model
 off the floor, and takes the footprint at y = 0 when a corner dips a
 little below it (a sitting fox's tail tip), since a model built on the
