@@ -121,9 +121,7 @@ that never reached the face texture; sheets that meshed the same shut
 box a dozen times a render. Their reports' three changes each are
 answered below; the marionette's re-import probe and the drone's and
 jack's are kept and skipped by the render set like the others. Not
-done: a per-pose assert (`assert ..., pose="pop"`), an `ease` that
-leaves a loop's ends alone (a low `ease` is the documented answer), a
-default import resolution that follows the grid (the grid is a setting
+done: a default import resolution that follows the grid (the grid is a setting
 of the program being evaluated), a ghosted neighbour on a focus sheet,
 an offline viewer (three.js is loaded from a CDN by design); the
 drone's report of a joint step turned by the pose getting no `posed`
@@ -245,7 +243,9 @@ each a close-up of the step where the pose puts it; `check` and the
 report print the joints as a tree, joints made inside a `def` included,
 and the pose sheet's bar names every joint, wrapped; a strip's bar says
 `once` or `loop`, and the report's animations line gives each key's
-second, the loop and the ease; asserts are judged at rest; a posed
+second, the loop and the ease; asserts are judged at rest unless one
+names its pose (`pose=pop`, added after the round with `ease_ends`, the
+two language items the round left undone); a posed
 report's Stands, footprint and watertight rows say which pose, standing
 is not judged when the pose lifts the model off the floor, and the
 footprint is taken at y = 0 when a corner dips a little below it;

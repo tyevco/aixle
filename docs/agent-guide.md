@@ -147,7 +147,9 @@ joint's angles are relative to its parent. A pose value can be a whole
 transform, `hand=xform(rotate=[0, 0, 20], move=[0, 0.2, 0], scale=1.1)`,
 for a hop, a squash or a breath; an animation takes `times=[0, 0.15,
 0.6]` for uneven keys and `ease=1` to settle into each pose instead of
-turning sharply, and the strip's bar says which. `angle("elbow")` reads the
+turning sharply (`ease_ends=0` keeps a loop's seam moving), and the
+strip's bar says which. An assert is judged at rest; one about a pose
+names it, `assert clearance(hand, face) > 0.02, pose=reach`. `angle("elbow")` reads the
 current pose's angles, which is how a member between two moving parts (a
 hydraulic cylinder) finds its end points; the language doc has the
 cylinder written out. Sizes printed by `check` and

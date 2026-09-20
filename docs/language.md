@@ -355,7 +355,9 @@ takes the same triple or single angle a bare pose value does.
 `animation("wave", ["rest", "reach", "rest"], seconds=2)` strings poses
 into evenly spaced keyframes; `times=[0, 0.15, 0.6]` puts each pose at
 its own second instead, the last being the length, and `ease=1` slows
-to a stop at every pose (0 is linear, a value between blends the two).
+to a stop at every pose (0 is linear, a value between blends the two);
+`ease_ends=0` leaves the first and last pose alone, so a loop runs
+straight through its seam while easing at the keys between.
 Every pose is drawn on `poses.png`, every
 animation on `anim_<name>.png` (an eased or timed one says so in its
 bar), and the GLB carries the joints as nodes with the animations as
@@ -399,8 +401,10 @@ spring included: a part that should not stretch reads
 the inverse, as `angle()` reads the turn. `at()` on a nested joint's own
 step is that joint's posed point; the world point is read through the
 outer step, `at(arm, "tip")`, which carries every joint above it.
-A looping cycle (a walk, a rotor) usually wants `ease=0` or a low value,
-since an ease stops at every key, its ends included; a rotor turning a
+A looping cycle (a walk, a rotor) wants `ease_ends=0`, since an ease
+stops at every key, its ends included, and a loop's ends are one
+moment; a one-shot that must start at once and settle takes
+`ease_ends=0` with `ease=1` at the keys between. A rotor turning a
 full turn needs keys under 180 degrees apart (`[0, 120, 240, 360]`), or
 the export takes the short way round. A bare call such as
 `spin_pose("spin_120", 120)` is a statement on its own; its result need
@@ -711,10 +715,14 @@ report has an Asserts row and `report.json` every assert with its
 result. The next agent to edit the program then learns what it broke
 from the tool rather than from a picture, and a promise that lived only
 in a report ("the handle must clear the rim text") lives in the program.
-In a pose (`check --pose reach`) the asserts run in that pose, so a
-clearance that must hold when a joint has turned is asserted with `set
-pose` or `--pose`. A used library's asserts run with it and are reported
-with the library's path.
+An assert is judged at rest, whatever pose `--pose` or `set pose`
+shows, because it is a promise about the model as built and a pose is a
+view of it; a promise about a pose names it, `assert clearance(hand,
+face) > 0.02, "the wave clears the face", pose=reach` (a bare word or a
+string), and is judged with the program evaluated in that pose, on every
+`check` and `render`. A pose that is not defined is a warning and the
+assert is never tested. A used library's asserts run with it and are
+reported with the library's path.
 
 The queries that make it useful: `pieces(shape, resolution=64)` is the
 number of separate pieces the shape meshes into at that grid, as the

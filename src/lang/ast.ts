@@ -32,8 +32,8 @@ export interface Set { type: "set"; key: string; value: Expr; line: number }
 export interface ExprStmt { type: "expr"; value: Expr; line: number }
 /** `use "parts/hardware.aix"` or `use "std/furniture" as f`: a library's defs under a prefix. */
 export interface Use { type: "use"; path: string; alias?: string; line: number }
-/** `assert test, "message"`: a promise the model makes about itself, checked on every evaluation. */
-export interface Assert { type: "assert"; test: Expr; message?: Expr; line: number }
+/** `assert test, "message", pose=name`: a promise the model makes about itself, checked at rest or in the named pose. */
+export interface Assert { type: "assert"; test: Expr; message?: Expr; pose?: string; line: number }
 
 export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt | Use | Assert;
 

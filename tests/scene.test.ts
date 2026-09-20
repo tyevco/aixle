@@ -169,6 +169,23 @@ describe("poses", () => {
     expect(easeBlend(0.25, 0.5)).toBeCloseTo((0.25 + easeBlend(0.25, 1)) / 2, 12);
     expect(interpolatePose(keys, ["k"], 0.125, { ease: 1 }).k.angles[0]).toBeCloseTo(90 * easeBlend(0.25, 1), 6);
   });
+  it("eases the first and last key by ease_ends alone", () => {
+    // A lone ease at one end is a quarter sine: it moves at once and settles, or starts slow and runs out straight.
+    expect(easeBlend(0.5, 0, 1)).toBeCloseTo(Math.sin(Math.PI / 4), 12);
+    expect(easeBlend(0.5, 1, 0)).toBeCloseTo(1 - Math.cos(Math.PI / 4), 12);
+    expect(easeBlend(0, 1, 0)).toBe(0);
+    expect(easeBlend(1, 0, 1)).toBeCloseTo(1, 12);
+    expect(easeBlend(0.25, 0, 0)).toBe(0.25);
+    // Three keys, eased between but not at the ends: the first segment eases out only, the last in only.
+    expect(keyAt(3, 0.25, { ease: 1, easeEnds: 0 })).toEqual({ i: 0, u: easeBlend(0.5, 0, 1) });
+    expect(keyAt(3, 0.75, { ease: 1, easeEnds: 0 })).toEqual({ i: 1, u: easeBlend(0.5, 1, 0) });
+    // With given times the same, and a two-key animation has ends only.
+    expect(keyAt(3, 0.1, { times: [0, 0.4, 1], ease: 1, easeEnds: 0 })).toEqual({ i: 0, u: easeBlend(0.25, 0, 1) });
+    expect(keyAt(2, 0.25, { ease: 1, easeEnds: 0 })).toEqual({ i: 0, u: 0.25 });
+    expect(keyAt(2, 0.25, { ease: 0, easeEnds: 1 })).toEqual({ i: 0, u: easeBlend(0.25, 1, 1) });
+    // Left out, the ends ease like the rest.
+    expect(keyAt(3, 0.25, { ease: 1 })).toEqual({ i: 0, u: easeBlend(0.5, 1, 1) });
+  });
   it("renders a pose sheet with rest first, rebuilding the shape per pose", () => {
     const shapeAt = (joints: Record<string, JointPose>) =>
       O.union([P.box(0.5, 0.5, 0.5), O.joint(O.move(P.box(2, 0.3, 0.3), 1, 0, 0), "elbow", 0, 0, 0, joints.elbow?.angles ?? [0, 0, 0])]);
@@ -215,7 +232,9 @@ describe("poses", () => {
     expect(ev.warnings).toEqual([]);
     expect(ev.poses[0].joints.body).toEqual({ angles: [0, 0, 0], move: [0, 2, 0], scale: [1, 1.5, 1] });
     expect(ev.poses[1].joints.body).toEqual({ angles: [0, 90, 0], move: [0, 0, 0], scale: [1, 1, 1] });
-    expect(ev.animations[0]).toMatchObject({ seconds: 1, times: [0, 0.3, 1], ease: 1 });
+    expect(ev.animations[0]).toMatchObject({ seconds: 1, times: [0, 0.3, 1], ease: 1, easeEnds: 1 });
+    expect(evaluate(parse('animation("m", ["rest", "rest", "rest"], ease=1, ease_ends=0)')).animations[0]).toMatchObject({ ease: 1, easeEnds: 0 });
+    expect(() => evaluate(parse('animation("m", ["rest", "rest"], ease_ends=2)'))).toThrow(/ease_ends is a number from 0 to 1/);
     // In the hop pose the sphere sits 2 up and is stretched to 1.5 tall about its pivot.
     const hop = evaluate(parse(src), { jointPoses: ev.poses[0].joints }).output!;
     expect(hop.dist(0, 2, 0)).toBeLessThan(0);
@@ -270,6 +289,22 @@ describe("pipeline with a scene", () => {
       expect(posed.warnings.filter((w) => /assert/.test(w))).toEqual([]);
       expect(posed.report).toMatch(/\| Asserts \| 1 pass \(judged at rest\)/);
       expect(posed.report).toMatch(/\| Stands \(in pose up\)/);
+      // An assert that names a pose is judged in that pose whichever pose is shown, and says so in its line.
+      const inPose = run(`${src}\nassert tall(arm) < 1.4, "at rest"\nassert tall(arm) > 1.4, "lifted", pose=up\nassert tall(arm) < 1.4, "still at rest", pose=up`, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128, obj: false, glb: false, quick: true });
+      expect(inPose.warnings.filter((w) => /assert/.test(w))).toEqual([expect.stringMatching(/^assert \(line 9\) in pose up fails: tall\(arm\) < 1\.4 is [\d.]+ < 1\.4: still at rest$/)]);
+      expect(inPose.report).toMatch(/\| Asserts \| 2 pass, 1 fail: \(line 9\) in pose up fails: .* \(at rest, or in the pose each names\) \|/);
+      const reportJson = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(reportJson.asserts.map((a: { line: number; passed: boolean; pose?: string }) => [a.line, a.passed, a.pose])).toEqual([[7, true, undefined], [8, true, "up"], [9, false, "up"]]);
+      // ease_ends: the loop's seam runs straight, so only the middle segments are densified in the GLB.
+      const ends = run(`${src}\nanimation("cycle", ["rest", "up", "rest", "up"], ease=1, ease_ends=0)\nanimation("launch", ["rest", "up"], ease=0, ease_ends=1)`, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128, obj: false, quick: true, minecraft: 8 });
+      const g2 = readFileSync(join(dir, "model.glb"));
+      const j2 = JSON.parse(g2.toString("utf8", 20, 20 + g2.readUInt32LE(12)));
+      const cycle = j2.animations.find((a: { name: string }) => a.name === "cycle"), launch = j2.animations.find((a: { name: string }) => a.name === "launch");
+      // cycle: three segments, the first and last eased at one key each (8 samples), the middle at both (8): 25 keys.
+      expect(j2.accessors[cycle.samplers[0].input].count).toBe(25);
+      // launch: one segment whose two keys are both ends, eased by ease_ends: 9 keys.
+      expect(j2.accessors[launch.samplers[0].input].count).toBe(9);
+      expect(ends.report).toMatch(/cycle \(rest → up → rest → up, 1s, loop, ease 1, ends 0\); launch \(rest → up, 1s, loop, ends 1\)/);
       // A quick pass draws the pose sheet but not the strips.
       const quick = run(src, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128, quick: true, obj: false, glb: false });
       expect(quick.files).toContain("poses.png");

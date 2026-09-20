@@ -112,8 +112,20 @@ class Parser {
       this.next();
       const test = this.expr();
       let message: Expr | undefined;
-      if (this.atOp(",")) { this.next(); message = this.expr(); }
-      return { type: "assert", test, message, line: t.line };
+      let pose: string | undefined;
+      // Then a message, a pose or both, in either order: `assert tall(m) < 2, "closed", pose=shut`.
+      while (this.atOp(",")) {
+        this.next();
+        const k = this.peek();
+        if (k.type === "ident" && k.value === "pose" && this.peek(1).type === "op" && this.peek(1).value === "=") {
+          this.next(); this.next();
+          const v = this.next();
+          if (v.type !== "ident" && v.type !== "str") throw new SyntaxError(`assert's pose= names a pose, as a bare word or a string`, v.line);
+          pose = v.value;
+        } else if (message === undefined) message = this.expr();
+        else throw new SyntaxError(`assert takes a test, then a message and pose=name`, k.line);
+      }
+      return { type: "assert", test, message, pose, line: t.line };
     }
     if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === "=") {
       const name = this.expectIdent("a name").value;
