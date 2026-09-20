@@ -132,6 +132,8 @@ function main(argv: string[]): number {
       for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${m.names.join(", ")}`);
       for (const st of ev.steps) {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
+        // A number set inside a loop is the last iteration's, not a size: not listed (round 9: "a = 327" as a step).
+        if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
         if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
         if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
         // A 2D profile has a box too, and a part built from one is invisible until it is extruded (round 4 asked).

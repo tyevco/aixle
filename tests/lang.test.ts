@@ -312,6 +312,10 @@ describe("interpreter", () => {
     expect(both.steps.find((s) => s.name === "c")?.cuts).toBe(true);
     expect(both.steps.find((s) => s.name === "d")?.cuts).toBe(true);
   });
+  it("marks a step assigned inside a loop", () => {
+    const ev = run('b = 1\nall = sphere(0.1)\nfor i in range(3) {\n  a = i * 2\n  all = all + (sphere(0.1) | move(i, 0, 0))\n}\nshow all');
+    expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true], ["a", true]]);
+  });
   it("measures overhangs like the report's row", () => {
     // A table: the underside of its top faces down and is not on the floor.
     const ev = run('top = box(2, 0.1, 2) | move(0, 1, 0)\nleg = cylinder(0.1, 1) | move(0, 0.5, 0)\ntable = top + leg\nassert overhang(table) > 0.2\nassert overhang(leg) < 0.01\nshow table');

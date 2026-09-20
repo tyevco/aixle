@@ -179,9 +179,10 @@ ambient was raised; a low light meant "from the horizon"; chrome was
 white under a white sky; glass could not be judged in a quick pass;
 glass on a loft banded; a focus shot's marcher stopped at the frame so a
 through hole read as blind. Their reports' three changes each are
-answered below. Not done: environment thumbnails in the reference and
-loop variables kept out of the step list (a joint step's own `surface`
-line under `--pose` is its posed extent, now said in the docs).
+answered below. Not done: environment thumbnails in the reference (a
+joint step's own `surface` line under `--pose` is its posed extent, now
+said in the docs; a number set inside a loop is no longer listed as a
+step).
 
 ## What each round changed
 

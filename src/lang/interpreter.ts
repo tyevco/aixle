@@ -44,6 +44,8 @@ export interface Step {
   movedDeps?: Set<string>;
   /** The steps this one read as they are (joined, cut, painted, shelled, measured): their surface stays put. */
   keptDeps?: Set<string>;
+  /** Assigned inside a loop: a number here is the last iteration's, not a size worth listing. */
+  inLoop?: boolean;
 }
 
 /**
@@ -267,6 +269,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const decalRegions = new Set<string>();
   // The step being computed at top level, to note a cut in it.
   let currentStep: Step | undefined;
+  // How many loops the statement being run is inside.
+  let loopDepth = 0;
   // Each top-level shape step by its value, so a transform of exactly that value is known to move the step.
   const stepOfValue = new Map<Shape3, string>();
   // Where the last void, inside or overlap query in an assert found its offending point.
@@ -912,8 +916,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
             if (cutDeps) prev.cutDeps = new Set([...(prev.cutDeps ?? []), ...cutDeps]);
             if (movedDeps) prev.movedDeps = new Set([...(prev.movedDeps ?? []), ...movedDeps]);
             if (keptDeps) prev.keptDeps = new Set([...(prev.keptDeps ?? []), ...keptDeps]);
+            if (loopDepth > 0) prev.inLoop = true;
           } else {
-            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps });
+            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, inLoop: loopDepth > 0 || undefined });
           }
           if (isShape3(value)) { lastShape = { name: stmt.name }; stepOfValue.set(value, stmt.name); }
         }
@@ -956,10 +961,15 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "for": {
         const iterable = evalExpr(stmt.iterable, scope);
         if (!Array.isArray(iterable)) throw new RuntimeError(`'for' needs a list (use range(n)), got a ${typeName(iterable)}`, stmt.line);
-        for (const item of iterable) {
-          if (++loops > MAX_LOOP) throw new RuntimeError(`more than ${MAX_LOOP} loop iterations`, stmt.line);
-          scope.set(stmt.name, item);
-          for (const s of stmt.body) exec(s, scope, topLevel);
+        loopDepth++;
+        try {
+          for (const item of iterable) {
+            if (++loops > MAX_LOOP) throw new RuntimeError(`more than ${MAX_LOOP} loop iterations`, stmt.line);
+            scope.set(stmt.name, item);
+            for (const s of stmt.body) exec(s, scope, topLevel);
+          }
+        } finally {
+          loopDepth--;
         }
         return;
       }
