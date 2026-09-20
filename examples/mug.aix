@@ -4,8 +4,9 @@ r = 1.2
 body = cylinder(r=r, h=2.4, round=0.12) | move(0, 1.2, 0)
 cavity = cylinder(r - 0.14, 2.4) | move(0, 1.4, 0)
 cup = body - cavity
-# The handle's inner edge sits in the wall (0.05 in), not through it into the cup: it once reached the cavity.
-handle = torus(0.75, 0.16) | rotate(x=90) | move(r - 0.05 + 0.75 + 0.16, 1.3, 0)
+# The handle is a ring through the wall with the part inside the cup cut away, so it joins at two points and
+# nothing pokes into the cup (it once did: the ring reached 0.32 inside).
+handle = (torus(0.75, 0.16) | rotate(x=90) | move(r + 0.45, 1.3, 0)) - cavity
 mug = (cup + handle) | paint("porcelain")
 show mug
 

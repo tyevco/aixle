@@ -14,7 +14,7 @@ r = 1.2
 body = cylinder(r=r, h=2.4, round=0.12) | move(0, 1.2, 0)
 cavity = cylinder(r - 0.14, 2.4) | move(0, 1.4, 0)
 cup = body - cavity
-handle = torus(0.75, 0.16) | rotate(x=90) | move(r - 0.05 + 0.75 + 0.16, 1.3, 0)
+handle = (torus(0.75, 0.16) | rotate(x=90) | move(r + 0.45, 1.3, 0)) - cavity
 mug = (cup + handle) | paint("porcelain")
 show mug
 
