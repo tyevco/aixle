@@ -18,7 +18,7 @@ import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedro
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
-import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -596,6 +596,40 @@ export function minecraftThinWarnings(ev: Evaluation, px: number, grid: number):
   return foldThinWarnings(thinWarnings(ev, voxel, grid, 1)).map((w) => `minecraft: ${w.replace(/ or raise the grid \(set grid \d+\)/, "").replace(/, or set grid \d+ covers them all/, "").replace(/in the mesh/g, "in the geometry")} (a voxel is ${fmt(voxel)} at ${px} pixels per block; set minecraft ${px * 2} halves it)`);
 }
 
+/** A ghost is meshed at this many times the close-up's cell. */
+const GHOST_CELL = 2;
+
+/** The shape clipped to a box: the cut faces keep the shape's own material (measured: a marble base read as clay). */
+function clipTo(shape: Shape3, frame: Bounds): Shape3 {
+  const fc = boundsCenter(frame), fsz = boundsSize(frame);
+  const clipBox = move(box(fsz[0], fsz[1], fsz[2]), fc[0], fc[1], fc[2]);
+  return {
+    kind: "shape3",
+    dist: (x, y, z) => Math.max(shape.dist(x, y, z), clipBox.dist(x, y, z)),
+    hit: (x, y, z) => { const q = shape.hit(x, y, z); return { ...q, d: Math.max(q.d, clipBox.dist(x, y, z)) }; },
+    bounds: frame,
+    cost: shape.cost + 1,
+  };
+}
+
+/**
+ * A focus close-up in two: the focused part (already placed where the output puts it) clipped to the frame, and the
+ * ghost, everything else the frame holds with the part carved out of it, grown by `margin` so the two surfaces never
+ * coincide and the ghost reads as the neighbour it is.
+ */
+function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number): { focus: Shape3; ghost: Shape3 } {
+  const focus = clipTo(part, frame);
+  const rest = clipTo(output, frame);
+  const ghost: Shape3 = {
+    kind: "shape3",
+    dist: (x, y, z) => Math.max(rest.dist(x, y, z), margin - part.dist(x, y, z)),
+    hit: (x, y, z) => { const q = rest.hit(x, y, z); return { ...q, d: Math.max(q.d, margin - part.dist(x, y, z)) }; },
+    bounds: frame,
+    cost: rest.cost + part.cost,
+  };
+  return { focus, ghost };
+}
+
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string): Evaluation {
   return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName });
@@ -661,6 +695,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let offFloor = false;
   // A focused render's close-up mesh judged on its own (round 4: a focus sheet could not say whether the lug was sound).
   let closeUpNote: string | undefined;
+  // The focused step's name when the sheet drew the rest of the model as a ghost, for the report's file notes.
+  let ghosted: string | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
@@ -786,6 +822,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     let focusStep = false;
     let frame = trueBounds ?? bounds;
     let shownName = evaluation.outputName;
+    // The focused step as it sits in the output (through the joints and moves above it), for the close-up's split
+    // into the part itself and the ghost of everything else the frame holds.
+    let focusShape: Shape3 | undefined;
     if (focusName) {
       let st = evaluation.steps.find((x) => x.name === focusName && isShape3(x.value));
       let obj = evaluation.objects.find((o) => o.name === focusName);
@@ -816,27 +855,33 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
         const grow = Math.max(...boundsSize(fb)) * 0.08;
         frame = { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] };
+        focusShape = (output && st ? placedShape(output, fs) : undefined) ?? fs;
         shownName = `${evaluation.outputName} → ${focusName}`;
       } else warnings.push(`focus ${focusName}: no such step or object; framing the whole model`);
     }
     // A focused sheet is a close-up: the model clipped to the frame and re-extracted at the frame's own cell, so a
     // lantern in a market is drawn with a lantern's detail rather than the market's (measured: a blob of six cells).
     let viewMesh = mesh, viewCell = cellSize;
+    // On a focus sheet, the rest of the model inside the frame, drawn faint (round 7: the drone's body, clipped to
+    // the gimbal's frame, was read as an unknown plate); its cell, for the ghost's depth margin.
+    let viewGhost: Mesh | undefined, ghostCell = 0;
     if (focusName && frame !== (trueBounds ?? bounds)) {
-      const fc = boundsCenter(frame), fsz = boundsSize(frame);
-      const clipBox = move(box(fsz[0], fsz[1], fsz[2]), fc[0], fc[1], fc[2]);
-      // The cut faces keep the model's own material rather than the clay of the clipping box (measured: a marble
-      // base read as an unpainted part on a focus sheet).
-      const clip: Shape3 = {
-        kind: "shape3",
-        dist: (x, y, z) => Math.max(output.dist(x, y, z), clipBox.dist(x, y, z)),
-        hit: (x, y, z) => { const q = output.hit(x, y, z); return { ...q, d: Math.max(q.d, clipBox.dist(x, y, z)) }; },
-        bounds: frame,
-        cost: output.cost + 1,
-      };
-      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: frame }));
+      const sharp = opts.sharp ?? evaluation.settings.sharp !== 0;
+      const clip = clipTo(output, frame);
+      const close = time("focus", () => surfaceNets(clip, { resolution: grid, sharp, crease, bounds: frame }));
       if (triangleCount(close.mesh) > 0) {
         viewMesh = close.mesh; viewCell = close.cellSize;
+        if (focusShape) {
+          // The part on its own at the frame's cell, and everything else at twice it: a ghost is faint and is most
+          // of the model, so it need not be sharp.
+          const split = focusSplit(output, focusShape, frame, close.cellSize * GHOST_CELL);
+          const part = time("focus:part", () => surfaceNets(split.focus, { resolution: grid, sharp, crease, bounds: frame }));
+          if (triangleCount(part.mesh) > 0) {
+            viewMesh = part.mesh;
+            const ghost = time("focus:ghost", () => surfaceNets(split.ghost, { resolution: Math.max(8, Math.round(grid / GHOST_CELL)), sharp, crease, bounds: frame }));
+            if (triangleCount(ghost.mesh) > 0) { viewGhost = ghost.mesh; ghostCell = ghost.cellSize; ghosted = focusName; }
+          }
+        }
         // The close-up is meshed at its own, finer cell, so its edges are a second reading of the same surface: the
         // clip faces are open by construction, so only edges away from the frame's faces count.
         const inside = (p: [number, number, number]) => [0, 1, 2].every((k) => p[k] > frame.min[k] + close.cellSize * 1.5 && p[k] < frame.max[k] - close.cellSize * 1.5);
@@ -848,8 +893,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       }
     }
     const info = { name: shownName, bounds: frame, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation };
-    time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size).toPng()));
-    for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(viewMesh, info, v, size, { azimuth, elevation }).toPng()));
+    time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size, viewGhost, ghostCell).toPng()));
+    for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(viewMesh, info, v, size, { azimuth, elevation, ghost: viewGhost, ghostMargin: ghostCell }).toPng()));
     if (opts.slices !== false) {
       const at: Partial<Record<"x" | "y" | "z", number>> = {};
       for (const axis of ["x", "y", "z"] as const) {
@@ -859,7 +904,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // A scene's default cut goes through its first object, which is the one to list first; a focus wins over that.
       const first = evaluation.objects.length > 1 && !focusName ? evaluation.objects[0].shape.bounds : undefined;
       const sliceInfo = first && !isEmpty(first) ? { ...info, bounds: first, name: `${info.name} → ${evaluation.objects[0].name}` } : info;
-      time("slices", () => write("slices.png", renderSlices(output, sliceInfo, Math.round(size * 0.75), at).toPng()));
+      // A focus sheet's slices cut the part, with the cut through the rest of the model faint around it.
+      time("slices", () => write("slices.png", renderSlices(viewGhost && focusShape ? focusShape : output, sliceInfo, Math.round(size * 0.75), at, viewGhost && focusShape ? output : undefined).toPng()));
     }
     if (opts.turntable !== false) time("turntable", () => write("turntable.png", renderTurntable(mesh!, info, Math.round(size / 2)).toPng()));
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
@@ -938,36 +984,39 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       let poseCell = cellSize * 1.5;
       let poseShapeAt = shapeAt;
       // With a focus, the sheet and the strips are close-ups of that step where each pose puts it, at the frame's
-      // own cell, so a gimbal's pan or a crank's turn is readable (round 7: a 10 px gimbal on a whole-drone strip).
+      // own cell, so a gimbal's pan or a crank's turn is readable (round 7: a 10 px gimbal on a whole-drone strip);
+      // the rest of the model in the frame is a ghost behind it.
+      let poseGhostAt: ShapeAt | undefined;
       if (focusName && focusStep) {
-        const frameAt = (ev: Evaluation): Bounds | undefined => {
+        const focusAt = (ev: Evaluation): { fs: Shape3; frame: Bounds } | undefined => {
           const st = ev.steps.find((x) => x.name === focusName && isShape3(x.value));
           const fs = st ? (st.value as Shape3) : ev.objects.find((o) => o.name === focusName)?.shape;
           if (!fs || isEmpty(fs.bounds) || !ev.output) return undefined;
           const own = tightBounds(fs);
           const fb = placedBounds(ev.output, fs, own) ?? own;
           const grow = Math.max(...boundsSize(fb)) * 0.08;
-          return { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] };
+          return { fs, frame: { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] } };
         };
-        const restFrame = frameAt(evaluation);
-        if (restFrame) poseCell = (Math.max(...boundsSize(restFrame)) / grid) * 1.5;
-        poseShapeAt = (j) => {
-          const ev = evalAt(j);
-          const fr = frameAt(ev);
-          if (!fr || !ev.output) return ev.output;
-          const fc = boundsCenter(fr), fsz = boundsSize(fr);
-          const clipBox = move(box(fsz[0], fsz[1], fsz[2]), fc[0], fc[1], fc[2]);
-          const out = ev.output;
-          return { kind: "shape3", dist: (x, y, z) => Math.max(out.dist(x, y, z), clipBox.dist(x, y, z)), hit: (x, y, z) => { const q = out.hit(x, y, z); return { ...q, d: Math.max(q.d, clipBox.dist(x, y, z)) }; }, bounds: fr, cost: out.cost + 1 };
+        const restFocus = focusAt(evaluation);
+        if (restFocus) poseCell = (Math.max(...boundsSize(restFocus.frame)) / grid) * 1.5;
+        const splitAt = new Map<Evaluation, { focus: Shape3; ghost: Shape3 } | undefined>();
+        const split = (ev: Evaluation) => {
+          if (!splitAt.has(ev)) {
+            const f = focusAt(ev);
+            splitAt.set(ev, f && ev.output ? focusSplit(ev.output, placedShape(ev.output, f.fs) ?? f.fs, f.frame, poseCell * GHOST_CELL) : undefined);
+          }
+          return splitAt.get(ev);
         };
+        poseShapeAt = (j) => { const ev = evalAt(j); return split(ev)?.focus ?? ev.output; };
+        poseGhostAt = (j) => split(evalAt(j))?.ghost;
       }
       const cache: PoseCache = new Map();
-      time("poses", () => write("poses.png", renderPoses(poseShapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation, cache, !!(focusName && focusStep)).toPng()));
+      time("poses", () => write("poses.png", renderPoses(poseShapeAt, jointNames, poseViews, Math.round(size * 0.5), poseCell, azimuth, elevation, cache, !!(focusName && focusStep), poseGhostAt).toPng()));
       // A quick pass is for the geometry: the strips wait for the full render (round 7: 12 of a quick pass's 15 s).
       if (opts.quick) log(`quick pass: ${evaluation.animations.length} animation strip${evaluation.animations.length === 1 ? "" : "s"} skipped; the full render draws them`);
       else for (const a of evaluation.animations) {
         const keys = a.poses.map((pn) => poseViews.find((v) => v.name === pn) ?? { name: "rest", joints: {} });
-        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(poseShapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease, easeEnds: a.easeEnds, loop: a.loop }, cache).toPng()));
+        time(`anim:${a.name}`, () => write(`anim_${a.name}.png`, renderAnimation(poseShapeAt, jointNames, a.name, keys, a.seconds, Math.round(size * 0.35), poseCell, 8, azimuth, elevation, { times: a.times, ease: a.ease, easeEnds: a.easeEnds, loop: a.loop }, cache, poseGhostAt).toPng()));
       }
     }
     if (opts.beauty || evaluation.settings.beauty === 1) {
@@ -1121,8 +1170,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     lines.push("");
   }
   lines.push("## Files", "");
+  const focusNote = ghosted ? `, a close-up on ${ghosted}: the rest of the model in the frame is drawn faint` : "";
   const descriptions: Record<string, string> = {
-    "sheet.png": "perspective, front, right and top views with grids",
+    "sheet.png": `perspective, front, right and top views with grids${focusNote}`,
     "persp.png": "perspective view", "front.png": "front view (from +z)", "right.png": "right view (from +x)", "top.png": "top view (from +y)",
     "back.png": "back view", "left.png": "left view", "bottom.png": "bottom view",
     "slices.png": "cross-sections through the centre on each axis",
@@ -1134,7 +1184,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object and per joint",
     "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
-    "poses.png": "every pose, rest first",
+    "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
   };

@@ -371,8 +371,9 @@ always at rest, with the joints as nodes. The
 thumbnails on `poses.png` are meshed coarsely, so judge a pose that
 matters at full size with `set pose`; with `set focus name` (or
 `--focus`) the pose sheet and the strips are close-ups of that step
-where each pose puts it, at the frame's own cell, so a crank or a
-gimbal a few pixels wide on the whole model can be read. `check` prints
+where each pose puts it, at the frame's own cell, with the rest of the
+model faint around it, so a crank or a gimbal a few pixels wide on the
+whole model can be read. `check` prints
 the joints as a tree, each under the joint it turns with, pivots and
 axes included and joints made inside a `def` too, so a rig can be
 checked before any picture; the report has the same tree. An assert is
@@ -529,6 +530,10 @@ of one step or object (`--focus` on the command line): every view is
 framed on it, the model is clipped to that frame and re-extracted at the
 frame's own cell so a lantern in a market is drawn with a lantern's
 detail, the slices cut through it, and the beauty render is framed on it.
+Whatever else the frame holds is drawn faint and see-through, with a
+note under each caption, so a neighbour the frame clips reads as the
+context it is and not as a part (a drone's body over its gimbal); the
+slices draw the cut through it faint too.
 `--out DIR` puts a render somewhere other than `out/<name>/`, so a focus
 render does not overwrite the main one. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`

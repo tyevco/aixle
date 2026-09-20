@@ -15,7 +15,7 @@ import { meshBounds, triangleCount, type Mesh } from "../mesh/mesh.js";
 import { orthographic, perspective, project, toView, type Camera, type OrthoView } from "./camera.js";
 import { Canvas, mixColor, rgbf, type Color } from "./canvas.js";
 import { drawText, textWidth } from "./font.js";
-import { createTarget, renderLine, renderMesh, type RenderTarget } from "./raster.js";
+import { createTarget, renderGhost, renderLine, renderMesh, type RenderTarget } from "./raster.js";
 
 export const INK = {
   page: 0xf4f2ee,
@@ -99,35 +99,55 @@ function orthoGrid(cam: Camera, canvas: Canvas): { step: number } {
   return { step };
 }
 
-function caption(canvas: Canvas, text: string, sub?: string): void {
+function caption(canvas: Canvas, text: string, sub?: string, note?: string): void {
   const w = textWidth(text, 2) + 12;
   canvas.fill(6, 6, w, 20, INK.bar);
   drawText(canvas, 12, 9, text, INK.barText, 2);
   if (sub) drawText(canvas, 12, 30, sub, INK.dim, 1);
+  if (note) drawText(canvas, 12, 42, note, INK.dim, 1);
 }
 
 /** Render one view of a mesh at `size` pixels square. */
-export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: number, opts: { flatColor?: Vec3; outline?: boolean; label?: boolean; azimuth?: number; elevation?: number } = {}): Canvas {
+export interface ViewOptions {
+  flatColor?: Vec3;
+  outline?: boolean;
+  label?: boolean;
+  azimuth?: number;
+  elevation?: number;
+  /** A second mesh drawn faint and see-through over the first: a focus sheet's neighbours, clipped to the frame. */
+  ghost?: Mesh;
+  /** How far in front of the solid mesh a ghost surface must be to be drawn, in world units (about a cell). */
+  ghostMargin?: number;
+}
+
+/** The ghost's note under a view's caption, so a faint slab is read as a clipped neighbour and not a part. */
+export const GHOST_NOTE = "faint: the rest of the model, clipped to this frame";
+
+/** Render one view of a mesh at `size` pixels square. */
+export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: number, opts: ViewOptions = {}): Canvas {
   const bounds = isEmpty(info.bounds) ? { min: [-1, -1, -1] as Vec3, max: [1, 1, 1] as Vec3 } : info.bounds;
   const label = opts.label ?? true;
+  const ghost = opts.ghost && triangleCount(opts.ghost) > 0 ? opts.ghost : undefined;
   if (view === "persp") {
     const az = opts.azimuth ?? info.azimuth ?? 35, el = opts.elevation ?? info.elevation ?? 25;
     const cam = perspective(bounds, size, size, az, el, 30, 1, mesh.positions);
     const target = createTarget(size, size, INK.viewPersp);
     renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor });
     floorGrid(cam, target, bounds, label);
-    if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.bounds)}`);
+    if (ghost) renderGhost(ghost, cam, target, { margin: opts.ghostMargin });
+    if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.bounds)}`, ghost ? GHOST_NOTE : undefined);
     return target.canvas;
   }
   const cam = orthographic(bounds, size, size, view);
   const target = createTarget(size, size, INK.view);
   const { step } = orthoGrid(cam, target.canvas);
   renderMesh(mesh, cam, target, { background: INK.view, outline: opts.outline, flatColor: opts.flatColor });
+  if (ghost) renderGhost(ghost, cam, target, { margin: opts.ghostMargin });
   if (label) {
     const h = axisOf(cam.right), v = axisOf(cam.up);
     const hs = `${h.sign < 0 ? "-" : ""}${AXIS_NAMES[h.index]}→`;
     const vs = `${v.sign < 0 ? "-" : ""}${AXIS_NAMES[v.index]}↑`;
-    caption(target.canvas, view.toUpperCase(), `${hs} ${vs}  grid ${fmt(step)}`);
+    caption(target.canvas, view.toUpperCase(), `${hs} ${vs}  grid ${fmt(step)}`, ghost ? GHOST_NOTE : undefined);
   }
   return target.canvas;
 }
@@ -165,7 +185,7 @@ export interface SheetInfo extends ViewInfo {
 }
 
 /** The 2x2 contact sheet with a title bar. */
-export function renderSheet(mesh: Mesh, info: SheetInfo, size: number): Canvas {
+export function renderSheet(mesh: Mesh, info: SheetInfo, size: number, ghost?: Mesh, ghostMargin?: number): Canvas {
   const gutter = 4, bar = 30;
   const sheet = new Canvas(size * 2 + gutter * 3, size * 2 + gutter * 3 + bar, INK.page);
   sheet.fill(0, 0, sheet.width, bar, INK.bar);
@@ -177,7 +197,7 @@ export function renderSheet(mesh: Mesh, info: SheetInfo, size: number): Canvas {
   if (w) drawText(sheet, sheet.width - textWidth(w, scale) - 10, scale === 2 ? 8 : 11, w, 0xf0a060, scale);
   const views: ViewName[] = ["persp", "front", "right", "top"];
   views.forEach((v, i) => {
-    const c = renderView(mesh, info, v, size);
+    const c = renderView(mesh, info, v, size, { ghost, ghostMargin });
     sheet.blit(c, gutter + (i % 2) * (size + gutter), bar + gutter + Math.floor(i / 2) * (size + gutter));
   });
   return sheet;
@@ -198,12 +218,15 @@ export function defaultLevel(b: Bounds, axis: "x" | "y" | "z"): number {
   return b.min[i] < -s * 0.05 && b.max[i] > s * 0.05 ? 0 : c[i];
 }
 
-/** Three cross-sections, coloured from the field itself; `at` overrides the plane per axis. */
-export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: Partial<Record<"x" | "y" | "z", number>>): Canvas {
+/**
+ * Three cross-sections, coloured from the field itself; `at` overrides the plane per axis. With a `ghost` (a focus
+ * sheet's whole model), the cut through it is drawn faint around the cut through `shape`, the focused part.
+ */
+export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: Partial<Record<"x" | "y" | "z", number>>, ghost?: Shape3): Canvas {
   const gutter = 4, bar = 30;
   const out = new Canvas(size * 3 + gutter * 4, size + gutter * 2 + bar, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
-  drawText(out, 10, 8, `${info.name.toUpperCase()}   CROSS-SECTIONS   inside is filled, the outline is the surface`, INK.barText, 2);
+  drawText(out, 10, 8, `${info.name.toUpperCase()}   CROSS-SECTIONS   inside is filled, the outline is the surface${ghost ? ", the rest of the model faint" : ""}`, INK.barText, 2);
   const b = isEmpty(info.bounds) ? { min: [-1, -1, -1] as Vec3, max: [1, 1, 1] as Vec3 } : info.bounds;
   const c = boundsCenter(b);
   const s = boundsSize(b);
@@ -241,9 +264,16 @@ export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: P
           canvas.set(px, py, rgbf(col[0] * 0.8 + 0.05, col[1] * 0.8 + 0.05, col[2] * 0.8 + 0.05));
         } else if (d < upp * 0.75) {
           canvas.set(px, py, INK.text);
+        } else if (ghost) {
+          const g = ghost.dist(p[0], p[1], p[2]);
+          if (g < -upp * 0.75) {
+            const h = ghost.hit(p[0], p[1], p[2]);
+            const col = albedo(h.mat, h.lx, h.ly, h.lz);
+            canvas.set(px, py, mixColor(canvas.get(px, py), rgbf(col[0] * 0.8 + 0.05, col[1] * 0.8 + 0.05, col[2] * 0.8 + 0.05), 0.3));
+          } else if (g < upp * 0.75) canvas.set(px, py, mixColor(canvas.get(px, py), INK.text, 0.4));
         }
       }
-    caption(canvas, `${pl.axis.toUpperCase()} = ${fmt(level)}`, `${pl.label}  grid ${fmt(step)}`);
+    caption(canvas, `${pl.axis.toUpperCase()} = ${fmt(level)}`, `${pl.label}  grid ${fmt(step)}`, ghost ? GHOST_NOTE : undefined);
     out.blit(canvas, gutter + i * (size + gutter), bar + gutter);
   });
   return out;
@@ -373,8 +403,8 @@ function poseKey(joints: Record<string, JointPose>, cellSize: number): string {
 }
 
 /** The mesh of the model in one pose, at about `cellSize`; undefined when the pose has no shape. */
-function poseMesh(shapeAt: ShapeAt, joints: Record<string, JointPose>, cellSize: number, cache?: PoseCache): Mesh | undefined {
-  const key = cache ? poseKey(joints, cellSize) : "";
+function poseMesh(shapeAt: ShapeAt, joints: Record<string, JointPose>, cellSize: number, cache?: PoseCache, kind = ""): Mesh | undefined {
+  const key = cache ? kind + poseKey(joints, cellSize) : "";
   if (cache && cache.has(key)) return cache.get(key);
   const m = poseMeshUncached(shapeAt, joints, cellSize);
   if (cache) cache.set(key, m);
@@ -389,13 +419,13 @@ function poseMeshUncached(shapeAt: ShapeAt, joints: Record<string, JointPose>, c
   return surfaceNets(shape, { resolution }).mesh;
 }
 
-function poseThumb(mesh: Mesh | undefined, framing: Bounds, thumb: number, label: string, azimuth?: number, elevation?: number): Canvas {
+function poseThumb(mesh: Mesh | undefined, framing: Bounds, thumb: number, label: string, azimuth?: number, elevation?: number, ghost?: Mesh, ghostMargin?: number): Canvas {
   if (!mesh || triangleCount(mesh) === 0) {
     const c = new Canvas(thumb, thumb, INK.viewPersp);
     drawText(c, 6, 6, label, INK.text, 1);
     return c;
   }
-  const c = renderView(mesh, { name: label, bounds: framing }, "persp", thumb, { label: false, azimuth, elevation });
+  const c = renderView(mesh, { name: label, bounds: framing }, "persp", thumb, { label: false, azimuth, elevation, ghost, ghostMargin });
   drawText(c, 6, 6, label, INK.text, 1);
   return c;
 }
@@ -430,25 +460,32 @@ function barLines(text: string, width: number): string[] {
 
 const BAR_LINE = 18;
 
-/** One thumbnail per pose, the rest pose first, all framed alike. `shapeAt` rebuilds the model for a set of angles. */
-export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseView[], thumb: number, cellSize: number, azimuth?: number, elevation?: number, cache?: PoseCache, frameEach = false): Canvas {
+/** A ghost is meshed at twice the cell: it is faint, and it is most of the model (a focus sheet's neighbours). */
+const GHOST_CELL = 2;
+
+/**
+ * One thumbnail per pose, the rest pose first, all framed alike. `shapeAt` rebuilds the model for a set of angles;
+ * `ghostAt`, when given, the part of it drawn faint behind and around that (a focus sheet's clipped neighbours).
+ */
+export function renderPoses(shapeAt: ShapeAt, jointNames: string[], poses: PoseView[], thumb: number, cellSize: number, azimuth?: number, elevation?: number, cache?: PoseCache, frameEach = false, ghostAt?: ShapeAt): Canvas {
   const all: PoseView[] = [{ name: "rest", joints: {} }, ...poses.filter((p) => p.name !== "rest")];
   const cols = Math.min(5, all.length);
   const rows = Math.ceil(all.length / cols);
   const gutter = 6;
   const width = cols * (thumb + gutter) + gutter;
   // Every joint is named, wrapped onto more bar lines when there are many (round 7: a ten-joint rig's legs were "...").
-  const lines = barLines(`POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${jointNames.join(", ")}`, width);
+  const lines = barLines(`POSES   ${jointNames.length} joint${jointNames.length === 1 ? "" : "s"}: ${jointNames.join(", ")}${ghostAt ? "   (the rest of the model faint)" : ""}`, width);
   const bar = 12 + lines.length * BAR_LINE;
   const out = new Canvas(width, bar + rows * (thumb + gutter) + gutter, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
   lines.forEach((l, i) => drawText(out, 10, 8 + i * BAR_LINE, l, INK.barText, 2));
   const meshes = all.map((p) => poseMesh(shapeAt, p.joints, cellSize, cache));
+  const ghosts = ghostAt ? all.map((p) => poseMesh(ghostAt, p.joints, cellSize * GHOST_CELL, cache, "ghost")) : [];
   // One framing for every pose, so sizes compare; a focused sheet frames each close-up on its own, since the
   // focused step is wherever each pose put it (a gimbal under a drone at take-off is far from one at rest).
   const framing = framingFor(meshes);
   all.forEach((p, i) => {
-    const c = poseThumb(meshes[i], frameEach ? framingFor([meshes[i]]) : framing, thumb, p.name, azimuth, elevation);
+    const c = poseThumb(meshes[i], frameEach ? framingFor([meshes[i]]) : framing, thumb, p.name, azimuth, elevation, ghosts[i], cellSize * GHOST_CELL);
     out.blit(c, gutter + (i % cols) * (thumb + gutter), bar + gutter + Math.floor(i / cols) * (thumb + gutter));
   });
   return out;
@@ -508,22 +545,26 @@ export function interpolatePose(keys: PoseView[], jointNames: string[], t: numbe
 }
 
 /** A strip of frames through an animation's keyframes, with the time under each. */
-export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number, timing: Timing = {}, cache?: PoseCache): Canvas {
+export function renderAnimation(shapeAt: ShapeAt, jointNames: string[], name: string, keys: PoseView[], seconds: number, frame: number, cellSize: number, frames = 8, azimuth?: number, elevation?: number, timing: Timing = {}, cache?: PoseCache, ghostAt?: ShapeAt): Canvas {
   const gutter = 4, labelH = 12;
   const width = frames * (frame + gutter) + gutter;
   const keyList = keys.map((k, i) => (timing.times ? `${k.name} ${fmt(timing.times[i])}s` : k.name)).join(" → ");
   // The bar says whether it loops (round 7: a one-shot's bar read like a loop's) and wraps a long key list.
-  const lines = barLines(`${name.toUpperCase()}   ${fmt(seconds)}s   ${timing.loop === false ? "once" : "loop"}${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}${timing.easeEnds !== undefined && timing.easeEnds !== (timing.ease ?? 0) ? `   ends ${fmt(timing.easeEnds)}` : ""}   keyframes: ${keyList}`, width);
+  const lines = barLines(`${name.toUpperCase()}   ${fmt(seconds)}s   ${timing.loop === false ? "once" : "loop"}${timing.ease ? `   ease ${fmt(timing.ease)}` : ""}${timing.easeEnds !== undefined && timing.easeEnds !== (timing.ease ?? 0) ? `   ends ${fmt(timing.easeEnds)}` : ""}   keyframes: ${keyList}${ghostAt ? "   (the rest of the model faint)" : ""}`, width);
   const bar = 6 + lines.length * BAR_LINE;
   const out = new Canvas(width, frame + gutter * 2 + bar + labelH, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
   lines.forEach((l, i) => drawText(out, 10, 6 + i * BAR_LINE, l, INK.barText, 2));
-  const meshes: (Mesh | undefined)[] = [];
-  for (let i = 0; i < frames; i++) meshes.push(poseMesh(shapeAt, interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1), timing), cellSize, cache));
+  const meshes: (Mesh | undefined)[] = [], ghosts: (Mesh | undefined)[] = [];
+  for (let i = 0; i < frames; i++) {
+    const at = interpolatePose(keys, jointNames, frames === 1 ? 0 : i / (frames - 1), timing);
+    meshes.push(poseMesh(shapeAt, at, cellSize, cache));
+    if (ghostAt) ghosts.push(poseMesh(ghostAt, at, cellSize * GHOST_CELL, cache, "ghost"));
+  }
   const framing = framingFor(meshes);
   for (let i = 0; i < frames; i++) {
     const t = frames === 1 ? 0 : i / (frames - 1);
-    const c = poseThumb(meshes[i], framing, frame, "", azimuth, elevation);
+    const c = poseThumb(meshes[i], framing, frame, "", azimuth, elevation, ghosts[i], cellSize * GHOST_CELL);
     out.blit(c, gutter + i * (frame + gutter), bar + gutter);
     drawText(out, gutter + i * (frame + gutter), bar + gutter + frame + 2, `${fmt(t * seconds)}s`, INK.dim, 1);
   }
