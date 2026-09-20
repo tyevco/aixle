@@ -30,7 +30,10 @@ the inside is cut open.
    `report.md` for the numbers (does it stand, is it one piece).
 5. **Say what the model promises**, with `assert`: one piece, a gap
    that must stay open, a size that must hold (`assert pieces(model) ==
-   1`, `assert clearance(handle, rim) > 0.05`), and for a rig a promise
+   1`, `assert clearance(handle, rim) > 0.05`), a void that must stay
+   empty and parts that must not sink into each other (`assert
+   void(cavity, mug)`, `assert overlap(frog, pad) < 0.001`, `assert
+   inside(spring, box) == 1`), and for a rig a promise
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing

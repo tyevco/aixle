@@ -139,7 +139,7 @@ export function assertLine(a: AssertResult): string {
 }
 
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "at", "surface", "pieces"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {

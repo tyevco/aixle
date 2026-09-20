@@ -15,7 +15,7 @@ import * as S from "../sdf/shapes2d.js";
 import * as W from "../sdf/sweeps.js";
 import { bezierCurve, curveThrough, sweepCurve, tubeCurve, type Curve } from "../sdf/curves.js";
 import { textProfile, textWidth } from "../sdf/font.js";
-import { clearance } from "../sdf/measure.js";
+import { clearance, insideFraction, isVoid, overlapVolume } from "../sdf/measure.js";
 import { countPieces } from "../mesh/pieces.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
@@ -294,6 +294,12 @@ export const BUILTINS: Builtin[] = [
   def("tall", "Queries", "The size of a shape's bounds along y.", ov([shape()], "number", (a) => s3(a[0]).bounds.max[1] - s3(a[0]).bounds.min[1])),
   def("pieces", "Queries", "How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.",
     ov([shape(), num("resolution", "cells on the longest side", 64)], "number", (a) => countPieces(s3(a[0]), n(a[1])))),
+  def("void", "Queries", "1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a hole that goes through, a slot a lid must not fill. Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught.",
+    ov([shape("region"), shape()], "number", (a) => (isVoid(s3(a[0]), s3(a[1])) ? 1 : 0))),
+  def("overlap", "Queries", "The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene.",
+    ov([shape("a"), shape("b")], "number", (a) => overlapVolume(s3(a[0]), s3(a[1])))),
+  def("inside", "Queries", "The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. Sampled at 24 cells along a's longest side.",
+    ov([shape("a"), shape("b")], "number", (a) => insideFraction(s3(a[0]), s3(a[1])))),
   def("clearance", "Queries", "The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.",
     ov([shape("a"), shape("b")], "number", (a) => clearance(s3(a[0]), s3(a[1])))),
 

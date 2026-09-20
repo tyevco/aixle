@@ -11,12 +11,15 @@ one thumbnail per build step, a turntable) and into meshes it can ship
 ```
 # A coffee mug: a rounded cup, hollowed and opened at the top, a torus handle.
 r = 1.2
-body = cylinder(r=r, h=2.4, round=0.12)
-cavity = cylinder(r - 0.14, 2.4) | move(0, 0.2, 0)
+body = cylinder(r=r, h=2.4, round=0.12) | move(0, 1.2, 0)
+cavity = cylinder(r - 0.14, 2.4) | move(0, 1.4, 0)
 cup = body - cavity
-handle = torus(0.75, 0.16) | rotate(x=90) | move(r + 0.45, 0.1, 0)
-mug = (cup + handle) | paint("porcelain") | ground()
+handle = torus(0.75, 0.16) | rotate(x=90) | move(r - 0.05 + 0.75 + 0.16, 1.3, 0)
+mug = (cup + handle) | paint("porcelain")
 show mug
+
+assert void(cavity, mug), "nothing pokes into the cup"
+assert overlap(handle, body) > 0.001, "the handle is joined to the wall"
 ```
 
 ```

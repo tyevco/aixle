@@ -447,6 +447,24 @@ How many separate pieces the shape meshes into at `resolution` cells on its long
 
 - `resolution`: cells on the longest side
 
+### void
+
+1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a hole that goes through, a slot a lid must not fill. Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught.
+
+    void(region, shape) -> number
+
+### overlap
+
+The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene.
+
+    overlap(a, b) -> number
+
+### inside
+
+The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. Sampled at 24 cells along a's longest side.
+
+    inside(a, b) -> number
+
 ### clearance
 
 The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.

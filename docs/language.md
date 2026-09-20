@@ -784,8 +784,22 @@ of each shape's box and then tightened, so it is exact for parts that
 face each other and can miss a feature narrower than a twelfth of the
 part. Measure parts rather than the whole model: `clearance(handle,
 body)`, not `clearance(handle, model)` (the handle is in the model, so
-that is zero). The bound queries (`width`, `tall`, `depth`, `top`,
-`bottom`, `height`) and the anchors (`at`) are the rest.
+that is zero). `void(region, shape)` is 1 when the region holds no
+solid of the shape: `assert void(cavity, mug)` promises nothing pokes
+into the cup (the mug example's handle once reached inside it), and
+the same form promises a hole goes through or a slot stays open, with
+the region the shape you subtracted or a box you name for it.
+`overlap(a, b)` is the volume two parts share, zero when they only
+touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
+rather than sunk into it, and `assert overlap(handle, body) > 0.001`
+says a handle is joined to its wall, not just touching. `inside(a,
+b)` is the fraction of a's volume inside b: `== 1` for a spring that
+must stay in its housing, `== 0` for a handle that must stay out of the
+cavity. All three sample a lattice (24 cells along the longest side,
+and `void` walks the surface too, so a pin thinner than the lattice is
+caught), so measure parts, not a scene. The bound queries (`width`,
+`tall`, `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are
+the rest.
 
 ## Limits worth knowing
 

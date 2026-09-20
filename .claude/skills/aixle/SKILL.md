@@ -52,6 +52,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    render anything.
 5. **Promise it with `assert`** once a thing is right: `assert
    pieces(model) == 1`, `assert clearance(handle, rim) > 0.05`, `assert
+   void(cavity, mug)` (nothing pokes into the cup), `assert overlap(frog,
+   pad) < 0.001` (on the pad, not sunk in), `assert
    tall(model) < 2.2`. `check` then fails, with the numbers, when a later
    edit breaks it.
 6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
@@ -97,7 +99,7 @@ import("part.obj", size=2)                                                      
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
-pieces(s)  clearance(a, b)   a < b  a == b  a != b                                        # measure for assert (1 or 0)
+pieces(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b     # measure for assert (1 or 0)
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 

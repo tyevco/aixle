@@ -240,6 +240,10 @@ describe("interpreter", () => {
     expect(run(`set grid 24\n${bridge}n = pieces(m, resolution=64)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(1);
     expect(() => run('s = sphere(1)\np = at(s, "tp")')).toThrow(/^line 2: at\(\): no anchor "tp"/);
   });
+  it("promises a void, a bounded overlap and containment", () => {
+    const ev = run('cup = cylinder(1, 2) - (cylinder(0.85, 2) | move(0, 0.2, 0))\ncavity = cylinder(0.85, 2) | move(0, 0.2, 0)\nhandle = torus(0.6, 0.15) | rotate(x=90) | move(1.2, 1, 0)\nmug = cup + handle\nassert void(cavity, mug), "nothing pokes in"\nassert overlap(handle, cup) > 0\nassert inside(handle, cavity) < 0.5\nshow mug');
+    expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual([[false, undefined], [true, expect.stringMatching(/^0\.\d+ > 0$/)], [true, expect.stringMatching(/^0\.\d+ < 0\.5$/)]]);
+  });
   it("judges an assert that names a pose only in that pose's evaluation", () => {
     const src = 'lid = joint(box(1, 0.2, 1) | move(0, 1.1, 0), "hinge", 0, 1, 0.5)\npose("open", hinge=[-90, 0, 0])\nassert tall(lid) < 0.5, "lies flat", pose=open\nassert tall(lid) < 0.5, "at rest"\nassert tall(lid) < 0.5, pose=rest';
     const rest = run(src);
