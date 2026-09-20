@@ -169,3 +169,35 @@ export function renderCallouts(mesh: Mesh, steps: CalloutStep[], info: ViewInfo,
   drawText(out, 10 + textWidth("CALLOUTS", 2) + 12, 10, `${labels.length} of ${named} named step${named === 1 ? "" : "s"} in view${unlabelled.length ? `, the largest. report.md names the rest` : ""}`, INK.barText, 1);
   return { canvas: out, labelled: chosen.map((r) => ({ name: r.name, cut: r.cut, visible: r.visible })), unlabelled };
 }
+
+/**
+ * How much of a set of points (a focused step's vertices) is hidden by the rest of the mesh from a view: the
+ * fraction whose projection lies behind the depth buffer of the whole mesh drawn from that azimuth and elevation.
+ * A focus shot from behind a pole framed the pole (round 9); this says so before the render is read.
+ */
+export function hiddenFraction(mesh: Mesh, within: Bounds, info: ViewInfo, cellSize: number, azimuth?: number, elevation?: number, size = 160, on?: Shape3): number {
+  let target: RenderTarget | undefined, cam: Camera | undefined;
+  renderView(mesh, info, "persp", size, { label: false, azimuth, elevation, capture: (t, c) => { target = t; cam = c; } });
+  if (!target || !cam) return 0;
+  const depthTol = Math.max(cellSize * 3, 1e-6);
+  const n = mesh.positions.length / 3;
+  const stride = Math.max(1, Math.floor(n / 4000));
+  const eye = cam.eye;
+  let seen = 0, hidden = 0;
+  for (let v = 0; v < n; v += stride) {
+    const x = mesh.positions[v * 3], y = mesh.positions[v * 3 + 1], z = mesh.positions[v * 3 + 2];
+    if (x < within.min[0] || x > within.max[0] || y < within.min[1] || y > within.max[1] || z < within.min[2] || z > within.max[2]) continue;
+    // Only the step's own surface counts, not whatever else its box holds (a lantern's pole runs through its box).
+    if (on && Math.abs(on.dist(x, y, z)) > cellSize) continue;
+    // Only vertices that face the camera count: a part's own far side is hidden by the part, not by the model.
+    if (mesh.normals[v * 3] * (x - eye[0]) + mesh.normals[v * 3 + 1] * (y - eye[1]) + mesh.normals[v * 3 + 2] * (z - eye[2]) >= 0) continue;
+    const pr = project(cam, toView(cam, [x, y, z]));
+    if (!pr) continue;
+    const px = Math.round(pr.x), py = Math.round(pr.y);
+    if (px < 0 || py < 0 || px >= size || py >= size) continue;
+    seen++;
+    const d = target.depth[py * size + px];
+    if (Number.isFinite(d) && pr.depth > d + depthTol) hidden++;
+  }
+  return seen ? hidden / seen : 0;
+}

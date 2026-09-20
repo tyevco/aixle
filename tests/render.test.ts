@@ -4,7 +4,7 @@ import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
-import { attributeVertices, renderCallouts } from "../src/render/callouts.js";
+import { attributeVertices, renderCallouts, hiddenFraction } from "../src/render/callouts.js";
 import { decodePng, encodePng } from "../src/render/png.js";
 import { albedo, coverage, sampleImage } from "../src/sdf/materials.js";
 import type { ImageTexture } from "../src/sdf/types.js";
@@ -237,6 +237,20 @@ describe("callouts", () => {
     const one = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 1, undefined, undefined, model);
     expect(one.labelled.map((l) => l.name)).toEqual(["cut"]);
     expect(one.unlabelled.map((u) => u.name).sort()).toEqual(["hole", "knob"]);
+  });
+});
+
+describe("a hidden focus", () => {
+  it("measures how much of a part the rest of the model hides from a view", () => {
+    // A small sphere behind a wall: hidden from the front, in the clear from behind, half seen from the side.
+    const wall = O.move(P.box(2, 2, 0.2), 0, 0, 1);
+    const ball = O.move(P.sphere(0.3), 0, 0, 0);
+    const model = O.union([wall, ball]);
+    const nets = surfaceNets(model, { resolution: 40 });
+    const info = { name: "m", bounds: model.bounds };
+    expect(hiddenFraction(nets.mesh, ball.bounds, info, nets.cellSize, 0, 5)).toBeGreaterThan(0.8);
+    expect(hiddenFraction(nets.mesh, ball.bounds, info, nets.cellSize, 180, 5)).toBeLessThan(0.2);
+    expect(hiddenFraction(nets.mesh, { min: [5, 5, 5], max: [6, 6, 6] }, info, nets.cellSize, 0, 5)).toBe(0);
   });
 });
 

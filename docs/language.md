@@ -596,7 +596,10 @@ What the lights and the skies can and cannot do, measured in round 9:
   step back from it), and a step in the middle of a scene makes a good
   framing proxy for a composition. A focus shot marches the whole
   model, so a hole under a counterbore reads as through, and the rest
-  of the model stays in the picture at its true depth. `dof` scales a
+  of the model stays in the picture at its true depth; when more than
+  15% of the focus step's surface facing the camera is hidden behind
+  the rest of the model, the render warns with the fraction and the
+  angles. `dof` scales a
   blur that grows with a surface's distance from the focus: 0.3 to 0.5
   is a gentle falloff, 1 blurs everything off the focus plane hard.
 - `--azimuth`, `--elevation` and `--zoom` on the command line override

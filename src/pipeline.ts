@@ -24,7 +24,7 @@ import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
-import { renderCallouts } from "./render/callouts.js";
+import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertResult, evaluate, type Evaluation, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
@@ -1177,6 +1177,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         if (shot && opts.camera && c.name !== shot.name) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         const b = r ? r.frame : beautyFrame;
+        // A focus mostly hidden from its camera by the rest of the model is said, not discovered in the picture.
+        if (r) {
+          const hidden = hiddenFraction(mesh!, b, { name: shownName, bounds: modelBounds }, cellSize, c.azimuth ?? azimuth, c.elevation ?? elevation, 160, r.shape);
+          if (hidden > 0.15) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(c.azimuth ?? azimuth)}, elevation ${fmt(c.elevation ?? elevation)}; a camera round it sees more`);
+        }
         time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(b)}`));
       }
     }
