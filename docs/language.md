@@ -773,7 +773,9 @@ joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the
 joints above it have turned, since a part built at rest and turned by a
-joint keeps its rest box. Both lines come from rays marched in from the
+joint keeps its rest box. A joint step itself is already turned in a
+pose, so its box is the box of the turned box and its `surface` line is
+where it is; it gets no `posed` line of its own. Both lines come from rays marched in from the
 box's faces, so a plate thinner than the rays' spacing can slip between
 them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
 also writes the warnings into `report.md` and counts them on the sheet's title bar.
