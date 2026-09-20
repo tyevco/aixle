@@ -509,10 +509,15 @@ vertex colours instead). `set minecraft 16` also writes Minecraft Bedrock
 geometry (`--minecraft` on the command line, with an optional pixel
 count): the field is sampled at that many pixels per unit, a unit being
 one block, every filled voxel is a pixel of solid, and the voxels are
-merged into as few cuboids as they allow, a bone per scene object, each
-cube face with its own window in `model.geo.png` painted from the
-materials; `model.geo.json` is the geometry, identifier
-`geometry.<name>`. A curved thing comes out stepped, which is what a
+merged into as few cuboids as they allow, a bone per scene object and
+per joint (a joint's bone sits under the joint above it, at its pivot,
+with the joint's part as its cubes), each cube face with its own window
+in `model.geo.png` painted from the materials; `model.geo.json` is the
+geometry, identifier `geometry.<name>`. With joints and animations the
+render also writes `model.animation.json`: every animation as Bedrock
+keyframes (`animation.<name>.<animation>`, rotation, position and
+scale per bone at the sampled times, `loop` when it loops), which is the
+rig back in the game it may have come from. A curved thing comes out stepped, which is what a
 block model is; a mug at 16 is about 250 cubes, and `set minecraft 8` is
 a chunkier, cheaper model. A part thinner than a voxel (a sixteenth of a
 block at 16: a chair leg 0.04 across) is lost, and the render warns which;
@@ -545,8 +550,12 @@ plant and a sign; a Roblox accessory hangs on its attachment, so an accessory ge
 no warning about standing. Bedrock draws geometry with x mirrored, so
 cubes are authored at -x and the model stands in the game as it does on
 the sheet, its +z front to the south, the block convention; an entity
-faces north, so turn an entity model `rotate(y=180)` first. Joints are
-not carried: the geometry is the rest pose.
+faces north, so `set minecraft_entity 1` (or `--minecraft-entity`)
+turns the model half a turn about y first, which with the mirror is a
+flip of z, and writes the bone rotations in the entity's frame.
+`examples/roblox/hatchling.aix` does both: the Roblox pet and, at
+`set minecraft 8`, the Bedrock entity it was rebuilt from, with its
+clips. The geometry is the rest pose; the poses are in the animations.
 
 ## The fast loop
 

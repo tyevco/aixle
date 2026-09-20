@@ -137,7 +137,28 @@ use, so a decal and a wood pattern come through, and the windows are
 shelf-packed into a power-of-two texture. Bedrock draws geometry with x
 mirrored (measured in the Minecraft repo this tool grew up beside: a
 cube authored on +x lands on the block's west), so cubes are authored at
--x and the model stands in the game as on the sheet.
+-x and the model stands in the game as on the sheet. An entity faces
+north, so its model is turned half a turn about y first, which with the
+mirror is a flip of z.
+
+A joint is a bone: its pivot in geometry pixels, its parent the joint
+above it, its cubes the joint's part with the joints inside it left out,
+the same walk the GLB's node tree makes. The animations are the same
+samples the GLB gets (a linear clip at its keys, an eased one at eight
+per segment, since Bedrock interpolates linearly too), written as
+keyframes per bone. Bedrock's bone rotation is an Euler triple applied
+z, y, x (x first, as `rotate` does) with the x and y angles negated in
+geometry space, and geometry space is the mirror of the world: the
+convention Blockbench's Bedrock codec and the Minecraft repo's viewer
+render with, and the one under which that repo's hatchling flaps the
+way its file says. Conjugating through the mirror, a right-handed
+rotation (rx, ry, rz) in the world is written (-rx, ry, -rz) for a
+block, and for an entity, turned half a turn, it is written as it is:
+the Aixle hatchling, built from the Bedrock file's numbers with z
+flipped, exports the file's numbers back. A test pushes a cube's centre
+through that convention for the exported numbers and checks it lands
+inside the posed shape, for both orientations. What the game does with
+the texture windows' orientation is still to be seen in it.
 
 ## Roblox
 

@@ -8,6 +8,11 @@
 # flap and glide clips are poses and animations the GLB carries.
 set roblox 1
 set grid 128
+# And back to Bedrock: at 8 pixels per stud a voxel is an eighth of a stud, about the geometry pixel the cubes
+# were built from, so the bones come out as the cubes they were (twice the original's size, a stud being a
+# block here), with the poses and animations as keyframes in model.animation.json; an entity faces north.
+set minecraft 8
+set minecraft_entity 1
 
 px = 0.12
 # The ember variant's ramp, from the texture generator's tiles.
@@ -73,11 +78,11 @@ pose("glide_deep", body=[-14, 0, 0], left_wing=[0, 0, -52], right_wing=[0, 0, 52
 pose("crouch", body=xform(rotate=[6, 0, 0], move=[0, -1 * px, 0], scale=[1.06, 0.88, 1.06]), head=[-10, 0, 0], tail=[0, 0, 0])
 pose("hop", body=xform(move=[0, 5 * px, 0], scale=[0.95, 1.1, 0.95]), left_wing=[0, 0, -30], right_wing=[0, 0, 30], front_left_leg=[-25, 0, 0], front_right_leg=[-25, 0, 0], back_left_leg=[30, 0, 0], back_right_leg=[30, 0, 0], tail=[10, 0, 0])
 # The flap snaps up and settles down: times= puts the up beats at 0.12 and 0.42 of 0.6 seconds; ease= slows
-# the glide and the idle to a stop at each pose instead of turning sharply.
-animation("flap", ["rest", "flap_up", "rest", "flap_up", "rest"], times=[0, 0.12, 0.3, 0.42, 0.6])
+# the glide and the idle to a stop at each pose instead of turning sharply. The flap and the hop are one-shots.
+animation("flap", ["rest", "flap_up", "rest", "flap_up", "rest"], times=[0, 0.12, 0.3, 0.42, 0.6], loop=0)
 animation("glide", ["glide", "glide_deep", "glide"], seconds=1.2, loop=1, ease=1)
 animation("idle", ["rest", "look", "rest"], seconds=2, loop=1, ease=1)
-animation("hop", ["rest", "crouch", "hop", "crouch", "rest"], times=[0, 0.2, 0.45, 0.7, 0.9], ease=0.5)
+animation("hop", ["rest", "crouch", "hop", "crouch", "rest"], times=[0, 0.2, 0.45, 0.7, 0.9], ease=0.5, loop=0)
 
 assert width(hatchling) <= 2.67, "a shoulder accessory may be 2.67 studs wide"
 assert tall(hatchling) <= 4.4

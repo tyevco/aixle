@@ -22,12 +22,26 @@
  * lands on the world's west; measured in tyevco/minecraft-qol,
  * docs/block-geometry-results.md), so cubes are authored at -x and the
  * model appears in the game as it does on the sheet: its +z front is south,
- * the block convention there; an entity, which faces north, wants the
- * model turned 180 degrees about y first.
+ * the block convention there. An entity faces north, so `entity` turns the
+ * model half a turn about y first, which with the mirror is a flip of z.
+ *
+ * Every joint is a bone: its pivot in geometry pixels, its parent the joint
+ * above it (or the object's own bone when the object has cubes of its own),
+ * its cubes the joint's part with the joints inside it left out. The
+ * animations are the same keys the GLB gets, as Bedrock keyframes. Bedrock's
+ * bone rotation is an Euler triple applied z, y, x (x first, as here) with
+ * the x and y angles negated in geometry space, and geometry space is the
+ * mirror of the world (the convention Blockbench's Bedrock codec and the
+ * Minecraft repo's viewer render with), so a right-handed rotation (rx, ry,
+ * rz) in world space is written (-rx, ry, -rz); turned for an entity, it is
+ * written as it is. A move is in geometry pixels with the same mirror.
  */
 import { albedo } from "../sdf/materials.js";
 import { Canvas, rgbf } from "../render/canvas.js";
-import { boundsSize, isEmpty, type Shape3 } from "../sdf/types.js";
+import { boundsSize, isEmpty, REST_POSE, type JointPose, type Shape3 } from "../sdf/types.js";
+import { eulerXYZ, rotAxis, type Vec3 } from "../core/vec.js";
+import { allJoints, findJoints, move as moveShape } from "../sdf/ops.js";
+import { offsetToJoint } from "./hierarchy.js";
 
 export type BedrockFace = "north" | "south" | "east" | "west" | "up" | "down";
 
@@ -40,6 +54,7 @@ export interface BedrockCube {
 
 export interface BedrockBone {
   name: string;
+  parent?: string;
   pivot: [number, number, number];
   cubes: BedrockCube[];
 }
@@ -51,6 +66,8 @@ export interface BedrockOptions {
   identifier?: string;
   /** Cap on the voxel lattice along any axis, so a scene does not ask for a billion samples. */
   maxPixels?: number;
+  /** An entity model faces north (-z): turn the model half a turn about y so its +z front does. A block faces south. */
+  entity?: boolean;
 }
 
 export interface BedrockResult {
@@ -61,8 +78,84 @@ export interface BedrockResult {
   cubes: number;
   voxels: number;
   bones: string[];
+  /** Bones that are joints, so an animation can name them. */
+  joints: string[];
   pixelsPerUnit: number;
   warnings: string[];
+}
+
+/** One animation as the exporter samples it: a pose per joint at each time, already blended and eased. */
+export interface BedrockClip {
+  name: string;
+  seconds: number;
+  loop: boolean;
+  times: number[];
+  /** Per time, per joint name: the pose there. A joint not named is at rest. */
+  samples: Record<string, JointPose>[];
+  /** Per joint name, its axis when declared about one: the single angle is then turned into an Euler triple. */
+  axes: Record<string, Vec3 | undefined>;
+}
+
+/** Model space to geometry space: the block convention mirrors x; an entity is turned half a turn first, which is a flip of z. */
+function toGeometry(v: [number, number, number], entity: boolean): [number, number, number] {
+  return entity ? [v[0], v[1], -v[2]] : [-v[0], v[1], v[2]];
+}
+
+/** A right-handed model-space rotation as Bedrock's numbers (see the header): (-rx, ry, -rz) for a block, unchanged for an entity. */
+export function bedrockRotation(angles: Vec3, entity: boolean, axis?: Vec3): [number, number, number] {
+  const e = axis ? eulerXYZ(rotAxis(axis, angles[0])) : angles;
+  return entity ? [e[0], e[1], e[2]] : [-e[0], e[1], -e[2]];
+}
+
+/** A keyframe time as Bedrock writes it: seconds with the decimals it needs, at least one. */
+function timeKey(t: number): string {
+  const r = Math.round(t * 10000) / 10000;
+  return Number.isInteger(r) ? `${r}.0` : `${r}`;
+}
+
+const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-9;
+
+/**
+ * The animations file, `<name>.animation.json`: `animation.<name>.<clip>` per clip, each bone's rotation, position
+ * and scale keyed by time, only the channels a clip changes. Keys are the sampled ones, so an eased clip has its
+ * eight keys per segment and Bedrock's linear interpolation plays the same curve.
+ */
+export function toBedrockAnimations(clips: BedrockClip[], name: string, joints: string[], opts: BedrockOptions = {}): object {
+  const entity = opts.entity ?? false;
+  const clean = (n: string): string => n.replace(/[^A-Za-z0-9_]/g, "_");
+  const known = new Set(joints.map(clean));
+  const animations: Record<string, unknown> = {};
+  for (const c of clips) {
+    const bones: Record<string, unknown> = {};
+    const jointNames = new Set<string>();
+    for (const sample of c.samples) for (const j of Object.keys(sample)) jointNames.add(j);
+    for (const j of jointNames) {
+      const bone = clean(j);
+      if (!known.has(bone)) continue;
+      const poses = c.samples.map((sm) => sm[j] ?? REST_POSE);
+      const turns = poses.some((pz) => pz.angles.some((v) => !near(v, 0)));
+      const moves = poses.some((pz) => pz.move.some((v) => !near(v, 0)));
+      const scales = poses.some((pz) => pz.scale.some((v) => !near(v, 1)));
+      if (!turns && !moves && !scales) continue;
+      const b: Record<string, unknown> = {};
+      const channel = (f: (pz: JointPose) => [number, number, number]): Record<string, [number, number, number]> => {
+        const out: Record<string, [number, number, number]> = {};
+        // + 0 turns a -0 (a negated zero angle) into the 0 the file should show.
+        c.times.forEach((t, i) => { out[timeKey(t)] = f(poses[i]).map((v) => Math.round(v * 10000) / 10000 + 0) as [number, number, number]; });
+        return out;
+      };
+      if (turns) b.rotation = channel((pz) => bedrockRotation(pz.angles, entity, c.axes[j]));
+      if (moves) b.position = channel((pz) => toGeometry([pz.move[0] * 16, pz.move[1] * 16, pz.move[2] * 16], entity));
+      if (scales) b.scale = channel((pz) => [pz.scale[0], pz.scale[1], pz.scale[2]]);
+      bones[bone] = b;
+    }
+    animations[`animation.${clean(name)}.${clean(c.name)}`] = {
+      ...(c.loop ? { loop: true } : {}),
+      animation_length: Math.round(c.seconds * 10000) / 10000,
+      bones,
+    };
+  }
+  return { format_version: "1.8.0", animations };
 }
 
 /** A merged box in model pixel coordinates (x not yet mirrored). */
@@ -143,44 +236,56 @@ const FACES: { face: BedrockFace; axis: 0 | 1 | 2; dir: 1 | -1 }[] = [
 export function toBedrock(objects: { name: string; shape: Shape3 }[], name: string, opts: BedrockOptions = {}): BedrockResult {
   const px = Math.max(1, Math.round(opts.pixelsPerUnit ?? 16));
   const maxPixels = opts.maxPixels ?? 256;
+  const entity = opts.entity ?? false;
   const warnings: string[] = [];
   const bones: BedrockBone[] = [];
+  const jointBones: string[] = [];
   let cubes = 0, voxels = 0;
   // Every face window, to pack into one texture, with how to paint it.
   type Window = { w: number; h: number; paint: (canvas: Canvas, u0: number, v0: number) => void; place: (u: number, v: number) => void };
   const windows: Window[] = [];
   const size = boundsSize(objects.reduce((acc, o) => (isEmpty(o.shape.bounds) ? acc : { min: acc.min.map((v, k) => Math.min(v, o.shape.bounds.min[k])) as [number, number, number], max: acc.max.map((v, k) => Math.max(v, o.shape.bounds.max[k])) as [number, number, number] }), { min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }));
-  for (const o of objects) {
-    const { boxes, voxels: n } = voxelBoxes(o.shape, px, maxPixels, warnings, o.name);
+  const clean = (n: string): string => n.replace(/[^A-Za-z0-9_]/g, "_");
+  // Geometry is sixteen to the block whatever the sampling, so a voxel is 16/px geometry units; the texture stays
+  // one texel per voxel. The block convention mirrors x; an entity is turned half a turn about y, so z flips instead.
+  const g = 16 / px;
+  const geo = (bx: Box): { origin: [number, number, number]; size: [number, number, number] } =>
+    entity
+      ? { origin: [bx.x * g, bx.y * g, -(bx.z + bx.d) * g], size: [bx.w * g, bx.h * g, bx.d * g] }
+      : { origin: [-(bx.x + bx.w) * g, bx.y * g, bx.z * g], size: [bx.w * g, bx.h * g, bx.d * g] };
+  /** Voxelise a shape into a bone's cubes, each face with a window painted from the shape's materials. */
+  const cubesOf = (shape: Shape3, label: string, bone: BedrockBone): void => {
+    const { boxes, voxels: n } = voxelBoxes(shape, px, maxPixels, warnings, label);
     voxels += n;
-    const bone: BedrockBone = { name: o.name.replace(/[^A-Za-z0-9_]/g, "_"), pivot: [0, 0, 0], cubes: [] };
     for (const bx of boxes) {
-      // The game mirrors x: authored at -x, the box lands where the model has it. Geometry is sixteen to the block
-      // whatever the sampling, so a voxel is 16/px geometry units; the texture stays one texel per voxel.
-      const g = 16 / px;
-      const cube: BedrockCube = { origin: [-(bx.x + bx.w) * g, bx.y * g, bx.z * g], size: [bx.w * g, bx.h * g, bx.d * g], uv: {} as BedrockCube["uv"] };
+      const cube: BedrockCube = { ...geo(bx), uv: {} as BedrockCube["uv"] };
       const lo = [bx.x, bx.y, bx.z], hi = [bx.x + bx.w, bx.y + bx.h, bx.z + bx.d];
       for (const f of FACES) {
         // The two in-plane axes: u runs along the first, v along the second (v down the texture is -y on a side).
         const [ua, va]: [0 | 1 | 2, 0 | 1 | 2] = f.axis === 1 ? [0, 2] : f.axis === 0 ? [2, 1] : [0, 1];
         const w = hi[ua] - lo[ua], h = hi[va] - lo[va];
-        // The model face this window shows: the game's mirror swaps east and west, so the geometry's east face
-        // is painted with the model's -x side (f.dir already says which side of the model to read).
-        const plane = f.dir > 0 ? hi[f.axis] : lo[f.axis];
+        // Which side of the model this window shows. The table's dir is the side in the world (the mirror is already
+        // allowed for: the geometry's east face is the world's west side); for an entity the world is the model turned
+        // half a turn, so its x and z sides are the model's opposite ones.
+        const dir = entity && f.axis !== 1 ? -f.dir : f.dir;
+        const plane = dir > 0 ? hi[f.axis] : lo[f.axis];
+        // u increases with the axis on top and up faces; on the north face (seen from -z) the world's +x is on the
+        // viewer's left, so u runs against x there, as it does on the east face against z. These are world directions,
+        // and u always runs along x or z, which for an entity are the model's negatives.
+        const worldFlipU = f.face === "north" || f.face === "east" || f.face === "down";
+        const flipU = entity ? !worldFlipU : worldFlipU;
+        // v runs down the texture: from the top of a side face, or from the far (-z) edge of the top face.
+        const fromLowV = f.axis === 1 ? (entity ? f.face !== "up" : f.face === "up") : false;
         const win: Window = {
           w, h,
           paint: (canvas, u0, v0) => {
             for (let v = 0; v < h; v++)
               for (let u = 0; u < w; u++) {
                 const p: [number, number, number] = [0, 0, 0];
-                // u increases with the axis on top and up faces; on the north face (seen from -z) the model's +x is on
-                // the viewer's left, so u runs against x there, as it does on the east face against z.
-                const flipU = (f.face === "north") || (f.face === "east") || (f.face === "down");
                 p[ua] = flipU ? hi[ua] - u - 0.5 : lo[ua] + u + 0.5;
-                // v runs down the texture: from the top of a side face, or from the far (-z) edge of the top face.
-                p[va] = f.axis === 1 ? (f.face === "up" ? lo[va] + v + 0.5 : hi[va] - v - 0.5) : hi[va] - v - 0.5;
-                p[f.axis] = plane - f.dir * 0.25;
-                const hit = o.shape.hit(p[0] / px, p[1] / px, p[2] / px);
+                p[va] = fromLowV ? lo[va] + v + 0.5 : hi[va] - v - 0.5;
+                p[f.axis] = plane - dir * 0.25;
+                const hit = shape.hit(p[0] / px, p[1] / px, p[2] / px);
                 const c = albedo(hit.mat, hit.lx, hit.ly, hit.lz);
                 canvas.set(u0 + u, v0 + v, rgbf(c[0], c[1], c[2]));
               }
@@ -192,7 +297,37 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
       bone.cubes.push(cube);
       cubes++;
     }
-    if (bone.cubes.length) bones.push(bone);
+  };
+  /** A joint as a bone under `parent`: its part with the joints inside it left out, and those as bones under it. */
+  const jointBone = (j: Shape3, parent: string | undefined, offset: Vec3): void => {
+    const st = j.joint!;
+    const nested = findJoints(st.child);
+    for (const n of nested) n.joint!.hidden = true;
+    const part = offset[0] === 0 && offset[1] === 0 && offset[2] === 0 ? st.child : moveShape(st.child, offset[0], offset[1], offset[2]);
+    const pivot = toGeometry([(st.pivot[0] + offset[0]) * 16, (st.pivot[1] + offset[1]) * 16, (st.pivot[2] + offset[2]) * 16], entity);
+    const bone: BedrockBone = { name: clean(st.name), pivot, cubes: [] };
+    if (parent) bone.parent = parent;
+    cubesOf(part, st.name, bone);
+    for (const n of nested) n.joint!.hidden = false;
+    bones.push(bone);
+    jointBones.push(bone.name);
+    for (const n of nested) jointBone(n, bone.name, offset);
+  };
+  for (const o of objects) {
+    const top = findJoints(o.shape);
+    const all = allJoints(o.shape);
+    for (const n of all) n.joint!.hidden = true;
+    const own: BedrockBone = { name: clean(o.name), pivot: [0, 0, 0], cubes: [] };
+    cubesOf(o.shape, o.name, own);
+    for (const n of all) n.joint!.hidden = false;
+    // An object that is all joints (a rig whose body is itself a joint) needs no bone of its own: its joints are roots.
+    const ownBone = own.cubes.length > 0 || top.length === 0;
+    if (ownBone) bones.push(own);
+    for (const j of top) {
+      const { offset, rigid } = offsetToJoint(o.shape, j);
+      if (!rigid) warnings.push(`minecraft: joint "${j.joint!.name}" sits under a rotation or a scale, which a bone cannot carry; its cubes are placed as at rest but its pivot may be off`);
+      jointBone(j, ownBone ? own.name : undefined, offset);
+    }
   }
   // Shelf packing, tallest first, into a power-of-two square that grows until everything fits.
   const area = windows.reduce((a, w) => a + w.w * w.h, 0);
@@ -234,5 +369,5 @@ export function toBedrock(objects: { name: string; shape: Shape3 }[], name: stri
       },
     ],
   };
-  return { geometry, texture, cubes, voxels, bones: bones.map((b) => b.name), pixelsPerUnit: px, warnings };
+  return { geometry, texture, cubes, voxels, bones: bones.map((b) => b.name), joints: jointBones, pixelsPerUnit: px, warnings };
 }

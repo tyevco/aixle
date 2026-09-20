@@ -76,6 +76,31 @@ function shifted(mesh: Mesh, origin: Vec3): Mesh {
   return { ...mesh, positions: p };
 }
 
+/** The translation the transforms between a root and a joint add up to, and whether any of them is not a plain move. */
+export function offsetToJoint(root: Shape3, j: Shape3): { offset: Vec3; rigid: boolean } {
+  const chain: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const find = (n: Shape3): boolean => {
+    if (n === j) return true;
+    if (seen.has(n) || n.joint) return false;
+    seen.add(n);
+    chain.push(n);
+    for (const k of n.parts ?? n.inner ?? []) if (find(k)) return true;
+    chain.pop();
+    return false;
+  };
+  if (!find(root)) return { offset: [0, 0, 0], rigid: true };
+  let rigid = true;
+  let p: Vec3 = [0, 0, 0], q: Vec3 = [1, 2, 3];
+  for (let k = chain.length - 1; k >= 0; k--) {
+    const w = chain[k].warp;
+    if (!w) continue;
+    p = w(p[0], p[1], p[2]); q = w(q[0], q[1], q[2]);
+  }
+  if (Math.abs(q[0] - p[0] - 1) > 1e-6 || Math.abs(q[1] - p[1] - 2) > 1e-6 || Math.abs(q[2] - p[2] - 3) > 1e-6) rigid = false;
+  return { offset: p, rigid };
+}
+
 export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts: HierarchyOptions): SceneHierarchy {
   const meshes: Mesh[] = [];
   const addMesh = (m: Mesh): number => { meshes.push(m); return meshes.length - 1; };
@@ -153,30 +178,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     };
     return node;
   };
-  /** The translation the transforms between a root and a joint add up to, and whether any of them is not a plain move. */
-  const offsetTo = (root: Shape3, j: Shape3): { offset: Vec3; rigid: boolean } => {
-    const chain: Shape3[] = [];
-    const seen = new Set<Shape3>();
-    const find = (n: Shape3): boolean => {
-      if (n === j) return true;
-      if (seen.has(n) || n.joint) return false;
-      seen.add(n);
-      chain.push(n);
-      for (const k of n.parts ?? n.inner ?? []) if (find(k)) return true;
-      chain.pop();
-      return false;
-    };
-    if (!find(root)) return { offset: [0, 0, 0], rigid: true };
-    let rigid = true;
-    let p: Vec3 = [0, 0, 0], q: Vec3 = [1, 2, 3];
-    for (let k = chain.length - 1; k >= 0; k--) {
-      const w = chain[k].warp;
-      if (!w) continue;
-      p = w(p[0], p[1], p[2]); q = w(q[0], q[1], q[2]);
-    }
-    if (Math.abs(q[0] - p[0] - 1) > 1e-6 || Math.abs(q[1] - p[1] - 2) > 1e-6 || Math.abs(q[2] - p[2] - 3) > 1e-6) rigid = false;
-    return { offset: p, rigid };
-  };
+  const offsetTo = offsetToJoint;
 
   for (const obj of objects) {
     if (obj.shape.instanced) {

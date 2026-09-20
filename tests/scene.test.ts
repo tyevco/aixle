@@ -214,8 +214,18 @@ describe("pipeline with a scene", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
       const src = 'a = box(1) | move(0, 0.5, 0)\narm = joint(box(1.5, 0.3, 0.3) | move(0.75, 1.2, 0), "elbow", 0, 1.2, 0)\npose("up", elbow=xform(rotate=[0, 0, 60], move=[0, 0.2, 0], scale=[1, 1, 1.5]))\nanimation("lift", ["rest", "up"], seconds=1)\nanimation("soft", ["rest", "up", "rest"], times=[0, 0.25, 1], ease=1)\nscene a, arm';
-      const r = run(src, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128 });
+      const r = run(src, "s.aix", dir, { grid: 24, size: 96, views: [], slices: false, turntable: false, steps: false, texture: 128, minecraft: 8 });
       expect(r.files).toContain("poses.png");
+      // The Bedrock geometry has the joint as a bone under the object, and the animations as keyframes on it.
+      expect(r.files).toContain("model.animation.json");
+      const geo = JSON.parse(readFileSync(join(dir, "model.geo.json"), "utf8"));
+      expect(geo["minecraft:geometry"][0].bones.map((b: { name: string; parent?: string }) => [b.name, b.parent])).toEqual([["a", undefined], ["elbow", undefined]]);
+      const anim = JSON.parse(readFileSync(join(dir, "model.animation.json"), "utf8"));
+      expect(Object.keys(anim.animations)).toEqual(["animation.s.lift", "animation.s.soft"]);
+      expect(Object.keys(anim.animations["animation.s.lift"].bones.elbow)).toEqual(["rotation", "position", "scale"]);
+      expect(Object.keys(anim.animations["animation.s.soft"].bones.elbow.rotation)).toHaveLength(17);
+      expect(anim.animations["animation.s.lift"].bones.elbow.rotation["1.0"]).toEqual([0, 0, -60]);
+      expect(r.report).toMatch(/Minecraft.*\(1 joint\).*animation\.s\.lift, animation\.s\.soft in model\.animation\.json/);
       expect(r.files).toContain("anim_lift.png");
       expect(r.files).toContain("model.glb");
       const glb = readFileSync(join(dir, "model.glb"));

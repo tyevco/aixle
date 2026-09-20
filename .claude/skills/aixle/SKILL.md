@@ -57,7 +57,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    `--beauty` for the presentation picture, and `--minecraft` when the
    model is for Bedrock: `model.geo.json` and its texture, the model
    voxelised at 16 pixels to the block (one unit is a block; keep every
-   member at least 1/16 thick, or `set minecraft 32`); `--roblox` when it
+   member at least 1/16 thick, or `set minecraft 32`; `--minecraft-entity`
+   for an entity, which faces north; a rig's joints are bones and its
+   animations go to `model.animation.json`); `--roblox` when it
    is for Roblox Studio: `model.roblox.glb` facing -Z with an
    `anchor(m, "HatAttachment", ...)` as the attachment, one mesh under
    4000 triangles for an accessory (`set grid 40`), a unit a stud.

@@ -64,7 +64,7 @@ npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
-npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png)
+npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
 npx aixle render model.aix --roblox             # also model.roblox.glb for Roblox Studio (facing -Z, _Att attachment nodes)
 npx aixle doc                        # the reference, to stdout
 ```
@@ -86,7 +86,8 @@ npx aixle doc                        # the reference, to stdout
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
-| `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, with its texture |
+| `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, a bone per object and per joint, with its texture |
+| `model.animation.json` | with `--minecraft` and joints: the animations as Bedrock keyframes on the joint bones |
 | `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings |
 
 ## The language in one screen
