@@ -563,3 +563,35 @@ round 7: A wooden marionette as a Roblox rig: a unit is a stud, about 2.5 studs
 ![round-7_marionette, beauty render](../dogfood/renders/round-7_marionette_beauty.png) ![round-7_marionette, contact sheet](../dogfood/renders/round-7_marionette.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-7/marionette.aix) · <a href="/aixle/viewers/round-7_marionette.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-7/marionette.report.md)
+
+### round-8_arm
+
+round 8: A six-axis robot arm with a parallel gripper, about 1.2 tall at rest,
+
+![round-8_arm, beauty render](../dogfood/renders/round-8_arm_beauty.png) ![round-8_arm, contact sheet](../dogfood/renders/round-8_arm.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-8/arm.aix) · <a href="/aixle/viewers/round-8_arm.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-8/arm.report.md)
+
+### round-8_dog
+
+round 8: A walking dog as a Minecraft Bedrock entity. One unit is a block, sixteen
+
+![round-8_dog, beauty render](../dogfood/renders/round-8_dog_beauty.png) ![round-8_dog, contact sheet](../dogfood/renders/round-8_dog.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-8/dog.aix) · <a href="/aixle/viewers/round-8_dog.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-8/dog.report.md)
+
+### round-8_ferris
+
+round 8: A fairground Ferris wheel: the wheel turns on an axis joint about z,
+
+![round-8_ferris, beauty render](../dogfood/renders/round-8_ferris_beauty.png) ![round-8_ferris, contact sheet](../dogfood/renders/round-8_ferris.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-8/ferris.aix) · <a href="/aixle/viewers/round-8_ferris.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-8/ferris.report.md)
+
+### round-8_multitool
+
+round 8: A folding pocket multi-tool, 0.9 long along x, lying flat on y = 0.
+
+![round-8_multitool, beauty render](../dogfood/renders/round-8_multitool_beauty.png) ![round-8_multitool, contact sheet](../dogfood/renders/round-8_multitool.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-8/multitool.aix) · <a href="/aixle/viewers/round-8_multitool.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-8/multitool.report.md)
