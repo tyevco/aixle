@@ -26,7 +26,9 @@ the inside is cut open.
    the full render; `--no-poses` while the geometry is still moving). Then
    the full render: read `out/model/sheet.png`,
    then `slices.png` if anything is hollow or nested, then `steps.png` if a
-   part is missing or misplaced, to see which step went wrong, and
+   part is missing or misplaced, to see which step went wrong,
+   `callouts.png` when you are not sure which step a thing in the picture
+   is (the perspective view with the largest visible steps named), and
    `report.md` for the numbers (does it stand, is it one piece).
 5. **Say what the model promises**, with `assert`: one piece, a gap
    that must stay open, a size that must hold (`assert pieces(model) ==

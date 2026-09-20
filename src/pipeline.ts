@@ -24,6 +24,7 @@ import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { renderCallouts } from "./render/callouts.js";
 import { assertLine, type AssertResult, evaluate, type Evaluation } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
@@ -53,6 +54,8 @@ export interface RunOptions {
   size?: number;
   views?: ViewName[];
   steps?: boolean;
+  /** false skips callouts.png, the perspective view with its visible steps named. */
+  callouts?: boolean;
   slices?: boolean;
   turntable?: boolean;
   obj?: boolean;
@@ -715,6 +718,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let closeUpNote: string | undefined;
   // The focused step's name when the sheet drew the rest of the model as a ghost, for the report's file notes.
   let ghosted: string | undefined;
+  // Which steps callouts.png labelled, for the report.
+  let calloutNote: string | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
@@ -919,6 +924,17 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     }
     const info = { name: shownName, bounds: frame, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation };
     time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size, viewGhost, ghostCell).toPng()));
+    // The perspective view with the largest visible steps named, a leader line each: what maps a picture back to
+    // the program (roadmap 9: "the thing at the top left is lantern_ring" as a fact). Not on a quick pass.
+    if (!opts.quick && opts.callouts !== false) {
+      // Every used shape step but the output: a union a later union flattened is still a name the program reads.
+      const named = evaluation.steps.filter((s) => isShape3(s.value) && evaluation.used.has(s.name) && s.value !== output && !isEmpty((s.value as Shape3).bounds)).map((s) => ({ name: s.name, shape: s.value as Shape3 }));
+      if (named.length) {
+        const co = time("callouts", () => renderCallouts(viewMesh, named, info, size, viewCell, 20, azimuth, elevation, output));
+        write("callouts.png", co.canvas.toPng());
+        calloutNote = co.labelled.length ? `${co.labelled.map((l) => l.name).join(", ")}${co.unlabelled.length ? ` (in view but smaller, not labelled: ${co.unlabelled.join(", ")})` : ""}` : "no named step has a visible surface from this view";
+      }
+    }
     for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(viewMesh, info, v, size, { azimuth, elevation, ghost: viewGhost, ghostMargin: ghostCell }).toPng()));
     if (opts.slices !== false) {
       const at: Partial<Record<"x" | "y" | "z", number>> = {};
@@ -1197,6 +1213,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
     if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.map((pn, i) => (a.times ? `${pn} ${fmt(a.times[i])}s` : pn)).join(" → ")}, ${fmt(a.seconds)}s, ${a.loop ? "loop" : "once"}${a.ease ? `, ease ${fmt(a.ease)}` : ""}${a.easeEnds !== a.ease ? `, ends ${fmt(a.easeEnds)}` : ""})`).join("; ")}`, "");
   }
+  if (calloutNote) lines.push(`Callouts (callouts.png, the largest visible steps named): ${calloutNote}`, "");
   if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`, "");
   if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shot ? ` (the sheet and beauty.png use "${shot.name}")` : ""}`, "");
   if (environment) lines.push(`Environment: ${environment}`, "");
@@ -1223,6 +1240,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "back.png": "back view", "left.png": "left view", "bottom.png": "bottom view",
     "slices.png": "cross-sections through the centre on each axis",
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
+    "callouts.png": "the perspective view with the largest visible steps named, a leader line from each label to its part",
     "turntable.png": "eight views around the model",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",

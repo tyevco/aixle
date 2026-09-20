@@ -113,6 +113,22 @@ describe("pipeline", () => {
     expect(cellSize).toBeCloseTo(10 / 128);
     expect(thinWarnings(ev, cellSize, grid).join()).toMatch(/'plate' \(line 1\) is only 0.05/);
   });
+  it("writes callouts.png on a full render and says which steps it labelled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = "slab = box(2, 0.4, 2) | move(0, 0.2, 0)\nknob = sphere(0.3) | move(0.5, 0.6, 0.5)\nhole = cylinder(0.25, 1) | move(-0.5, 0.2, -0.5)\nm = (slab - hole) + knob";
+      const r = run(src, "co.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false });
+      expect(r.files).toContain("callouts.png");
+      expect(r.report).toMatch(/Callouts \(callouts\.png, the largest visible steps named\): slab, knob\n/);
+      expect(r.timings.callouts).toBeDefined();
+      const quick = run(src, "co.aix", dir, { ...QUICK, grid: 32 });
+      expect(quick.files).not.toContain("callouts.png");
+      const off = run(src, "co.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false, callouts: false });
+      expect(off.files).not.toContain("callouts.png");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("frames a focused step and notes the true lowest point, not the bounds", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {

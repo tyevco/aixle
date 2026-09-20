@@ -4,6 +4,7 @@ import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
+import { attributeVertices, renderCallouts } from "../src/render/callouts.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
 import { preset } from "../src/sdf/materials.js";
 import { Canvas } from "../src/render/canvas.js";
@@ -153,6 +154,35 @@ describe("canvas and font", () => {
     const end = drawText(c, 0, 0, "AB 1", 0x000000);
     expect(end).toBe(textWidth("AB 1"));
     expect(c.get(1, 0)).toBe(0x000000);
+  });
+});
+
+describe("callouts", () => {
+  it("attributes vertices to the smallest step they lie on, never to a cutter, and labels the visible ones", () => {
+    const slab = O.move(P.box(2, 0.4, 2), 0, 0.2, 0);
+    const knob = O.move(P.sphere(0.3), 0.5, 0.6, 0.5);
+    const hole = O.move(P.cylinder(0.25, 1), -0.5, 0.2, -0.5);
+    const cut = O.difference(slab, hole);
+    const model = O.union([cut, knob]);
+    const nets = surfaceNets(model, { resolution: 40 });
+    const steps = [{ name: "slab", shape: slab }, { name: "knob", shape: knob }, { name: "hole", shape: hole }, { name: "cut", shape: cut }];
+    const owner = attributeVertices(nets.mesh, steps, nets.cellSize, 1, model);
+    const counts = [0, 0, 0, 0, 0];
+    for (const o of owner) counts[o < 0 ? 4 : o]++;
+    // The knob's vertices are the knob's, the slab's faces the slab's; the hole's wall is the cut's, never the hole's.
+    expect(counts[1]).toBeGreaterThan(50);
+    expect(counts[0]).toBeGreaterThan(counts[1]);
+    expect(counts[2]).toBe(0);
+    expect(counts[3]).toBeGreaterThan(50);
+    const r = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 20, undefined, undefined, model);
+    expect(r.labelled.map((l) => l.name).sort()).toEqual(["cut", "knob", "slab"]);
+    expect(r.labelled[0].name).toBe("slab");
+    expect(r.unlabelled).toEqual([]);
+    expect([r.canvas.width, r.canvas.height]).toEqual([160, 186]);
+    // With one label allowed, the smaller step is reported as in view but not labelled.
+    const one = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 1, undefined, undefined, model);
+    expect(one.labelled.map((l) => l.name)).toEqual(["slab"]);
+    expect([...one.unlabelled].sort()).toEqual(["cut", "knob"]);
   });
 });
 

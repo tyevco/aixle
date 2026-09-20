@@ -39,7 +39,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    a second or two; on a rig add `--no-poses` until the geometry settles,
    the strips come with the full render), then read `out/model/sheet.png`. Drop `--quick` for
    the full render: read `slices.png` if anything is hollow or nested,
-   `steps.png` if a part is missing or misplaced; `report.md` has the
+   `steps.png` if a part is missing or misplaced, `callouts.png` to read
+   which step a thing in the picture is; `report.md` has the
    numbers, including whether the model stands and is in one piece; a
    quick sheet that dropped thin steps says so and does not judge the
    pieces. `--focus step` is a close-up meshed at its own finer cell,

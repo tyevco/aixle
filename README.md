@@ -79,6 +79,7 @@ npx aixle doc                        # the reference, to stdout
 | `sheet.png` | perspective, front, right and top views on unit grids, with the model's size in the bar |
 | `slices.png` | cross-sections on x, y and z, inside filled with the material, outline where the surface is |
 | `steps.png` | one thumbnail per named shape in program order; red = not part of the output |
+| `callouts.png` | the perspective view with the largest visible steps named, a leader line from each label to its part |
 | `turntable.png` | eight views around the model |
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
 | `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |

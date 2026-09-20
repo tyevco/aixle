@@ -120,6 +120,8 @@ export interface ViewOptions {
   ghostMargin?: number;
   /** The points the perspective camera fits, instead of this mesh's own: every frame of a strip, so the camera holds still. */
   fitPoints?: Float32Array;
+  /** Receives the render target (depth per pixel) and the camera, for a caller that draws over the view. */
+  capture?: (target: RenderTarget, cam: Camera) => void;
 }
 
 /** The ghost's note under a view's caption, so a faint slab is read as a clipped neighbour and not a part. */
@@ -138,6 +140,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
     floorGrid(cam, target, bounds, label);
     if (ghost) renderGhost(ghost, cam, target, { margin: opts.ghostMargin });
     if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.bounds)}`, ghost ? GHOST_NOTE : undefined);
+    opts.capture?.(target, cam);
     return target.canvas;
   }
   const cam = orthographic(bounds, size, size, view);

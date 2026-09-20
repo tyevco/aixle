@@ -170,22 +170,19 @@ of the model and framed the whole mug; it now fits the points inside
 the frame. Not built: a light's position (they are directions), an
 image environment, and a camera path.
 
-## 9. Callouts: the picture labelled with the program's names
+## 9. Callouts: built
 
-**Why.** An agent maps a picture back to a step by inference. A view
-with each visible step's name drawn at its centroid, and a legend, would
-make "the thing at the top left is `lantern_ring`" a fact.
-
-**What.** `callouts.png`: the perspective view with a leader line and
-label per named step that is visible, the largest twenty. `--callouts`
-to include it in the sheet.
-
-**How.** The per-vertex material and the step's bounds give each
-triangle a step; a label at the projected centroid of each step's
-visible triangles, pushed apart so they do not overlap.
-
-**Must prototype.** Whether the labels are readable at 512 pixels on a
-fifty-step scene.
+`callouts.png` is written by every full render: the perspective view
+with a label and a leader line for each of the largest twenty visible
+named steps, and the report says which were labelled and which were in
+view but smaller. Each mesh vertex is attributed to the smallest step
+whose field it lies on with the model's inside on the step's inside (so
+a cutter's cut face is not the cutter's), a step is visible where the
+depth buffer shows its vertices, the label sits out from the picture's
+centre past the vertex nearest the step's visible centroid, and
+overlapping labels are pushed apart. Prototyped as asked: the
+robot's fifteen visible steps read at 400 pixels. `--no-callouts` skips
+it; it is not in the sheet, which stays four views.
 
 ## 10. `aixle explain`: built
 

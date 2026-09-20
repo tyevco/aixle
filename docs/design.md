@@ -127,6 +127,19 @@ rim the way the sky does. A camera is a set of framing choices the
 render already took; its `focus=` reuses the close-up's frame and fits
 the camera to the mesh's points inside it.
 
+`callouts.png` maps the picture back to the program. Each mesh vertex
+is attributed to the smallest named step whose field is within a cell
+of it and whose inside is the model's inside just behind the surface:
+the second test is what keeps a cutter from claiming the face it cut (a
+cavity's field is zero on the cup's inner wall too, but the cup's solid
+is outside the cavity), and it uses the model's own field to step back
+less at an edge cell rather than hand a rim to the cavity below it. A
+step is visible where the depth buffer shows its vertices, its label
+sits out from the picture's centre past the visible vertex nearest its
+visible centroid (so a ring's label points at the ring, not its hole),
+and overlapping labels are pushed apart. The largest twenty are
+labelled; the report names the rest.
+
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.
 
