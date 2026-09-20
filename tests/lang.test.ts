@@ -240,6 +240,22 @@ describe("interpreter", () => {
     expect(run(`set grid 24\n${bridge}n = pieces(m, resolution=64)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(1);
     expect(() => run('s = sphere(1)\np = at(s, "tp")')).toThrow(/^line 2: at\(\): no anchor "tp"/);
   });
+  it("paints with a picture through material(image=) and decal(image=), loaded by the host", () => {
+    const rgba = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 0]);
+    const resolveImage = (path: string) => { if (path !== "pic.png") throw new Error(`cannot read ${path}`); return { width: 2, height: 1, rgba }; };
+    const ev = evaluate(parse('m = box(2, 1, 0.2) | paint(material("white", image="pic.png", projection="planar", axis="z", scale=2))\nr = box(2, 1, 0.3) | move(0, 0.5, 0.1)\nd = decal(box(2, 1, 0.2), r, image="pic.png")\nshow m'), { resolveImage });
+    expect(ev.images.map((i) => [i.name, i.width, i.projection, i.size])).toEqual([["pic.png", 2, "planar", "2 units wide, along z"], ["pic.png", 2, "box", "fitted to a 2 × 1 × 0.3 region"]]);
+    expect(ev.images.every((i) => i.height === 1)).toBe(true);
+    const m = ev.steps.find((s) => s.name === "m")!.value as Shape3;
+    // The left half is the picture's red texel; the right half is transparent, so the decal shows the base there.
+    expect(m.hit(-0.5, 0, 0.1).mat.image?.name).toBe("pic.png");
+    const d = ev.steps.find((s) => s.name === "d")!.value as Shape3;
+    expect(d.hit(-0.5, 0.5, 0.1).mat.name).toBe("pic.png");
+    expect(d.hit(0.5, 0.5, 0.1).mat.name).toBe("clay");
+    expect(() => evaluate(parse('m = material("white", image="nope.png")'), { resolveImage })).toThrow(/image "nope.png": cannot read nope.png/);
+    expect(() => evaluate(parse('m = material("white", image="pic.png")'))).toThrow(/pictures cannot be loaded here/);
+    expect(() => evaluate(parse('m = material("white", image="pic.png", projection="cubic")'), { resolveImage })).toThrow(/projection is "planar", "cylindrical" or "spherical"/);
+  });
   it("declares lights, cameras and an environment for the beauty render", () => {
     const ev = run('m = box(1)\nlight("key", azimuth=-35, elevation=50, size=1.5, color="#fff1dc")\nlight("rim", azimuth=150, elevation=20, power=0.5)\ncamera("hero", azimuth=30, elevation=20, zoom=1.4)\ncamera("detail", focus="m", zoom=2, dof=1)\nset camera hero\nset environment sunset\nshow m');
     expect(ev.lights.map((l) => [l.name, l.azimuth, l.elevation, l.size, l.power, l.colorName])).toEqual([["key", -35, 50, 1.5, 1, "#fff1dc"], ["rim", 150, 20, 1, 0.5, "white"]]);

@@ -5,6 +5,9 @@ import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
 import { attributeVertices, renderCallouts } from "../src/render/callouts.js";
+import { decodePng, encodePng } from "../src/render/png.js";
+import { albedo, coverage, sampleImage } from "../src/sdf/materials.js";
+import type { ImageTexture } from "../src/sdf/types.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
 import { preset } from "../src/sdf/materials.js";
 import { Canvas } from "../src/render/canvas.js";
@@ -154,6 +157,51 @@ describe("canvas and font", () => {
     const end = drawText(c, 0, 0, "AB 1", 0x000000);
     expect(end).toBe(textWidth("AB 1"));
     expect(c.get(1, 0)).toBe(0x000000);
+  });
+});
+
+describe("pictures", () => {
+  const picture = (): ImageTexture => {
+    // 4 by 2: red, green / blue, transparent.
+    const rgba = new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0]);
+    return { name: "p.png", width: 4, height: 2, rgba, projection: "planar", axis: "z", size: 2 };
+  };
+  it("decodes what the encoder writes, and filtered rows too", () => {
+    const w = 5, h = 3, rgba = new Uint8Array(w * h * 4);
+    for (let i = 0; i < rgba.length; i++) rgba[i] = (i * 37) & 255;
+    const back = decodePng(encodePng(w, h, rgba));
+    expect([back.width, back.height]).toEqual([w, h]);
+    expect([...back.rgba]).toEqual([...rgba]);
+    // An RGB, 8-bit file with a Sub-filtered row, built by hand: two pixels, the second stored as a difference.
+    const { deflateSync } = require("node:zlib") as typeof import("node:zlib");
+    const raw = new Uint8Array([1, 10, 20, 30, 5, 5, 5]);
+    const chunk = (type: string, body: Uint8Array) => { const t = Buffer.from(type); const c = Buffer.concat([t, Buffer.from(body)]); const len = Buffer.alloc(4); len.writeUInt32BE(body.length); const crc = Buffer.alloc(4); return Buffer.concat([len, c, crc]); };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(2, 0); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 2;
+    const file = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array(0))]);
+    expect([...decodePng(file).rgba]).toEqual([10, 20, 30, 255, 15, 25, 35, 255]);
+    expect(() => decodePng(new Uint8Array([1, 2, 3]))).toThrow(/not a PNG/);
+  });
+  it("samples a picture flat, wrapped, and fitted to a box, with its alpha as coverage", () => {
+    const flat = picture();
+    // Planar along z, 2 units wide (so 1 unit tall): the top-left texel is red, the bottom-right transparent.
+    const rgb = (v: number[]) => v.slice(0, 3).map((c) => Math.round(c * 1000) / 1000);
+    expect(rgb(sampleImage(flat, -0.75, 0.25, 0))).toEqual([1, 0, 0]);
+    expect(sampleImage(flat, 0.75, -0.25, 0)[3]).toBe(0);
+    expect(sampleImage(flat, 3, 0, 0)[3]).toBe(0);
+    const m = { name: "p", color: [1, 1, 1] as [number, number, number], color2: [1, 1, 1] as [number, number, number], pattern: "solid" as const, scale: 1, metal: 0, rough: 0.5, transmit: 0, seed: 0, axis: "z" as const, glow: 0, image: flat };
+    expect(rgb(albedo(m, -0.75, 0.25, 0))).toEqual([1, 0, 0]);
+    expect(coverage(m, 0.75, -0.25, 0)).toBe(0);
+    // Wrapped round y by arc length, 1 unit wide: the front (+z) starts the picture, a quarter turn on at radius 1
+    // is 1.57 units along, so into the second copy's green.
+    const wrap: ImageTexture = { ...picture(), projection: "cylindrical", axis: "y", size: 1 };
+    // Sampled at texel centres: an eighth of a unit along the arc is the first texel, 1.375 the sixth, a green one.
+    expect(rgb(sampleImage(wrap, Math.sin(0.125), 0.125, Math.cos(0.125)))).toEqual([1, 0, 0]);
+    expect(rgb(sampleImage(wrap, Math.sin(1.375), 0.125, Math.cos(1.375)))).toEqual([0, 1, 0]);
+    expect(sampleImage(wrap, 0, 5, 1)[3]).toBe(0);
+    // Fitted to a box thin along z: u along x, v down y.
+    const box: ImageTexture = { ...picture(), projection: "box", axis: "y", size: 1, box: { min: [0, 0, 0], max: [4, 2, 0.1] } };
+    expect(rgb(sampleImage(box, 0.5, 1.75, 0.05))).toEqual([1, 0, 0]);
+    expect(sampleImage(box, 3.5, 0.25, 0.05)[3]).toBe(0);
   });
 });
 

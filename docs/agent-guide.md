@@ -118,6 +118,7 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
 | the eyes, mouth or a label need geometry you do not want | a painted sphere bulges, a painted tube sticks out | `decal(shape, region, material)` paints the surface inside a region and adds nothing |
 | a fine pattern looks like blocks or camouflage on the sheet | the sheet colours per vertex and the pattern is near the cell size | judge it in the beauty render, or coarsen `scale=` |
+| a label, a logo or a face must be a picture, not strokes | patterns are procedural | a PNG beside the program: `decal(part, box, image="label.png")` fits it to the box; `material(..., image="skin.png", projection="cylindrical")` wraps it |
 | lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
 | the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
 | the beauty render leaves the model small in the frame | the camera fits the box's corners, so a diagonal model has empty corners | `set zoom 1.2` or `--zoom 1.2` (it stops where the box would touch the edge) |

@@ -140,6 +140,17 @@ visible centroid (so a ring's label points at the ring, not its hole),
 and overlapping labels are pushed apart. The largest twenty are
 labelled; the report names the rest.
 
+A picture is a material whose `albedo()` samples pixels instead of a
+pattern, so nothing downstream changes: the atlas baker, the Bedrock
+texture and the beauty render all ask `albedo()` at a local point and
+get the picture. The mapping from point to pixel is the material's
+projection, evaluated in the frame the part was painted in like a
+pattern's axis; a decal's picture is fitted to its region's box, and
+its alpha is what the decal falls through to the base material. The
+cylindrical wrap goes by arc length rather than angle so the picture
+keeps its shape and repeats round a lid; one copy stretched round it
+smeared its lettering five to one.
+
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.
 

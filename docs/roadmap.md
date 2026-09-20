@@ -137,23 +137,23 @@ guide and the skill tells agents to write them once a thing is right.
 when the loop tells them to, and whether the asserts they write catch
 anything: the next dogfooding round's question.
 
-## 7. Image textures and decals
+## 7. Image textures and decals: built
 
-**Why.** A label, a logo, a face, a map: things that are pictures, not
-patterns. `decal` paints a region one colour; it cannot paint an image.
-
-**What.** `material(image="label.png")` with a projection (`planar`,
-`cylindrical`, `spherical`, `triplanar`, default triplanar) and
-`decal(shape, region, image="logo.png")` which projects along the
-region's shortest axis.
-
-**How.** A PNG decoder (zlib is already there for writing); the image is
-sampled in `albedo()` from the local point; the atlas baker and the
-beauty render need nothing else.
-
-**Must prototype.** Filtering: an image sampled per texel at a coarse
-atlas aliases; a box filter over the texel's footprint is probably
-enough.
+`decal(shape, region, image="label.png")` fits a PNG to the region's
+box across its shortest side, transparent texels leaving the base
+material; `material(..., image="skin.png", projection=...)` paints a
+part with a picture, planar, cylindrical (by arc length, repeating,
+which is what keeps a band's lettering its own shape) or spherical. A
+PNG decoder beside the encoder (every colour type, 1 to 16 bits, the
+five filters, no interlace); the picture is sampled in `albedo()`
+bilinear between texels, so the atlas, the Bedrock texture and the
+beauty render need nothing else; the report lists the pictures. The
+tin example wears one. Prototyped as asked: the label baked into a
+1024-pixel atlas at the tin's grid reads clean with bilinear sampling
+alone, so no footprint filter was built; a picture much larger than its
+region would want one. Not built: `triplanar` (it needs the normal,
+which `albedo()` does not have) and a picture on a pattern's second
+colour.
 
 ## 8. Lights, cameras and environments: built
 

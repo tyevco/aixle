@@ -136,6 +136,14 @@ A teapot: a revolved body hollowed with shell() and opened at the top, a
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/teapot.aix) · <a href="/aixle/viewers/teapot.html" target="_blank" rel="noopener">viewer</a>
 
+### tin
+
+A biscuit tin with a paper label: the picture in examples/assets/label.png is
+
+![tin, beauty render](../examples/renders/tin_beauty.png) ![tin, contact sheet](../examples/renders/tin.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/tin.aix) · <a href="/aixle/viewers/tin.html" target="_blank" rel="noopener">viewer</a>
+
 ### tower
 
 A castle tower: a hollow drum with merlons round the top, arrow slits cut

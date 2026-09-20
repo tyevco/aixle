@@ -12,7 +12,7 @@ import { regionTouches } from "../sdf/measure.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import { isEmpty, REST_POSE, type JointPose, type Shape3 } from "../sdf/types.js";
+import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
 import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
@@ -60,6 +60,8 @@ export interface EvalOptions {
   poseName?: string;
   /** Skip every assert (`--no-asserts`): a pieces() promise on a big rig can cost more than the render. */
   skipAsserts?: boolean;
+  /** Load a picture for material(image=) and decal(image=): the file's pixels, or throw with why not. */
+  resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -149,6 +151,19 @@ export interface Evaluation {
   warnings: string[];
   /** Every assert the program ran, in order, passed or not; a used library's come first with its path. */
   asserts: AssertResult[];
+  /** The pictures the program painted with, for the report. */
+  images: ImageUse[];
+}
+
+/** A picture a material or a decal uses. */
+export interface ImageUse {
+  name: string;
+  width: number;
+  height: number;
+  projection: ImageTexture["projection"];
+  /** The picture's width (or height, wrapped) in units, or the box it was fitted to. */
+  size: string;
+  line: number;
 }
 
 export interface AssertResult {
@@ -228,6 +243,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const animations: Animation[] = [];
   const lights: Light[] = [];
   const cameras: CameraShot[] = [];
+  const images: ImageUse[] = [];
+  const imageCache = new Map<string, { width: number; height: number; rgba: Uint8Array }>();
+  /** A picture by path, loaded once per evaluation. */
+  const loadImage = (path: string, line: number): { width: number; height: number; rgba: Uint8Array } => {
+    if (!options.resolveImage) throw new RuntimeError(`image "${path}": pictures cannot be loaded here`, line);
+    let img = imageCache.get(path);
+    if (!img) {
+      try { img = options.resolveImage(path); } catch (err) { throw new RuntimeError(`image "${path}": ${(err as Error).message}`, line); }
+      imageCache.set(path, img);
+    }
+    return img;
+  };
   let lastShape: { name: string } | undefined;
   let depth = 0;
   let loops = 0;
@@ -402,6 +429,35 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return nameArg.value;
   }
 
+  function callWithImage(callee: string, builtin: Builtin, values: { name?: string; value: Value }[], line: number): Value {
+    const path = values.find((v) => v.name === "image")!.value;
+    if (typeof path !== "string") throw new RuntimeError(`${callee}(): image is a file name, a string`, line);
+    const projArg = values.find((v) => v.name === "projection")?.value;
+    const rest = values.filter((v) => v.name !== "image" && v.name !== "projection");
+    const px = loadImage(path, line);
+    const name = path.replace(/^.*[\\/]/, "");
+    if (callee === "material") {
+      if (projArg !== undefined && (typeof projArg !== "string" || !["planar", "cylindrical", "spherical"].includes(projArg))) throw new RuntimeError(`material(): projection is "planar", "cylindrical" or "spherical"`, line);
+      const projection = (projArg as ImageTexture["projection"] | undefined) ?? "planar";
+      const base = callBuiltin(builtin, rest, line) as Material;
+      const image: ImageTexture = { name, width: px.width, height: px.height, rgba: px.rgba, projection, axis: base.axis, size: base.scale > 0 ? base.scale : 1 };
+      images.push({ name, width: px.width, height: px.height, projection, size: `${image.size} units wide, along ${base.axis}`, line });
+      return { ...base, name: `${name}`, pattern: "solid", image };
+    }
+    if (projArg !== undefined) throw new RuntimeError(`decal(): a picture on a decal is fitted to its region; there is no projection= here`, line);
+    // decal(shape, region, image=): a white base the picture paints over, fitted to the region's box.
+    const positional = rest.filter((v) => !v.name);
+    if (positional.length < 2 || !isShape3(positional[0].value) || !isShape3(positional[1].value)) throw new RuntimeError(`decal(): decal(shape, region, image="file.png")`, line);
+    const region = positional[1].value as Shape3;
+    if (isEmpty(region.bounds)) throw new RuntimeError(`decal(): the region is empty, so there is nothing to fit the picture to`, line);
+    const size3 = boundsSize(region.bounds);
+    const image: ImageTexture = { name, width: px.width, height: px.height, rgba: px.rgba, projection: "box", axis: "y", size: 1, box: region.bounds };
+    const white = toMaterial("white");
+    const mat: Material = { ...white, name, image };
+    images.push({ name, width: px.width, height: px.height, projection: "box", size: `fitted to a ${size3.map((v) => Number(v.toPrecision(3))).join(" × ")} region`, line });
+    return callBuiltin(builtin, [positional[0], positional[1], { value: mat }], line);
+  }
+
   function callLight(args: Arg[], scope: Scope, line: number): Value {
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
     const nameArg = values.find((v) => !v.name);
@@ -555,6 +611,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
+    // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
+    // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
+    if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
     // In a pose, a query measures a step where the pose put it: the shape is read through the joints and transforms
     // above it in the output, or in the newest step that holds it (round 8: clearance on a nested wrist in a tucked
     // pose measured the rest position and the promise passed for the wrong reason).
@@ -894,7 +953,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, steps: stepList, settings, warnings, modules: moduleList, defs, asserts };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
 }
 
 export function signature(name: string, ov: Overload): string {

@@ -511,17 +511,20 @@ Give the whole shape a material: a preset name, a colour ("#rrggbb" or a name), 
 
 ### decal
 
-Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), "black")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material.
+Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), "black")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material. With `image="label.png"` (a PNG beside the program) the picture is fitted to the region's box across its shortest side, its transparent texels leaving the base material: a label on a jar, a logo, a face.
 
     decal(shape, region, material) -> shape
+    decal(shape, region, image) -> shape
 
 - `region`: the part of the surface inside this shape gets the material
+- `region`: the box the picture is fitted to, across its shortest side
+- `image`: a PNG file, relative to the program
 
 ### material
 
 A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
-    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?) -> material
+    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?, image="", projection="") -> material
 
 - `color`: a colour, or a preset name to start from
 - `color2`: second colour for two-tone patterns
@@ -529,6 +532,8 @@ A custom material, from a colour or from a preset with some of its fields change
 - `transmit`: 0 opaque .. 1 clear glass (beauty render only)
 - `axis`: the pattern's axis: stripes stack along it, grain runs along it
 - `glow`: light the surface gives off, 0..2 (unshadowed, for flames and lamps)
+- `image`: a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape
+- `projection`: how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)
 
 ### rgb
 

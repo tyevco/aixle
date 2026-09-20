@@ -1,0 +1,19 @@
+# A biscuit tin with a paper label: the picture in examples/assets/label.png is
+# a decal fitted to a box on the tin's front (its transparent margin leaves the
+# tin's own paint), and the same picture repeats round the lid's band as a
+# cylindrical material, 0.6 units wide per copy. Pictures are PNG files beside the program.
+set grid 160
+body = cylinder(1.0, 1.4) | move(0, 0.7, 0) | paint(material("#2a5d8f", rough=0.5))
+label_box = box(1.2, 0.72, 0.3) | move(0, 0.72, 0.95)
+labelled = decal(body, label_box, image="assets/label.png")
+band = material("cream", image="assets/label.png", projection="cylindrical", scale=0.6)
+lid = (cylinder(1.03, 0.36) | paint(band)) | move(0, 1.58, 0)
+lid_top = cylinder(1.03, 0.06, round=0.02) | move(0, 1.79, 0) | paint(material("#2a5d8f", rough=0.5))
+knob = sphere(0.12) | move(0, 1.88, 0) | paint("brass")
+tin = labelled + lid + lid_top + knob
+show tin
+
+camera("front", azimuth=15, elevation=12, zoom=1.2)
+camera("label", focus="label_box", azimuth=0, elevation=5)
+set camera front
+assert overlap(knob, lid_top) > 0.0005, "the knob is set into the lid"

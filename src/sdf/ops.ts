@@ -8,7 +8,7 @@
  */
 import { fbm3 } from "../core/noise.js";
 import { apply, length2, rad, rotAxis, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
-import { DEFAULT_MATERIAL } from "./materials.js";
+import { DEFAULT_MATERIAL, coverage } from "./materials.js";
 import { primitive, cylinder } from "./primitives.js";
 import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import { smax, smin } from "./shapes2d.js";
@@ -620,6 +620,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
  */
 export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
   const d = s.dist, h = s.hit, rd = region.dist;
+  const picture = !!m.image;
   // Only a skin: deeper than a tenth of the region's smallest side the base material shows, so a cross-section
   // does not draw the region as a solid inside the part (measured: a frog's belly decal read as an organ).
   const rs = isEmpty(region.bounds) ? 1 : Math.max(1e-6, Math.min(...boundsSize(region.bounds)) * 0.1);
@@ -628,7 +629,8 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
     dist: d,
     hit: (x, y, z) => {
       const v = d(x, y, z);
-      return v > -rs && rd(x, y, z) <= 0 ? { d: v, mat: m, lx: x, ly: y, lz: z } : h(x, y, z);
+      // A picture's transparent texels (and the space off its edge) show the base material.
+      return v > -rs && rd(x, y, z) <= 0 && (!picture || coverage(m, x, y, z) >= 0.5) ? { d: v, mat: m, lx: x, ly: y, lz: z } : h(x, y, z);
     },
     bounds: s.bounds,
     cost: s.cost + region.cost,

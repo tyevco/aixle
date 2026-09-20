@@ -25,6 +25,7 @@ import { drawText } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { renderCallouts } from "./render/callouts.js";
+import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertResult, evaluate, type Evaluation } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
@@ -122,6 +123,26 @@ export const STD_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "s
  * which is the library shipped with the tool; `.aix` may be left off.
  * Each file is read once per run.
  */
+/** Load a PNG beside the program for material(image=) and decal(image=), once per file. */
+export function imageResolver(sourceName: string) {
+  const cache = new Map<string, DecodedPng>();
+  return (path: string): DecodedPng => {
+    const file = resolve(dirname(resolve(sourceName)), path);
+    const hit = cache.get(file);
+    if (hit) return hit;
+    let data: Buffer;
+    try {
+      data = readFileSync(file);
+    } catch {
+      throw new Error(`cannot read ${file}`);
+    }
+    if (!/\.png$/i.test(file)) throw new Error(`${path} is not a PNG; pictures are PNG files`);
+    const png = decodePng(data);
+    cache.set(file, png);
+    return png;
+  };
+}
+
 export function moduleResolver(sourceName: string) {
   const cache = new Map<string, { source: string; file: string }>();
   return (path: string, from?: string): { source: string; file: string } => {
@@ -652,7 +673,7 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
 }
 
 /**
@@ -690,20 +711,21 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
 
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
   const resolver = importResolver(sourceName, log);
+  const resolveImage = imageResolver(sourceName);
   const program = parse(source);
   const modules = moduleResolver(sourceName);
   const skipAsserts = opts.asserts === false;
-  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, skipAsserts }));
+  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
-  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts }) : rest;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts }) : rest;
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
   // asserts for a pose share it.
   const evalCache = new Map<string, Evaluation>();
   const evalAt = (joints: Record<string, JointPose>, poseName?: string): Evaluation => {
     const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
     let ev = evalCache.get(key);
-    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts }); evalCache.set(key, ev); }
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts }); evalCache.set(key, ev); }
     return ev;
   };
   // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"
@@ -1214,6 +1236,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (evaluation.animations.length) lines.push(`Animations: ${evaluation.animations.map((a) => `${a.name} (${a.poses.map((pn, i) => (a.times ? `${pn} ${fmt(a.times[i])}s` : pn)).join(" → ")}, ${fmt(a.seconds)}s, ${a.loop ? "loop" : "once"}${a.ease ? `, ease ${fmt(a.ease)}` : ""}${a.easeEnds !== a.ease ? `, ends ${fmt(a.easeEnds)}` : ""})`).join("; ")}`, "");
   }
   if (calloutNote) lines.push(`Callouts (callouts.png, the largest visible steps named): ${calloutNote}`, "");
+  if (evaluation.images.length) lines.push(`Images: ${evaluation.images.map((i) => `${i.name} ${i.width} × ${i.height} (${i.projection === "box" ? i.size : `${i.projection}, ${i.size}`}; line ${i.line})`).join("; ")}`, "");
   if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}`, "");
   if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shot ? ` (the sheet and beauty.png use "${shot.name}")` : ""}`, "");
   if (environment) lines.push(`Environment: ${environment}`, "");

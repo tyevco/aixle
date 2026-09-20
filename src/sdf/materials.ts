@@ -7,7 +7,7 @@
  */
 import { fbm3, noise3, white3 } from "../core/noise.js";
 import type { Vec3 } from "../core/vec.js";
-import type { Material, PatternKind } from "./types.js";
+import type { ImageTexture, Material, PatternKind } from "./types.js";
 
 export const PATTERNS: readonly PatternKind[] = [
   "solid", "checker", "stripes", "wood", "marble", "noise", "speckle", "brick", "tiles", "dots",
@@ -155,6 +155,10 @@ const frac = (v: number): number => v - Math.floor(v);
  * perpendicular to it. `axis` swaps world x or z into that role.
  */
 export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
+  if (m.image) {
+    const px = sampleImage(m.image, x, y, z);
+    return [px[0], px[1], px[2]];
+  }
   const s = m.scale > 0 ? m.scale : 1;
   if (m.axis === "x") { const t = x; x = y; y = t; }
   else if (m.axis === "z") { const t = z; z = y; y = t; }
@@ -224,4 +228,84 @@ export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
       return d < 0.06 ? m.color2 : m.color;
     }
   }
+}
+
+/** The picture's (u, v) in 0..1 for a local point, or undefined off a planar picture's edge. */
+export function imageUV(img: ImageTexture, x: number, y: number, z: number): [number, number] | undefined {
+  // The picture's own frame has its axis along y, like a pattern's.
+  if (img.axis === "x") { const t = x; x = y; y = t; }
+  else if (img.axis === "z") { const t = z; z = y; y = t; }
+  const size = img.size > 0 ? img.size : 1;
+  const aspect = img.height / Math.max(1, img.width);
+  switch (img.projection) {
+    case "planar": {
+      // Across the axis: u along x, v along the third axis, the picture `size` wide and centred on the origin.
+      const u = x / size + 0.5, v = 0.5 - z / (size * aspect);
+      if (u < 0 || u > 1 || v < 0 || v > 1) return undefined;
+      return [u, v];
+    }
+    case "cylindrical": {
+      // Round the axis by arc length, so the picture keeps its shape and repeats as many times as fit: `size` is
+      // its width along the surface (measured: stretching one copy round a lid smeared its lettering five to one).
+      const r = Math.hypot(x, z);
+      const arc = Math.atan2(x, z) * r;
+      const u = arc / size - Math.floor(arc / size);
+      const v = 0.5 - y / (size * aspect);
+      if (v < 0 || v > 1) return undefined;
+      return [u, v];
+    }
+    case "spherical": {
+      const r = Math.hypot(x, y, z) || 1;
+      const u = Math.atan2(x, z) / (2 * Math.PI) + 0.5;
+      const v = Math.acos(Math.max(-1, Math.min(1, y / r))) / Math.PI;
+      return [u, v];
+    }
+    case "box": {
+      // The picture fitted to the box's face across its shortest side: u along the longer of the other two, v the other.
+      const b = img.box;
+      if (!b) return undefined;
+      const size3 = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]];
+      const p = [x, y, z];
+      // Undo the axis swap above: box projection works in the raw frame.
+      if (img.axis === "x") { const t = p[0]; p[0] = p[1]; p[1] = t; }
+      else if (img.axis === "z") { const t = p[2]; p[2] = p[1]; p[1] = t; }
+      let thin = 0;
+      for (let k = 1; k < 3; k++) if (size3[k] < size3[thin]) thin = k;
+      // Screen-like reading: u runs along x where it can, v down the up axis where it can.
+      const others = [0, 1, 2].filter((k) => k !== thin);
+      const uAxis = others.includes(0) ? 0 : others[0], vAxis = others.find((k) => k !== uAxis)!;
+      const u = (p[uAxis] - b.min[uAxis]) / Math.max(1e-9, size3[uAxis]);
+      const vRaw = (p[vAxis] - b.min[vAxis]) / Math.max(1e-9, size3[vAxis]);
+      // The picture's top is the box's top (or its far side, on a floor).
+      const v = vAxis === 1 ? 1 - vRaw : thin === 1 ? 1 - vRaw : 1 - vRaw;
+      if (u < 0 || u > 1 || v < 0 || v > 1) return undefined;
+      return [u, v];
+    }
+  }
+}
+
+/** The picture's colour and alpha at a local point, bilinear between texels; off a picture's edge, transparent. */
+export function sampleImage(img: ImageTexture, x: number, y: number, z: number): [number, number, number, number] {
+  const uv = imageUV(img, x, y, z);
+  if (!uv) return [0, 0, 0, 0];
+  const wrapU = img.projection === "cylindrical" || img.projection === "spherical";
+  let fx = uv[0] * img.width - 0.5, fy = uv[1] * img.height - 0.5;
+  if (wrapU) fx = ((fx % img.width) + img.width) % img.width;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const tx = fx - x0, ty = fy - y0;
+  const px = (ix: number, iy: number): [number, number, number, number] => {
+    const cx = wrapU ? ((ix % img.width) + img.width) % img.width : Math.max(0, Math.min(img.width - 1, ix));
+    const cy = Math.max(0, Math.min(img.height - 1, iy));
+    const o = (cy * img.width + cx) * 4;
+    return [img.rgba[o] / 255, img.rgba[o + 1] / 255, img.rgba[o + 2] / 255, img.rgba[o + 3] / 255];
+  };
+  const a = px(x0, y0), b = px(x0 + 1, y0), c = px(x0, y0 + 1), d = px(x0 + 1, y0 + 1);
+  const out: [number, number, number, number] = [0, 0, 0, 0];
+  for (let k = 0; k < 4; k++) out[k] = (a[k] * (1 - tx) + b[k] * tx) * (1 - ty) + (c[k] * (1 - tx) + d[k] * tx) * ty;
+  return out;
+}
+
+/** How opaque a material is at a local point: a picture's alpha, else fully. */
+export function coverage(m: Material, x: number, y: number, z: number): number {
+  return m.image ? sampleImage(m.image, x, y, z)[3] : 1;
 }

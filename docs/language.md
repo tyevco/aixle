@@ -494,7 +494,19 @@ GLB, the model as shown. `decal(shape, region, m)` paints only the surface insid
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
 a jar; `region` is any shape, and it must cross the surface (a sphere
 centred on the skin, a box through it): a region that touches none of
-the shape's surface paints nothing, and `check` warns. A decal is a skin: the cross-sections show
+the shape's surface paints nothing, and `check` warns. A picture is a
+PNG beside the program: `decal(jar, label_box, image="label.png")` fits
+it to the region's box across the box's shortest side (u along x where
+it can, v down), and its transparent texels leave the base material, so
+a label's margin is the label's edge; `material("cream",
+image="label.png", projection="cylindrical", scale=0.6)` paints a part
+with the picture instead of a pattern, `planar` (one copy flat across
+`axis`, `scale` wide, centred on the origin of the frame the part is
+painted in), `cylindrical` (round `axis` by arc length, `scale` wide,
+repeating, its height by its shape) or `spherical` (one copy round the
+origin). Pictures reach the atlas, the Bedrock texture and the beauty
+render through the same sampling, bilinear between texels; the report's
+Images line says each picture's size and where it went. A decal is a skin: the cross-sections show
 the base material underneath, and a step used only as a region is not
 geometry, so it gets no thin-part warning and is never named as a loose
 piece. Patterns are laid out in the frame the part is painted in, along the
