@@ -75,7 +75,8 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 - A small part of a large model is a few pixels on the sheet: `--focus
   name` (or `--focus name_3` for one copy of a placed set) frames every
   view on that step alone, meshed at the frame's own
-  finer cell, where the step is in the pose being shown; the report adds
+  finer cell, where the step is in the pose being shown, with the rest
+  of the model in the frame drawn faint; the report adds
   a "Close-up watertight" row for that mesh, so a lug or a tooth can be
   judged sound on its own.
 - A quick sheet that dropped thin steps says so and does not judge the

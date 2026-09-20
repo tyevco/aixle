@@ -43,7 +43,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    numbers, including whether the model stands and is in one piece; a
    quick sheet that dropped thin steps says so and does not judge the
    pieces. `--focus step` is a close-up meshed at its own finer cell,
-   where the step is in the pose shown, with its own watertight row.
+   where the step is in the pose shown, the rest of the model faint
+   around it, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side.
    On a program you did not write, `npx aixle explain model.aix` first: the
    tree from the output down, each step with its source line, size,

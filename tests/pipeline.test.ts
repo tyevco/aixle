@@ -222,6 +222,13 @@ describe("extents and close-ups", () => {
       // The sheet's cell is the knob's box over 32 cells, far finer than the slab's 10 units over 32.
       expect(r.files).toContain("sheet.png");
       expect(r.timings.focus).toBeDefined();
+      // The slab's top reaches into the knob's frame: it is meshed as a ghost and the report says so (round 7: a
+      // clipped body over a gimbal read as a plate).
+      expect(r.timings["focus:ghost"]).toBeDefined();
+      expect(r.report).toMatch(/`sheet.png`: .*a close-up on knob: the rest of the model in the frame is drawn faint/);
+      // A focus on the whole model leaves nothing to ghost.
+      const whole = run(src, "focus.aix", dir, { ...QUICK, grid: 32, focus: "m" });
+      expect(whole.report).not.toMatch(/drawn faint/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

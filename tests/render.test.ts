@@ -3,6 +3,7 @@ import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
+import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
 import { preset } from "../src/sdf/materials.js";
 import { Canvas } from "../src/render/canvas.js";
@@ -64,6 +65,43 @@ describe("views", () => {
     const px = c.get(80, 80);
     const r = (px >> 16) & 255, b = px & 255;
     expect(r).toBeGreaterThan(b);
+  });
+  it("draws a ghost faint where it is in front of nothing, and not at all behind the solid mesh", () => {
+    const solid = surfaceNets(P.box(1, 1, 1), { resolution: 16 }).mesh;
+    // Two ghost boxes: one behind the solid one (hidden), one off to its right (faint), plus one in front of it.
+    const behind = O.move(P.box(1, 1, 0.5), 0, 0, -2), beside = O.move(P.box(1, 1, 1), 3, 0, 0), front = O.move(P.box(0.4, 0.4, 0.2), 0, 0, 2);
+    const ghost = surfaceNets(O.union([behind, beside]), { resolution: 32 }).mesh;
+    const bounds = { min: [-1, -1, -3] as [number, number, number], max: [4, 1, 3] as [number, number, number] };
+    const cam = orthographic(bounds, 160, 160, "front");
+    const px = (p: [number, number, number]) => { const q = project(cam, toView(cam, p))!; return [Math.round(q.x), Math.round(q.y)] as const; };
+    const [sx, sy] = px([0, 0, 0.5]), [gx, gy] = px([3, 0, 0.5]);
+    const plain = renderView(solid, { name: "g", bounds }, "front", 160, { label: false });
+    const ghosted = renderView(solid, { name: "g", bounds }, "front", 160, { label: false, ghost, ghostMargin: 0.05 });
+    // Over the solid box the ghost behind it changes nothing.
+    expect(ghosted.get(sx, sy)).toBe(plain.get(sx, sy));
+    // Over the box beside it, the ghost tints the background without covering it.
+    // (The plain pixel is the background or one of its grid lines.)
+    const bg = plain.get(gx, gy), g = ghosted.get(gx, gy);
+    expect(g).not.toBe(bg);
+    const solidThere = renderView(surfaceNets(beside, { resolution: 32 }).mesh, { name: "s", bounds }, "front", 160, { label: false }).get(gx, gy);
+    const dist = (a: number, b: number) => Math.abs((a >> 16) - (b >> 16)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
+    expect(dist(g, bg)).toBeLessThan(dist(solidThere, bg));
+    // A ghost in front of the solid mesh is drawn over it, faintly: the pixel moves but the solid still shows.
+    const target = createTarget(160, 160, INK.view);
+    renderMesh(solid, cam, target, { background: INK.view });
+    const before = target.canvas.get(sx, sy);
+    renderGhost(surfaceNets(front, { resolution: 16 }).mesh, cam, target, { margin: 0.05 });
+    const after = target.canvas.get(sx, sy);
+    expect(after).not.toBe(before);
+    expect(dist(after, before)).toBeLessThan(dist(after, INK.view) + dist(before, INK.view));
+    // A slice with a ghost draws the cut through it faint around the part's own cut.
+    const boxInfo = { name: "g", bounds: P.box(4, 4, 4).bounds };
+    const slices = renderSlices(sphere, boxInfo, 80, undefined, P.box(4, 4, 4));
+    const centre = slices.get(4 + 40, 34 + 40), corner = slices.get(4 + 12, 34 + 68);
+    expect(corner).not.toBe(INK.view);
+    expect(corner).not.toBe(centre);
+    expect(dist(corner, INK.view)).toBeLessThan(dist(centre, INK.view));
+    expect(renderSlices(sphere, boxInfo, 80).get(4 + 12, 34 + 68)).not.toBe(corner);
   });
   it("composes the sheet, slices, steps and turntable at the expected sizes", () => {
     const sheet = renderSheet(mesh, { ...info, triangles: 10, cellSize: 0.1, warnings: 1 }, 100);

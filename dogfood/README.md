@@ -122,8 +122,7 @@ box a dozen times a render. Their reports' three changes each are
 answered below; the marionette's re-import probe and the drone's and
 jack's are kept and skipped by the render set like the others. Not
 done: a default import resolution that follows the grid (the grid is a setting
-of the program being evaluated), a ghosted neighbour on a focus sheet,
-an offline viewer (three.js is loaded from a CDN by design); the
+of the program being evaluated), an offline viewer (three.js is loaded from a CDN by design); the
 drone's report of a joint step turned by the pose getting no `posed`
 line did not reproduce on its final program (the line is there).
 
@@ -245,7 +244,10 @@ and the pose sheet's bar names every joint, wrapped; a strip's bar says
 `once` or `loop`, and the report's animations line gives each key's
 second, the loop and the ease; asserts are judged at rest unless one
 names its pose (`pose=pop`, added after the round with `ease_ends`, the
-two language items the round left undone); a posed
+two language items the round left undone); a focus sheet, its slices,
+its pose sheet and its strips draw the rest of the model faint around
+the focused step, with a note under each caption (added after the round:
+the drone's body clipped over its gimbal read as a plate); a posed
 report's Stands, footprint and watertight rows say which pose, standing
 is not judged when the pose lifts the model off the floor, and the
 footprint is taken at y = 0 when a corner dips a little below it;

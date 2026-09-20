@@ -421,7 +421,13 @@ the surface's extent, and the fine pass is laid over that box. A focused
 render goes further: the model is clipped to the focused step's extent
 and re-extracted at that box's own cell, so a small part is drawn with
 its own detail rather than the scene's, and the slices and the beauty
-render are framed on it too. Focus is a close-up, not a reframing.
+render are framed on it too. Focus is a close-up, not a reframing. The
+close-up is two meshes: the focused step, placed where the output puts
+it, and a ghost of everything else in the frame with the step carved
+out of it, meshed at twice the cell and drawn faint and see-through
+over the step wherever it is in front by more than a cell (round 7: the
+drone's body, clipped flat over the gimbal, was read as an unknown
+plate). The pose sheet and the strips do the same per pose.
 
 ## Lighting a metal, lighting a lamp
 
