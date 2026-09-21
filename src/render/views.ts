@@ -357,6 +357,13 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
   return out;
 }
 
+/** The frames of a turn around the model, at a fixed distance so it never jumps between them, for an animated PNG. */
+export function turntableFrames(mesh: Mesh, info: ViewInfo, frame: number, frames = 24): Canvas[] {
+  const out: Canvas[] = [];
+  for (let i = 0; i < frames; i++) out.push(renderView(mesh, info, "persp", frame, { azimuth: (info.azimuth ?? 35) + (360 / frames) * i, label: false }));
+  return out;
+}
+
 /** Eight frames around the model at a fixed distance, so it never jumps between frames. */
 export function renderTurntable(mesh: Mesh, info: ViewInfo, frame: number, frames = 8): Canvas {
   const gutter = 4, bar = 24;

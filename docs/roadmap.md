@@ -201,7 +201,6 @@ It is a printer over the dependencies the evaluation records. Not built:
 - Records: `p = {x: 1, y: 2}` with `p.x`, for readable parameters.
 - An import cache keyed by the file's hash, so `check` and `render` do
   not both sample a large mesh.
-- An APNG turntable, since the PNG writer is there.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
 - A warning when `attach` leaves two faces exactly touching, and a

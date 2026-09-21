@@ -66,6 +66,53 @@ export interface DecodedPng {
  * Decode a PNG file: greyscale, greyscale with alpha, RGB, RGBA and palette images at 1 to 16 bits, not interlaced,
  * with the five row filters. Anything else says what it is. Sixteen-bit samples keep their high byte.
  */
+/**
+ * An animated PNG of same-sized RGBA frames, each shown for `delayMs`, looping: an acTL after the header, an fcTL
+ * before each frame, the first frame's data in IDAT and the others' in fdAT. A browser shows it as a picture that
+ * moves; a viewer that knows no APNG shows the first frame.
+ */
+export function encodeApng(width: number, height: number, frames: Uint8Array[], delayMs = 80): Buffer {
+  if (!frames.length) throw new Error("an animated PNG needs at least one frame");
+  for (const f of frames) if (f.length !== width * height * 4) throw new Error(`expected ${width * height * 4} bytes per frame, got ${f.length}`);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  const actl = Buffer.alloc(8);
+  actl.writeUInt32BE(frames.length, 0);
+  actl.writeUInt32BE(0, 4);
+  const stride = width * 4;
+  const filtered = (rgba: Uint8Array): Buffer => {
+    const raw = Buffer.alloc((stride + 1) * height);
+    for (let y = 0; y < height; y++) { raw[y * (stride + 1)] = 0; raw.set(rgba.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1); }
+    return deflateSync(raw, { level: 9 });
+  };
+  const parts: Buffer[] = [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("acTL", actl)];
+  let seq = 0;
+  frames.forEach((f, i) => {
+    const fctl = Buffer.alloc(26);
+    fctl.writeUInt32BE(seq++, 0);
+    fctl.writeUInt32BE(width, 4);
+    fctl.writeUInt32BE(height, 8);
+    fctl.writeUInt32BE(0, 12);
+    fctl.writeUInt32BE(0, 16);
+    fctl.writeUInt16BE(Math.max(1, Math.round(delayMs)), 20);
+    fctl.writeUInt16BE(1000, 22);
+    fctl[24] = 0; fctl[25] = 0;
+    parts.push(chunk("fcTL", fctl));
+    const data = filtered(f);
+    if (i === 0) parts.push(chunk("IDAT", data));
+    else {
+      const fdat = Buffer.alloc(4 + data.length);
+      fdat.writeUInt32BE(seq++, 0);
+      data.copy(fdat, 4);
+      parts.push(chunk("fdAT", fdat));
+    }
+  });
+  parts.push(chunk("IEND", new Uint8Array(0)));
+  return Buffer.concat(parts);
+}
+
 export function decodePng(data: Uint8Array): DecodedPng {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (data.length < 8 || sig.some((b, i) => data[i] !== b)) throw new Error("not a PNG file");

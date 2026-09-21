@@ -32,7 +32,8 @@ import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
-import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, dimsLabel, type StepView, type ViewName } from "./render/views.js";
+import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
+import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
 
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
@@ -1049,6 +1050,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       time("slices", () => write("slices.png", renderSlices(viewGhost && focusShape ? focusShape : output, sliceInfo, Math.round(size * 0.75), at, viewGhost && focusShape ? output : undefined).toPng()));
     }
     if (opts.turntable !== false) time("turntable", () => write("turntable.png", renderTurntable(mesh!, info, Math.round(size / 2)).toPng()));
+    // The same turn as a picture that moves: 24 frames in an animated PNG, which a browser plays and a plain
+    // viewer shows as its first frame. Not on a quick pass.
+    if (opts.turntable !== false && !opts.quick) time("turntable:apng", () => { const fr = turntableFrames(mesh!, info, Math.round(size / 2)); write("turntable.apng", encodeApng(fr[0].width, fr[0].height, fr.map((c) => c.data), 80)); });
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
     if (opts.obj !== false || opts.glb !== false) {
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
@@ -1393,6 +1397,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
     "callouts.png": "the perspective view with the largest visible steps named, a leader line from each label to its part",
     "turntable.png": "eight views around the model",
+    "turntable.apng": "the model turning, an animated PNG of 24 frames (a browser plays it)",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
     "model.roblox.glb": "the GLB for Roblox Studio's 3D Importer: a Handle node facing -Z with _Att attachment nodes from the anchors",

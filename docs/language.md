@@ -799,7 +799,9 @@ pose, so its box is the box of the turned box and its `surface` line is
 where it is; it gets no `posed` line of its own. Both lines come from rays marched in from the
 box's faces, so a plate thinner than the rays' spacing can slip between
 them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
-also writes the warnings into `report.md` and counts them on the sheet's title bar.
+also writes the warnings into `report.md` and counts them on the sheet's title bar,
+and beside `turntable.png` writes `turntable.apng`, the same turn as an
+animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).
 Warnings cover: a shape computed but never assigned; a step that is not part
 of the output (a step an assert, a decal or a camera reads is a region
 and is not warned about; `check` tags each step `(cut)`, `(region)` or

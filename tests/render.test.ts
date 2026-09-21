@@ -5,7 +5,7 @@ import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
 import { attributeVertices, renderCallouts, hiddenFraction } from "../src/render/callouts.js";
-import { decodePng, encodePng } from "../src/render/png.js";
+import { decodePng, encodePng, encodeApng } from "../src/render/png.js";
 import { albedo, coverage, sampleImage } from "../src/sdf/materials.js";
 import type { ImageTexture } from "../src/sdf/types.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
@@ -237,6 +237,21 @@ describe("callouts", () => {
     const one = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 1, undefined, undefined, model);
     expect(one.labelled.map((l) => l.name)).toEqual(["cut"]);
     expect(one.unlabelled.map((u) => u.name).sort()).toEqual(["hole", "knob"]);
+  });
+});
+
+describe("animated PNG", () => {
+  it("writes the acTL, an fcTL per frame, the first frame in IDAT and the rest in fdAT, and decodes to its first frame", () => {
+    const w = 3, h = 2;
+    const f1 = new Uint8Array(w * h * 4).fill(255), f2 = new Uint8Array(w * h * 4).fill(0);
+    const buf = encodeApng(w, h, [f1, f2], 50);
+    const types: string[] = [];
+    for (let i = 8; i < buf.length; ) { const len = buf.readUInt32BE(i); types.push(buf.toString("latin1", i + 4, i + 8)); i += 12 + len; }
+    expect(types).toEqual(["IHDR", "acTL", "fcTL", "IDAT", "fcTL", "fdAT", "IEND"]);
+    expect(buf.readUInt32BE(buf.indexOf("acTL") + 4)).toBe(2);
+    const first = decodePng(buf);
+    expect([first.width, first.height, first.rgba[0]]).toEqual([3, 2, 255]);
+    expect(() => encodeApng(w, h, [], 50)).toThrow(/at least one frame/);
   });
 });
 
