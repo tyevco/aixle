@@ -792,7 +792,9 @@ blobs or gone at a quick cell, so judge a working end at full grid, with
 which mesh) prints every step's size and the warnings: shapes as their
 box, 2D profiles as their box in the plane, numbers and lists of numbers
 as their values (a number set inside a loop is the last iteration's and
-is not listed), then the program's `def`s with their parameters. A step whose tree holds a rotation, a warp or a posed
+is not listed), then the program's `def`s with their parameters;
+`--brief` leaves the sizes out and prints the output, the warnings and
+the asserts alone, for a promise loop on a long program. A step whose tree holds a rotation, a warp or a posed
 joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the

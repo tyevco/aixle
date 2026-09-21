@@ -66,7 +66,7 @@ function usage(): never {
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--camera NAME] [--environment NAME]  one declared shot only (the sheet takes its view); a sky over the program's",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
-      "  aixle check  <file.aix> [--pose NAME] [--no-asserts]   parse and evaluate; print sizes and warnings, render nothing",
+      "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
@@ -131,7 +131,8 @@ function main(argv: string[]): number {
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
       for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${m.names.join(", ")}`);
-      for (const st of ev.steps) {
+      // --brief: the verdicts alone (output, warnings, notes, asserts), for a promise loop on a big program.
+      for (const st of opts.brief ? [] : ev.steps) {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
         // A number set inside a loop is the last iteration's, not a size: not listed (round 9: "a = 327" as a step).
         if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
@@ -182,7 +183,7 @@ function main(argv: string[]): number {
       // In a pose the output's box is the box of turned boxes; its surface is the size the sheet shows (round 8: a
       // sitting dog's output line said 1.84 tall for a 1.18 surface).
       // The program's own defs, with their parameters, so a program's vocabulary is on the terminal with its steps.
-      if (ev.defs.length) console.log(`defs: ${ev.defs.map((d) => `${d.name}(${d.params.map((p) => (p.default ? `${p.name}=${exprText(p.default)}` : p.name)).join(", ")})`).join("  ")}`);
+      if (ev.defs.length && !opts.brief) console.log(`defs: ${ev.defs.map((d) => `${d.name}(${d.params.map((p) => (p.default ? `${p.name}=${exprText(p.default)}` : p.name)).join(", ")})`).join("  ")}`);
       if (ev.output && pose && !isEmpty(ev.output.bounds)) { const e = surfaceExtent(ev.output, 48); console.log(`output: ${ev.outputName} ${isEmpty(e) ? dimsLabel(ev.output.bounds) : `${dimsLabel(e)} (the surface in pose ${pose.name}; its box is ${dimsLabel(ev.output.bounds)})`}`); }
       else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
