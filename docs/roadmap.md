@@ -203,8 +203,7 @@ It is a printer over the dependencies the evaluation records. Not built:
   not both sample a large mesh.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
-- A warning when `attach` leaves two faces exactly touching, and a
-  per-step slice (round 10).
+- A per-step slice (round 10).
 
 ## What was considered and set aside
 

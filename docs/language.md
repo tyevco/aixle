@@ -130,7 +130,10 @@ a placement with no numbers. Every shape also answers to the free
 anchors `centre`, `top`, `bottom`, `front`, `back`, `left` and `right`
 (its box's face centres, so `centre` of a boom is the middle of its
 box, not its end: anchor the end), so `lamp | attach("bottom", arm, "tip")` sets a
-lamp on the end of an arm. Rotate a part first, then attach it; the
+lamp on the end of an arm. That is face on face, a touch, which a fine
+grid meshes as two pieces: `attach(..., sink=0.02)` pushes the part that
+far into the target, along the line from its anchor to its own centre,
+so the two overlap by a cell or two. Rotate a part first, then attach it; the
 anchors turn with it. A union keeps every part's anchors (the first part
 wins a repeated name), a cut keeps the first shape's, and `check` prints
 a step's named anchors under its box. In a pose, `at()` on a joint's

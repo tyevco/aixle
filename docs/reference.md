@@ -695,12 +695,13 @@ The world point of a shape's anchor as [x, y, z]: one named with anchor(), or a 
 
 ### attach
 
-Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it.
+Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which a fine grid meshes as two pieces: `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, so the two overlap.
 
-    attach(part, anchor, target, targetAnchor) -> shape
+    attach(part, anchor, target, targetAnchor, sink=0) -> shape
 
 - `anchor`: the part's anchor
 - `targetAnchor`: the target's anchor
+- `sink`: how far to push the part into the target
 
 ## Files
 

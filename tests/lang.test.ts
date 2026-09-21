@@ -326,6 +326,12 @@ describe("interpreter", () => {
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
     expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
   });
+  it("attach sinks a part into its target along its anchor's line to its centre", () => {
+    const ev = run('post = cylinder(0.1, 1) | move(0, 0.5, 0)\nlamp = sphere(0.2) | attach("bottom", post, "top")\nsunk = sphere(0.2) | attach("bottom", post, "top", sink=0.05)\nshow post + lamp + sunk');
+    const lamp = ev.steps.find((s) => s.name === "lamp")!.value as Shape3, sunk = ev.steps.find((s) => s.name === "sunk")!.value as Shape3;
+    expect(lamp.bounds.min[1]).toBeCloseTo(1, 9);
+    expect(sunk.bounds.min[1]).toBeCloseTo(0.95, 9);
+  });
   it("marks a step assigned inside a loop", () => {
     const ev = run('b = 1\nall = sphere(0.1)\nfor i in range(3) {\n  a = i * 2\n  all = all + (sphere(0.1) | move(i, 0, 0))\n}\nshow all');
     expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true], ["a", true]]);

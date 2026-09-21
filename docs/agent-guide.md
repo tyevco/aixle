@@ -150,7 +150,7 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | `--focus` on a probe region or a cutter | it is not geometry | the frame is the region's, and what is drawn is the model inside it |
 | "separate pieces" but everything looks joined | a part stops a hair short of its neighbour | the warning names the loose piece's volume, centre and step; overlap by a little |
 | a rig's part swings about the wrong point | the joint's pivot is not where the part turns | give `joint` the world point of the hinge, after the part is moved into place |
-| a part placed with `attach` is a loose piece at a finer grid | `attach` sets face on face, exactly touching | put the anchor a cell inside the part, so it sinks in by that much |
+| a part placed with `attach` is a loose piece at a finer grid | `attach` sets face on face, exactly touching | `attach(..., sink=0.02)` pushes it in, or put the anchor a cell inside the part |
 | text wrapped inside a band reads backwards | `wrap` reads left to right from outside | `flip("x")` the extruded text before the `wrap` for an inscription read from inside |
 | `set pose reach` shows the rest pose | the pose is not named that | the warning lists the poses that exist |
 

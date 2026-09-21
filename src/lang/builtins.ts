@@ -18,6 +18,7 @@ import { textProfile, textWidth } from "../sdf/font.js";
 import { clearance, insideFraction, isVoid, overlapVolume } from "../sdf/measure.js";
 import { countPieces, overhangFraction } from "../mesh/pieces.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
+import { boundsCenter } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
 /** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
@@ -339,12 +340,23 @@ export const BUILTINS: Builtin[] = [
       if (!p) throw new Error(`at(): no anchor "${a[1]}"; this shape has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
       return [p[0], p[1], p[2]];
     })),
-  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it.",
-    ov([shape("part"), str("anchor", "the part's anchor"), shape("target"), str("targetAnchor", "the target's anchor")], "shape", (a) => {
-      const from = O.anchorAt(s3(a[0]), a[1] as string), to = O.anchorAt(s3(a[2]), a[3] as string);
-      if (!from) throw new Error(`attach(): the part has no anchor "${a[1]}"; it has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
+  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which a fine grid meshes as two pieces: `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, so the two overlap.",
+    ov([shape("part"), str("anchor", "the part's anchor"), shape("target"), str("targetAnchor", "the target's anchor"), num("sink", "how far to push the part into the target", 0)], "shape", (a) => {
+      const part = s3(a[0]);
+      const from = O.anchorAt(part, a[1] as string), to = O.anchorAt(s3(a[2]), a[3] as string);
+      if (!from) throw new Error(`attach(): the part has no anchor "${a[1]}"; it has ${Object.keys(O.anchorsOf(part)).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
       if (!to) throw new Error(`attach(): the target has no anchor "${a[3]}"; it has ${Object.keys(O.anchorsOf(s3(a[2]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
-      return O.move(s3(a[0]), to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+      const sink = n(a[4]);
+      let dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+      if (sink !== 0) {
+        // Into the target is away from the part's own centre, seen from its anchor.
+        const c = boundsCenter(part.bounds);
+        const ux = c[0] - from[0], uy = c[1] - from[1], uz = c[2] - from[2];
+        const len = Math.hypot(ux, uy, uz);
+        if (!(len > 1e-9)) throw new Error("attach(): sink needs the anchor away from the part's centre, to know which way is in");
+        dx -= (ux / len) * sink; dy -= (uy / len) * sink; dz -= (uz / len) * sink;
+      }
+      return O.move(part, dx, dy, dz);
     })),
   def("surface", "Queries", "The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.",
     ov([shape(), num("x"), num("y"), num("z")], "list", (a) => { const p = O.surfacePoint(s3(a[0]), n(a[1]), n(a[2]), n(a[3])); return [p[0], p[1], p[2]]; })),
