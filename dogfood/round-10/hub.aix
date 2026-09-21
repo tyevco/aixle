@@ -1,0 +1,53 @@
+# A bolted wheel hub flange for printing: a thick disc with a raised boss, a keyed bore,
+# six counterbored bolt holes on a circle, six lightening pockets between them, a rounded
+# rim and a part number engraved on the boss. Lies flat on y = 0, about 2 units across.
+set grid 160
+
+# --- the solid ---
+disc = cylinder(1.0, 0.25, round=0.03) | move(0, 0.125, 0)
+boss = cylinder(0.42, 0.5, round=0.02) | move(0, 0.25, 0)
+body = disc + boss
+
+# --- the cutters ---
+bore = cylinder(0.2, 1.2)
+keyway = box(0.1, 1.2, 0.08) | move(0.2, 0, 0)
+hole = cylinder(0.07, 1.2)                                     # past both faces
+holes = hole | ring(6, 0.7)
+counterbore = cylinder(0.12, 0.2) | move(0, 0.25, 0)           # from y = 0.15 to 0.35: overlaps its hole
+counterbores = counterbore | ring(6, 0.7)
+counterbore_1 = counterbore | move(0.7, 0, 0)                   # one copy, for the focus shot
+pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0)                 # 0.12 deep from the top
+pockets = pocket | ring(6, 0.7) | rotate(y=30)                  # turned half a pitch: between the holes
+label = text("HB-7", 0.1, weight=0.03, align="center", arc=0.27)   # r 0.255..0.385: inside the boss's flat top (r < 0.40)
+engraving = extrude(label, 0.06) | move(0, 0.5, 0)              # 0.03 into the boss top at y = 0.5
+
+cutters = bore + keyway + holes + counterbores + pockets + engraving
+hub = (body - cutters) | paint("steel")
+show hub
+
+# --- probes: regions only the asserts read ---
+rod = cylinder(0.03, 0.6) | move(0, 0.125, 0)
+rods = rod | ring(6, 0.7)
+cb_probe = cylinder(0.1, 0.08) | move(0, 0.2, 0) | ring(6, 0.7)
+bore_probe = cylinder(0.17, 0.7) | move(0, 0.25, 0)
+key_probe = box(0.1, 0.6, 0.06) | move(0.19, 0.25, 0)
+under_text = (cylinder(0.4, 0.02) - cylinder(0.27, 0.1)) | move(0, 0.44, 0)   # clear of the keyway (x to 0.25)
+engraved = extrude(label, 0.03) | move(0, 0.485, 0)             # the part of the engraving that is inside the boss
+
+assert void(rods, hub), "every bolt hole goes right through"
+assert void(cb_probe, hub), "every counterbore is empty"
+assert void(bore_probe, hub), "the bore is clear"
+assert void(key_probe, hub), "the keyway is open to the bore"
+assert clearance(counterbores, pockets) > 0.05, "no counterbore reaches the pocket next to it"
+assert pieces(hub) == 1, "one piece"
+assert overhang(hub) < 0.03, "printable flat without support"
+assert inside(under_text, hub) == 1, "the engraving does not break through the boss"
+assert inside(engraved, boss) == 1, "the lettering stays on the boss face, not over its rim"
+
+# --- shots ---
+set environment overcast
+light("key", azimuth=-40, elevation=55, size=3, color="#fff4e6")
+light("fill", azimuth=120, elevation=25, size=2, power=0.4, color="#dde8ff")
+camera("plan", azimuth=0, elevation=90)
+camera("cbore", focus="counterbore_1", zoom=1.2, azimuth=35, elevation=65)   # steep enough to see down the hole (0.14 wide, 0.25 deep)
+set slice_y 0.2                                                  # the default 0.25 is the disc's own top face

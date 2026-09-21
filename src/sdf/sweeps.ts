@@ -362,7 +362,12 @@ export function loft(a: Shape2, b: Shape2, h: number): Shape3 {
   const miny = Math.min(a.bounds.min[1], b.bounds.min[1]), maxy = Math.max(a.bounds.max[1], b.bounds.max[1]);
   const out = primitive((x, y, z) => {
     const t = Math.max(0, Math.min(1, (y + hh) / h));
-    const d2 = da(x, -z) * (1 - t) + db(x, -z) * t;
+    const pa = da(x, -z), pb = db(x, -z);
+    // The blend's gradient has a vertical part (pb - pa) / h where the profiles differ, so the raw blend measures a
+    // slanted wall along the profile plane and overestimates the distance to it (round 10: a shelled loft's wall
+    // curled and a clearance read 4e-17). Divided by that gradient's length it is a lower bound, exact for a cone.
+    const g = (pb - pa) / h;
+    const d2 = (pa * (1 - t) + pb * t) / Math.sqrt(1 + g * g);
     const cap = Math.abs(y) - hh;
     return Math.min(Math.max(d2, cap), 0) + length2(Math.max(d2, 0), Math.max(cap, 0));
   }, { min: [minx, -hh, -maxy], max: [maxx, hh, -miny] }, a.cost + b.cost);

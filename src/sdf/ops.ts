@@ -282,7 +282,8 @@ export function offset(s: Shape3, r: number): Shape3 {
     bounds: boundsGrow(s.bounds, Math.max(r, 0)),
     cost: s.cost,
     inner: [s],
-    feature: s.feature,
+    // A grown part is thicker by twice the offset (round 10: a bench's slats fattened by round() kept their warning).
+    feature: s.feature === undefined ? undefined : Math.max(0, s.feature + 2 * r),
     gap: s.gap,
     gapWhat: s.gapWhat,
   };

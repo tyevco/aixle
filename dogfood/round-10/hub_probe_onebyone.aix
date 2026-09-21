@@ -1,0 +1,52 @@
+# Probe: the same hub as hub.aix with the cutters subtracted one by one instead of as one union,
+# to see whether the mesh, the numbers, the asserts or the callouts differ.
+set grid 160
+
+disc = cylinder(1.0, 0.25, round=0.03) | move(0, 0.125, 0)
+boss = cylinder(0.42, 0.5, round=0.02) | move(0, 0.25, 0)
+body = disc + boss
+
+bore = cylinder(0.2, 1.2)
+keyway = box(0.1, 1.2, 0.08) | move(0.2, 0, 0)
+hole = cylinder(0.07, 1.2)
+holes = hole | ring(6, 0.7)
+counterbore = cylinder(0.12, 0.2) | move(0, 0.25, 0)
+counterbores = counterbore | ring(6, 0.7)
+counterbore_1 = counterbore | move(0.7, 0, 0)
+pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0)
+pockets = pocket | ring(6, 0.7) | rotate(y=30)
+label = text("HB-7", 0.1, weight=0.03, align="center", arc=0.27)
+engraving = extrude(label, 0.06) | move(0, 0.5, 0)
+
+bored = body - bore
+keyed = bored - keyway
+drilled = keyed - holes
+cbored = drilled - counterbores
+pocketed = cbored - pockets
+hub = (pocketed - engraving) | paint("steel")
+show hub
+
+rod = cylinder(0.03, 0.6) | move(0, 0.125, 0)
+rods = rod | ring(6, 0.7)
+cb_probe = cylinder(0.1, 0.08) | move(0, 0.2, 0) | ring(6, 0.7)
+bore_probe = cylinder(0.17, 0.7) | move(0, 0.25, 0)
+key_probe = box(0.1, 0.6, 0.06) | move(0.19, 0.25, 0)
+under_text = (cylinder(0.4, 0.02) - cylinder(0.27, 0.1)) | move(0, 0.44, 0)
+engraved = extrude(label, 0.03) | move(0, 0.485, 0)
+
+assert void(rods, hub), "every bolt hole goes right through"
+assert void(cb_probe, hub), "every counterbore is empty"
+assert void(bore_probe, hub), "the bore is clear"
+assert void(key_probe, hub), "the keyway is open to the bore"
+assert clearance(counterbores, pockets) > 0.05, "no counterbore reaches the pocket next to it"
+assert pieces(hub) == 1, "one piece"
+assert overhang(hub) < 0.03, "printable flat without support"
+assert inside(under_text, hub) == 1, "the engraving does not break through the boss"
+assert inside(engraved, boss) == 1, "the lettering stays on the boss face, not over its rim"
+
+set environment overcast
+light("key", azimuth=-40, elevation=55, size=3, color="#fff4e6")
+light("fill", azimuth=120, elevation=25, size=2, power=0.4, color="#dde8ff")
+camera("plan", azimuth=0, elevation=90)
+camera("cbore", focus="counterbore_1", zoom=1.2, azimuth=35, elevation=65)
+set slice_y 0.2

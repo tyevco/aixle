@@ -59,6 +59,7 @@ function usage(): never {
       "                          [--no-callouts]                    skip callouts.png, the perspective view with its visible steps named",
       "                          [--no-asserts]                     skip the program's asserts (a pieces() promise on a big rig can cost more than the render)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
+      "                          [--beauty-only]                    the beauty render, its shots and the sheet alone (no steps, slices, turntable, callouts, exports): a lighting loop",
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
@@ -146,7 +147,7 @@ function main(argv: string[]): number {
         // A cutter is drawn as the solid it removes and a region is read by an assert, a decal or a camera: neither is
         // a part, and the tag says which (round 9: agents took a region's warning for a mistake).
         const role = ev.roles.get(st.name);
-        const used = role === "part" ? "" : role === "cut" ? "   (cut)" : role === "region" ? "   (region)" : "   (not in output)";
+        const used = role === "part" ? "" : role === "cut" ? "   (cut)" : role === "mask" ? "   (mask)" : role === "region" ? "   (region)" : "   (not in output)";
         const b = st.value.bounds;
         console.log(`${st.name.padEnd(18)} ${isEmpty(b) ? "empty" : spanBox(b)}${used}`);
         if (isEmpty(b)) continue;
@@ -195,7 +196,7 @@ function main(argv: string[]): number {
         // In a pose the floor is the pose's doing: ground() would move the rest model and the exports too.
         if (pose && bottom < -cellSize) console.log(`note: in pose ${pose.name} the lowest point of the surface is at y = ${shortY(bottom)}, below the floor: raise the root joint with xform(move=) in the pose, or bend it less`);
         else if (pose && bottom > cellSize * 2) console.log(`note: in pose ${pose.name} the model is off the floor: its lowest point is at y = ${shortY(bottom)} (standing is not judged in this pose)`);
-        else if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${shortY(bottom)}; pipe the model through ground() to rest it on y = 0`);
+        else if (bottom < -cellSize && -bottom > 0.1 * (ev.output.bounds.max[1] - bottom)) console.log(`note: the lowest point of the surface is at y = ${shortY(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${shortY(bottom)}; ground() rests it on y = 0`);
       }
       // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
@@ -346,7 +347,8 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       obj: opts["no-export"] ? false : undefined,
       glb: opts["no-export"] ? false : undefined,
       viewer: opts["no-viewer"] ? false : undefined,
-      beauty: opts.beauty === true ? true : undefined,
+      beauty: opts.beauty === true || opts["beauty-only"] === true ? true : undefined,
+      ...(opts["beauty-only"] ? { views: [], steps: false, slices: false, turntable: false, callouts: false, poses: false, animations: false, obj: false, glb: false, viewer: false } : {}),
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       sharp: opts.soft ? false : undefined,
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,

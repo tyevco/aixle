@@ -575,7 +575,8 @@ What the lights and the skies can and cannot do, measured in round 9:
   strength halving `range` away, shadowed by what stands between, and
   not reaching the far floor. Put it in the air just outside the glowing
   part (a solid the light sits inside shadows everything; inside a glass
-  shade is fine, since glass lets its light through dimmed). A `glow`
+  shade is fine, since glass lets its light through dimmed, and a bulb
+  beside the light does not shadow what is on the far side of it). A `glow`
   material lights itself only: a flame does not light the stones round
   it or the ground under it unless a point light sits in it.
 - `night` scales the ambient light to 0.4 of the studio's, so a first
@@ -587,6 +588,11 @@ What the lights and the skies can and cannot do, measured in round 9:
   `overcast` and `studio` are neutral skies, so `chrome` and `silver`
   reflect a white sky and blow out to white under them: give a mirror
   metal a `sunset` or a `night`, or use `steel`, `iron` or `brass`.
+  Gold is flat yellow under the neutral skies, deep and warm under
+  `sunset`, olive under `night`. A coloured stone (`transmit` about
+  0.5) shows what is behind it, so in a closed setting it reads dark;
+  open the setting or keep transmit down. `--environment all` writes
+  `environments.png`, the same shot under every sky, for one render.
 - A camera's `elevation` is about the model's centre and may be
   negative: at 0 a perspective camera still looks down on the floor
   round a low model, so a low shot is `elevation=-8`. `elevation=90` is
@@ -595,18 +601,24 @@ What the lights and the skies can and cannot do, measured in round 9:
   a camera with `focus=` frames that step instead (with `zoom=0.8` to
   step back from it), and a step in the middle of a scene makes a good
   framing proxy for a composition. A focus shot marches the whole
-  model, so a hole under a counterbore reads as through, and the rest
-  of the model stays in the picture at its true depth; when more than
+  model, so a hole under a counterbore reads as through when the camera
+  is steep enough to see its floor (a hole 0.14 across through 0.25
+  wants an elevation above about 60), and the rest of the model stays
+  in the picture at its true depth; when more than
   15% of the focus step's surface facing the camera is hidden behind
-  the rest of the model, the render warns with the fraction and the
-  angles. `dof` scales a
+  the rest of the model and another azimuth would show much more of
+  it, the render warns with the fraction and the better azimuth (a
+  stone enclosed in its setting is hidden from every side alike and
+  gets no warning). `dof` scales a
   blur that grows with a surface's distance from the focus: 0.3 to 0.5
   is a gentle falloff, 1 blurs everything off the focus plane hard.
 - `--azimuth`, `--elevation` and `--zoom` on the command line override
   the sheet's view and `beauty.png` only; a declared camera keeps its
   own angles. `--camera NAME` renders one declared shot (the sheet and
-  `beauty.png` take its view) while a lighting loop runs, and
-  `--environment NAME` tries a sky without editing the program.
+  `beauty.png` take its view, and its `focus=` framing) while a lighting
+  loop runs, `--beauty-only` skips the steps, slices, turntable,
+  callouts and exports for that loop, and `--environment NAME` tries a
+  sky without editing the program.
 - `--quick` meshes at 64 cells, so a glass wall thinner than that cell
   renders as a frosted solid and a `transmit` material cannot be judged
   there; judge glass at the full grid. A glowing part inside a glass
@@ -615,10 +627,17 @@ What the lights and the skies can and cannot do, measured in round 9:
   is a bound rather than a distance, and glass on one bands the picture
   behind it (a liquid seen through a lofted flacon drew contour lines;
   a rounded box rendered clean; `check` warns when a `transmit`
-  material sits on such a field); two coincident faces band too, so a
+  material sits on such a field, and a `shell`, a `clearance` or an
+  `overlap` on one is only as true as the field: a loft of two profiles
+  is measured across its slanted wall, like the cone it is, but a
+  smooth union's blend or a twist is a bound); two coincident faces band too, so a
   liquid filling a cavity is grown a cell into the wall, and its promise
   is `inside(liquid, cavity) > 0.9`, not `== 1`. `glow` on a `transmit`
-  material is not visible.
+  material is not visible, and a `glow` above 1 washes out the part's
+  own shading, so a lamp's cap reads as a flat disc until a point light
+  beside it lights its surroundings. The first `light()` replaces the
+  default key light, so a program adding a point light declares its key
+  too.
 
 ## Settings
 
@@ -766,7 +785,8 @@ blobs or gone at a quick cell, so judge a working end at full grid, with
 
 ## What the tool checks for you
 
-`aixle check` prints every step's size and the warnings: shapes as their
+`aixle check` (a second, or a few with `pieces()` and `overhang()`,
+which mesh) prints every step's size and the warnings: shapes as their
 box, 2D profiles as their box in the plane, numbers and lists of numbers
 as their values (a number set inside a loop is the last iteration's and
 is not listed), then the program's `def`s with their parameters. A step whose tree holds a rotation, a warp or a posed
@@ -905,17 +925,26 @@ for a spring that must stay in its housing, `== 0` for a handle that
 must stay out of the cavity, and a failure says where a is outside b.
 `b` is the solid volume: a mantle hangs in the air inside a shelled
 shade, so `inside(mantle, shade)` is 0; keep the un-shelled shape as a
-step (`shade = shade_space | shell(0.05)`) and test against that. All
+step (`shade = shade_space | shell(0.05)`) and test against that; that
+solid includes the wall's own volume, so `inside(gnome, dome_space) == 1`
+alone does not keep the gnome out of the glass, and `void(wall,
+innards)` beside it does. A failing `clearance` says where the two came
+closest or overlapped deepest. All
 three sample a lattice (24 cells along the longest side, and `void`
 walks the surface too, so a pin thinner than the lattice is caught), so
 measure parts, not a scene. The bound queries (`width`, `tall`,
 `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are the
-rest. A step only an assert reads (a probe rod, a cavity's region, a
-union of the neighbours) is a *region*: not part of the output, not
-warned about, framed grey and tagged on the steps sheet, and never
-labelled in the callouts; a shape subtracted from a part is a *cut*,
-tagged so on the steps sheet, which draws it as the solid it removes.
-`check` prints the asserts in line order, failures among the passes.
+rest. A failing `pieces()` names the smallest loose piece and where it
+is. A `void` whose region's box never meets the shape's box holds for
+no reason, and `check` says so: a probe built in one frame against a
+cutter in another promises nothing. A step only an assert reads (a
+probe rod, a cavity's region, a union of the neighbours) is a *region*:
+not part of the output, not warned about, framed grey and tagged on the
+steps sheet, and never labelled in the callouts; a shape subtracted
+from a part is a *cut*, tagged so on the steps sheet, which draws it as
+the solid it removes; the larger operand of an `&` (a half-space box
+that trims a gem) is a *mask*, tagged so and never labelled. `check`
+prints the asserts in line order, failures among the passes.
 
 ## Limits worth knowing
 

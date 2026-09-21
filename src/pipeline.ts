@@ -18,7 +18,7 @@ import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedro
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import type { Vec3 } from "./core/vec.js";
-import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText } from "./render/font.js";
@@ -831,7 +831,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
   const environmentName = opts.environment ?? evaluation.settings.environment;
   const environment: Environment | undefined = ENVIRONMENTS.includes(environmentName as Environment) ? (environmentName as Environment) : undefined;
-  if (opts.environment && !environment) warnings.push(`--environment ${opts.environment}: no such environment; the skies are ${ENVIRONMENTS.join(", ")}`);
+  if (opts.environment && opts.environment !== "all" && !environment) warnings.push(`--environment ${opts.environment}: no such environment; the skies are ${ENVIRONMENTS.join(", ")}, or all for a strip of every sky`);
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let minecraftNote: string | undefined;
@@ -898,7 +898,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The true extent comes from the mesh: bounds are boxes, and a difference keeps the left side's box
     // however much was cut away, so a note based on bounds once told a scene on the floor to ground() itself.
     const extent = triangleCount(mesh) > 0 ? meshBounds(mesh) : bounds;
-    if (extent.min[1] < -cellSize)
+    // A slab under a scene with its top at y = 0 is meant to be below the floor: no note for a thin one (round 10).
+    if (extent.min[1] < -cellSize && -extent.min[1] > 0.1 * (extent.max[1] - extent.min[1]))
       lines.push(`Note: the lowest point of the surface is at y = ${fmt(extent.min[1])}; pipe the model through ground() to rest it on y = 0.`, "");
     else if (extent.min[1] > cellSize * 2)
       lines.push(`Note: the surface floats: its lowest point is at y = ${fmt(extent.min[1])}. ground() rests it on y = 0 (by bounds, which may be looser than the surface).`, "");
@@ -939,6 +940,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         }
       }
       if (!fs || isEmpty(fs.bounds)) return undefined;
+      // A region (a probe an assert reads) or a cutter is not geometry to draw: the focus is the model inside its
+      // frame (round 10: --focus on a counterbore's region drew the region as a solid cylinder).
+      const role = st ? evaluation.roles.get(st.name) : undefined;
+      if (output && st && (role === "region" || role === "cut")) {
+        const fb0 = (placedBounds(output, fs, tightBounds(fs)) ?? tightBounds(fs));
+        const grow0 = Math.max(...boundsSize(fb0)) * 0.08;
+        const frame0: Bounds = { min: [fb0.min[0] - grow0, fb0.min[1] - grow0, fb0.min[2] - grow0], max: [fb0.max[0] + grow0, fb0.max[1] + grow0, fb0.max[2] + grow0] };
+        return { frame: frame0, shape: clipTo(output, frame0) };
+      }
       // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the
       // whole machine); carried through the joints and transforms above it, so a bucket inside a turned joint is
       // framed where the pose put it (measured: --focus in a pose framed the rest position).
@@ -992,7 +1002,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (!opts.quick && opts.callouts !== false) {
       // Every part and cutter but the output (a union a later union flattened is still a name the program reads);
       // a region only an assert or a decal reads is not geometry and gets no label (round 9: eye regions labelled).
-      const named = evaluation.steps.filter((s) => isShape3(s.value) && evaluation.used.has(s.name) && !evaluation.displaced.has(s.name) && s.value !== output && !isEmpty((s.value as Shape3).bounds)).map((s) => ({ name: s.name, shape: s.value as Shape3, cut: evaluation.roles.get(s.name) === "cut", derived: s.cuts === true }));
+      // Each step where the output puts it (round 10: a lantern built at the origin and carried up a lamp post by
+      // its parents was labelled on the pavement, and a stripe revolved flat was labelled on the floor).
+      // A step is derived (its surface may hold a cut face) when it or anything it is built from was cut: a band
+      // turned upright after its engraving still carries the engraving's faces.
+      const derivedMemo = new Map<string, boolean>();
+      const derived = (name: string, depth = 0): boolean => {
+        const known = derivedMemo.get(name);
+        if (known !== undefined) return known;
+        const st = evaluation.steps.find((x) => x.name === name);
+        const d = !!st && depth < 64 && (st.cuts === true || [...st.deps].some((k) => evaluation.roles.get(k) !== "cut" && derived(k, depth + 1)));
+        derivedMemo.set(name, d);
+        return d;
+      };
+      const named = evaluation.steps.filter((s) => isShape3(s.value) && evaluation.used.has(s.name) && s.value !== output && !isEmpty((s.value as Shape3).bounds)).map((s) => ({ name: s.name, shape: placedUnder([output], s.value as Shape3), cut: evaluation.roles.get(s.name) === "cut", derived: derived(s.name) }));
       if (named.length) {
         const co = time("callouts", () => renderCallouts(viewMesh, named, info, size, viewCell, 20, azimuth, elevation, output));
         write("callouts.png", co.canvas.toPng());
@@ -1011,6 +1034,17 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // A scene's default cut goes through its first object, which is the one to list first; a focus wins over that.
       const first = evaluation.objects.length > 1 && !focusName ? evaluation.objects[0].shape.bounds : undefined;
       const sliceInfo = first && !isEmpty(first) ? { ...info, bounds: first, name: `${info.name} → ${evaluation.objects[0].name}` } : info;
+      // A default plane that lies on a face (a 0.25-thick disc cut at y = 0.25) draws that face as outline, not as a
+      // section: when a share of the mesh sits on the plane, it moves in by a cell and a half (round 10).
+      if (!isEmpty(sliceInfo.bounds)) {
+        const sc = boundsCenter(sliceInfo.bounds), n = viewMesh.positions.length / 3;
+        for (const [k, axis] of (["x", "y", "z"] as const).entries()) {
+          if (at[axis] !== undefined || n === 0) continue;
+          let on = 0;
+          for (let v = 0; v < n; v++) if (Math.abs(viewMesh.positions[v * 3 + k] - sc[k]) < viewCell * 0.5) on++;
+          if (on > n * 0.05) at[axis] = sc[k] - viewCell * 1.5;
+        }
+      }
       // A focus sheet's slices cut the part, with the cut through the rest of the model faint around it.
       time("slices", () => write("slices.png", renderSlices(viewGhost && focusShape ? focusShape : output, sliceInfo, Math.round(size * 0.75), at, viewGhost && focusShape ? output : undefined).toPng()));
     }
@@ -1143,15 +1177,32 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Framed like the views: on the focused step when there is one.
       // Framed on the surface the mesh found, not the box a blend or a displace padded (measured: a tree's box was
       // 10% wider than its surface on every side, and the zoom could not reach past it).
-      const beautyFrame = focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
-      // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
-      // (measured: a focused beauty render fitted every point and framed the whole mug).
+      // A `set camera` (or --camera) with a focus= frames beauty.png on it too, as its own beauty_<name>.png is
+      // (round 10: an agent read beauty.png for the framed shot and judged the zoom erratic).
       // A focus shot frames its part but marches the whole model, so a hole under a counterbore still reads as
       // through and the floor's shadow is the model's (round 9: a focused counterbore looked blind).
       const modelBounds = triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
+      const shotFocus = shot?.focus ? resolveFocus(shot.focus) : undefined;
+      const beautyFrame = shotFocus ? shotFocus.frame : focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
+      // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
+      // (measured: a focused beauty render fitted every point and framed the whole mug).
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
         write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label }).toPng());
-      time("beauty", () => shoot("beauty.png", beautyFrame, !!focusName, azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}  ${dimsLabel(beautyFrame)}`));
+      time("beauty", () => shoot("beauty.png", beautyFrame, !!(shotFocus || focusName), azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(beautyFrame)}`));
+      // Every sky at once, for choosing one: --environment all writes environments.png beside the program's own.
+      if (opts.environment === "all") {
+        const frame = Math.max(96, Math.round(bsize * 0.4));
+        const gutter = 6, bar = 26;
+        const strip = new Canvas((frame + gutter) * ENVIRONMENTS.length + gutter, bar + frame + gutter * 2, INK.page);
+        strip.fill(0, 0, strip.width, bar, INK.bar);
+        drawText(strip, 10, 7, `ENVIRONMENTS   the same shot under each sky`, INK.barText, 2);
+        time("environments", () => {
+          ENVIRONMENTS.forEach((env, i) => {
+            strip.blit(renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment: env, fitPoints: shotFocus || focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocus || focusName ? modelBounds : undefined, label: env }), gutter + i * (frame + gutter), bar + gutter);
+          });
+        });
+        write("environments.png", strip.toPng());
+      }
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
       // Every declared camera is a shot of its own, framed on its focus= when it has one.
       // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
@@ -1177,10 +1228,17 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         if (shot && opts.camera && c.name !== shot.name) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         const b = r ? r.frame : beautyFrame;
-        // A focus mostly hidden from its camera by the rest of the model is said, not discovered in the picture.
+        // A focus mostly hidden from its camera by the rest of the model is said, not discovered in the picture,
+        // when another azimuth would see much more of it (a gem in its setting is hidden from every side alike).
         if (r) {
-          const hidden = hiddenFraction(mesh!, b, { name: shownName, bounds: modelBounds }, cellSize, c.azimuth ?? azimuth, c.elevation ?? elevation, 160, r.shape);
-          if (hidden > 0.15) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(c.azimuth ?? azimuth)}, elevation ${fmt(c.elevation ?? elevation)}; a camera round it sees more`);
+          const az = c.azimuth ?? azimuth, el = c.elevation ?? elevation;
+          const info = { name: shownName, bounds: modelBounds };
+          const hidden = hiddenFraction(mesh!, b, info, cellSize, az, el, 160, r.shape);
+          if (hidden > 0.15) {
+            let bestAz = az, best = hidden;
+            for (let k = 1; k < 8; k++) { const h = hiddenFraction(mesh!, b, info, cellSize, az + k * 45, el, 120, r.shape); if (h < best) { best = h; bestAz = az + k * 45; } }
+            if (best < hidden - 0.2) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}; from azimuth ${fmt(((bestAz % 360) + 360) % 360)} it is ${Math.round(best * 100)}%`);
+          }
         }
         time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(b)}`));
       }
@@ -1345,6 +1403,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
     "lights.png": "the beauty render under each declared light alone, then all of them, so each light's contribution can be seen",
+    "environments.png": "the beauty render under each sky, from --environment all",
     ...cameraFiles,
   };
   for (const f of files) lines.push(`- \`${f}\`: ${descriptions[f] ?? (f.startsWith("anim_") ? "frames through the animation" : "")}`);
@@ -1419,7 +1478,7 @@ export function diff(a: { source: string; name: string }, b: { source: string; n
 
 /** The report's In output column for a step's role. */
 export function roleLabel(role: StepRole | undefined): string {
-  return role === "part" ? "yes" : role === "cut" ? "cut" : role === "region" ? "region" : "no";
+  return role === "part" ? "yes" : role === "cut" ? "cut" : role === "mask" ? "mask" : role === "region" ? "region" : "no";
 }
 
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */

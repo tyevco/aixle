@@ -55,11 +55,26 @@ function sharedBox(a: Shape3, b: Shape3): { min: Vec3; max: Vec3 } | undefined {
  * share: zero when they only touch, the sunk-in volume when one is pressed into the other (round 8, asked for:
  * a frog's belly blended into its pad, a mug's handle reaching into the cup). Cubic in n, so keep it to parts.
  */
+/**
+ * A lattice cell for a box: `n` cells along its longest side, then halved while the sample count stays within
+ * the budget, and never coarser than a quarter of the shortest side. A rim sunk 0.02 into a base shares a box the
+ * height of the rim's cut but overlaps it in a ring 0.02 tall, which 24 cells miss (round 10); 200k samples cost
+ * well under a second.
+ */
+function latticeCell(size: Vec3, n: number, budget = 200000): number {
+  const longest = Math.max(size[0], size[1], size[2]), shortest = Math.max(1e-9, Math.min(size[0], size[1], size[2]));
+  const count = (c: number) => Math.ceil(size[0] / c) * Math.ceil(size[1] / c) * Math.ceil(size[2] / c);
+  let cell = longest / n;
+  while (count(cell / 2) <= budget) cell /= 2;
+  if (cell > shortest / 4) { cell = shortest / 4; if (count(cell) > budget) cell *= Math.cbrt(count(cell) / budget); }
+  return cell;
+}
+
 export function overlapVolume(a: Shape3, b: Shape3, n = 24): number {
   const box = sharedBox(a, b);
   if (!box) return 0;
   const size = boundsSize(box);
-  const cell = Math.max(size[0], size[1], size[2]) / n;
+  const cell = latticeCell(size, n);
   const nx = Math.max(1, Math.ceil(size[0] / cell)), ny = Math.max(1, Math.ceil(size[1] / cell)), nz = Math.max(1, Math.ceil(size[2] / cell));
   const dx = size[0] / nx, dy = size[1] / ny, dz = size[2] / nz;
   let count = 0;
@@ -77,11 +92,13 @@ export function overlapWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
   const box = sharedBox(a, b);
   if (!box) return undefined;
   const size = boundsSize(box);
+  const cell = latticeCell(size, n);
+  const nx = Math.max(1, Math.ceil(size[0] / cell)), ny = Math.max(1, Math.ceil(size[1] / cell)), nz = Math.max(1, Math.ceil(size[2] / cell));
   let best: Vec3 | undefined, bd = 0;
-  for (let i = 0; i < n; i++)
-    for (let j = 0; j < n; j++)
-      for (let k = 0; k < n; k++) {
-        const x = box.min[0] + ((i + 0.5) * size[0]) / n, y = box.min[1] + ((j + 0.5) * size[1]) / n, z = box.min[2] + ((k + 0.5) * size[2]) / n;
+  for (let i = 0; i < nx; i++)
+    for (let j = 0; j < ny; j++)
+      for (let k = 0; k < nz; k++) {
+        const x = box.min[0] + ((i + 0.5) * size[0]) / nx, y = box.min[1] + ((j + 0.5) * size[1]) / ny, z = box.min[2] + ((k + 0.5) * size[2]) / nz;
         const d = Math.max(a.dist(x, y, z), b.dist(x, y, z));
         if (d < bd) { bd = d; best = [x, y, z]; }
       }
@@ -161,7 +178,12 @@ export function voidWitness(region: Shape3, shape: Shape3, n = 24): Vec3 | undef
 }
 
 export function clearance(a: Shape3, b: Shape3, n = 12): number {
-  if (isEmpty(a.bounds) || isEmpty(b.bounds)) return Infinity;
+  return clearanceAt(a, b, n).d;
+}
+
+/** The clearance and the point on `a` or `b` where it was measured: the closest approach, or the deepest overlap. */
+export function clearanceAt(a: Shape3, b: Shape3, n = 12): { d: number; at?: Vec3 } {
+  if (isEmpty(a.bounds) || isEmpty(b.bounds)) return { d: Infinity };
   let best = Infinity;
   let bestPoint: Vec3 | undefined;
   let bestFrom: Shape3 = a, bestInto: Shape3 = b;
@@ -193,7 +215,7 @@ export function clearance(a: Shape3, b: Shape3, n = 12): number {
   };
   seed(a, b);
   seed(b, a);
-  if (!bestPoint) return Infinity;
+  if (!bestPoint) return { d: Infinity };
   // Tighten: slide the point onto the other surface and back, which walks down to the nearest pair when the two
   // surfaces face each other; each step is accepted only when it brings the distance down.
   let p = bestPoint;
@@ -204,5 +226,5 @@ export function clearance(a: Shape3, b: Shape3, n = 12): number {
     if (d >= best - 1e-9) break;
     best = d; p = back;
   }
-  return best;
+  return { d: best, at: p };
 }

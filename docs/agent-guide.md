@@ -146,8 +146,12 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | stripes run the wrong way, or a pattern is missing on a thin sheet | patterns are stacked along the material's axis (y) in the paint frame | `material(..., axis="x")`, or paint the part standing and then lay it down |
 | the counter under the awning is black, the flame is a dark blob | the key light is fixed at the upper left and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |
 | gold looks olive, silver looks charcoal | a metal is mostly what it reflects, and the sheet has no environment | judge metals in the beauty render, which reflects the sky, ground and the model itself |
+| a steel boss shows a row of blobs at its foot | a metal reflects the model's own cut faces (a ring of counterbores) | nothing is wrong; the slices and the plan view are the truth about holes |
+| `--focus` on a probe region or a cutter | it is not geometry | the frame is the region's, and what is drawn is the model inside it |
 | "separate pieces" but everything looks joined | a part stops a hair short of its neighbour | the warning names the loose piece's volume, centre and step; overlap by a little |
 | a rig's part swings about the wrong point | the joint's pivot is not where the part turns | give `joint` the world point of the hinge, after the part is moved into place |
+| a part placed with `attach` is a loose piece at a finer grid | `attach` sets face on face, exactly touching | put the anchor a cell inside the part, so it sinks in by that much |
+| text wrapped inside a band reads backwards | `wrap` reads left to right from outside | `flip("x")` the extruded text before the `wrap` for an inscription read from inside |
 | `set pose reach` shows the rest pose | the pose is not named that | the warning lists the poses that exist |
 
 When the model is right, `npx aixle render model.aix --beauty` adds

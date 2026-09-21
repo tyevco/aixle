@@ -9,7 +9,8 @@ import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } f
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
-import { regionTouches, voidWitness, outsideWitness, overlapWitness } from "../sdf/measure.js";
+import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
+import { loosePiece } from "../mesh/pieces.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -40,6 +41,8 @@ export interface Step {
   cuts?: boolean;
   /** The names subtracted while this step was computed: cuts below it, unless another step joins them. */
   cutDeps?: Set<string>;
+  /** The larger operand of each `&` in this step: a mask that clips, not geometry of its own. */
+  maskDeps?: Set<string>;
   /** The steps this one moved (move, rotate, place, ground, ...): their surfaces are elsewhere in this step. */
   movedDeps?: Set<string>;
   /** The steps this one read as they are (joined, cut, painted, shelled, measured): their surface stays put. */
@@ -52,7 +55,7 @@ export interface Step {
  * What a step is to the output: a `part` of its geometry, a `cut` (subtracted from a part, so its surface is a cut
  * face at most), or a `region` that only an assert, a decal or a camera reads. A step with no role is unused.
  */
-export type StepRole = "part" | "cut" | "region";
+export type StepRole = "part" | "cut" | "mask" | "region";
 
 export interface Settings {
   grid?: number;
@@ -348,6 +351,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const l = evalExpr(e.left, scope), r = evalExpr(e.right, scope);
         if (currentStep) for (const v of [l, r]) if (isShape3(v)) { const nm = stepOfValue.get(v); if (nm) (currentStep.keptDeps ??= new Set()).add(nm); }
         if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident") noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
+        if (e.op === "&" && isShape3(l) && isShape3(r)) noteMask(l, e.left, r, e.right);
         return binary(e.op, l, r, e.line);
       }
       case "call":
@@ -695,6 +699,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       }
     }
     if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") noteCut(args[1].value.name);
+    if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
     if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
     if (assertDepth > 0) for (const a of args) if (!a.name && a.value.type === "ident") regionNames.add(a.value.name);
@@ -712,6 +717,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
     if ((callee === "pieces" || callee === "overhang") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
     const result = callBuiltin(builtin, values, line);
+    // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
+    if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
+      const c = clearanceAt(values[0].value, values[1].value);
+      if (c.at) witness = `${c.d < 0 ? "deepest overlap" : "closest"} at (${c.at.map(fmt3).join(", ")})`;
+    }
     // A failing void, inside or overlap says where (round 9: three agents bisected a bare 0 by hand).
     if (assertDepth > 0 && (callee === "void" || callee === "inside" || callee === "overlap") && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const a = values[0].value, b = values[1].value;
@@ -719,9 +729,23 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (p) {
         const at = `(${p.map(fmt3).join(", ")})`;
         const first = args[0].value, second = args[1].value;
-        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a, b])}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
+        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
         witness = what;
       }
+      // A void whose region is nowhere near the shape holds for no reason (round 10: a probe in the standing frame
+      // against a cutter in the flat frame promised nothing); a region just clear of the shape is a guard, and fine.
+      if (callee === "void" && !isEmpty(a.bounds) && !isEmpty(b.bounds)) {
+        const gap = Math.max(...[0, 1, 2].map((k) => Math.max(a.bounds.min[k] - b.bounds.max[k], b.bounds.min[k] - a.bounds.max[k])));
+        const big = Math.max(...boundsSize(a.bounds), ...boundsSize(b.bounds));
+        if (gap > big * 0.25)
+          warnings.push(`line ${line}: void(${exprText(args[0].value)}, ${exprText(args[1].value)}) holds trivially: their boxes are ${fmt3(gap)} apart (${dimsLabel(a.bounds)} at ${a.bounds.min.map(fmt3).join(", ")} and ${dimsLabel(b.bounds)} at ${b.bounds.min.map(fmt3).join(", ")}); build the region in the shape's frame`);
+      }
+    }
+    // A pieces() promise that fails names the loose piece, as the report's Pieces row does (round 10: four renders).
+    if (assertDepth > 0 && callee === "pieces" && typeof result === "number" && result > 1 && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64);
+      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
     }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
     // beside the wrong part).
@@ -861,6 +885,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return close.length ? ` (did you mean ${close.slice(0, 3).join(", ")}?)` : "";
   }
 
+  /** Of two shapes intersected, the larger by box is the mask: named so for the step being computed. */
+  function noteMask(l: Shape3, le: Expr, r: Shape3, re: Expr): void {
+    if (!currentStep) return;
+    const vol = (s: Shape3) => (isEmpty(s.bounds) ? 0 : boundsSize(s.bounds).reduce((a, b) => a * b, 1));
+    const bigger = vol(l) > vol(r) * 1.5 ? le : vol(r) > vol(l) * 1.5 ? re : undefined;
+    if (bigger && bigger.type === "ident") (currentStep.maskDeps ??= new Set()).add(bigger.name);
+  }
+
   /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
   function noteCut(name: string): void {
     cutNames.add(name);
@@ -869,12 +901,25 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     (currentStep.cutDeps ??= new Set()).add(name);
   }
 
-  /** The innermost named part with solid at `p`, as " in 'name'", for a failed void; none when no step holds it. */
-  function stepAt(p: Vec3, exclude: Shape3[]): string {
+  /**
+   * The innermost named step of `within` with solid at `p`, as " in 'name'", for a failed void: a step whose value
+   * is in the measured shape's own tree (round 10: a gem's mask cube was named for an engraving's solid, and a
+   * bell for the gnome that poked through it), the shape itself when it is a step; none when no step holds it.
+   */
+  function stepAt(p: Vec3, exclude: Shape3[], within: Shape3): string {
     const roots = posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [];
+    const tree = new Set<Shape3>();
+    const walk = (s: Shape3, depth: number) => {
+      if (tree.has(s) || depth > 200) return;
+      tree.add(s);
+      for (const c of s.parts ?? s.inner ?? []) walk(c, depth + 1);
+      if (s.instanced) walk(s.instanced.base, depth + 1);
+      if (s.joint) walk(s.joint.child, depth + 1);
+    };
+    walk(within, 0);
     let best: string | undefined, bv = Infinity;
     for (const st of steps.values()) {
-      if (!isShape3(st.value) || exclude.includes(st.value) || cutNames.has(st.name) || regionNames.has(st.name) || isEmpty(st.value.bounds)) continue;
+      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
       const s = posed ? placedUnder(roots, st.value) : st.value;
       const b = s.bounds;
       if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
@@ -900,6 +945,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const cutDeps = topLevel ? here.cutDeps : undefined;
         const movedDeps = topLevel ? here.movedDeps : undefined;
         const keptDeps = topLevel ? here.keptDeps : undefined;
+        const maskDeps = topLevel ? here.maskDeps : undefined;
         // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
         // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
         if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
@@ -916,9 +962,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
             if (cutDeps) prev.cutDeps = new Set([...(prev.cutDeps ?? []), ...cutDeps]);
             if (movedDeps) prev.movedDeps = new Set([...(prev.movedDeps ?? []), ...movedDeps]);
             if (keptDeps) prev.keptDeps = new Set([...(prev.keptDeps ?? []), ...keptDeps]);
+            if (maskDeps) prev.maskDeps = new Set([...(prev.maskDeps ?? []), ...maskDeps]);
             if (loopDepth > 0) prev.inLoop = true;
           } else {
-            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, inLoop: loopDepth > 0 || undefined });
+            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
           }
           if (isShape3(value)) { lastShape = { name: stmt.name }; stepOfValue.set(value, stmt.name); }
         }
@@ -1083,12 +1130,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // assert, a decal or a camera reads is a region. A part stays a part however else it is read.
   for (const c of cameras) if (c.focus) regionNames.add(c.focus);
   const roles = new Map<string, StepRole>();
-  const rank = (r: StepRole | undefined) => (r === "part" ? 3 : r === "cut" ? 2 : r === "region" ? 1 : 0);
+  const rank = (r: StepRole | undefined) => (r === "part" ? 4 : r === "cut" ? 3 : r === "mask" ? 2 : r === "region" ? 1 : 0);
   const visit = (nme: string, role: StepRole) => {
     if (rank(roles.get(nme)) >= rank(role)) return;
     roles.set(nme, role);
     const st = steps.get(nme);
-    if (st) for (const d of st.deps) visit(d, role === "region" ? role : st.cutDeps?.has(d) ? "cut" : decalRegions.has(d) ? "region" : role);
+    if (st) for (const d of st.deps) visit(d, role === "region" ? role : st.cutDeps?.has(d) ? "cut" : st.maskDeps?.has(d) ? "mask" : decalRegions.has(d) ? "region" : role);
   };
   for (const r of roots) visit(r, "part");
   for (const r of regionNames) visit(r, "region");

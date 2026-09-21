@@ -37,6 +37,7 @@ export interface CalloutResult {
  * inside is the model's inside just behind the surface; of two the same size the later step, so a shell or a painted
  * cut is named, not the primitive it came from. When that part was computed with a cut and a cutter's surface passes
  * here with the model's solid outside it, the face is the cutter's: a slot is "slot (cut)", not the plate it is in.
+ * A cut face no part claims at all (the only cut step is the output, which is not a candidate) is a cutter's too.
  */
 export function attributeVertices(mesh: Mesh, steps: CalloutStep[], cellSize: number, stride = 1, model?: Shape3): Int32Array {
   const n = mesh.positions.length / 3;
@@ -63,9 +64,9 @@ export function attributeVertices(mesh: Mesh, steps: CalloutStep[], cellSize: nu
       const d = steps[i].shape.dist;
       if (Math.abs(d(x, y, z)) <= tol && d(ix, iy, iz) < 0) { part = i; break; }
     }
-    if (part < 0) continue;
-    owner[v] = part;
-    if (!steps[part].derived) continue;
+    if (part >= 0) owner[v] = part;
+    if (part >= 0 && !steps[part].derived) continue;
+    if (part < 0 && !model) continue;
     for (const i of cutters) {
       if (!inBox(i, x, y, z)) continue;
       const d = steps[i].shape.dist;
@@ -91,8 +92,14 @@ export function renderCallouts(mesh: Mesh, steps: CalloutStep[], info: ViewInfo,
   const stride = n > 60000 ? 2 : 1;
   const owner = attributeVertices(mesh, steps, cellSize, stride, model);
   // Visible vertices per step: projected, and no nearer surface in the depth buffer there.
-  const acc = steps.map(() => ({ count: 0, sx: 0, sy: 0, pts: [] as [number, number][] }));
+  // Per step: how many vertices are visible, where (a 12 by 12 density grid over the picture), and a sample of
+  // them kept uniform over the whole surface (reservoir), so the anchor comes from the densest patch and not from
+  // wherever the mesh's vertex order started (round 10: a flange's label landed on its boss).
+  const CELLS = 12, cw = size / CELLS;
+  const acc = steps.map(() => ({ count: 0, sx: 0, sy: 0, pts: [] as [number, number][], dens: new Int32Array(CELLS * CELLS) }));
   const depthTol = Math.max(cellSize * 3, 1e-6);
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   for (let v = 0; v < n; v += stride) {
     const i = owner[v];
     if (i < 0) continue;
@@ -105,18 +112,24 @@ export function renderCallouts(mesh: Mesh, steps: CalloutStep[], info: ViewInfo,
     if (!Number.isFinite(d) || pr.depth > d + depthTol) continue;
     const a = acc[i];
     a.count++; a.sx += px; a.sy += py;
+    a.dens[Math.min(CELLS - 1, Math.floor(py / cw)) * CELLS + Math.min(CELLS - 1, Math.floor(px / cw))]++;
     if (a.pts.length < 400) a.pts.push([px, py]);
+    else { const j = Math.floor(rnd() * a.count); if (j < 400) a.pts[j] = [px, py]; }
   }
   const ranked = steps.map((s, i) => ({ i, name: s.name, cut: s.cut, visible: acc[i].count * stride })).filter((r) => r.visible >= 6 * stride).sort((a, b) => b.visible - a.visible);
   const chosen = ranked.slice(0, maxLabels);
   const unlabelled = ranked.slice(maxLabels).map((r) => ({ name: r.name, cut: r.cut }));
-  // Each label's anchor: the visible vertex nearest the step's visible centroid, so a ring's label points at the ring.
+  // Each label's anchor: a visible vertex in the densest patch of the step's visible pixels (a 12 by 12 grid over
+  // the picture), so a ring's label points at the ring and a flange's at its open face, not at the boss in its
+  // middle where its centroid falls (round 10).
   type Label = { name: string; ax: number; ay: number; x: number; y: number; w: number; h: number; dx: number; dy: number };
   const labels: Label[] = [];
   const cx = size / 2, cy = size / 2;
   for (const r of chosen) {
     const a = acc[r.i];
-    const mx = a.sx / a.count, my = a.sy / a.count;
+    let top = 0;
+    for (let k = 1; k < a.dens.length; k++) if (a.dens[k] > a.dens[top]) top = k;
+    const mx = ((top % CELLS) + 0.5) * cw, my = (Math.floor(top / CELLS) + 0.5) * cw;
     let best = a.pts[0], bd = Infinity;
     for (const q of a.pts) { const dd = (q[0] - mx) ** 2 + (q[1] - my) ** 2; if (dd < bd) { bd = dd; best = q; } }
     const [ax, ay] = best;

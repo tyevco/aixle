@@ -166,6 +166,11 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     let res = 1;
     let t = Math.max(tmin, cell * 1.5);
     let passes = 0;
+    // The penumbra term counts a surface only while the ray is closing on it (a ray leaving a flat face moves away
+    // from that face, which cannot shadow its own points), only while that surface can lie short of the light (a
+    // bulb just beyond a point light drew rings on the pavement under it, round 10), and not when it is glass,
+    // which dims the ray where it is crossed rather than as it is approached.
+    let prev = Infinity;
     for (let i = 0; i < 64 && t < tmax; i++) {
       const x = p[0] + LIGHT[0] * t, y = p[1] + LIGHT[1] * t, z = p[2] + LIGHT[2] * t;
       const d = dist(x, y, z);
@@ -179,7 +184,14 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
         t += cell;
         continue;
       }
-      res = Math.min(res, (softness * d) / t);
+      if (i > 0 && d < prev && t + d < limit && !(d < cell * 2 && shape.hit(x, y, z).mat.transmit > 0)) {
+        // The closest approach between this sample and the last, from the two distances (Quilez), so the
+        // penumbra does not band with where the steps happen to land.
+        const y = (d * d) / (2 * prev);
+        const s = Math.sqrt(Math.max(0, d * d - y * y));
+        res = Math.min(res, (softness * s) / Math.max(1e-9, t - y));
+      }
+      prev = d;
       t += Math.max(d, cell * 0.5);
     }
     return Math.max(0, Math.min(1, res));

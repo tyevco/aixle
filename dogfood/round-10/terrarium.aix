@@ -1,0 +1,75 @@
+# A glass terrarium: a walnut base with a shallow recess, a bell-jar dome of
+# glass sitting on it, pebbles and soil in the recess, a bush and a tuft of
+# grass, a painted gnome, a glowing mushroom, and a label round the base.
+# About 2 units tall, standing on y = 0, front is +z.
+use "std/plants"
+set grid 160
+
+# --- base -------------------------------------------------------------------
+base_top = 0.24
+base_disc = cylinder(0.8, base_top, round=0.03) | move(0, base_top / 2, 0)
+recess = cylinder(0.5, 0.1) | move(0, base_top, 0)          # 0.05 deep dish
+base_wood = (base_disc - recess) | paint("walnut")
+label_region = extrude(text("MOSS & CO", 0.08, weight=0.02, align="center"), 0.1, "z") | wrap(0.8) | move(0, 0.08, 0)
+base = base_wood | decal(label_region, "ivory")
+
+# --- dome: a revolve of an exact 2D profile (a loft banded and its shell
+# curled in at the rim; see the report) --------------------------------------
+rim_y = base_top - 0.02                                      # sunk 0.02 into the wood
+bell_profile = (rect(1.24, 1.2) | move(0, rim_y + 0.4)) + (circle(0.62) | move(0, rim_y + 1.0))
+bell = revolve(bell_profile)                                  # reaches below the rim, cut there
+above_rim = box(2, 2, 2) | move(0, rim_y + 1, 0)
+below_rim = box(2, 2, 2) | move(0, rim_y - 1, 0)
+dome_space = bell & above_rim                                 # the solid the dome encloses
+dome = ((bell | shell(0.05)) - below_rim) | paint("glass")
+knob = sphere(0.09) | move(0, rim_y + 1.68, 0) | paint("glass")
+wall = dome & (box(2, 2, 2) | move(0, base_top + 0.06 + 1, 0))   # the glass above the wood
+
+# --- pebbles and soil -------------------------------------------------------
+pebbles = cylinder(0.53, 0.13) | move(0, 0.17 + 0.065, 0) | paint(material("#cfc6b8", "speckle", "#7a716a", scale=0.05))   # over the recess wall, a band showing above the wood
+soil = cylinder(0.5, 0.16, round=0.03) | move(0, 0.28 + 0.08, 0) | paint(material("#8a6a48", "noise", "#5e4630", scale=0.15))
+soil_top = 0.44
+stone = sphere(0.045) | paint("stone")
+stones = (stone | move(0.3, soil_top - 0.01, -0.2)) + (stone | move(-0.32, soil_top - 0.015, 0.12)) + (stone | move(0.12, soil_top - 0.02, 0.3))
+
+# --- plant -------------------------------------------------------------------
+plant = plants.bush(0.25) | move(-0.17, soil_top - 0.03, -0.1)
+tuft = plants.grass(0.13) | move(0.22, soil_top - 0.01, -0.22)
+tree = plants.tree(0.85) | move(0.1, soil_top - 0.03, -0.2)        # a small tree reaching up into the dome
+
+# --- gnome --------------------------------------------------------------------
+gnome_body = cone(0.06, 0.035, 0.13) | move(0, 0.065, 0) | paint("navy")
+gnome_head = sphere(0.045) | move(0, 0.15, 0) | paint("tan")
+gnome_hat = cone(0.05, 0, 0.11) | move(0, 0.22, 0) | paint("red")
+gnome = (gnome_body + gnome_head + gnome_hat) | scale(1.3) | move(0.2, soil_top - 0.02, 0.18)
+
+# --- glowing mushroom ---------------------------------------------------------
+stem = cylinder(0.03, 0.14) | move(0, 0.07, 0) | paint("cream")
+cap = (sphere(0.08) & (box(0.3, 0.08, 0.3) | move(0, 0.04, 0))) | move(0, 0.13, 0) | paint(material("#ffc860", glow=1.2))
+mushroom = (stem + cap) | move(-0.28, soil_top - 0.02, 0.22)
+
+innards = pebbles + soil + stones + plant + tuft + tree + gnome + mushroom
+terrarium = base + dome + knob + innards
+
+# --- promises -----------------------------------------------------------------
+assert inside(plant, dome_space) == 1, "the bush is inside the dome's air"
+assert inside(gnome, dome_space) == 1, "the gnome is inside the dome's air"
+assert inside(tree, dome_space) == 1, "the tree is inside the dome's air"
+assert void(wall, innards), "nothing pokes through the glass"
+# overlap() on the whole rim ring measured 0 at a 0.02 sink (its 24-cell lattice
+# over the shared 1.24-wide box never lands in a 0.02 slab), so the join is
+# promised on a chunk of the rim, where the lattice is fine enough.
+rim_tab = dome & (box(0.2, 0.2, 0.2) | move(0.6, base_top, 0))
+assert overlap(rim_tab, base) > 0.0001, "the dome rim is sunk into the wood, joined not resting"
+assert clearance(dome, base) < -0.01, "the dome is sunk at least 0.01 into the base"
+assert clearance(soil, dome) > 0.03, "the soil does not reach the glass"
+assert pieces(terrarium) == 1, "one piece"
+
+camera("hero", azimuth=28, elevation=12, zoom=1.2)
+set camera hero
+set environment studio
+set ambient 1.5
+light("key", azimuth=-35, elevation=50, size=2, color="#fff2e0")
+light("rim", azimuth=150, elevation=25, power=0.5, color="#cfe0ff")
+light("shroom", position=[-0.28, 0.66, 0.22], range=0.6, color="#ffc860", power=0.8)
+show terrarium

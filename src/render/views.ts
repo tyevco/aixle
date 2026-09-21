@@ -290,7 +290,7 @@ export interface StepView {
   shape: Shape3;
   used: boolean;
   /** part, cut or region; undefined for a step the output never reads. */
-  role?: "part" | "cut" | "region";
+  role?: "part" | "cut" | "mask" | "region";
   line: number;
   /** The step's mesh, if already extracted; otherwise it is extracted here. */
   mesh?: Mesh;
@@ -351,7 +351,7 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
     out.blit(canvas, x, y);
     const name = `${i + 1}. ${st.name}`;
     drawText(out, x, y + thumb + 3, name.length > thumb / 6 ? name.slice(0, Math.floor(thumb / 6) - 1) + "…" : name, st.used || region ? INK.text : INK.warn, 1);
-    const tag = st.role === "cut" ? "  cut" : region ? "  region" : st.used ? "" : "  unused";
+    const tag = st.role === "cut" ? "  cut" : st.role === "mask" ? "  mask" : region ? "  region" : st.used ? "" : "  unused";
     drawText(out, x, y + thumb + 13, isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds) + tag, INK.dim, 1);
   });
   return out;

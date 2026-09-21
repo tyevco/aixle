@@ -312,6 +312,20 @@ describe("interpreter", () => {
     expect(both.steps.find((s) => s.name === "c")?.cuts).toBe(true);
     expect(both.steps.find((s) => s.name === "d")?.cuts).toBe(true);
   });
+  it("names the larger operand of an intersection a mask, and a failing void a step of the measured shape", () => {
+    const ev = run('stone = prism(8, 0.3, 0.4)\nabove = box(2, 2, 2) | move(0, 1, 0)\ngem = stone & above\nprobe = box(0.1, 0.1, 0.1) | move(0, 0.1, 0)\nassert void(probe, gem)\nshow gem');
+    expect(ev.roles.get("above")).toBe("mask");
+    expect(ev.roles.get("stone")).toBe("part");
+    expect(ev.asserts[0].where).toMatch(/^solid at \(.*\) in 'gem'$/);
+    // Boxes that never meet make a void trivial, and it is said.
+    const far = run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(5, 0, 0)\nassert void(b, a)\nshow a');
+    expect(far.warnings).toContainEqual(expect.stringMatching(/^line 3: void\(b, a\) holds trivially: their boxes are 4 apart/));
+    // A region just clear of the shape is a guard, not a mistake.
+    expect(run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(1.1, 0, 0)\nassert void(b, a)\nshow a').warnings.filter((w) => /trivially/.test(w))).toEqual([]);
+    // A failing pieces() names the loose piece.
+    const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
+    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
+  });
   it("marks a step assigned inside a loop", () => {
     const ev = run('b = 1\nall = sphere(0.1)\nfor i in range(3) {\n  a = i * 2\n  all = all + (sphere(0.1) | move(i, 0, 0))\n}\nshow all');
     expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true], ["a", true]]);

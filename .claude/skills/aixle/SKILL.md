@@ -43,7 +43,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    which step a thing in the picture is; `report.md` has the
    numbers, including whether the model stands and is in one piece; a
    quick sheet that dropped thin steps says so and does not judge the
-   pieces. `--focus step` is a close-up meshed at its own finer cell,
+   pieces. `--focus step` (on a region or a cutter: the model inside its
+   frame) is a close-up meshed at its own finer cell,
    where the step is in the pose shown, the rest of the model faint
    around it, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side.
@@ -109,7 +110,7 @@ pieces(s)  overhang(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")  light("rim", azimuth=150, elevation=20, power=0.5)  light("fire", position=[0, 0.4, 0], range=2)   # several lights, a point light; lights.png shows each alone
-camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky (--camera NAME, --environment NAME try one)
+camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky (--camera NAME, --environment NAME|all, --beauty-only for the loop)
 decal(part, label_box, image="label.png")   material("cream", image="skin.png", projection="cylindrical", scale=0.6)   # a PNG as a label or a skin
 
 a + b   a - b   a & b            # union, difference, intersection; union(a, b, k=0.3) blends

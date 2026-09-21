@@ -204,7 +204,8 @@ It is a printer over the dependencies the evaluation records. Not built:
 - An APNG turntable, since the PNG writer is there.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
-- A thumbnail per environment in the reference (round 9).
+- A warning when `attach` leaves two faces exactly touching, and a
+  per-step slice (round 10).
 
 ## What was considered and set aside
 

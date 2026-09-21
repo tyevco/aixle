@@ -1,0 +1,84 @@
+# A jewelled ring on a velvet display stand, about 1.5 tall on y = 0.
+# The band is built flat (a torus round y) so the inscription can be
+# wrapped round its inside, then stood up with rotate(x=-90); the head
+# (bezel cup, claws, gem) is built in the standing frame at the top.
+set grid 220
+
+# --- the stand -----------------------------------------------------------
+plinth = box(1.5, 0.1, 1.0, round=0.02) | move(0, 0.05, 0) | paint("ebony")
+velvet = material("#7a1b3d", "noise", "#4d0f27", scale=0.03, rough=0.85)
+cushion = box(1.3, 0.34, 0.8, round=0.07) | move(0, 0.24, 0) | paint(velvet)
+stand = plinth + cushion
+
+# --- the band, flat ------------------------------------------------------
+R = 0.42
+rr = 0.065
+band_blank = torus(R, rr) | paint("gold")
+# The chrome inlay: a square-section ring set into the outer face, 0.015 proud.
+stripe = revolve(rect(0.03, 0.03) | move(R + rr - 0.01, 0)) | paint("chrome")
+# The inscription: standing lettering wrapped round the inner face (radius
+# R - rr), 0.02 deep into the gold; flipped so it reads from inside the band,
+# turned to -z so it lands at the bottom once the ring stands up.
+letters = extrude(text("FOREVER", 0.05, weight=0.012, align="center"), 0.03, "z") | move(0, -0.025, 0.005) | flip("x")
+inscription = letters | wrap(R - rr) | rotate(y=180)
+# A probe region past the band's centre line, out to beyond the outer face:
+# the engraving must never reach it.
+outer_probe = revolve(rect(0.1, 0.2) | move(R + 0.08, 0))
+band_flat = (band_blank - inscription) + stripe
+
+# --- stand it up ---------------------------------------------------------
+yc = 0.41 - 0.03 + R + rr
+band = band_flat | rotate(x=-90) | move(0, yc, 0)
+band_top = yc + R + rr
+
+# --- the head ------------------------------------------------------------
+cup = cylinder(0.19, 0.23) | move(0, band_top - 0.005, 0) | paint("gold")
+cavity = cylinder(0.155, 0.4) | move(0, band_top + 0.14, 0)
+# Two windows through the cup's front and back so light reaches the pavilion.
+windows = box(0.14, 0.09, 0.6) | move(0, band_top - 0.01, 0)
+setting_air = cylinder(0.16, 0.34) | move(0, band_top + 0.11, 0)
+claw = tube(0.02, [0.185, band_top, 0, 0.205, band_top + 0.09, 0, 0.14, band_top + 0.135, 0], smooth=4) | paint("gold")
+claws = claw | ring(4, 0) | rotate(y=45)
+bezel = (cup - cavity - windows) + claws
+ring = (band + cup) - cavity - windows + claws
+
+# --- the gem: an 8-sided brilliant from a prism and tilted half-spaces ---
+g = 0.17
+crown = 25
+pav = 40
+girdle = 0.035
+h_crown = girdle + g * tan(crown)
+stone = prism(8, g / cos(22.5), 0.6) | rotate(y=22.5)
+below = box(2, 2, 2) | move(0, -1, 0)
+above = box(2, 2, 2) | move(0, 1, 0)
+for i in range(8) {
+  stone = stone & (below | rotate(x=crown) | move(0, h_crown, 0) | rotate(y=i * 45))
+  stone = stone & (above | rotate(x=-pav) | move(0, -g * tan(pav), 0) | rotate(y=i * 45 + 22.5))
+}
+table = below | move(0, 0.08, 0)
+culet = above | move(0, -0.11, 0)
+ruby = material("#ff3b60", transmit=0.55, rough=0.04)
+gem = (stone & table & culet) | move(0, band_top + 0.07, 0) | paint(ruby)
+
+# --- whole ---------------------------------------------------------------
+model = stand + ring + gem
+
+assert inside(gem, setting_air) > 0.9, "the gem sits in its setting"
+assert overlap(gem, bezel) > 0.0002, "the girdle is held by the bezel rim"
+assert overlap(gem, bezel) < 0.005, "the gem is not sunk into the bezel"
+assert clearance(claws, gem) < 0.01, "the claws touch the gem"
+assert void(outer_probe, inscription), "the inscription stays inside the band"
+assert overlap(ring, stand) > 0.0003, "the ring rests in the velvet"
+assert pieces(model) == 1, "one piece"
+
+light("key", azimuth=-35, elevation=50, size=1.5, color="#fff0dc")
+light("rim", azimuth=150, elevation=20, power=0.6, color="#cfe0ff")
+light("spark", position=[0.25, 1.7, 0.3], range=0.8, color="#fff8f0", power=1.2)
+camera("hero", azimuth=30, elevation=10, zoom=1.3)
+camera("gem", focus="gem", zoom=0.8, dof=0.4)
+camera("gem_soft", focus="gem", zoom=0.8, dof=1)
+camera("low", azimuth=60, elevation=-8, zoom=1.2)
+set camera hero
+set environment sunset
+set ambient 1.3
+show model

@@ -332,6 +332,46 @@ round 1: A lighthouse on a rocky outcrop, with a keeper's cottage and a stone pa
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/lighthouse.aix) · <a href="/aixle/viewers/round-1_lighthouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/lighthouse.report.md)
 
+### round-10_alley
+
+round 10: A street corner at night: a pavement slab (top at y = 0), a shop front
+
+![round-10_alley, beauty render](../dogfood/renders/round-10_alley_beauty.png) ![round-10_alley, contact sheet](../dogfood/renders/round-10_alley.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/alley.aix) · <a href="/aixle/viewers/round-10_alley.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/alley.report.md)
+
+### round-10_hub
+
+round 10: A bolted wheel hub flange for printing: a thick disc with a raised boss, a keyed bore,
+
+![round-10_hub, beauty render](../dogfood/renders/round-10_hub_beauty.png) ![round-10_hub, contact sheet](../dogfood/renders/round-10_hub.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub.aix) · <a href="/aixle/viewers/round-10_hub.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/hub.report.md)
+
+### round-10_hub_probe_onebyone
+
+round 10: Probe: the same hub as hub.aix with the cutters subtracted one by one instead of as one union,
+
+![round-10_hub_probe_onebyone, beauty render](../dogfood/renders/round-10_hub_probe_onebyone_beauty.png) ![round-10_hub_probe_onebyone, contact sheet](../dogfood/renders/round-10_hub_probe_onebyone.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub_probe_onebyone.aix) · <a href="/aixle/viewers/round-10_hub_probe_onebyone.html" target="_blank" rel="noopener">viewer</a>
+
+### round-10_ring
+
+round 10: A jewelled ring on a velvet display stand, about 1.5 tall on y = 0.
+
+![round-10_ring, beauty render](../dogfood/renders/round-10_ring_beauty.png) ![round-10_ring, contact sheet](../dogfood/renders/round-10_ring.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/ring.aix) · <a href="/aixle/viewers/round-10_ring.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/ring.report.md)
+
+### round-10_terrarium
+
+round 10: A glass terrarium: a walnut base with a shallow recess, a bell-jar dome of
+
+![round-10_terrarium, beauty render](../dogfood/renders/round-10_terrarium_beauty.png) ![round-10_terrarium, contact sheet](../dogfood/renders/round-10_terrarium.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/terrarium.aix) · <a href="/aixle/viewers/round-10_terrarium.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/terrarium.report.md)
+
 ### round-2_excavator
 
 round 2: A hydraulic excavator: tracked base, a slewing upper structure, a bent

@@ -73,6 +73,12 @@ describe("booleans", () => {
     const tube = W.tube([[0, 0, 0], [1, 0, 0], [1, 1, 0]], 0.2);
     expect(tube.dist(1, 0, 0)).toBeCloseTo(-0.2, 6);
   });
+  it("offset and round carry the feature they grow", () => {
+    const thin = W.tube([[0, 0, 0], [1, 0, 0]], 0.02);
+    expect(thin.feature).toBeCloseTo(0.04, 9);
+    expect(O.offset(thin, 0.03).feature).toBeCloseTo(0.1, 9);
+    expect(O.offset(thin, -0.01).feature).toBeCloseTo(0.02, 9);
+  });
   it("marks a field that is a bound rather than a distance", () => {
     expect(O.union([a, b]).bound).toBeUndefined();
     expect(O.union([a, b], 0.3).bound).toBe(true);
@@ -375,6 +381,18 @@ describe("spatial index", () => {
     const sw = W.sweep(S.circle(0.15), pts);
     expect(sw.dist(1, 0, 0)).toBeLessThan(0);
     expect(sw.dist(1.3, 0, 0)).toBeGreaterThan(0.1);
+  });
+});
+
+describe("loft", () => {
+  it("measures a slanted wall across it, like the cone it is, and never farther than the truth", () => {
+    const l = W.loft(S.circle(1), S.circle(0.5), 2);
+    const c = P.cone(1, 0.5, 2);
+    // Beside the wall, outside and inside: the cone's distance, not the radial gap (0.45 and -0.25).
+    expect(l.dist(1.2, 0, 0)).toBeCloseTo(c.dist(1.2, 0, 0), 6);
+    expect(l.dist(0.5, 0, 0)).toBeCloseTo(c.dist(0.5, 0, 0), 6);
+    for (const p of [[1.5, 0.5, 0.2], [0.2, 0.9, 0.1], [0.9, -0.9, 0], [0, 1.5, 0]] as const) expect(l.dist(p[0], p[1], p[2])).toBeLessThanOrEqual(c.dist(p[0], p[1], p[2]) + 1e-9);
+    expect(l.bound).toBe(true);
   });
 });
 

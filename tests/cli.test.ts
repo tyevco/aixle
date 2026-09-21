@@ -31,8 +31,8 @@ describe("asserts", () => {
       failed = (e as { stdout: string; status: number }).stdout;
       expect((e as { status: number }).status).toBe(1);
     }
-    expect(failed).toMatch(/assert \(line 3\) fails: clearance\(a, b\) > 0.5 is 0.2 > 0.5: apart\n/);
-    expect(failed).toMatch(/assert \(line 4\) fails: pieces\(a \+ b\) == 1 is 2 == 1\n/);
+    expect(failed).toMatch(/assert \(line 3\) fails: clearance\(a, b\) > 0.5 is 0.2 > 0.5, closest at \([-\d., ]+\): apart\n/);
+    expect(failed).toMatch(/assert \(line 4\) fails: pieces\(a \+ b\) == 1 is 2 == 1, the smallest piece is [\d.]+ at \([-\d., ]+\)\n/);
     expect(failed).toMatch(/asserts: 1 pass, 2 fail\n$/);
   });
 });

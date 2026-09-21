@@ -52,6 +52,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 9 | Perfume bottle | [`round-9/bottle.aix`](round-9/bottle.aix) | [report](round-9/bottle.report.md) | glass, a liquid, brass and four shots in thirteen renders; glass on a loft banded and chrome blew out under a white sky, both now documented, and a bare `void` failure now says where |
 | 9 | Campsite at night | [`round-9/campsite.aix`](round-9/campsite.aix) | [report](round-9/campsite.report.md) | seven objects, two lights and three shots in twelve renders; eight assert-only regions were warned as unused and a focus shot was blocked by a pole, the first fixed |
 | 9 | Owl money box | [`round-9/owl.aix`](round-9/owl.aix) | [report](round-9/owl.report.md) | a shelled body with a coin slot, decal eyes and three poses in seven renders; the callouts named decal regions, a cutter and a shell's primitive, all three now fixed |
+| 10 | Bolted wheel hub | [`round-10/hub.aix`](round-10/hub.aix) | [report](round-10/hub.report.md) | six counterbored holes in a ring, a keyway and nine promises in seven renders; a union of cutters subtracted once credited no cut face and a clearance failure said no place, both fixed |
+| 10 | Glass terrarium | [`round-10/terrarium.aix`](round-10/terrarium.aix) | [report](round-10/terrarium.report.md) | a bell jar, plants and eight promises in seven renders; a lofted dome's shell curled and its clearance read 4e-17, and a rim sunk 0.02 overlapped by 0, both fixed |
+| 10 | Street corner at night | [`round-10/alley.aix`](round-10/alley.aix) | [report](round-10/alley.report.md) | a lamp post, a shop front, three point-lit shots in sixteen renders; a point light inside its glass lantern lit nothing and every pool wore rings, both fixed |
+| 10 | Jewelled ring | [`round-10/ring.aix`](round-10/ring.aix) | [report](round-10/ring.report.md) | a faceted stone in claws, an inscription and four skies in twelve renders; a void promise held with its boxes never meeting and named a mask cube for the culprit, both fixed |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -183,6 +187,31 @@ answered below. Not done: environment thumbnails in the reference (a
 joint step's own `surface` line under `--pose` is its posed extent, now
 said in the docs; a number set inside a loop is no longer listed as a
 step).
+
+Round 10 was four models against round 9's changes and its
+leftovers (a bolted hub flange with a ring of counterbored holes, a
+glass terrarium, a street corner at night with point lights, a jewelled
+ring under four skies). Roles, witnesses, the cut-face callouts, the
+point light, `lights.png` and the flags all did what the docs said, and
+each agent found the case underneath: a union of cutters subtracted
+once had no derived step among the candidates, so no cut face was
+credited; a `clearance` failure said no place; `--focus` on a region
+drew the region as a solid; a default slice plane on a face drew the
+face; a loft measured its slanted wall radially, so a shelled loft
+curled and a clearance read 4e-17; a rim sunk 0.02 into a base
+overlapped by 0 at 24 cells; a `void` failure named the region's
+primitive, or a mask cube, for the intruder; a void whose boxes never
+met held for no reason; a point light inside a glass lantern lit
+nothing, and every point light drew rings on the pavement, both from
+the shadow march's penumbra term (applied as a surface was approached,
+before the glass crossing was seen, and to a bulb beyond the light);
+a step carried into place by its parents was labelled at the origin; a
+part fattened by `round()` kept its thin warning; `pieces()` failed
+without naming the piece; and `beauty.png` under a focus camera was not
+framed. Their reports' three changes each are answered below. Not
+done: a warning when `attach` leaves two faces touching (documented
+instead), a per-step slice, a `--environment a,b` pair (`all` exists),
+a bigger lights strip, and `text(arc=)` printing its radial span.
 
 ## What each round changed
 
@@ -390,6 +419,29 @@ with two or more lights `--beauty` writes `lights.png`, the picture
 under each light alone and then all of them, and a camera whose focus
 is more than half hidden from it by the rest of the model is warned
 about.
+
+**Round 10** (against round 9's changes: hub, terrarium, alley, ring):
+a cut face no part claims is credited to its cutter, so a union of
+cutters subtracted once labels its members; `clearance` failures say
+where the two came closest or overlapped deepest; `--focus` on a region
+or a cutter frames the model inside it; a default slice plane that lies
+on a face moves in a cell and a half; the callouts' anchors sit in the
+densest patch of a step's visible pixels, and each step is placed where
+the output puts it, so a lantern carried up a post and a stripe
+revolved flat are labelled where they are; a loft is measured across
+its slanted wall, exact for a cone; `overlap` refines its lattice
+within a sample budget, so a rim sunk 0.02 is measured; a failing
+`void` names a step of the measured shape's own tree, and a void whose
+boxes never meet is warned as trivial; the larger operand of an `&` is
+a mask, tagged and never labelled; a failing `pieces()` names the loose
+piece; a shadow ray counts a surface only while closing on it, only
+short of a point light, and never as it approaches glass, so a light
+inside a glass shell works and pools have no rings; `offset` and
+`round` carry the feature they grow; a slab thinner than a tenth of the
+scene gets no ground() note; `beauty.png` is framed on a `set camera`'s
+focus; `--beauty-only` and `--environment all` (an `environments.png`
+strip); docs on gold and gems under each sky, `attach` face on face,
+and text wrapped inside a band.
 
 ## Running a round
 

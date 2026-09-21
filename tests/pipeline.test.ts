@@ -45,9 +45,12 @@ describe("pipeline", () => {
       expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_side.png"]);
       expect(one.report).toMatch(/\(the sheet and beauty\.png use "side"\)/);
       expect(one.report).toMatch(/Environment: sunset/);
+      const all = run('m = box(1)\nshow m', "all.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "all" });
+      expect(all.files).toContain("environments.png");
+      expect(all.warnings.filter((w) => /environment/.test(w))).toEqual([]);
       // A focus hidden behind the rest of the model from its camera is warned about; from the other side it is not.
       const hid = run('wall = box(2, 2, 0.2) | move(0, 1, 1)\nball = sphere(0.3) | move(0, 1, 0)\nboth = wall + ball\ncamera("front", focus="ball", azimuth=0, elevation=5)\ncamera("back", focus="ball", azimuth=180, elevation=5)\nshow both', "hid.aix", dir, { grid: 24, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
-      expect(hid.warnings.filter((w) => /hidden behind/.test(w))).toEqual([expect.stringMatching(/^camera "front" \(line 4\): \d+% of ball is hidden behind the rest of the model from azimuth 0, elevation 5; a camera round it sees more$/)]);
+      expect(hid.warnings.filter((w) => /hidden behind/.test(w))).toEqual([expect.stringMatching(/^camera "front" \(line 4\): \d+% of ball is hidden behind the rest of the model from azimuth 0, elevation 5; from azimuth \d+ it is \d+%$/)]);
       expect(run('m = box(1)\nshow m', "bad.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, camera: "nope", environment: "mars" }).warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera \(declare one/), expect.stringMatching(/^--environment mars: no such environment; the skies are studio/)]));
       expect(r.files).toContain("viewer.html");
       expect(r.files).toContain("beauty.png");
@@ -130,7 +133,8 @@ describe("pipeline", () => {
       const src = "slab = box(2, 0.4, 2) | move(0, 0.2, 0)\nknob = sphere(0.3) | move(0.5, 0.6, 0.5)\nhole = cylinder(0.25, 1) | move(-0.5, 0.2, -0.5)\nm = (slab - hole) + knob";
       const r = run(src, "co.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false });
       expect(r.files).toContain("callouts.png");
-      expect(r.report).toMatch(/Callouts \(callouts\.png, the largest visible steps named\): slab, knob\n/);
+      // The hole's wall is a cut face, credited to the hole though the only cut step is the output.
+      expect(r.report).toMatch(/Callouts \(callouts\.png, the largest visible steps named\): slab, knob, hole \(cut\)\n/);
       expect(r.timings.callouts).toBeDefined();
       const quick = run(src, "co.aix", dir, { ...QUICK, grid: 32 });
       expect(quick.files).not.toContain("callouts.png");

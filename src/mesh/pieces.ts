@@ -33,3 +33,17 @@ export function overhangFraction(shape: Shape3, resolution = 64): number {
   const cell = Math.max(size[0], size[1], size[2]) / resolution;
   return analyse(nets.mesh, cell).overhang;
 }
+
+/** The smallest solid piece other than the largest, when the shape meshes into more than one: what a pieces() promise names. */
+export function loosePiece(shape: Shape3, resolution = 64): { count: number; volume: number; centre: [number, number, number] } | undefined {
+  if (isEmpty(shape.bounds)) return undefined;
+  const nets = surfaceNets(shape, { resolution: Math.max(8, Math.round(resolution)) });
+  if (!nets.mesh.indices.length) return undefined;
+  const size = boundsSize(shape.bounds);
+  const cell = Math.max(size[0], size[1], size[2]) / resolution;
+  const physics = analyse(nets.mesh, cell);
+  const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics, cell));
+  if (solid.length < 2) return undefined;
+  const last = solid[solid.length - 1];
+  return { count: solid.length, volume: Math.abs(last.volume), centre: [last.centre[0], last.centre[1], last.centre[2]] };
+}
