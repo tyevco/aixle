@@ -4,6 +4,10 @@ import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
+import { attributeVertices, renderCallouts, hiddenFraction } from "../src/render/callouts.js";
+import { decodePng, encodePng, encodeApng } from "../src/render/png.js";
+import { albedo, coverage, sampleImage } from "../src/sdf/materials.js";
+import type { ImageTexture } from "../src/sdf/types.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
 import { preset } from "../src/sdf/materials.js";
 import { Canvas } from "../src/render/canvas.js";
@@ -153,6 +157,157 @@ describe("canvas and font", () => {
     const end = drawText(c, 0, 0, "AB 1", 0x000000);
     expect(end).toBe(textWidth("AB 1"));
     expect(c.get(1, 0)).toBe(0x000000);
+  });
+});
+
+describe("pictures", () => {
+  const picture = (): ImageTexture => {
+    // 4 by 2: red, green / blue, transparent.
+    const rgba = new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 0, 0]);
+    return { name: "p.png", width: 4, height: 2, rgba, projection: "planar", axis: "z", size: 2 };
+  };
+  it("decodes what the encoder writes, and filtered rows too", () => {
+    const w = 5, h = 3, rgba = new Uint8Array(w * h * 4);
+    for (let i = 0; i < rgba.length; i++) rgba[i] = (i * 37) & 255;
+    const back = decodePng(encodePng(w, h, rgba));
+    expect([back.width, back.height]).toEqual([w, h]);
+    expect([...back.rgba]).toEqual([...rgba]);
+    // An RGB, 8-bit file with a Sub-filtered row, built by hand: two pixels, the second stored as a difference.
+    const { deflateSync } = require("node:zlib") as typeof import("node:zlib");
+    const raw = new Uint8Array([1, 10, 20, 30, 5, 5, 5]);
+    const chunk = (type: string, body: Uint8Array) => { const t = Buffer.from(type); const c = Buffer.concat([t, Buffer.from(body)]); const len = Buffer.alloc(4); len.writeUInt32BE(body.length); const crc = Buffer.alloc(4); return Buffer.concat([len, c, crc]); };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(2, 0); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 2;
+    const file = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array(0))]);
+    expect([...decodePng(file).rgba]).toEqual([10, 20, 30, 255, 15, 25, 35, 255]);
+    expect(() => decodePng(new Uint8Array([1, 2, 3]))).toThrow(/not a PNG/);
+  });
+  it("samples a picture flat, wrapped, and fitted to a box, with its alpha as coverage", () => {
+    const flat = picture();
+    // Planar along z, 2 units wide (so 1 unit tall): the top-left texel is red, the bottom-right transparent.
+    const rgb = (v: number[]) => v.slice(0, 3).map((c) => Math.round(c * 1000) / 1000);
+    expect(rgb(sampleImage(flat, -0.75, 0.25, 0))).toEqual([1, 0, 0]);
+    expect(sampleImage(flat, 0.75, -0.25, 0)[3]).toBe(0);
+    expect(sampleImage(flat, 3, 0, 0)[3]).toBe(0);
+    const m = { name: "p", color: [1, 1, 1] as [number, number, number], color2: [1, 1, 1] as [number, number, number], pattern: "solid" as const, scale: 1, metal: 0, rough: 0.5, transmit: 0, seed: 0, axis: "z" as const, glow: 0, image: flat };
+    expect(rgb(albedo(m, -0.75, 0.25, 0))).toEqual([1, 0, 0]);
+    expect(coverage(m, 0.75, -0.25, 0)).toBe(0);
+    // Wrapped round y by arc length, 1 unit wide: the front (+z) starts the picture, a quarter turn on at radius 1
+    // is 1.57 units along, so into the second copy's green.
+    const wrap: ImageTexture = { ...picture(), projection: "cylindrical", axis: "y", size: 1 };
+    // Sampled at texel centres: an eighth of a unit along the arc is the first texel, 1.375 the sixth, a green one.
+    expect(rgb(sampleImage(wrap, Math.sin(0.125), 0.125, Math.cos(0.125)))).toEqual([1, 0, 0]);
+    expect(rgb(sampleImage(wrap, Math.sin(1.375), 0.125, Math.cos(1.375)))).toEqual([0, 1, 0]);
+    expect(sampleImage(wrap, 0, 5, 1)[3]).toBe(0);
+    // Fitted to a box thin along z: u along x, v down y.
+    const box: ImageTexture = { ...picture(), projection: "box", axis: "y", size: 1, box: { min: [0, 0, 0], max: [4, 2, 0.1] } };
+    expect(rgb(sampleImage(box, 0.5, 1.75, 0.05))).toEqual([1, 0, 0]);
+    expect(sampleImage(box, 3.5, 0.25, 0.05)[3]).toBe(0);
+  });
+});
+
+describe("callouts", () => {
+  it("attributes vertices to the smallest step they lie on, the later of two the same size, cut faces to the cutter, and labels the visible ones", () => {
+    const slab = O.move(P.box(2, 0.4, 2), 0, 0.2, 0);
+    const knob = O.move(P.sphere(0.3), 0.5, 0.6, 0.5);
+    const hole = O.move(P.cylinder(0.25, 1), -0.5, 0.2, -0.5);
+    const cut = O.difference(slab, hole);
+    const model = O.union([cut, knob]);
+    const nets = surfaceNets(model, { resolution: 40 });
+    // The hole is a cutter and the cut was computed with it, as the interpreter marks them.
+    const steps = [{ name: "slab", shape: slab }, { name: "knob", shape: knob }, { name: "hole", shape: hole, cut: true }, { name: "cut", shape: cut, derived: true }];
+    const owner = attributeVertices(nets.mesh, steps, nets.cellSize, 1, model);
+    const counts = [0, 0, 0, 0, 0];
+    for (const o of owner) counts[o < 0 ? 4 : o]++;
+    // The knob's vertices are the knob's; the slab's faces are the cut's, the later step in the same box (a shell or
+    // a painted cut is named, not the primitive it came from); the hole's wall is the hole's, as a cut face.
+    expect(counts[1]).toBeGreaterThan(50);
+    expect(counts[3]).toBeGreaterThan(counts[1]);
+    expect(counts[0]).toBe(0);
+    expect(counts[2]).toBeGreaterThan(20);
+    // A cutter not marked as one never owns a face: the wall stays the cut's.
+    const plain = attributeVertices(nets.mesh, steps.map((st) => ({ name: st.name, shape: st.shape })), nets.cellSize, 1, model);
+    expect([...plain].filter((o) => o === 2).length).toBe(0);
+    const r = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 20, undefined, undefined, model);
+    expect(r.labelled.map((l) => l.name).sort()).toEqual(["cut", "hole", "knob"]);
+    expect(r.labelled[0].name).toBe("cut");
+    expect(r.labelled.find((l) => l.name === "hole")?.cut).toBe(true);
+    expect(r.unlabelled).toEqual([]);
+    expect([r.canvas.width, r.canvas.height]).toEqual([160, 186]);
+    // With one label allowed, the smaller steps are reported as in view but not labelled.
+    const one = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 1, undefined, undefined, model);
+    expect(one.labelled.map((l) => l.name)).toEqual(["cut"]);
+    expect(one.unlabelled.map((u) => u.name).sort()).toEqual(["hole", "knob"]);
+  });
+});
+
+describe("animated PNG", () => {
+  it("writes the acTL, an fcTL per frame, the first frame in IDAT and the rest in fdAT, and decodes to its first frame", () => {
+    const w = 3, h = 2;
+    const f1 = new Uint8Array(w * h * 4).fill(255), f2 = new Uint8Array(w * h * 4).fill(0);
+    const buf = encodeApng(w, h, [f1, f2], 50);
+    const types: string[] = [];
+    for (let i = 8; i < buf.length; ) { const len = buf.readUInt32BE(i); types.push(buf.toString("latin1", i + 4, i + 8)); i += 12 + len; }
+    expect(types).toEqual(["IHDR", "acTL", "fcTL", "IDAT", "fcTL", "fdAT", "IEND"]);
+    expect(buf.readUInt32BE(buf.indexOf("acTL") + 4)).toBe(2);
+    const first = decodePng(buf);
+    expect([first.width, first.height, first.rgba[0]]).toEqual([3, 2, 255]);
+    expect(() => encodeApng(w, h, [], 50)).toThrow(/at least one frame/);
+  });
+});
+
+describe("a hidden focus", () => {
+  it("measures how much of a part the rest of the model hides from a view", () => {
+    // A small sphere behind a wall: hidden from the front, in the clear from behind, half seen from the side.
+    const wall = O.move(P.box(2, 2, 0.2), 0, 0, 1);
+    const ball = O.move(P.sphere(0.3), 0, 0, 0);
+    const model = O.union([wall, ball]);
+    const nets = surfaceNets(model, { resolution: 40 });
+    const info = { name: "m", bounds: model.bounds };
+    expect(hiddenFraction(nets.mesh, ball.bounds, info, nets.cellSize, 0, 5)).toBeGreaterThan(0.8);
+    expect(hiddenFraction(nets.mesh, ball.bounds, info, nets.cellSize, 180, 5)).toBeLessThan(0.2);
+    expect(hiddenFraction(nets.mesh, { min: [5, 5, 5], max: [6, 6, 6] }, info, nets.cellSize, 0, 5)).toBe(0);
+  });
+});
+
+describe("beauty lights and environments", () => {
+  it("shadows towards each light, darkens at night and warms a sunset horizon, and is unchanged without lights", () => {
+    const nets = surfaceNets(sphere, { resolution: 24 });
+    const lum = (p: number) => ((p >> 16) & 255) + ((p >> 8) & 255) + (p & 255);
+    const base = { size: 96, cellSize: nets.cellSize };
+    const plain = renderBeauty(sphere, nets.mesh, sphere.bounds, base);
+    // One white light at the default direction, declared, matches the default key light's picture.
+    const declared = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }] });
+    expect(declared.get(48, 44)).not.toBe(plain.get(0, 95));
+    // A point light just right of the sphere lights its right side and not its left; farther away it does less.
+    const point = (x: number) => renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: 0, elevation: 0, size: 1, color: [1, 1, 1], power: 1, position: [x, 0.2, 0.3], range: 1.5 }] });
+    const near = point(1.6), off = point(6);
+    expect(lum(near.get(70, 48))).toBeGreaterThan(lum(near.get(26, 48)) + 60);
+    expect(lum(near.get(70, 48))).toBeGreaterThan(lum(off.get(70, 48)) + 30);
+    // A second light from the right lifts the sphere's right side.
+    const two = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }, { azimuth: 120, elevation: 30, size: 1, color: [1, 1, 1], power: 1 }] });
+    expect(lum(two.get(70, 48))).toBeGreaterThan(lum(declared.get(70, 48)));
+    // Night is darker than the studio everywhere in the sky; a sunset's horizon is warmer than its zenith.
+    const night = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, environment: "night" });
+    expect(lum(night.get(48, 2))).toBeLessThan(lum(plain.get(48, 2)) / 3);
+    const sunset = renderBeauty(sphere, nets.mesh, sphere.bounds, { ...base, environment: "sunset" });
+    // The far floor fades to the sunset's warm ground; in the studio it fades to a near-grey.
+    const far = sunset.get(48, 2), farPlain = plain.get(48, 2);
+    expect(((far >> 16) & 255) - (far & 255)).toBeGreaterThan(((farPlain >> 16) & 255) - (farPlain & 255) + 20);
+    // Somewhere down the left edge the backdrop passes through the warm band.
+    let warmest = -255;
+    for (let y = 0; y < 96; y++) { const c = sunset.get(1, y); warmest = Math.max(warmest, ((c >> 16) & 255) - (c & 255)); }
+    expect(warmest).toBeGreaterThan(40);
+    // A camera fitted to the points of one part fills the frame with it.
+    const two_ = O.union([sphere, O.move(P.sphere(0.3), 3, 0, 0)]);
+    const n2 = surfaceNets(two_, { resolution: 40 });
+    const pts: number[] = [];
+    for (let i = 0; i < n2.mesh.positions.length; i += 3) if (n2.mesh.positions[i] > 2) pts.push(n2.mesh.positions[i], n2.mesh.positions[i + 1], n2.mesh.positions[i + 2]);
+    const small = { min: [2.6, -0.4, -0.4] as [number, number, number], max: [3.4, 0.4, 0.4] as [number, number, number] };
+    const whole = renderBeauty(two_, n2.mesh, small, base);
+    const fitted = renderBeauty(two_, n2.mesh, small, { ...base, fitPoints: new Float32Array(pts) });
+    // Fitted, the small sphere is at the centre; fitted to everything, the centre pixel sees past it to the sky.
+    expect(fitted.get(48, 48)).not.toBe(fitted.get(48, 2));
+    expect(whole.get(48, 48)).not.toBe(fitted.get(48, 48));
   });
 });
 

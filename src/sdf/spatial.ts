@@ -18,7 +18,11 @@
 export type PieceDist = (i: number, x: number, y: number, z: number) => number;
 
 export interface SpatialIndex {
-  /** The exact minimum over all pieces of `piece(i, x, y, z)`, using `boxDist` (a lower bound per piece) to skip. */
+  /**
+   * The exact minimum over all pieces of `piece(i, x, y, z)`, using `boxDist` (a lower bound per piece) to skip.
+   * A piece whose box holds the point is always evaluated: inside two overlapping pieces the min is the deeper one,
+   * and on the first piece's face the other piece decides whether that face is a surface at all.
+   */
   min(x: number, y: number, z: number, piece: PieceDist, boxDist: PieceDist, init: number): number;
   inside(x: number, y: number, z: number): boolean;
   /** Cell index for a point inside the grid. */
@@ -113,7 +117,8 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
       let best = init;
       if (!index.inside(x, y, z)) {
         for (let i = 0; i < n; i++) {
-          if (boxDist(i, x, y, z) >= best) continue;
+          const bd = boxDist(i, x, y, z);
+          if (bd > 0 && bd >= best) continue;
           const d = piece(i, x, y, z);
           if (d < best) best = d;
         }
@@ -123,7 +128,8 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
       const s0 = start[c], s1 = start[c + 1];
       for (let s = s0; s < s1; s++) {
         const i = items[s];
-        if (boxDist(i, x, y, z) >= best) continue;
+        const bd = boxDist(i, x, y, z);
+        if (bd > 0 && bd >= best) continue;
         const d = piece(i, x, y, z);
         if (d < best) best = d;
       }
@@ -134,12 +140,15 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
         const i = near[c * NEAR + q];
         if (i < 0) break;
         mark[i] = 1;
-        if (boxDist(i, x, y, z) >= best) continue;
+        const bd = boxDist(i, x, y, z);
+        if (bd > 0 && bd >= best) continue;
         const d = piece(i, x, y, z);
         if (d < best) best = d;
       }
       for (let i = 0; i < n; i++) {
-        if (mark[i] || boxDist(i, x, y, z) >= best) continue;
+        if (mark[i]) continue;
+        const bd = boxDist(i, x, y, z);
+        if (bd > 0 && bd >= best) continue;
         const d = piece(i, x, y, z);
         if (d < best) best = d;
       }

@@ -133,7 +133,8 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
   const out = shape2((x, y) => {
     let d = FAR;
     for (let i = 0; i < n; i++) {
-      if (boxDist(i, x, y) >= d + k) continue;
+      const bd = boxDist(i, x, y);
+      if (bd > 0 && bd >= d + k) continue;
       d = k > 0 ? smin(d, fns[i](x, y), k) : Math.min(d, fns[i](x, y));
     }
     return d;

@@ -16,8 +16,9 @@ import * as W from "../sdf/sweeps.js";
 import { bezierCurve, curveThrough, sweepCurve, tubeCurve, type Curve } from "../sdf/curves.js";
 import { textProfile, textWidth } from "../sdf/font.js";
 import { clearance, insideFraction, isVoid, overlapVolume } from "../sdf/measure.js";
-import { countPieces } from "../mesh/pieces.js";
+import { countPieces, overhangFraction } from "../mesh/pieces.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
+import { boundsCenter } from "../sdf/types.js";
 import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
 /** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
@@ -198,8 +199,8 @@ export const BUILTINS: Builtin[] = [
   def("spline", "Paths", "A smooth path through the points, subdivided until no piece turns more than `degrees`: a curve that shows no faceting in a tube or sweep, however tight.",
     ov([{ name: "points", type: "list", doc: "a flat list [x,y,z, x,y,z, ...]" }, num("degrees", "largest turn between pieces", 3)], "list",
       (a) => W.splinePath(W.toPoints(nums(a[0]), "spline"), n(a[1])))),
-  def("arc", "Paths", "A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).",
-    ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16)], "list", (a) => W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3])))),
+  def("arc", "Paths", "A path list for an arc of radius r about `axis`: on the ground plane about y (0 is +z, 90 is +x); about x it stands in the yz plane (0 at +z, 90 at +y: a toe curling round a branch that lies along x); about z in the xy plane (0 at +y, 90 at +x).",
+    ov([num("r"), num("from", "", 0), num("to", "", 90), num("segments", "", 16), str("axis", "y, x or z", "y")], "list", (a) => { const ax = String(a[4]); if (ax !== "x" && ax !== "y" && ax !== "z") throw new Error(`arc(): axis is x, y or z, not "${ax}"`); return W.arcPath(n(a[0]), n(a[1]), n(a[2]), n(a[3]), ax); })),
   def("loft", "Paths", "A solid h tall that is profile a at the bottom and profile b at the top, blending between them; centred on y = 0 like extrude (from -h/2 to h/2), each profile laid flat with its y along -z.",
     ov([shape2("a"), shape2("b"), num("h")], "shape", (a) => W.loft(s2(a[0]), s2(a[1]), n(a[2])))),
 
@@ -294,11 +295,13 @@ export const BUILTINS: Builtin[] = [
   def("tall", "Queries", "The size of a shape's bounds along y.", ov([shape()], "number", (a) => s3(a[0]).bounds.max[1] - s3(a[0]).bounds.min[1])),
   def("pieces", "Queries", "How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.",
     ov([shape(), num("resolution", "cells on the longest side", 64)], "number", (a) => countPieces(s3(a[0]), n(a[1])))),
-  def("void", "Queries", "1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a hole that goes through, a slot a lid must not fill. Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught.",
+  def("overhang", "Queries", "The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment.",
+    ov([shape(), num("resolution", "cells on the longest side", 64)], "number", (a) => overhangFraction(s3(a[0]), n(a[1])))),
+  def("void", "Queries", "1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for \"goes through\" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught; a failure says where the solid is and in which step.",
     ov([shape("region"), shape()], "number", (a) => (isVoid(s3(a[0]), s3(a[1])) ? 1 : 0))),
-  def("overlap", "Queries", "The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene.",
+  def("overlap", "Queries", "The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled on a lattice over the shared box, 24 cells along its longest side and at least four across its shortest (a rim sunk 0.02 into a base), so measure parts, not a scene; a failure says where.",
     ov([shape("a"), shape("b")], "number", (a) => overlapVolume(s3(a[0]), s3(a[1])))),
-  def("inside", "Queries", "The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. Sampled at 24 cells along a's longest side.",
+  def("inside", "Queries", "The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; a failure says where `a` is outside.",
     ov([shape("a"), shape("b")], "number", (a) => insideFraction(s3(a[0]), s3(a[1])))),
   def("clearance", "Queries", "The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.",
     ov([shape("a"), shape("b")], "number", (a) => clearance(s3(a[0]), s3(a[1])))),
@@ -306,10 +309,11 @@ export const BUILTINS: Builtin[] = [
   // --- materials ---
   def("paint", "Materials", "Give the whole shape a material: a preset name, a colour (\"#rrggbb\" or a name), or material(...). Paint parts before combining them to keep several materials.",
     ov([shape(), mat()], "shape", (a) => O.paint(s3(a[0]), a[1] as Material))),
-  def("decal", "Materials", "Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), \"black\")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material.",
-    ov([shape(), shape("region", "the part of the surface inside this shape gets the material"), mat()], "shape", (a) => O.decal(s3(a[0]), s3(a[1]), a[2] as Material))),
+  def("decal", "Materials", "Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), \"black\")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material. With `image=\"label.png\"` (a PNG beside the program) the picture is fitted to the region's box across its shortest side, its transparent texels leaving the base material: a label on a jar, a logo, a face.",
+    ov([shape(), shape("region", "the part of the surface inside this shape gets the material"), mat()], "shape", (a) => O.decal(s3(a[0]), s3(a[1]), a[2] as Material)),
+    ov([shape(), shape("region", "the box the picture is fitted to, across its shortest side"), str("image", "a PNG file, relative to the program")], "shape", () => { throw new Error("a picture cannot be loaded here"); })),
   def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis=\"x\" for stripes running the other way.",
-    ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN), str("axis", "the pattern's axis: stripes stack along it, grain runs along it", ""), num("glow", "light the surface gives off, 0..2 (unshadowed, for flames and lamps)", NaN)], "material", makeMaterial)),
+    ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN), str("axis", "the pattern's axis: stripes stack along it, grain runs along it", ""), num("glow", "light the surface gives off, 0..2 (unshadowed, for flames and lamps)", NaN), str("image", "a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape", ""), str("projection", "how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)", "")], "material", makeMaterial)),
   def("rgb", "Materials", "A colour string from red, green, blue in 0..255.", ov([num("r"), num("g"), num("b")], "string", (a) => hexOf(n(a[0]), n(a[1]), n(a[2])))),
   def("hsl", "Materials", "A colour string from hue in degrees, saturation and lightness in 0..1.", ov([num("h"), num("s"), num("l")], "string", (a) => hslToHex(n(a[0]), n(a[1]), n(a[2])))),
 
@@ -336,12 +340,23 @@ export const BUILTINS: Builtin[] = [
       if (!p) throw new Error(`at(): no anchor "${a[1]}"; this shape has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
       return [p[0], p[1], p[2]];
     })),
-  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it.",
-    ov([shape("part"), str("anchor", "the part's anchor"), shape("target"), str("targetAnchor", "the target's anchor")], "shape", (a) => {
-      const from = O.anchorAt(s3(a[0]), a[1] as string), to = O.anchorAt(s3(a[2]), a[3] as string);
-      if (!from) throw new Error(`attach(): the part has no anchor "${a[1]}"; it has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
+  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which a fine grid meshes as two pieces: `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, so the two overlap.",
+    ov([shape("part"), str("anchor", "the part's anchor"), shape("target"), str("targetAnchor", "the target's anchor"), num("sink", "how far to push the part into the target", 0)], "shape", (a) => {
+      const part = s3(a[0]);
+      const from = O.anchorAt(part, a[1] as string), to = O.anchorAt(s3(a[2]), a[3] as string);
+      if (!from) throw new Error(`attach(): the part has no anchor "${a[1]}"; it has ${Object.keys(O.anchorsOf(part)).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
       if (!to) throw new Error(`attach(): the target has no anchor "${a[3]}"; it has ${Object.keys(O.anchorsOf(s3(a[2]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
-      return O.move(s3(a[0]), to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+      const sink = n(a[4]);
+      let dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+      if (sink !== 0) {
+        // Into the target is away from the part's own centre, seen from its anchor.
+        const c = boundsCenter(part.bounds);
+        const ux = c[0] - from[0], uy = c[1] - from[1], uz = c[2] - from[2];
+        const len = Math.hypot(ux, uy, uz);
+        if (!(len > 1e-9)) throw new Error("attach(): sink needs the anchor away from the part's centre, to know which way is in");
+        dx -= (ux / len) * sink; dy -= (uy / len) * sink; dz -= (uz / len) * sink;
+      }
+      return O.move(part, dx, dy, dz);
     })),
   def("surface", "Queries", "The point on a shape's surface nearest to (x, y, z), as [x, y, z]: where a rod, a foot or a decal should meet a curved body. Found by sliding along the field, so it is exact on primitives and close on blends and warps.",
     ov([shape(), num("x"), num("y"), num("z")], "list", (a) => { const p = O.surfacePoint(s3(a[0]), n(a[1]), n(a[2]), n(a[3])); return [p[0], p[1], p[2]]; })),

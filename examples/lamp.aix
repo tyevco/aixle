@@ -17,6 +17,20 @@ slope = (r1 - r0) / h
 outer = loft(circle(r0), circle(r1), h)
 inner = loft(circle(r0 - wall - slope * ext), circle(r1 - wall + slope * ext), h + 2 * ext)
 shade = (outer - inner) | rotate(z=-25) | move(1.75, 2.35, 0) | paint("cream")
-bulb = sphere(0.22) | move(1.6, 2.55, 0) | paint("#fff4c0")
-lamp = base + arm + joint + shade + bulb
+bulb = sphere(0.22) | move(1.6, 2.55, 0) | paint(material("#fff4c0", glow=1))
+# A short stem from the joint holds the bulb: without it the bulb floated inside the shade as a second piece.
+stem = tube(0.05, [1.4, 3.0, 0, 1.6, 2.55, 0]) | paint("brass")
+lamp = base + arm + joint + stem + shade + bulb
 show lamp
+
+# Lit for the picture: a warm key from the front left, a cool rim from behind, under a night sky so the
+# glowing bulb carries it, and a point light in the air just under the bulb so it lights the base and the
+# inside of the shade (a glow lights only itself); a second shot framed on the shade. beauty.png takes the
+# "desk" camera.
+light("key", azimuth=-35, elevation=45, size=1.5, color="#fff1dc")
+light("rim", azimuth=150, elevation=25, power=0.6, color="#bcd4ff")
+light("bulb", position=[1.6, 2.28, 0], range=2.5, size=0.5, color="#fff0b0", power=1.4)
+camera("desk", azimuth=30, elevation=18, zoom=1.15)
+camera("shade", focus="shade", azimuth=60, elevation=10)
+set camera desk
+set environment night

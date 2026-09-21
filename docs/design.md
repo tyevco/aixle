@@ -116,7 +116,40 @@ material with their neighbours) are sampled four times. A 512-pixel render
 of the mug takes under a second. The rasteriser is a plain z-buffered
 triangle filler with perspective-correct attributes and per-pixel shading;
 an outline pass darkens depth and normal discontinuities, which is what
-keeps a 384-pixel thumbnail readable.
+keeps a 384-pixel thumbnail readable. The lights are a loop over the
+one the render always had: each adds its diffuse and its highlight in
+its own colour, shadowed towards itself, and the floor takes each
+light's share by power, so a program with no `light()` renders byte for
+byte as before. An environment is a palette (sky, an optional horizon
+band, ground, floor, an ambient scale) that the backdrop, the floor and
+the metals' reflections all read, so a sunset tints a chrome ball's
+rim the way the sky does. A camera is a set of framing choices the
+render already took; its `focus=` reuses the close-up's frame and fits
+the camera to the mesh's points inside it.
+
+`callouts.png` maps the picture back to the program. Each mesh vertex
+is attributed to the smallest named step whose field is within a cell
+of it and whose inside is the model's inside just behind the surface:
+the second test is what keeps a cutter from claiming the face it cut (a
+cavity's field is zero on the cup's inner wall too, but the cup's solid
+is outside the cavity), and it uses the model's own field to step back
+less at an edge cell rather than hand a rim to the cavity below it. A
+step is visible where the depth buffer shows its vertices, its label
+sits out from the picture's centre past the visible vertex nearest its
+visible centroid (so a ring's label points at the ring, not its hole),
+and overlapping labels are pushed apart. The largest twenty are
+labelled; the report names the rest.
+
+A picture is a material whose `albedo()` samples pixels instead of a
+pattern, so nothing downstream changes: the atlas baker, the Bedrock
+texture and the beauty render all ask `albedo()` at a local point and
+get the picture. The mapping from point to pixel is the material's
+projection, evaluated in the frame the part was painted in like a
+pattern's axis; a decal's picture is fitted to its region's box, and
+its alpha is what the decal falls through to the base material. The
+cylindrical wrap goes by arc length rather than angle so the picture
+keeps its shape and repeats round a lid; one copy stretched round it
+smeared its lettering five to one.
 
 Fixed lights in camera space mean every view is lit the same way whatever
 the model's orientation.

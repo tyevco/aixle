@@ -8,7 +8,7 @@
  */
 import { fbm3 } from "../core/noise.js";
 import { apply, length2, rad, rotAxis, rotXYZ, transpose, type Mat3, type Vec3 } from "../core/vec.js";
-import { DEFAULT_MATERIAL } from "./materials.js";
+import { DEFAULT_MATERIAL, coverage } from "./materials.js";
 import { primitive, cylinder } from "./primitives.js";
 import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import { smax, smin } from "./shapes2d.js";
@@ -60,7 +60,8 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
         if (index) return index.min(x, y, z, piece, boxDist, FAR);
         let best = FAR;
         for (let i = 0; i < n; i++) {
-          if (boxDist(i, x, y, z) >= best) continue;
+          const bd = boxDist(i, x, y, z);
+          if (bd > 0 && bd >= best) continue;
           const d = fns[i](x, y, z);
           if (d < best) best = d;
         }
@@ -69,7 +70,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
       hit: (x, y, z) => {
         let best: Hit | undefined;
         for (let i = 0; i < n; i++) {
-          if (best && boxDist(i, x, y, z) >= best.d) continue;
+          if (best) { const bd = boxDist(i, x, y, z); if (bd > 0 && bd >= best.d) continue; }
           const h = hits[i](x, y, z);
           if (!best || h.d < best.d) best = h;
         }
@@ -89,7 +90,8 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     dist: (x, y, z) => {
       let best = FAR;
       for (let i = 0; i < n; i++) {
-        if (boxDist(i, x, y, z) >= best + k) continue;
+        const bd = boxDist(i, x, y, z);
+        if (bd > 0 && bd >= best + k) continue;
         best = smin(best, fns[i](x, y, z), k);
       }
       return best;
@@ -107,6 +109,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     bounds,
     cost,
     inner: live,
+    bound: true,
     feature: minFeature(live),
     gap: minGap(live),
     gapWhat: minGapWhat(live),
@@ -148,6 +151,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     cost: a.cost + b.cost,
     inner: [a, b],
     cut: true,
+    bound: k > 0 || undefined,
     feature: a.feature,
     gap: a.gap,
     gapWhat: a.gapWhat,
@@ -170,6 +174,7 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     cost: a.cost + b.cost,
     inner: [a, b],
     cut: true,
+    bound: k > 0 || undefined,
     feature: a.feature,
     gap: a.gap,
     gapWhat: a.gapWhat,
@@ -244,6 +249,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     bounds,
     cost: s.cost,
     inner: [s],
+    bound: sx !== sy || sy !== sz || undefined,
     transform: true,
     unwarp: (x, y, z) => [x / sx, y / sy, z / sz],
     warp: (x, y, z) => [x * sx, y * sy, z * sz],
@@ -276,7 +282,8 @@ export function offset(s: Shape3, r: number): Shape3 {
     bounds: boundsGrow(s.bounds, Math.max(r, 0)),
     cost: s.cost,
     inner: [s],
-    feature: s.feature,
+    // A grown part is thicker by twice the offset (round 10: a bench's slats fattened by round() kept their warning).
+    feature: s.feature === undefined ? undefined : Math.max(0, s.feature + 2 * r),
     gap: s.gap,
     gapWhat: s.gapWhat,
   };
@@ -334,6 +341,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     unwarp: warp,
     warp: (x, y, z) => { const a = k * y, c = Math.cos(a), sn = Math.sin(a); return [c * x - sn * z, y, sn * x + c * z]; },
     loose: true,
+    bound: true,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -397,6 +405,7 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     unwarp,
     warp,
     loose: true,
+    bound: true,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -444,6 +453,7 @@ export function wrap(s: Shape3, r: number): Shape3 {
     unwarp,
     warp,
     loose: true,
+    bound: true,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -470,6 +480,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     bounds: boundsGrow(s.bounds, Math.abs(amp)),
     cost: s.cost + 8,
     inner: [s],
+    bound: true,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -620,6 +631,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
  */
 export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
   const d = s.dist, h = s.hit, rd = region.dist;
+  const picture = !!m.image;
   // Only a skin: deeper than a tenth of the region's smallest side the base material shows, so a cross-section
   // does not draw the region as a solid inside the part (measured: a frog's belly decal read as an organ).
   const rs = isEmpty(region.bounds) ? 1 : Math.max(1e-6, Math.min(...boundsSize(region.bounds)) * 0.1);
@@ -628,7 +640,8 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
     dist: d,
     hit: (x, y, z) => {
       const v = d(x, y, z);
-      return v > -rs && rd(x, y, z) <= 0 ? { d: v, mat: m, lx: x, ly: y, lz: z } : h(x, y, z);
+      // A picture's transparent texels (and the space off its edge) show the base material.
+      return v > -rs && rd(x, y, z) <= 0 && (!picture || coverage(m, x, y, z) >= 0.5) ? { d: v, mat: m, lx: x, ly: y, lz: z } : h(x, y, z);
     },
     bounds: s.bounds,
     cost: s.cost + region.cost,

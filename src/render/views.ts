@@ -120,6 +120,8 @@ export interface ViewOptions {
   ghostMargin?: number;
   /** The points the perspective camera fits, instead of this mesh's own: every frame of a strip, so the camera holds still. */
   fitPoints?: Float32Array;
+  /** Receives the render target (depth per pixel) and the camera, for a caller that draws over the view. */
+  capture?: (target: RenderTarget, cam: Camera) => void;
 }
 
 /** The ghost's note under a view's caption, so a faint slab is read as a clipped neighbour and not a part. */
@@ -138,6 +140,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
     floorGrid(cam, target, bounds, label);
     if (ghost) renderGhost(ghost, cam, target, { margin: opts.ghostMargin });
     if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.bounds)}`, ghost ? GHOST_NOTE : undefined);
+    opts.capture?.(target, cam);
     return target.canvas;
   }
   const cam = orthographic(bounds, size, size, view);
@@ -286,6 +289,8 @@ export interface StepView {
   name: string;
   shape: Shape3;
   used: boolean;
+  /** part, cut or region; undefined for a step the output never reads. */
+  role?: "part" | "cut" | "mask" | "region";
   line: number;
   /** The step's mesh, if already extracted; otherwise it is extracted here. */
   mesh?: Mesh;
@@ -338,12 +343,24 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
         else drawText(canvas, 8, thumb / 2 - 4, "NO SURFACE", INK.warn, 1);
       }
     }
-    if (!st.used) canvas.rect(0, 0, thumb, thumb, INK.warn);
+    // A red frame is a step the output never reads; a region (an assert's, a decal's, a camera's) is framed grey
+    // and said so; a cutter is tagged, since the sheet draws it as the solid it subtracts (round 9 asked for both).
+    const region = st.role === "region";
+    if (!st.used && !region) canvas.rect(0, 0, thumb, thumb, INK.warn);
+    if (region) canvas.rect(0, 0, thumb, thumb, INK.dim);
     out.blit(canvas, x, y);
     const name = `${i + 1}. ${st.name}`;
-    drawText(out, x, y + thumb + 3, name.length > thumb / 6 ? name.slice(0, Math.floor(thumb / 6) - 1) + "…" : name, st.used ? INK.text : INK.warn, 1);
-    drawText(out, x, y + thumb + 13, isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds) + (st.used ? "" : "  unused"), INK.dim, 1);
+    drawText(out, x, y + thumb + 3, name.length > thumb / 6 ? name.slice(0, Math.floor(thumb / 6) - 1) + "…" : name, st.used || region ? INK.text : INK.warn, 1);
+    const tag = st.role === "cut" ? "  cut" : st.role === "mask" ? "  mask" : region ? "  region" : st.used ? "" : "  unused";
+    drawText(out, x, y + thumb + 13, isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds) + tag, INK.dim, 1);
   });
+  return out;
+}
+
+/** The frames of a turn around the model, at a fixed distance so it never jumps between them, for an animated PNG. */
+export function turntableFrames(mesh: Mesh, info: ViewInfo, frame: number, frames = 24): Canvas[] {
+  const out: Canvas[] = [];
+  for (let i = 0; i < frames; i++) out.push(renderView(mesh, info, "persp", frame, { azimuth: (info.azimuth ?? 35) + (360 / frames) * i, label: false }));
   return out;
 }
 

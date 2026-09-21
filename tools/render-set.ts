@@ -61,7 +61,7 @@ export function renderSet(srcDir: string, outDir: string, label: string, opts: R
       copyFileSync(join(tmp, "steps.png"), join(outDir, `${name}_steps.png`));
     }
     copyFileSync(join(tmp, "beauty.png"), join(outDir, `${name}_beauty.png`));
-    for (const extra of readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_")))
+    for (const extra of readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_") || f.startsWith("beauty_")))
       copyFileSync(join(tmp, extra), join(outDir, `${name}_${extra}`));
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     console.log(`${name.padEnd(10)} ${secs}s  ${result.warnings.length ? result.warnings.join(" | ") : "ok"}`);

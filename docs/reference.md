@@ -206,9 +206,11 @@ A smooth path through the points, subdivided until no piece turns more than `deg
 
 ### arc
 
-A path list for an arc of radius r on the ground plane from `from` to `to` degrees (0 is +z, 90 is +x).
+A path list for an arc of radius r about `axis`: on the ground plane about y (0 is +z, 90 is +x); about x it stands in the yz plane (0 at +z, 90 at +y: a toe curling round a branch that lies along x); about z in the xy plane (0 at +y, 90 at +x).
 
-    arc(r, from=0, to=90, segments=16) -> list
+    arc(r, from=0, to=90, segments=16, axis="y") -> list
+
+- `axis`: y, x or z
 
 ### loft
 
@@ -447,21 +449,29 @@ How many separate pieces the shape meshes into at `resolution` cells on its long
 
 - `resolution`: cells on the longest side
 
+### overhang
+
+The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment.
+
+    overhang(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
 ### void
 
-1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a hole that goes through, a slot a lid must not fill. Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught.
+1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught; a failure says where the solid is and in which step.
 
     void(region, shape) -> number
 
 ### overlap
 
-The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001. Sampled at 24 cells along the shared box's longest side, so measure parts, not a scene.
+The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled on a lattice over the shared box, 24 cells along its longest side and at least four across its shortest (a rim sunk 0.02 into a base), so measure parts, not a scene; a failure says where.
 
     overlap(a, b) -> number
 
 ### inside
 
-The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. Sampled at 24 cells along a's longest side.
+The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; a failure says where `a` is outside.
 
     inside(a, b) -> number
 
@@ -511,17 +521,20 @@ Give the whole shape a material: a preset name, a colour ("#rrggbb" or a name), 
 
 ### decal
 
-Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), "black")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material.
+Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), "black")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material. With `image="label.png"` (a PNG beside the program) the picture is fitted to the region's box across its shortest side, its transparent texels leaving the base material: a label on a jar, a logo, a face.
 
     decal(shape, region, material) -> shape
+    decal(shape, region, image) -> shape
 
 - `region`: the part of the surface inside this shape gets the material
+- `region`: the box the picture is fitted to, across its shortest side
+- `image`: a PNG file, relative to the program
 
 ### material
 
 A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
-    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?) -> material
+    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?, image="", projection="") -> material
 
 - `color`: a colour, or a preset name to start from
 - `color2`: second colour for two-tone patterns
@@ -529,6 +542,8 @@ A custom material, from a colour or from a preset with some of its fields change
 - `transmit`: 0 opaque .. 1 clear glass (beauty render only)
 - `axis`: the pattern's axis: stripes stack along it, grain runs along it
 - `glow`: light the surface gives off, 0..2 (unshadowed, for flames and lamps)
+- `image`: a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape
+- `projection`: how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)
 
 ### rgb
 
@@ -680,12 +695,13 @@ The world point of a shape's anchor as [x, y, z]: one named with anchor(), or a 
 
 ### attach
 
-Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it.
+Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which a fine grid meshes as two pieces: `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, so the two overlap.
 
-    attach(part, anchor, target, targetAnchor) -> shape
+    attach(part, anchor, target, targetAnchor, sink=0) -> shape
 
 - `anchor`: the part's anchor
 - `targetAnchor`: the target's anchor
+- `sink`: how far to push the part into the target
 
 ## Files
 
@@ -724,6 +740,27 @@ A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], second
 
     animation(name, poses, seconds=1, loop=1, ease=0, ease_ends=ease) -> string
     animation(name, poses, times=[0, ...], loop=1, ease=0, ease_ends=ease) -> string
+
+## Lights, cameras and environments
+
+The beauty render's lighting and shots, declared in the program. Without a `light()` the render has one key light, placed by `set light_azimuth`, `set light_elevation` and `set light_size`.
+
+### light
+
+A light in the beauty render: `light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")` and `light("rim", azimuth=150, elevation=20, power=0.5, color="#cfe0ff")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's apparent size (0.5 a lamp with crisp shadows, 3 a window); `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's. Each light casts its own soft shadow, so three lights cost about half again the time of one (measured on the market scene: 4.1 s to 5.9 s at 512 px). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them. A point light is at a place instead of a direction: `light("fire", position=[0, 0.4, 0], range=2, color="#ff9a3c")` lights what is round it, its strength halving `range` away, shadowed by what stands between; put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through dimmed), since inside a solid every shadow ray hits that solid.
+
+    light(name, azimuth=-40, elevation=55, size=1, color="white", power=1) -> string
+    light(name, position=[x, y, z], range=2, size=1, color="white", power=1) -> string
+
+### camera
+
+A named shot: `camera("hero", azimuth=30, elevation=20, zoom=1.4)` and `camera("detail", focus="nameplate", zoom=2)`. `render --beauty` writes `beauty_<name>.png` for each, framed on `focus=` (a step or object, as `--focus` frames it) when given, with the render's own azimuth, elevation, zoom and dof for whatever a shot leaves out. `set camera hero` makes that shot the sheet's and `beauty.png`'s view too (the command line's `--azimuth`, `--elevation` and `--zoom` still override).
+
+    camera(name, azimuth=35, elevation=25, zoom=1, focus="step", dof=0) -> string
+
+### set environment
+
+The sky the beauty render sits in and the metals reflect: `set environment sunset`. `studio` (the default) is the grey-white backdrop; `overcast` a white sky with soft, even light; `sunset` a warm band at the horizon under a blue sky on warm ground; `night` a dark blue sky and a dark floor, where a `glow` material carries the picture. An environment sets the sky, ground and floor colours and scales the ambient light; the lights are yours.
 
 ## Roblox attachments
 

@@ -38,6 +38,26 @@ export type PatternKind =
   | "tiles"
   | "dots";
 
+/** A picture painted on a surface: decoded pixels and how the surface's local point maps into them. */
+export interface ImageTexture {
+  /** The file name, for the report. */
+  name: string;
+  width: number;
+  height: number;
+  /** 8-bit RGBA, row-major, top row first. */
+  rgba: Uint8Array;
+  /**
+   * How a local point becomes a pixel: `planar` lays the picture flat across `axis` (its width `size` units,
+   * centred on the origin); `cylindrical` wraps it round `axis` by arc length, `size` units wide and repeating,
+   * its height by its aspect; `spherical` wraps one copy round the origin; `box` fits it to `box` along that box's
+   * shortest side, which is what a decal does with its region.
+   */
+  projection: "planar" | "cylindrical" | "spherical" | "box";
+  axis: "x" | "y" | "z";
+  size: number;
+  box?: Bounds;
+}
+
 export interface Material {
   name: string;
   /** Base colour, linear-ish 0..1. */
@@ -58,6 +78,8 @@ export interface Material {
   axis: "x" | "y" | "z";
   /** Light the surface gives off, 0..2: a flame, a lamp, a screen; added in the renders, unshadowed. */
   glow: number;
+  /** A picture instead of a pattern: sampled at the local point; its alpha is what a decal falls through. */
+  image?: ImageTexture;
 }
 
 export interface Hit {
@@ -108,6 +130,8 @@ export interface Shape3 {
   anchors?: Record<string, Vec3>;
   /** Set by a rotation or a warp: this box is the box of a turned box, and the surface's own extent is worth measuring. */
   loose?: boolean;
+  /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
+  bound?: boolean;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */

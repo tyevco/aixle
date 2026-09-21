@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -30,6 +30,28 @@ describe("pipeline", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
       const r = run("m = box(1) | paint(\"gold\")", "box.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, beauty: true, beautySize: 64 });
+      // A declared camera is a shot of its own, framed on its focus; the report lists lights, cameras and the sky.
+      const shots = run('m = box(1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5, color="#cfe0ff")\ncamera("hero", azimuth=20, zoom=1.2)\ncamera("knob", focus="k")\nset environment night\nshow both', "shots.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
+      expect(shots.files).toEqual(expect.arrayContaining(["beauty.png", "beauty_hero.png", "beauty_knob.png", "lights.png"]));
+      expect(shots.report).toMatch(/\(lights\.png shows each alone\)/);
+      expect(shots.timings.lights).toBeDefined();
+      expect(shots.report).toMatch(/Lights: key \(azimuth -30, elevation 40, size 1, white\); rim \(azimuth 160, elevation 20, size 1, #cfe0ff, power 0\.5\)/);
+      expect(shots.report).toMatch(/Cameras: hero \(azimuth 20, zoom 1\.2\) → beauty_hero\.png; knob \(on k\) → beauty_knob\.png/);
+      expect(shots.report).toMatch(/Environment: night/);
+      expect(shots.report).toMatch(/`beauty_knob\.png`: the beauty render from camera knob, framed on k/);
+      expect(shots.timings["beauty:knob"]).toBeDefined();
+      // One camera and another sky from the command line: only that shot, its view on beauty.png, the sky noted.
+      const one = run('m = box(1)\ncamera("hero", azimuth=20)\ncamera("side", azimuth=90)\nset environment night\nshow m', "one.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, camera: "side", environment: "sunset" });
+      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_side.png"]);
+      expect(one.report).toMatch(/\(the sheet and beauty\.png use "side"\)/);
+      expect(one.report).toMatch(/Environment: sunset/);
+      const all = run('m = box(1)\nshow m', "all.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "all" });
+      expect(all.files).toContain("environments.png");
+      expect(all.warnings.filter((w) => /environment/.test(w))).toEqual([]);
+      // A focus hidden behind the rest of the model from its camera is warned about; from the other side it is not.
+      const hid = run('wall = box(2, 2, 0.2) | move(0, 1, 1)\nball = sphere(0.3) | move(0, 1, 0)\nboth = wall + ball\ncamera("front", focus="ball", azimuth=0, elevation=5)\ncamera("back", focus="ball", azimuth=180, elevation=5)\nshow both', "hid.aix", dir, { grid: 24, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
+      expect(hid.warnings.filter((w) => /hidden behind/.test(w))).toEqual([expect.stringMatching(/^camera "front" \(line 4\): \d+% of ball is hidden behind the rest of the model from azimuth 0, elevation 5; from azimuth \d+ it is \d+%$/)]);
+      expect(run('m = box(1)\nshow m', "bad.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, camera: "nope", environment: "mars" }).warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera \(declare one/), expect.stringMatching(/^--environment mars: no such environment; the skies are studio/)]));
       expect(r.files).toContain("viewer.html");
       expect(r.files).toContain("beauty.png");
       const html = readFileSync(join(dir, "viewer.html"), "utf8");
@@ -104,6 +126,23 @@ describe("pipeline", () => {
     expect(grid).toBe(128);
     expect(cellSize).toBeCloseTo(10 / 128);
     expect(thinWarnings(ev, cellSize, grid).join()).toMatch(/'plate' \(line 1\) is only 0.05/);
+  });
+  it("writes callouts.png on a full render and says which steps it labelled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = "slab = box(2, 0.4, 2) | move(0, 0.2, 0)\nknob = sphere(0.3) | move(0.5, 0.6, 0.5)\nhole = cylinder(0.25, 1) | move(-0.5, 0.2, -0.5)\nm = (slab - hole) + knob";
+      const r = run(src, "co.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false });
+      expect(r.files).toContain("callouts.png");
+      // The hole's wall is a cut face, credited to the hole though the only cut step is the output.
+      expect(r.report).toMatch(/Callouts \(callouts\.png, the largest visible steps named\): slab, knob, hole \(cut\)\n/);
+      expect(r.timings.callouts).toBeDefined();
+      const quick = run(src, "co.aix", dir, { ...QUICK, grid: 32 });
+      expect(quick.files).not.toContain("callouts.png");
+      const off = run(src, "co.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false, callouts: false });
+      expect(off.files).not.toContain("callouts.png");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it("frames a focused step and notes the true lowest point, not the bounds", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
@@ -369,5 +408,15 @@ describe("round-6 findings", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("glass on a bound", () => {
+  it("warns when a transmit material sits on a loft, a blend or a warp, and not on an exact shape", () => {
+    const ev = check('body = loft(rect(1, 0.6, round=0.2), rect(0.8, 0.5, round=0.1), 1.2)\nglass = body | paint("glass")\nblob = union(sphere(0.5), sphere(0.5) | move(0.6, 0, 0), k=0.2) | paint(material("glass", transmit=0.6))\nfine = box(1, 1, 1, round=0.1) | paint("glass")\nbent = box(1, 0.2, 2) | bend(20) | paint("gold")\nshow glass + blob + fine + bent', "g.aix");
+    expect(glassWarnings(ev)).toEqual([
+      "'glass' (line 2) is glass on a field that is a bound, not a distance ('body': a loft, a smooth union, a warp or a non-uniform scale): the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.",
+      "'blob' (line 3) is glass on a field that is a bound, not a distance (a loft, a smooth union, a warp or a non-uniform scale): the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.",
+    ]);
   });
 });

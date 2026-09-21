@@ -8,8 +8,10 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, minecraftThinWarnings, paintState, paintWarnings, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { ENVIRONMENTS } from "./render/beauty.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
+import { exprText } from "./lang/ast.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
@@ -54,14 +56,17 @@ function usage(): never {
       "  aixle render <file.aix> [--out DIR] [--quick] [--watch] [--grid N] [--size N] [--views persp,front,right,top]",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
       "                          [--no-anims | --anim NAME[,NAME]]  skip the animation strips, or draw only these (poses.png stays)",
+      "                          [--no-callouts]                    skip callouts.png, the perspective view with its visible steps named",
       "                          [--no-asserts]                     skip the program's asserts (a pieces() promise on a big rig can cost more than the render)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
+      "                          [--beauty-only]                    the beauty render, its shots and the sheet alone (no steps, slices, turntable, callouts, exports): a lighting loop",
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
+      "                          [--camera NAME] [--environment NAME]  one declared shot only (the sheet takes its view); a sky over the program's",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
-      "  aixle check  <file.aix> [--pose NAME] [--no-asserts]   parse and evaluate; print sizes and warnings, render nothing",
+      "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
@@ -126,8 +131,11 @@ function main(argv: string[]): number {
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
       for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${m.names.join(", ")}`);
-      for (const st of ev.steps) {
+      // --brief: the verdicts alone (output, warnings, notes, asserts), for a promise loop on a big program.
+      for (const st of opts.brief ? [] : ev.steps) {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
+        // A number set inside a loop is the last iteration's, not a size: not listed (round 9: "a = 327" as a step).
+        if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
         if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
         if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
         // A 2D profile has a box too, and a part built from one is invisible until it is extruded (round 4 asked).
@@ -137,7 +145,10 @@ function main(argv: string[]): number {
           continue;
         }
         if (!isShape3(st.value)) continue;
-        const used = ev.used.has(st.name) ? "" : "   (not in output)";
+        // A cutter is drawn as the solid it removes and a region is read by an assert, a decal or a camera: neither is
+        // a part, and the tag says which (round 9: agents took a region's warning for a mistake).
+        const role = ev.roles.get(st.name);
+        const used = role === "part" ? "" : role === "cut" ? "   (cut)" : role === "mask" ? "   (mask)" : role === "region" ? "   (region)" : "   (not in output)";
         const b = st.value.bounds;
         console.log(`${st.name.padEnd(18)} ${isEmpty(b) ? "empty" : spanBox(b)}${used}`);
         if (isEmpty(b)) continue;
@@ -171,6 +182,8 @@ function main(argv: string[]): number {
       }
       // In a pose the output's box is the box of turned boxes; its surface is the size the sheet shows (round 8: a
       // sitting dog's output line said 1.84 tall for a 1.18 surface).
+      // The program's own defs, with their parameters, so a program's vocabulary is on the terminal with its steps.
+      if (ev.defs.length && !opts.brief) console.log(`defs: ${ev.defs.map((d) => `${d.name}(${d.params.map((p) => (p.default ? `${p.name}=${exprText(p.default)}` : p.name)).join(", ")})`).join("  ")}`);
       if (ev.output && pose && !isEmpty(ev.output.bounds)) { const e = surfaceExtent(ev.output, 48); console.log(`output: ${ev.outputName} ${isEmpty(e) ? dimsLabel(ev.output.bounds) : `${dimsLabel(e)} (the surface in pose ${pose.name}; its box is ${dimsLabel(ev.output.bounds)})`}`); }
       else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
@@ -184,22 +197,26 @@ function main(argv: string[]): number {
         // In a pose the floor is the pose's doing: ground() would move the rest model and the exports too.
         if (pose && bottom < -cellSize) console.log(`note: in pose ${pose.name} the lowest point of the surface is at y = ${shortY(bottom)}, below the floor: raise the root joint with xform(move=) in the pose, or bend it less`);
         else if (pose && bottom > cellSize * 2) console.log(`note: in pose ${pose.name} the model is off the floor: its lowest point is at y = ${shortY(bottom)} (standing is not judged in this pose)`);
-        else if (bottom < -cellSize) console.log(`note: the lowest point of the surface is at y = ${shortY(bottom)}; pipe the model through ground() to rest it on y = 0`);
+        else if (bottom < -cellSize && -bottom > 0.1 * (ev.output.bounds.max[1] - bottom)) console.log(`note: the lowest point of the surface is at y = ${shortY(bottom)}; pipe the model through ground() to rest it on y = 0`);
         else if (bottom > cellSize * 2) console.log(`note: the surface floats: its lowest point is at y = ${shortY(bottom)}; ground() rests it on y = 0`);
       }
       // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
       const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
+      // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike.
+      const nearly = cellSize > 0 ? nearlyThin(ev, cellSize).trim() : "";
+      if (nearly) console.log(`note: ${nearly}`);
+      // The lights, the shots and the sky, as the report will list them: a typo in a name is a warning above.
+      for (const l of presentationLines(ev, typeof ev.settings.camera === "string" ? ev.settings.camera : undefined, ENVIRONMENTS.includes(ev.settings.environment as never) ? String(ev.settings.environment) : undefined)) console.log(l);
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
       const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"])) : undefined; });
       const failed = all.filter((a) => !a.passed);
       // A passing promise prints its numbers too, so how close it came is on the terminal and not only in
-      // report.json (round 8: the gap between closed fingers).
-      for (const a of all) if (a.passed) console.log(assertPassLine(a));
-      for (const a of failed) console.log(assertLine(a));
+      // report.json (round 8: the gap between closed fingers), in line order, failures among the passes.
+      for (const a of [...all].sort((x, y) => (x.file ?? "").localeCompare(y.file ?? "") || x.line - y.line)) console.log(a.passed ? assertPassLine(a) : assertLine(a));
       if (all.length) console.log(`asserts: ${failed.length ? `${all.length - failed.length} pass, ${failed.length} fail` : `${all.length} pass`}${all.some((a) => a.pose) ? " (at rest, or in the pose each names)" : pose ? " (judged at rest)" : ""}`);
       return failed.length ? 1 : 0;
     } catch (err) {
@@ -255,7 +272,10 @@ function main(argv: string[]): number {
       if (!roots.length) { console.log("no output: nothing to explain"); return 0; }
       if (pose) console.log(`pose: ${pose.name} (sizes in this pose)`);
       for (const r of roots) walk(r, 0);
-      const unused = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value))).map((st) => st.name);
+      const left = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value)));
+      const regions = left.filter((st) => ev.roles.get(st.name) === "region").map((st) => st.name);
+      const unused = left.filter((st) => !ev.roles.has(st.name)).map((st) => st.name);
+      if (regions.length) console.log(`\nregions (read by an assert, a decal or a camera, not geometry): ${regions.join(", ")}`);
       if (unused.length) console.log(`\nnot in the output: ${unused.join(", ")}`);
       if (ev.poses.length) console.log(`\nposes: ${ev.poses.map((p) => p.name).join(", ")}`);
       for (const m of ev.modules) console.log(`\nuse ${m.prefix} (${m.path}): ${m.names.join(", ")}`);
@@ -319,6 +339,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       size: typeof opts.size === "string" ? Number(opts.size) : undefined,
       views: typeof opts.views === "string" ? opts.views.split(",") : undefined,
       steps: opts["no-steps"] ? false : undefined,
+      callouts: opts["no-callouts"] ? false : undefined,
       poses: opts["no-poses"] ? false : undefined,
       animations: opts["no-anims"] ? false : typeof opts.anim === "string" ? opts.anim.split(",") : undefined,
       asserts: opts["no-asserts"] ? false : undefined,
@@ -327,7 +348,8 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       obj: opts["no-export"] ? false : undefined,
       glb: opts["no-export"] ? false : undefined,
       viewer: opts["no-viewer"] ? false : undefined,
-      beauty: opts.beauty === true ? true : undefined,
+      beauty: opts.beauty === true || opts["beauty-only"] === true ? true : undefined,
+      ...(opts["beauty-only"] ? { views: [], steps: false, slices: false, turntable: false, callouts: false, poses: false, animations: false, obj: false, glb: false, viewer: false } : {}),
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       sharp: opts.soft ? false : undefined,
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,
@@ -340,6 +362,8 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
       focus: typeof opts.focus === "string" ? opts.focus : undefined,
       pose: typeof opts.pose === "string" ? opts.pose : undefined,
+      camera: typeof opts.camera === "string" ? opts.camera : undefined,
+      environment: typeof opts.environment === "string" ? opts.environment : undefined,
     };
     for (const k of Object.keys(given)) if (given[k] === undefined) delete given[k];
     const result = run(source, file, outDir, { ...quick, ...given, log: (l) => console.log(l) });

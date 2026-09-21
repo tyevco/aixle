@@ -137,67 +137,52 @@ guide and the skill tells agents to write them once a thing is right.
 when the loop tells them to, and whether the asserts they write catch
 anything: the next dogfooding round's question.
 
-## 7. Image textures and decals
+## 7. Image textures and decals: built
 
-**Why.** A label, a logo, a face, a map: things that are pictures, not
-patterns. `decal` paints a region one colour; it cannot paint an image.
+`decal(shape, region, image="label.png")` fits a PNG to the region's
+box across its shortest side, transparent texels leaving the base
+material; `material(..., image="skin.png", projection=...)` paints a
+part with a picture, planar, cylindrical (by arc length, repeating,
+which is what keeps a band's lettering its own shape) or spherical. A
+PNG decoder beside the encoder (every colour type, 1 to 16 bits, the
+five filters, no interlace); the picture is sampled in `albedo()`
+bilinear between texels, so the atlas, the Bedrock texture and the
+beauty render need nothing else; the report lists the pictures. The
+tin example wears one. Prototyped as asked: the label baked into a
+1024-pixel atlas at the tin's grid reads clean with bilinear sampling
+alone, so no footprint filter was built; a picture much larger than its
+region would want one. Not built: `triplanar` (it needs the normal,
+which `albedo()` does not have) and a picture on a pattern's second
+colour.
 
-**What.** `material(image="label.png")` with a projection (`planar`,
-`cylindrical`, `spherical`, `triplanar`, default triplanar) and
-`decal(shape, region, image="logo.png")` which projects along the
-region's shortest axis.
+## 8. Lights, cameras and environments: built
 
-**How.** A PNG decoder (zlib is already there for writing); the image is
-sampled in `albedo()` from the local point; the atlas baker and the
-beauty render need nothing else.
+`light(name, azimuth, elevation, size, color, power)` declares the
+beauty render's lights, each with its own soft shadow, the first
+replacing the default key; `set environment studio|overcast|sunset|night`
+picks a procedural sky, ground and floor the metals reflect, with its
+own ambient scale; `camera(name, azimuth, elevation, zoom, focus, dof)`
+is a shot written as `beauty_<name>.png`, framed on its focus, and `set
+camera name` makes it the sheet's view. Prototyped as asked: the market
+scene at 512 px took 4.1 s with one light and 5.9 s with three. Found
+on the way: a `--focus` beauty render fitted the camera to every vertex
+of the model and framed the whole mug; it now fits the points inside
+the frame. Not built: a light's position (they are directions), an
+image environment, and a camera path.
 
-**Must prototype.** Filtering: an image sampled per texel at a coarse
-atlas aliases; a box filter over the texel's footprint is probably
-enough.
+## 9. Callouts: built
 
-## 8. Lights, cameras and environments in the language
-
-**Why.** The beauty render has one key light with a size and direction,
-and one camera set by azimuth, elevation and zoom. A presentation needs
-a rim light, a coloured fill, an evening sky, and two or three named
-shots.
-
-**What.**
-
-```
-light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")
-light("rim", azimuth=150, elevation=20, power=0.5)
-set environment "studio"          # or "overcast", "sunset", "night"
-camera("hero", azimuth=30, elevation=20, zoom=1.4)
-camera("detail", focus="nameplate", zoom=2)
-```
-
-`render` writes `beauty_hero.png` and `beauty_detail.png`; `set camera
-hero` picks one for the sheet.
-
-**How.** The ray marcher already loops over one light; several are a
-loop. Environments are procedural sky functions the metals already
-reflect. Cameras reuse `--focus` and `--zoom`.
-
-**Must prototype.** Render time with three lights and soft shadows on
-the market scene.
-
-## 9. Callouts: the picture labelled with the program's names
-
-**Why.** An agent maps a picture back to a step by inference. A view
-with each visible step's name drawn at its centroid, and a legend, would
-make "the thing at the top left is `lantern_ring`" a fact.
-
-**What.** `callouts.png`: the perspective view with a leader line and
-label per named step that is visible, the largest twenty. `--callouts`
-to include it in the sheet.
-
-**How.** The per-vertex material and the step's bounds give each
-triangle a step; a label at the projected centroid of each step's
-visible triangles, pushed apart so they do not overlap.
-
-**Must prototype.** Whether the labels are readable at 512 pixels on a
-fifty-step scene.
+`callouts.png` is written by every full render: the perspective view
+with a label and a leader line for each of the largest twenty visible
+named steps, and the report says which were labelled and which were in
+view but smaller. Each mesh vertex is attributed to the smallest step
+whose field it lies on with the model's inside on the step's inside (so
+a cutter's cut face is not the cutter's), a step is visible where the
+depth buffer shows its vertices, the label sits out from the picture's
+centre past the vertex nearest the step's visible centroid, and
+overlapping labels are pushed apart. Prototyped as asked: the
+robot's fifteen visible steps read at 400 pixels. `--no-callouts` skips
+it; it is not in the sheet, which stays four views.
 
 ## 10. `aixle explain`: built
 
@@ -214,13 +199,11 @@ It is a printer over the dependencies the evaluation records. Not built:
 - `aixle fmt`: one layout for programs, comments kept, so diffs are
   about the model.
 - Records: `p = {x: 1, y: 2}` with `p.x`, for readable parameters.
-- `distance(a, b)` between two shapes from the field, for fits.
 - An import cache keyed by the file's hash, so `check` and `render` do
   not both sample a large mesh.
-- `def` bodies listed in `check`.
-- An APNG turntable, since the PNG writer is there.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
+- A per-step slice (round 10).
 
 ## What was considered and set aside
 

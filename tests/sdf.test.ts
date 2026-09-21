@@ -53,6 +53,42 @@ describe("booleans", () => {
       expect(u.dist(p[0], p[1], p[2])).toBeCloseTo(Math.min(a.dist(p[0], p[1], p[2]), b.dist(p[0], p[1], p[2])), 9);
     }
   });
+  it("is the deeper distance inside two overlapping members, and no surface on the first member's face inside the second", () => {
+    // Round 9: a union's box cull skipped every later member once an earlier one was at or below zero, so a
+    // counterbore's floor read as a surface inside the through hole it overlapped and void() saw solid there.
+    const thru = O.move(P.cylinder(0.06, 0.5), 0.55, 0.075, 0.35);
+    const cb = O.move(P.cylinder(0.11, 0.2), 0.55, 0.19, 0.35);
+    for (const u of [O.union([thru, cb]), O.union([cb, thru])]) {
+      expect(u.dist(0.55, 0.19, 0.35)).toBeCloseTo(-0.1, 9);
+      // On the counterbore's floor (y = 0.09) inside the through hole: well inside the union, not on its surface.
+      expect(u.dist(0.55, 0.09, 0.35)).toBeCloseTo(-0.06, 9);
+    }
+    const plate = O.difference(O.move(P.box(1.5, 0.15, 1), 0, 0.075, 0), O.union([thru, cb]));
+    expect(C_.isVoid(thru, plate)).toBe(true);
+    expect(C_.isVoid(cb, plate)).toBe(true);
+    expect(C_.voidWitness(O.move(P.cylinder(0.12, 0.2), 0.55, 0.19, 0.35), plate)).toBeDefined();
+    // The same rule in a spatial-indexed union and a tube's segments.
+    const many = O.union(Array.from({ length: 16 }, (_, i) => O.move(P.sphere(0.6), i * 0.5, 0, 0)));
+    expect(many.dist(0.25, 0, 0)).toBeCloseTo(Math.min(...Array.from({ length: 16 }, (_, i) => Math.hypot(0.25 - i * 0.5) - 0.6)), 9);
+    const tube = W.tube([[0, 0, 0], [1, 0, 0], [1, 1, 0]], 0.2);
+    expect(tube.dist(1, 0, 0)).toBeCloseTo(-0.2, 6);
+  });
+  it("offset and round carry the feature they grow", () => {
+    const thin = W.tube([[0, 0, 0], [1, 0, 0]], 0.02);
+    expect(thin.feature).toBeCloseTo(0.04, 9);
+    expect(O.offset(thin, 0.03).feature).toBeCloseTo(0.1, 9);
+    expect(O.offset(thin, -0.01).feature).toBeCloseTo(0.02, 9);
+  });
+  it("marks a field that is a bound rather than a distance", () => {
+    expect(O.union([a, b]).bound).toBeUndefined();
+    expect(O.union([a, b], 0.3).bound).toBe(true);
+    expect(O.difference(a, b).bound).toBeUndefined();
+    expect(O.difference(a, b, 0.2).bound).toBe(true);
+    expect(O.scale(a, 2, 2, 2).bound).toBeUndefined();
+    expect(O.scale(a, 1, 2, 1).bound).toBe(true);
+    for (const w of [O.twist(a, 30), O.bend(a, 30), O.wrap(a, 3), O.displace(a, 0.1, 0.5), W.loft(S.circle(1), S.rect(1, 1), 2)]) expect(w.bound).toBe(true);
+    expect(O.move(a, 1, 0, 0).bound).toBeUndefined();
+  });
   it("many-part unions cull without changing the result near the surface, and never overestimate", () => {
     const parts = Array.from({ length: 40 }, (_, i) => O.move(P.box(0.5, 0.5, 0.5), i * 0.7, 0, 0));
     const u = O.union(parts);
@@ -345,6 +381,26 @@ describe("spatial index", () => {
     const sw = W.sweep(S.circle(0.15), pts);
     expect(sw.dist(1, 0, 0)).toBeLessThan(0);
     expect(sw.dist(1.3, 0, 0)).toBeGreaterThan(0.1);
+  });
+});
+
+describe("loft", () => {
+  it("measures a slanted wall across it, like the cone it is, and never farther than the truth", () => {
+    const l = W.loft(S.circle(1), S.circle(0.5), 2);
+    const c = P.cone(1, 0.5, 2);
+    // Beside the wall, outside and inside: the cone's distance, not the radial gap (0.45 and -0.25).
+    expect(l.dist(1.2, 0, 0)).toBeCloseTo(c.dist(1.2, 0, 0), 6);
+    expect(l.dist(0.5, 0, 0)).toBeCloseTo(c.dist(0.5, 0, 0), 6);
+    for (const p of [[1.5, 0.5, 0.2], [0.2, 0.9, 0.1], [0.9, -0.9, 0], [0, 1.5, 0]] as const) expect(l.dist(p[0], p[1], p[2])).toBeLessThanOrEqual(c.dist(p[0], p[1], p[2]) + 1e-9);
+    expect(l.bound).toBe(true);
+  });
+});
+
+describe("arc about an axis", () => {
+  it("lies on the ground about y, stands in yz about x and in xy about z", () => {
+    expect(W.arcPath(1, 0, 90, 1)).toEqual([0, 0, 1, 1, 0, expect.closeTo(0, 9)]);
+    expect(W.arcPath(1, 0, 90, 1, "x")).toEqual([0, 0, 1, 0, 1, expect.closeTo(0, 9)]);
+    expect(W.arcPath(1, 0, 90, 1, "z")).toEqual([0, 1, 0, 1, expect.closeTo(0, 9), 0]);
   });
 });
 

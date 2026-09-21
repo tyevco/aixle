@@ -240,9 +240,106 @@ describe("interpreter", () => {
     expect(run(`set grid 24\n${bridge}n = pieces(m, resolution=64)\nshow m`).steps.find((s) => s.name === "n")?.value).toBe(1);
     expect(() => run('s = sphere(1)\np = at(s, "tp")')).toThrow(/^line 2: at\(\): no anchor "tp"/);
   });
+  it("paints with a picture through material(image=) and decal(image=), loaded by the host", () => {
+    const rgba = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 0]);
+    const resolveImage = (path: string) => { if (path !== "pic.png") throw new Error(`cannot read ${path}`); return { width: 2, height: 1, rgba }; };
+    const ev = evaluate(parse('m = box(2, 1, 0.2) | paint(material("white", image="pic.png", projection="planar", axis="z", scale=2))\nr = box(2, 1, 0.3) | move(0, 0.5, 0.1)\nd = decal(box(2, 1, 0.2), r, image="pic.png")\nshow m'), { resolveImage });
+    expect(ev.images.map((i) => [i.name, i.width, i.projection, i.size])).toEqual([["pic.png", 2, "planar", "2 units wide, along z"], ["pic.png", 2, "box", "fitted to a 2 × 1 × 0.3 region"]]);
+    expect(ev.images.every((i) => i.height === 1)).toBe(true);
+    const m = ev.steps.find((s) => s.name === "m")!.value as Shape3;
+    // The left half is the picture's red texel; the right half is transparent, so the decal shows the base there.
+    expect(m.hit(-0.5, 0, 0.1).mat.image?.name).toBe("pic.png");
+    const d = ev.steps.find((s) => s.name === "d")!.value as Shape3;
+    expect(d.hit(-0.5, 0.5, 0.1).mat.name).toBe("pic.png");
+    expect(d.hit(0.5, 0.5, 0.1).mat.name).toBe("clay");
+    expect(() => evaluate(parse('m = material("white", image="nope.png")'), { resolveImage })).toThrow(/image "nope.png": cannot read nope.png/);
+    expect(() => evaluate(parse('m = material("white", image="pic.png")'))).toThrow(/pictures cannot be loaded here/);
+    expect(() => evaluate(parse('m = material("white", image="pic.png", projection="cubic")'), { resolveImage })).toThrow(/projection is "planar", "cylindrical" or "spherical"/);
+  });
+  it("declares lights, cameras and an environment for the beauty render", () => {
+    const ev = run('m = box(1)\nlight("key", azimuth=-35, elevation=50, size=1.5, color="#fff1dc")\nlight("rim", azimuth=150, elevation=20, power=0.5)\ncamera("hero", azimuth=30, elevation=20, zoom=1.4)\ncamera("detail", focus="m", zoom=2, dof=1)\nset camera hero\nset environment sunset\nshow m');
+    expect(ev.lights.map((l) => [l.name, l.azimuth, l.elevation, l.size, l.power, l.colorName])).toEqual([["key", -35, 50, 1.5, 1, "#fff1dc"], ["rim", 150, 20, 1, 0.5, "white"]]);
+    expect(ev.lights[0].color[0]).toBeCloseTo(1, 1);
+    expect(ev.cameras).toEqual([{ name: "hero", azimuth: 30, elevation: 20, zoom: 1.4, dof: undefined, line: 4 }, { name: "detail", azimuth: undefined, elevation: undefined, zoom: 2, dof: 1, focus: "m", line: 5 }]);
+    expect(ev.settings.camera).toBe("hero");
+    expect(ev.settings.environment).toBe("sunset");
+    expect(ev.warnings).toEqual([]);
+    // A sky the renderer does not have, a shot never declared, a focus on nothing: warnings that name the options.
+    const w = run('m = box(1)\ncamera("x", focus="nope")\nset camera hero\nset environment dusk\nshow m').warnings;
+    expect(w).toContainEqual("set environment dusk: no such environment; the skies are studio, overcast, sunset, night (studio is the default)");
+    expect(w).toContainEqual("set camera hero: no such camera; cameras: x; the render uses its own view");
+    expect(w).toContainEqual('camera "x" (line 2): focus="nope" names no step or object; the shot frames the whole model');
+    // A point light: at a place, with a range; the parts it does not take are errors or a warning.
+    const point = run('light("fire", position=[0, 0.4, 0], range=1.5, color="#ff9a3c")\nlight("odd", position=[1, 1, 1], azimuth=30)');
+    expect(point.lights.map((l) => [l.name, l.position, l.range])).toEqual([["fire", [0, 0.4, 0], 1.5], ["odd", [1, 1, 1], 2]]);
+    expect(point.warnings).toContainEqual('light("odd") (line 2): a point light is at its position; azimuth and elevation are ignored');
+    expect(() => run('light("k", position=[1, 2])')).toThrow(/position is \[x, y, z\]/);
+    expect(() => run('light("k", range=2)')).toThrow(/range goes with position/);
+    expect(() => run('light("k", position=[0, 1, 0], range=0)')).toThrow(/range is the distance/);
+    expect(() => run('light("k", size=0)')).toThrow(/size is the light's apparent size, above 0/);
+    expect(() => run('light("k", colour="red")')).toThrow(/no parameter named 'colour'/);
+    expect(() => run('light("k", color="nope")')).toThrow(/light\("k"\): color: "nope" is not a material preset or a colour/);
+    expect(() => run('camera("c", zoom=0)')).toThrow(/zoom is above 0/);
+    expect(() => run('camera(3)')).toThrow(/camera\(name, azimuth=35/);
+  });
   it("promises a void, a bounded overlap and containment", () => {
     const ev = run('cup = cylinder(1, 2) - (cylinder(0.85, 2) | move(0, 0.2, 0))\ncavity = cylinder(0.85, 2) | move(0, 0.2, 0)\nhandle = torus(0.6, 0.15) | rotate(x=90) | move(1.2, 1, 0)\nmug = cup + handle\nassert void(cavity, mug), "nothing pokes in"\nassert overlap(handle, cup) > 0\nassert inside(handle, cavity) < 0.5\nshow mug');
     expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual([[false, undefined], [true, expect.stringMatching(/^0\.\d+ > 0$/)], [true, expect.stringMatching(/^0\.\d+ < 0\.5$/)]]);
+    // A failing void says where the solid is and in which part; the region is not a warning, it is a region.
+    expect(ev.asserts[0].where).toMatch(/^solid at \(0\.\d+, [\d.]+, -?[\d.]+\) in 'handle'$/);
+    expect(assertLine(ev.asserts[0])).toMatch(/^assert \(line 5\) fails: void\(cavity, mug\), solid at \(.*\) in 'handle': nothing pokes in$/);
+    expect(ev.roles.get("cavity")).toBe("region");
+    expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    // inside and overlap failures say where too; a passing query leaves no witness.
+    const f = run('a = sphere(1)\nb = sphere(1) | move(1.5, 0, 0)\nassert inside(a, b) == 1\nassert overlap(a, b) < 0.001\nassert overlap(a, b) > 0\nshow a + b');
+    expect(f.asserts.map((x) => [x.passed, x.where])).toEqual([[false, expect.stringMatching(/^a is outside b at \(-0\.\d+, -?[\d.]+, -?[\d.]+\)$/)], [false, expect.stringMatching(/^they overlap at \(0\.7\d, -?[\d.]+, -?[\d.]+\)$/)], [true, undefined]]);
+  });
+  it("gives each step a role: a part, a cut, a region, or none, and the unused warning only to the last", () => {
+    const ev = run('base = box(2, 0.2, 2)\nhole = cylinder(0.1, 1)\nrod = cylinder(0.05, 2)\nplate = base - hole\npeg = cylinder(0.05, 0.5) | move(0.5, 0.2, 0)\nspare = sphere(0.1)\neye = sphere(0.2) | move(0.5, 0.1, 0)\nmodel = decal(plate + peg, eye, "black")\ncamera("c", focus="rod")\nassert void(rod, model)\nshow model');
+    expect([...ev.roles.entries()].sort()).toEqual([["base", "part"], ["eye", "region"], ["hole", "cut"], ["model", "part"], ["peg", "part"], ["plate", "part"], ["rod", "region"]]);
+    expect(ev.used.has("hole")).toBe(true);
+    expect(ev.used.has("rod")).toBe(false);
+    expect(ev.steps.find((s) => s.name === "plate")?.cuts).toBe(true);
+    expect(ev.steps.find((s) => s.name === "peg")?.cuts).toBeUndefined();
+    expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual(["'spare' (line 6) is not part of the output; add it to the model or remove it"]);
+    // A shape cut from one part and joined by another step is a part; a cut inside a def marks the step that called it.
+    const both = run('a = box(1, 1, 1)\nb = sphere(0.6)\ndef notch(s) = s - b\nc = notch(a)\nd = difference(a, b)\ne = b | move(3, 0, 0)\nshow c + d + e');
+    expect(both.roles.get("b")).toBe("part");
+    expect(run('a = box(1, 1, 1)\nb = sphere(0.6)\ndef notch(s) = s - b\nc = notch(a)\nshow c').roles.get("b")).toBe("cut");
+    // A step every reader moves is displaced (its surface is elsewhere); one also joined as it is, is not.
+    const moved = run('log = cylinder(0.1, 1)\nstack = log + (log | move(0.2, 0, 0))\ndef place(s) = s | rotate(y=30) | move(2, 0, 0)\npile = place(stack)\nseat = box(1, 0.2, 0.3)\nfeet = box(1, 0.1, 0.3)\nbench = (seat + feet) | move(0, 0, 1.5)\nshow pile + bench');
+    expect([...moved.displaced].sort()).toEqual(["feet", "seat", "stack"]);
+    expect(both.steps.find((s) => s.name === "c")?.cuts).toBe(true);
+    expect(both.steps.find((s) => s.name === "d")?.cuts).toBe(true);
+  });
+  it("names the larger operand of an intersection a mask, and a failing void a step of the measured shape", () => {
+    const ev = run('stone = prism(8, 0.3, 0.4)\nabove = box(2, 2, 2) | move(0, 1, 0)\ngem = stone & above\nprobe = box(0.1, 0.1, 0.1) | move(0, 0.1, 0)\nassert void(probe, gem)\nshow gem');
+    expect(ev.roles.get("above")).toBe("mask");
+    expect(ev.roles.get("stone")).toBe("part");
+    expect(ev.asserts[0].where).toMatch(/^solid at \(.*\) in 'gem'$/);
+    // Boxes that never meet make a void trivial, and it is said.
+    const far = run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(5, 0, 0)\nassert void(b, a)\nshow a');
+    expect(far.warnings).toContainEqual(expect.stringMatching(/^line 3: void\(b, a\) holds trivially: their boxes are 4 apart/));
+    // A region just clear of the shape is a guard, not a mistake.
+    expect(run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(1.1, 0, 0)\nassert void(b, a)\nshow a').warnings.filter((w) => /trivially/.test(w))).toEqual([]);
+    // A failing pieces() names the loose piece.
+    const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
+    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
+  });
+  it("attach sinks a part into its target along its anchor's line to its centre", () => {
+    const ev = run('post = cylinder(0.1, 1) | move(0, 0.5, 0)\nlamp = sphere(0.2) | attach("bottom", post, "top")\nsunk = sphere(0.2) | attach("bottom", post, "top", sink=0.05)\nshow post + lamp + sunk');
+    const lamp = ev.steps.find((s) => s.name === "lamp")!.value as Shape3, sunk = ev.steps.find((s) => s.name === "sunk")!.value as Shape3;
+    expect(lamp.bounds.min[1]).toBeCloseTo(1, 9);
+    expect(sunk.bounds.min[1]).toBeCloseTo(0.95, 9);
+  });
+  it("marks a step assigned inside a loop", () => {
+    const ev = run('b = 1\nall = sphere(0.1)\nfor i in range(3) {\n  a = i * 2\n  all = all + (sphere(0.1) | move(i, 0, 0))\n}\nshow all');
+    expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true], ["a", true]]);
+  });
+  it("measures overhangs like the report's row", () => {
+    // A table: the underside of its top faces down and is not on the floor.
+    const ev = run('top = box(2, 0.1, 2) | move(0, 1, 0)\nleg = cylinder(0.1, 1) | move(0, 0.5, 0)\ntable = top + leg\nassert overhang(table) > 0.2\nassert overhang(leg) < 0.01\nshow table');
+    expect(ev.asserts.map((a) => a.passed)).toEqual([true, true]);
   });
   it("judges an assert that names a pose only in that pose's evaluation", () => {
     const src = 'lid = joint(box(1, 0.2, 1) | move(0, 1.1, 0), "hinge", 0, 1, 0.5)\npose("open", hinge=[-90, 0, 0])\nassert tall(lid) < 0.5, "lies flat", pose=open\nassert tall(lid) < 0.5, "at rest"\nassert tall(lid) < 0.5, pose=rest';

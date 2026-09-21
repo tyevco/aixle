@@ -88,6 +88,14 @@ A desk nameplate: a walnut wedge with a brass plate on its leaning face,
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/nameplate.aix) · <a href="/aixle/viewers/nameplate.html" target="_blank" rel="noopener">viewer</a>
 
+### patterns
+
+A plate of the ten material patterns: each on a rounded cube at scale 0.25
+
+![patterns, beauty render](../examples/renders/patterns_beauty.png) ![patterns, contact sheet](../examples/renders/patterns.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/patterns.aix) · <a href="/aixle/viewers/patterns.html" target="_blank" rel="noopener">viewer</a>
+
 ### robot
 
 A toy robot: mirror() builds both arms and legs from one side, and each
@@ -135,6 +143,14 @@ A teapot: a revolved body hollowed with shell() and opened at the top, a
 ![teapot, beauty render](../examples/renders/teapot_beauty.png) ![teapot, contact sheet](../examples/renders/teapot.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/teapot.aix) · <a href="/aixle/viewers/teapot.html" target="_blank" rel="noopener">viewer</a>
+
+### tin
+
+A biscuit tin with a paper label: the picture in examples/assets/label.png is
+
+![tin, beauty render](../examples/renders/tin_beauty.png) ![tin, contact sheet](../examples/renders/tin.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/tin.aix) · <a href="/aixle/viewers/tin.html" target="_blank" rel="noopener">viewer</a>
 
 ### tower
 
@@ -315,6 +331,46 @@ round 1: A lighthouse on a rocky outcrop, with a keeper's cottage and a stone pa
 ![round-1_lighthouse, beauty render](../dogfood/renders/round-1_lighthouse_beauty.png) ![round-1_lighthouse, contact sheet](../dogfood/renders/round-1_lighthouse.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-1/lighthouse.aix) · <a href="/aixle/viewers/round-1_lighthouse.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-1/lighthouse.report.md)
+
+### round-10_alley
+
+round 10: A street corner at night: a pavement slab (top at y = 0), a shop front
+
+![round-10_alley, beauty render](../dogfood/renders/round-10_alley_beauty.png) ![round-10_alley, contact sheet](../dogfood/renders/round-10_alley.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/alley.aix) · <a href="/aixle/viewers/round-10_alley.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/alley.report.md)
+
+### round-10_hub
+
+round 10: A bolted wheel hub flange for printing: a thick disc with a raised boss, a keyed bore,
+
+![round-10_hub, beauty render](../dogfood/renders/round-10_hub_beauty.png) ![round-10_hub, contact sheet](../dogfood/renders/round-10_hub.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub.aix) · <a href="/aixle/viewers/round-10_hub.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/hub.report.md)
+
+### round-10_hub_probe_onebyone
+
+round 10: Probe: the same hub as hub.aix with the cutters subtracted one by one instead of as one union,
+
+![round-10_hub_probe_onebyone, beauty render](../dogfood/renders/round-10_hub_probe_onebyone_beauty.png) ![round-10_hub_probe_onebyone, contact sheet](../dogfood/renders/round-10_hub_probe_onebyone.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub_probe_onebyone.aix) · <a href="/aixle/viewers/round-10_hub_probe_onebyone.html" target="_blank" rel="noopener">viewer</a>
+
+### round-10_ring
+
+round 10: A jewelled ring on a velvet display stand, about 1.5 tall on y = 0.
+
+![round-10_ring, beauty render](../dogfood/renders/round-10_ring_beauty.png) ![round-10_ring, contact sheet](../dogfood/renders/round-10_ring.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/ring.aix) · <a href="/aixle/viewers/round-10_ring.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/ring.report.md)
+
+### round-10_terrarium
+
+round 10: A glass terrarium: a walnut base with a shallow recess, a bell-jar dome of
+
+![round-10_terrarium, beauty render](../dogfood/renders/round-10_terrarium_beauty.png) ![round-10_terrarium, contact sheet](../dogfood/renders/round-10_terrarium.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/terrarium.aix) · <a href="/aixle/viewers/round-10_terrarium.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/terrarium.report.md)
 
 ### round-2_excavator
 
@@ -595,3 +651,67 @@ round 8: A folding pocket multi-tool, 0.9 long along x, lying flat on y = 0.
 ![round-8_multitool, beauty render](../dogfood/renders/round-8_multitool_beauty.png) ![round-8_multitool, contact sheet](../dogfood/renders/round-8_multitool.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-8/multitool.aix) · <a href="/aixle/viewers/round-8_multitool.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-8/multitool.report.md)
+
+### round-9_bottle
+
+round 9: A perfume bottle for a product shot, about 1.2 units tall, standing on a
+
+![round-9_bottle, beauty render](../dogfood/renders/round-9_bottle_beauty.png) ![round-9_bottle, contact sheet](../dogfood/renders/round-9_bottle.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bottle.aix) · <a href="/aixle/viewers/round-9_bottle.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/bottle.report.md)
+
+### round-9_bracket
+
+round 9: A machined L-bracket for a print: a base plate on y = 0, an upright at the
+
+![round-9_bracket, beauty render](../dogfood/renders/round-9_bracket_beauty.png) ![round-9_bracket, contact sheet](../dogfood/renders/round-9_bracket.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket.aix) · <a href="/aixle/viewers/round-9_bracket.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/bracket.report.md)
+
+### round-9_bracket_probe_void
+
+round 9: Probe: void() on a blind cut (a counterbore) versus a through cut.
+
+![round-9_bracket_probe_void, beauty render](../dogfood/renders/round-9_bracket_probe_void_beauty.png) ![round-9_bracket_probe_void, contact sheet](../dogfood/renders/round-9_bracket_probe_void.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_bracket_probe_void2
+
+round 9: Probe 2: which part of the bracket makes void(cbore, model) fail?
+
+![round-9_bracket_probe_void2, beauty render](../dogfood/renders/round-9_bracket_probe_void2_beauty.png) ![round-9_bracket_probe_void2, contact sheet](../dogfood/renders/round-9_bracket_probe_void2.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void2.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void2.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_bracket_probe_void3
+
+round 9: Probe 3: void() on a counterbore cut as part of a union of cutters.
+
+![round-9_bracket_probe_void3, beauty render](../dogfood/renders/round-9_bracket_probe_void3_beauty.png) ![round-9_bracket_probe_void3, contact sheet](../dogfood/renders/round-9_bracket_probe_void3.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void3.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void3.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_bracket_probe_void4
+
+round 9: Probe 4: which members of a cutter union does void() misread?
+
+![round-9_bracket_probe_void4, beauty render](../dogfood/renders/round-9_bracket_probe_void4_beauty.png) ![round-9_bracket_probe_void4, contact sheet](../dogfood/renders/round-9_bracket_probe_void4.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void4.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void4.html" target="_blank" rel="noopener">viewer</a>
+
+### round-9_campsite
+
+round 9: A campsite at night, about 6 units across on a ground slab whose top is y = 0.
+
+![round-9_campsite, beauty render](../dogfood/renders/round-9_campsite_beauty.png) ![round-9_campsite, contact sheet](../dogfood/renders/round-9_campsite.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/campsite.aix) · <a href="/aixle/viewers/round-9_campsite.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/campsite.report.md)
+
+### round-9_owl
+
+round 9: An owl money box perched on a branch, about 1.4 tall, facing +z.
+
+![round-9_owl, beauty render](../dogfood/renders/round-9_owl_beauty.png) ![round-9_owl, contact sheet](../dogfood/renders/round-9_owl.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/owl.aix) · <a href="/aixle/viewers/round-9_owl.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/owl.report.md)

@@ -130,7 +130,10 @@ a placement with no numbers. Every shape also answers to the free
 anchors `centre`, `top`, `bottom`, `front`, `back`, `left` and `right`
 (its box's face centres, so `centre` of a boom is the middle of its
 box, not its end: anchor the end), so `lamp | attach("bottom", arm, "tip")` sets a
-lamp on the end of an arm. Rotate a part first, then attach it; the
+lamp on the end of an arm. That is face on face, a touch, which a fine
+grid meshes as two pieces: `attach(..., sink=0.02)` pushes the part that
+far into the target, along the line from its anchor to its own centre,
+so the two overlap by a cell or two. Rotate a part first, then attach it; the
 anchors turn with it. A union keeps every part's anchors (the first part
 wins a repeated name), a cut keeps the first shape's, and `check` prints
 a step's named anchors under its box. In a pose, `at()` on a joint's
@@ -198,7 +201,7 @@ four points and `smooth=6`. A hollow spout is one tube minus a thinner one
 on the same path. `taper=` scales the end relative to the start (a horn,
 a tapering tail) and `sweep` also takes `twist=` degrees over the whole
 path, so three circles swept along `helix(r, h, turns)` with
-`twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to)` and
+`twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to, axis="y")` and
 `spline(points)` make point lists, and any of them can feed `curve()`
 for a smooth tube (a tight helix as a polyline has a join wedge at
 every segment; `tube(r, curve(helix(...)))` has none; a helix starts at `(r, 0, 0)` and rises
@@ -494,7 +497,19 @@ GLB, the model as shown. `decal(shape, region, m)` paints only the surface insid
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
 a jar; `region` is any shape, and it must cross the surface (a sphere
 centred on the skin, a box through it): a region that touches none of
-the shape's surface paints nothing, and `check` warns. A decal is a skin: the cross-sections show
+the shape's surface paints nothing, and `check` warns. A picture is a
+PNG beside the program: `decal(jar, label_box, image="label.png")` fits
+it to the region's box across the box's shortest side (u along x where
+it can, v down), and its transparent texels leave the base material, so
+a label's margin is the label's edge; `material("cream",
+image="label.png", projection="cylindrical", scale=0.6)` paints a part
+with the picture instead of a pattern, `planar` (one copy flat across
+`axis`, `scale` wide, centred on the origin of the frame the part is
+painted in), `cylindrical` (round `axis` by arc length, `scale` wide,
+repeating, its height by its shape) or `spherical` (one copy round the
+origin). Pictures reach the atlas, the Bedrock texture and the beauty
+render through the same sampling, bilinear between texels; the report's
+Images line says each picture's size and where it went. A decal is a skin: the cross-sections show
 the base material underneath, and a step used only as a region is not
 geometry, so it gets no thin-part warning and is never named as a loose
 piece. Patterns are laid out in the frame the part is painted in, along the
@@ -527,6 +542,105 @@ robot = body + eyes
 
 A pattern is anchored to the frame where `paint` was applied, so it moves
 with the part: paint, then `move`.
+
+## Lights, cameras and environments
+
+The beauty render has one key light unless the program declares its
+own: `light("key", azimuth=-40, elevation=55, size=1.5,
+color="#fff2e0")` and `light("rim", azimuth=150, elevation=20,
+power=0.5, color="#cfe0ff")` are a warm key and a cool rim, each
+casting its own soft shadow (azimuth about y, 0 from the front and 90
+from +x; `size` 0.5 is a lamp and 3 a window; `power` 1 is the default
+key's strength; the colour is a name, a hex or a material). Three
+lights cost about half again the time of one. `set environment sunset`
+puts the model under an evening sky; `studio` is the default grey-white
+backdrop, `overcast` a white sky with even light, `night` a dark sky
+and floor where a `glow` material carries the picture. A named shot,
+`camera("hero", azimuth=30, elevation=20, zoom=1.4)` or
+`camera("detail", focus="nameplate", zoom=2)`, is written by `render
+--beauty` as `beauty_<name>.png`, framed on its `focus=` step or object
+when it has one and taking the render's own view for whatever it leaves
+out; `set camera hero` makes that shot the sheet's perspective view and
+`beauty.png` as well (the front, right and top views are unchanged).
+`check` and the report list the lights, the cameras and the
+environment, so a misspelt name is a warning before any render. With
+two or more lights `render --beauty` also writes `lights.png`, the
+picture under each light alone and then all of them, so what a rim
+light adds is seen rather than guessed from two near-identical shots.
+
+What the lights and the skies can and cannot do, measured in round 9:
+
+- A light with an azimuth is a direction, not a place: `elevation=8`
+  means "from the horizon", whatever stands there, and a low light
+  throws a long shadow across a top-down shot. A campfire's warmth on
+  the stones round it is a point light, `light("fire", position=[0,
+  0.4, 0], range=2, color="#ff9a3c", power=1.5)`: at a place, its
+  strength halving `range` away, shadowed by what stands between, and
+  not reaching the far floor. Put it in the air just outside the glowing
+  part (a solid the light sits inside shadows everything; inside a glass
+  shade is fine, since glass lets its light through dimmed, and a bulb
+  beside the light does not shadow what is on the far side of it). A `glow`
+  material lights itself only: a flame does not light the stones round
+  it or the ground under it unless a point light sits in it.
+- `night` scales the ambient light to 0.4 of the studio's, so a first
+  render is dark: start from `set ambient 1.6` with a moon of
+  `power=0.9`, and let a glow carry the picture. `sunset` is a warm
+  band at the horizon under a blue sky, but only a camera near the
+  horizon (`elevation` under about 10) sees the band; from above, the
+  backdrop is the warm ground, and a brown model disappears into it.
+  `overcast` and `studio` are neutral skies, so `chrome` and `silver`
+  reflect a white sky and blow out to white under them: give a mirror
+  metal a `sunset` or a `night`, or use `steel`, `iron` or `brass`.
+  Gold is flat yellow under the neutral skies, deep and warm under
+  `sunset`, olive under `night`. A coloured stone (`transmit` about
+  0.5) shows what is behind it, so in a closed setting it reads dark;
+  open the setting or keep transmit down. `--environment all` writes
+  `environments.png`, the same shot under every sky, for one render.
+- A camera's `elevation` is about the model's centre and may be
+  negative: at 0 a perspective camera still looks down on the floor
+  round a low model, so a low shot is `elevation=-8`. `elevation=90` is
+  a plan view. `zoom` stops where the frame's corners would leave the
+  picture, so a wide scene on a slab never gets closer than the slab;
+  a camera with `focus=` frames that step instead (with `zoom=0.8` to
+  step back from it), and a step in the middle of a scene makes a good
+  framing proxy for a composition. A focus shot marches the whole
+  model, so a hole under a counterbore reads as through when the camera
+  is steep enough to see its floor (a hole 0.14 across through 0.25
+  wants an elevation above about 60), and the rest of the model stays
+  in the picture at its true depth; when more than
+  15% of the focus step's surface facing the camera is hidden behind
+  the rest of the model and another azimuth would show much more of
+  it, the render warns with the fraction and the better azimuth (a
+  stone enclosed in its setting is hidden from every side alike and
+  gets no warning). `dof` scales a
+  blur that grows with a surface's distance from the focus: 0.3 to 0.5
+  is a gentle falloff, 1 blurs everything off the focus plane hard.
+- `--azimuth`, `--elevation` and `--zoom` on the command line override
+  the sheet's view and `beauty.png` only; a declared camera keeps its
+  own angles. `--camera NAME` renders one declared shot (the sheet and
+  `beauty.png` take its view, and its `focus=` framing) while a lighting
+  loop runs, `--beauty-only` skips the steps, slices, turntable,
+  callouts and exports for that loop, and `--environment NAME` tries a
+  sky without editing the program.
+- `--quick` meshes at 64 cells, so a glass wall thinner than that cell
+  renders as a frosted solid and a `transmit` material cannot be judged
+  there; judge glass at the full grid. A glowing part inside a glass
+  shell must clear the glass by a cell, or the refraction draws rings
+  and bars where the two surfaces touch. A `loft` or a smooth `union(k=)`
+  is a bound rather than a distance, and glass on one bands the picture
+  behind it (a liquid seen through a lofted flacon drew contour lines;
+  a rounded box rendered clean; `check` warns when a `transmit`
+  material sits on such a field, and a `shell`, a `clearance` or an
+  `overlap` on one is only as true as the field: a loft of two profiles
+  is measured across its slanted wall, like the cone it is, but a
+  smooth union's blend or a twist is a bound); two coincident faces band too, so a
+  liquid filling a cavity is grown a cell into the wall, and its promise
+  is `inside(liquid, cavity) > 0.9`, not `== 1`. `glow` on a `transmit`
+  material is not visible, and a `glow` above 1 washes out the part's
+  own shading, so a lamp's cap reads as a flat disc until a point light
+  beside it lights its surroundings. The first `light()` replaces the
+  default key light, so a program adding a point light declares its key
+  too.
 
 ## Settings
 
@@ -674,19 +788,29 @@ blobs or gone at a quick cell, so judge a working end at full grid, with
 
 ## What the tool checks for you
 
-`aixle check` prints every step's size and the warnings: shapes as their
+`aixle check` (a second, or a few with `pieces()` and `overhang()`,
+which mesh) prints every step's size and the warnings: shapes as their
 box, 2D profiles as their box in the plane, numbers and lists of numbers
-as their values. A step whose tree holds a rotation, a warp or a posed
+as their values (a number set inside a loop is the last iteration's and
+is not listed), then the program's `def`s with their parameters;
+`--brief` leaves the sizes out and prints the output, the warnings and
+the asserts alone, for a promise loop on a long program. A step whose tree holds a rotation, a warp or a posed
 joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the
 joints above it have turned, since a part built at rest and turned by a
-joint keeps its rest box. Both lines come from rays marched in from the
+joint keeps its rest box. A joint step itself is already turned in a
+pose, so its box is the box of the turned box and its `surface` line is
+where it is; it gets no `posed` line of its own. Both lines come from rays marched in from the
 box's faces, so a plate thinner than the rays' spacing can slip between
 them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
-also writes the warnings into `report.md` and counts them on the sheet's title bar.
+also writes the warnings into `report.md` and counts them on the sheet's title bar,
+and beside `turntable.png` writes `turntable.apng`, the same turn as an
+animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).
 Warnings cover: a shape computed but never assigned; a step that is not part
-of the output; an empty output (a difference that removed everything, an
+of the output (a step an assert, a decal or a camera reads is a region
+and is not warned about; `check` tags each step `(cut)`, `(region)` or
+`(not in output)`); an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
 still catch it, below it they may not; between 1.2 and 2 cells a tube
@@ -777,7 +901,11 @@ its longest side, the program's `set grid` when none is given (64
 without one), as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
-chair's floating back once passed); `clearance(a, b)` is
+chair's floating back once passed); `overhang(shape, resolution)` is
+the fraction of the surface that faces down more than 45° with the
+floor faces left out, the report's Overhangs row, for `assert
+overhang(part) < 0.05` on something to be printed without support (it
+meshes too); `clearance(a, b)` is
 the smallest gap between two surfaces, negative by how deep they overlap,
 zero when they touch, sampled from the fields at twelve points per side
 of each shape's box and then tightened, so it is exact for parts that
@@ -786,20 +914,44 @@ part. Measure parts rather than the whole model: `clearance(handle,
 body)`, not `clearance(handle, model)` (the handle is in the model, so
 that is zero). `void(region, shape)` is 1 when the region holds no
 solid of the shape: `assert void(cavity, mug)` promises nothing pokes
-into the cup (the mug example's handle once reached inside it), and
-the same form promises a hole goes through or a slot stays open, with
-the region the shape you subtracted or a box you name for it.
+into the cup (the mug example's handle once reached inside it), and a
+failure says where the solid is and in which step (`void(cavity, mug),
+solid at (0.44, 1.3, 0) in 'handle'`). The region is a shape of its
+own, never the cutter: a cutter's volume is empty by construction, so
+`void(slot, plate)` holds whether or not the slot went through; "the
+hole goes through" is a thinner rod reaching past both faces,
+`rod = cylinder(0.04, 0.3) | move(...)` and `assert void(rod, plate)`.
 `overlap(a, b)` is the volume two parts share, zero when they only
 touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
 rather than sunk into it, and `assert overlap(handle, body) > 0.001`
-says a handle is joined to its wall, not just touching. `inside(a,
-b)` is the fraction of a's volume inside b: `== 1` for a spring that
-must stay in its housing, `== 0` for a handle that must stay out of the
-cavity. All three sample a lattice (24 cells along the longest side,
-and `void` walks the surface too, so a pin thinner than the lattice is
-caught), so measure parts, not a scene. The bound queries (`width`,
-`tall`, `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are
-the rest.
+says a handle is joined to its wall, not just touching; a volume is
+small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take a "joined"
+threshold from the part's size, and a failure says where the two
+overlap. `inside(a, b)` is the fraction of a's volume inside b: `== 1`
+for a spring that must stay in its housing, `== 0` for a handle that
+must stay out of the cavity, and a failure says where a is outside b.
+`b` is the solid volume: a mantle hangs in the air inside a shelled
+shade, so `inside(mantle, shade)` is 0; keep the un-shelled shape as a
+step (`shade = shade_space | shell(0.05)`) and test against that; that
+solid includes the wall's own volume, so `inside(gnome, dome_space) == 1`
+alone does not keep the gnome out of the glass, and `void(wall,
+innards)` beside it does. A failing `clearance` says where the two came
+closest or overlapped deepest. All
+three sample a lattice (24 cells along the longest side, and `void`
+walks the surface too, so a pin thinner than the lattice is caught), so
+measure parts, not a scene. The bound queries (`width`, `tall`,
+`depth`, `top`, `bottom`, `height`) and the anchors (`at`) are the
+rest. A failing `pieces()` names the smallest loose piece and where it
+is. A `void` whose region's box never meets the shape's box holds for
+no reason, and `check` says so: a probe built in one frame against a
+cutter in another promises nothing. A step only an assert reads (a
+probe rod, a cavity's region, a union of the neighbours) is a *region*:
+not part of the output, not warned about, framed grey and tagged on the
+steps sheet, and never labelled in the callouts; a shape subtracted
+from a part is a *cut*, tagged so on the steps sheet, which draws it as
+the solid it removes; the larger operand of an `&` (a half-space box
+that trims a gem) is a *mask*, tagged so and never labelled. `check`
+prints the asserts in line order, failures among the passes.
 
 ## Limits worth knowing
 
