@@ -62,6 +62,62 @@ describe("mesh field", () => {
     const open = meshField({ positions: new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]), indices: new Uint32Array([0, 1, 2]) }, 8);
     expect(open.openness).toBeGreaterThan(0.1);
   });
+  it("signs every sample as a test of every triangle on its grid line does, though each line reads only its own bin", () => {
+    // The sign pass bins each triangle into the lines its box covers; a line that missed a triangle it crosses would
+    // flip a run of samples. Here every line tests every triangle, as the pass did before it was binned.
+    const reference = (m: { positions: Float32Array; indices: Uint32Array }, s: ReturnType<typeof sampleMesh>): Uint8Array => {
+      const Pm = m.positions, Im = m.indices;
+      const [nx, ny, nz] = s.dims;
+      const inside = new Uint8Array(nx * ny * nz);
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++) {
+          const x = s.origin[0] + i * s.cell, y = s.origin[1] + j * s.cell;
+          const hits: [number, number][] = [];
+          for (let t = 0; t < Im.length / 3; t++) {
+            const a = Im[t * 3] * 3, b = Im[t * 3 + 1] * 3, c = Im[t * 3 + 2] * 3;
+            const ax = Pm[a], ay = Pm[a + 1], bx = Pm[b], by = Pm[b + 1], cx = Pm[c], cy = Pm[c + 1];
+            if (Math.min(ax, bx, cx) > x || Math.max(ax, bx, cx) < x || Math.min(ay, by, cy) > y || Math.max(ay, by, cy) < y) continue;
+            const det = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+            if (Math.abs(det) < 1e-18) continue;
+            const l1 = ((bx - x) * (cy - y) - (by - y) * (cx - x)) / det;
+            const l2 = ((cx - x) * (ay - y) - (cy - y) * (ax - x)) / det;
+            const l3 = 1 - l1 - l2;
+            if (l1 <= 0 || l2 <= 0 || l3 <= 0) continue;
+            hits.push([l1 * Pm[a + 2] + l2 * Pm[b + 2] + l3 * Pm[c + 2], det > 0 ? 1 : -1]);
+          }
+          hits.sort((p, q) => p[0] - q[0]);
+          let depth = 0, h = 0;
+          for (let k = 0; k < nz; k++) {
+            const z = s.origin[2] + k * s.cell;
+            while (h < hits.length && hits[h][0] < z) depth += hits[h++][1];
+            if (depth !== 0) inside[(k * ny + j) * nx + i] = 1;
+          }
+        }
+      return inside;
+    };
+    // A sphere of small triangles, a box of twelve large ones turned off the axes, and the two overlapping.
+    const corners = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1];
+    const box = { positions: new Float32Array(corners.map((c, i) => (c - 0.5) * [1.6, 0.7, 1.1][i % 3])), indices: new Uint32Array([0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6, 5, 0, 4, 7, 0, 7, 3]) };
+    const turned = new Float32Array(box.positions.length);
+    for (let v = 0; v < box.positions.length; v += 3) {
+      const x = box.positions[v], y = box.positions[v + 1], z = box.positions[v + 2];
+      const x1 = x * Math.cos(0.6) - y * Math.sin(0.6), y1 = x * Math.sin(0.6) + y * Math.cos(0.6);
+      turned[v] = x1 * Math.cos(0.9) + z * Math.sin(0.9); turned[v + 1] = y1; turned[v + 2] = -x1 * Math.sin(0.9) + z * Math.cos(0.9);
+    }
+    const both = { positions: new Float32Array([...sphereMesh.positions, ...turned]), indices: new Uint32Array([...sphereMesh.indices, ...Array.from(box.indices, (i) => i + sphereMesh.positions.length / 3)]) };
+    for (const [m, res] of [[{ positions: sphereMesh.positions, indices: sphereMesh.indices }, 30], [{ positions: turned, indices: box.indices }, 37], [both, 41]] as const) {
+      const s = sampleMesh(m, res);
+      const inside = reference(m, s);
+      let wrong = 0, inner = 0;
+      for (let n = 0; n < s.samples.length; n++) {
+        const negative = s.samples[n] < 0 || Object.is(s.samples[n], -0);
+        if (negative !== (inside[n] === 1)) wrong++;
+        if (negative) inner++;
+      }
+      expect(inner).toBeGreaterThan(s.samples.length / 20);
+      expect(wrong).toBe(0);
+    }
+  });
 });
 
 describe("import in the language", () => {
