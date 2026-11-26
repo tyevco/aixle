@@ -632,6 +632,10 @@ describe("records", () => {
     const ev = run("def two(x) = x * 2\nr = {f: two, n: 3}\na = r.f(r.n)\ndef area(s={w: 2, d: 3}) = s.w * s.d\nb = area()\nc = area({w: 1, d: 1})\nassert {w: 1}.w == 1");
     expect(ev.steps.filter((s) => ["a", "b", "c"].includes(s.name)).map((s) => s.value)).toEqual([6, 6, 1]);
     expect(ev.asserts[0].text).toBe("{w: 1}.w == 1");
+    // Only a name calls: a def reached through an index or a call is named first, and the error says so.
+    expect(() => parse("legs = [r]\na = legs[0].f(1)")).toThrow(/line 2: 'legs\[0\]\.f\(\.\.\.\)': only a name is called, as r\.f\(1\) is; name it first, f = legs\[0\]\.f, then f\(\.\.\.\)/);
+    expect(run("def two(x) = x * 2\nlegs = [{f: two}]\nf = legs[0].f\na = f(4)").steps.find((s) => s.name === "a")!.value).toBe(8);
+    expect(() => parse("a = (r).f(1)")).toThrow(/'\(r\)\.f\(\.\.\.\)': only a name is called; write r\.f\(\.\.\.\), without the parentheses/);
     expect(ev.defs.map((d) => d.name)).toEqual(["two", "area"]);
   });
 });

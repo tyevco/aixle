@@ -96,7 +96,9 @@ tall = {...seat, h: 0.6}        # a copy with h changed; seat is as it was
 ```
 
 A field holds any value: a number, a string, a list, a shape, a material,
-a def, another record. Reading a field that is not there is an error that
+a def, another record. A def in a field is called by its dotted name,
+`r.f(1)`; one reached through an index or a call is named first
+(`f = legs[0].f`, then `f(1)`). Reading a field that is not there is an error that
 names the fields there are, and a key written twice in one record is an
 error. A record never changes: `seat.h = 0.6` is an error that says to
 write `seat = {...seat, h: 0.6}`. `...other` takes another record's

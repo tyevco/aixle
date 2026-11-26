@@ -314,6 +314,11 @@ class Parser {
       } else if (this.atOp(".") && this.peek(1).type === "ident" && e.type !== "num" && e.type !== "str") {
         const t = this.next();
         e = { type: "field", target: e, name: this.next().value, line: t.line };
+        // A call is on a name (r.f(1) is the name r.f); after an index or a call there is none to call.
+        if (this.atOp("("))
+          throw new SyntaxError(e.target.type === "ident"
+            ? `'(${exprText(e.target)}).${e.name}(...)': only a name is called; write ${exprText(e)}(...), without the parentheses`
+            : `'${exprText(e)}(...)': only a name is called, as r.f(1) is; name it first, ${e.name} = ${exprText(e)}, then ${e.name}(...)`, t.line);
       } else break;
     }
     // `p.0` lexes as a name and the number .0: a field is a name, an item is an index.
