@@ -1101,7 +1101,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         exportsNote = { triangles: hierarchy.triangles, cap, cell: cellSize, ...dz };
         // Past a cell, and further than the full mesh already was, the decimation is visible: say so and how to stop it.
         if (dz.deviation > cellSize && dz.deviation > dz.fullDeviation * 1.05)
-          warnings.push(`The exports are decimated from ${dz.before} to ${hierarchy.triangles} triangles and stray up to ${fmt(dz.deviation)} from the surface at a face centre, ${fmt(dz.deviation / cellSize)} of the ${fmt(cellSize)} cell (the full mesh: ${fmt(dz.fullDeviation)}): raise the cap (set triangles ${Math.min(dz.before, cap * 2)}), or set triangles 0 for the full mesh.`);
+          warnings.push(`The exports are decimated from ${dz.before} to ${hierarchy.triangles} triangles and stray up to ${fmt(dz.deviation)} from the surface at a face centre, ${fmt(dz.deviation / cellSize)} of the ${fmt(cellSize)} cell (the full mesh: ${fmt(dz.fullDeviation)}): raise the cap (set triangles ${Math.min(dz.before, Math.max(cap, hierarchy.triangles) * 2)}), or set triangles 0 for the full mesh.`);
       }
       if (hierarchy.atlas) write("model.png", hierarchy.atlas.toPng());
       const glbAnimations: GlbAnimation[] = clips.map((c) => {

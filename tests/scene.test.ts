@@ -423,6 +423,22 @@ describe("a triangle cap on the exports", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("warns past a cell with a cap that would raise the count, though each mesh keeps a few triangles under any cap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // Three meshes keep at least four triangles each, so a cap of 1 exports 12: doubling the cap to 2 changes nothing.
+      const src = 'a = sphere(0.5) | paint("red")\nb = sphere(0.5) | move(2, 0, 0) | paint("red")\nc = sphere(0.5) | move(4, 0, 0) | paint("red")\nset triangles 1\nscene a, b, c';
+      const r = run(src, "balls.aix", dir, { grid: 48, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false, texture: 0 });
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.exports.triangles).toBeGreaterThan(1);
+      const w = r.warnings.find((x) => /The exports are decimated/.test(x));
+      expect(w).toBeDefined();
+      const suggested = Number(/raise the cap \(set triangles (\d+)\)/.exec(w!)![1]);
+      expect(suggested).toBeGreaterThan(data.exports.triangles);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("gives the Roblox row the full mesh's count, not the web export's, as what its budget was decimated from", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
