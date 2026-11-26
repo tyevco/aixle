@@ -394,7 +394,7 @@ normal points along most; triangles sharing an edge and an axis form a
 chart; a chart is projected flat along its axis (nearly distortion-free for
 a surface facing that way), and charts are shelf-packed at one
 texels-per-unit scale with padding. Every texel is shaded by the same
-`albedo()` from its interpolated local point, chart borders are dilated so
+`surface()` from its interpolated local point, chart borders are dilated so
 filtering never bleeds background into a seam, and vertices are split per
 chart so each has one UV. The GLB embeds the PNG and samples it; the OBJ
 gets `vt` and `map_Kd`. Vertex colours are left out of a textured GLB,
@@ -405,6 +405,80 @@ wins.
 
 Where two materials meet, a triangle takes the material of its nearest
 vertex per pixel, which makes a clean edge at grid resolution.
+
+## The finish, and the maps that carry it
+
+A displaced trunk, a worn edge and a flame live in the field, and an
+engine sees only the mesh and its textures, so the GLB carried flat
+plastic where the beauty render showed a used object. The finish is one
+function, `surface()`: colour, roughness, metalness, glow and a bump
+height at a local point, given the curvature there. The beauty render
+calls it per pixel and the atlas baker per texel, so the maps are the
+picture's surface, not a second description of it. A material with no
+wear, no bump and no rust takes the old path in both, which is why no
+existing render or GLB changed.
+
+Wear reads curvature from second differences of `dist`, which is cheap
+(nine calls, paid only by a material that wears) and exact for the
+level set of any field whose sign is right: the Laplacian less the
+second derivative along the normal, over the gradient's length. The
+Laplacian alone is what the roadmap proposed, and it is right only for
+a true distance: a smooth union, a loft, a twist or a non-uniform scale
+bends the field off the surface, and that bending read as curvature (12
+to 24% of the value in a fillet). The probe is 1.2% of the model's
+longest side, about one and a half cells at the default grid, so the
+worn band is a look rather than a resolution and a quick pass shows the
+band the full render will. It is +1 on a sharp convex edge, -1 in a
+crease and h/R on a sphere; wear's threshold falls as the wear rises,
+so more of the surface counts as an edge. A part thinner than about two
+probes is all edge: the lantern's bars are rubbed bright along their
+length, which is what a handled bar is.
+
+A bump is a height, not geometry: fractal noise in the paint frame,
+shaded by tilting the normal by its slope. The slope is measured along
+two directions on the surface, per unit of world distance, from how far
+the paint frame's point moves along each: the beauty render finds that
+from two nearby hits, the baker from a triangle's corners, and both call
+the same `bumpSlope()`, so they agree. The edge test that decides which
+beauty pixels get four samples reads the field's normal, not the bumped
+one, or every pixel of a bumped part would be supersampled.
+
+The normal map is tangent space, in glTF's convention (+x toward
+increasing u, +y toward decreasing v, since v runs down the image), and
+is baked against exactly the frame an engine builds: each vertex's
+tangent, its bitangent `cross(N, T) * w`, both interpolated and
+normalised, the target normal solved through that matrix rather than
+projected on it. The tangents come from the charts, which is what makes
+them easy: a chart's two projection axes, laid onto the vertex's tangent
+plane along the chart's axis, are the directions the UVs grow in there,
+and a vertex belongs to one chart, so there is no averaging across
+seams. The ±y projections are mirrored and get w = -1. The field's
+normal under a texel is found by sliding from the mesh point along the
+mesh normal to the surface, and taken one-sided per axis on whichever
+side agrees with the mesh: a central difference at a box's edge mixes in
+the next face, and leaned a plain box's texels 45 degrees in a band
+along every edge. Past 50 degrees the field's normal is the other face
+of an edge the mesh rounds, not detail, and the mesh's normal stands.
+
+A map is written only where it carries something, because most models
+are plain and their GLBs should not grow. The metallic-roughness map is
+written when some material's texels vary in either (wear, rust), the
+emissive map when a glowing material's colour varies (a constant one is
+a factor, which needs no texture), and the normal map only for relief
+the program asked for: a `bump`, or the materials that end up on a
+`displace`. The mesh's own error was the reason for that last rule: on
+every plain example the dual-contoured mesh leans 3 degrees or more off
+the field in a band at creases and junctions (1 to 23% of the texels),
+and a normal map would correct it, but baking it would add a map and
+sixteen bytes a vertex of tangents to every GLB. Which material a
+displace ends up wearing is read from the tree: the material at a point
+is the outermost paint above it, so a displace under a paint gives that
+paint, and one with no paint above gives the paints and decals inside it.
+
+`viewer.html` gives three.js a room environment, because a metal is
+mostly what it reflects: without one the lantern's bare iron rendered
+near black in headless Chromium, and a metallic-roughness map had
+nothing to vary.
 
 ## The language
 
@@ -540,6 +614,6 @@ spent their first renders working out.
 ## What is not here yet
 
 Proposals for what comes next, each with what must be prototyped first,
-are in `roadmap.md`: a full PBR bake from the field, `use` for libraries
+are in `roadmap.md`: `use` for libraries
 of parts, a print report, smooth 2D profiles, `assert`, image textures,
 lights and cameras in the language, and callouts on the views.
