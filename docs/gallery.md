@@ -56,6 +56,14 @@ A spur gear built as a 2D profile and extruded: a disc, teeth added in a
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/gear.aix) · <a href="/aixle/viewers/gear.html" target="_blank" rel="noopener">viewer</a>
 
+### guitar
+
+An acoustic guitar standing on its end, its top facing +z. The body is one
+
+![guitar, beauty render](../examples/renders/guitar_beauty.png) ![guitar, contact sheet](../examples/renders/guitar.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/guitar.aix) · <a href="/aixle/viewers/guitar.html" target="_blank" rel="noopener">viewer</a>
+
 ### lamp
 
 A desk lamp: a weighted base, an arm that is a tube bent through four
@@ -63,6 +71,14 @@ A desk lamp: a weighted base, an arm that is a tube bent through four
 ![lamp, beauty render](../examples/renders/lamp_beauty.png) ![lamp, contact sheet](../examples/renders/lamp.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/lamp.aix) · <a href="/aixle/viewers/lamp.html" target="_blank" rel="noopener">viewer</a>
+
+### lantern
+
+A worn iron lantern with a candle burning inside: the PBR finish. The iron is the
+
+![lantern, beauty render](../examples/renders/lantern_beauty.png) ![lantern, contact sheet](../examples/renders/lantern.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/lantern.aix) · <a href="/aixle/viewers/lantern.html" target="_blank" rel="noopener">viewer</a>
 
 ### medal
 
