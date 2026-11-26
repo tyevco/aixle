@@ -284,16 +284,9 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
     box[s * 4] = x0; box[s * 4 + 1] = y0; box[s * 4 + 2] = x1; box[s * 4 + 3] = y1;
     minx = Math.min(minx, x0); miny = Math.min(miny, y0); maxx = Math.max(maxx, x1); maxy = Math.max(maxy, y1);
   }
-  // Points on the curve, for an upper bound before any search: each piece's start and middle, and the chain's end.
-  const nu = pieces * 2 + 1;
-  const up = new Float64Array(nu * 2);
-  for (let s = 0; s < pieces; s++) {
-    const o = s * 8;
-    up[s * 4] = ctrl[o]; up[s * 4 + 1] = ctrl[o + 1];
-    up[s * 4 + 2] = cubic(co[o], co[o + 1], co[o + 2], co[o + 3], 0.5);
-    up[s * 4 + 3] = cubic(co[o + 4], co[o + 5], co[o + 6], co[o + 7], 0.5);
-  }
-  up[nu * 2 - 2] = ctrl[pieces * 8 - 2]; up[nu * 2 - 1] = ctrl[pieces * 8 - 1];
+  // Which pieces are straight runs on x = 0: a revolve leaves them out (see Shape2.revolveDist).
+  const tol = 1e-9 * (1 + Math.max(Math.abs(minx), Math.abs(maxx), Math.abs(miny), Math.abs(maxy)));
+  const onAxis = (s: number) => [0, 2, 4, 6].every((k) => Math.abs(ctrl[s * 8 + k]) <= tol);
   // The y-monotone parts, for the crossing count: power form (8), the end heights (2, taken from the control points
   // and shared between neighbours so a vertex is counted once), and the exact x range (2).
   const parts: number[] = [];
@@ -317,35 +310,59 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
   const mono = new Float64Array(parts);
   const nparts = mono.length / 12;
   const bx0 = minx, by0 = miny, bx1 = maxx, by1 = maxy;
-  const dist = (x: number, y: number): number => {
-    let best = Infinity;
-    for (let i = 0; i < nu; i++) {
-      const dx = up[i * 2] - x, dy = up[i * 2 + 1] - y;
-      const q = dx * dx + dy * dy;
-      if (q < best) best = q;
+  /**
+   * The field over the pieces listed in `use`: points on them (each piece's start and middle, and its end where no
+   * listed piece starts) give an upper bound before any search, then a piece is searched only when its box is
+   * nearer than the best so far.
+   */
+  const field = (use: number[]): ((x: number, y: number) => number) => {
+    const idx = Int32Array.from(use);
+    const n = idx.length;
+    const on = new Set(use);
+    const pts: number[] = [];
+    for (const s of use) {
+      const o = s * 8;
+      pts.push(ctrl[o], ctrl[o + 1], cubic(co[o], co[o + 1], co[o + 2], co[o + 3], 0.5), cubic(co[o + 4], co[o + 5], co[o + 6], co[o + 7], 0.5));
+      // The end is the next piece's start, unless there is no next piece in the list.
+      const next = s + 1 < pieces ? s + 1 : chain.closed ? 0 : -1;
+      if (!on.has(next)) pts.push(ctrl[o + 6], ctrl[o + 7]);
     }
-    for (let s = 0; s < pieces; s++) {
-      const o = s * 4;
-      const ex = Math.max(box[o] - x, 0, x - box[o + 2]), ey = Math.max(box[o + 1] - y, 0, y - box[o + 3]);
-      if (ex * ex + ey * ey >= best) continue;
-      const q = nearestSq(co, s * 8, x, y);
-      if (q < best) best = q;
-    }
-    const d = Math.sqrt(best);
-    if (!filled) return d - half;
-    if (x < bx0 || x > bx1 || y < by0 || y > by1) return d;
-    let inside = false;
-    for (let k = 0; k < nparts; k++) {
-      const o = k * 12;
-      const ya = mono[o + 8], yb = mono[o + 9];
-      if (!((ya <= y && y < yb) || (yb <= y && y < ya))) continue;
-      if (x >= mono[o + 11]) continue;
-      if (x < mono[o + 10] || crossX(mono, o, y) > x) inside = !inside;
-    }
-    return inside ? -d : d;
+    const up = new Float64Array(pts);
+    const nu = up.length / 2;
+    return (x: number, y: number): number => {
+      let best = Infinity;
+      for (let i = 0; i < nu; i++) {
+        const dx = up[i * 2] - x, dy = up[i * 2 + 1] - y;
+        const q = dx * dx + dy * dy;
+        if (q < best) best = q;
+      }
+      for (let i = 0; i < n; i++) {
+        const s = idx[i], o = s * 4;
+        const ex = Math.max(box[o] - x, 0, x - box[o + 2]), ey = Math.max(box[o + 1] - y, 0, y - box[o + 3]);
+        if (ex * ex + ey * ey >= best) continue;
+        const q = nearestSq(co, s * 8, x, y);
+        if (q < best) best = q;
+      }
+      const d = Math.sqrt(best);
+      if (!filled) return d - half;
+      if (x < bx0 || x > bx1 || y < by0 || y > by1) return d;
+      let inside = false;
+      for (let k = 0; k < nparts; k++) {
+        const o = k * 12;
+        const ya = mono[o + 8], yb = mono[o + 9];
+        if (!((ya <= y && y < yb) || (yb <= y && y < ya))) continue;
+        if (x >= mono[o + 11]) continue;
+        if (x < mono[o + 10] || crossX(mono, o, y) > x) inside = !inside;
+      }
+      return inside ? -d : d;
+    };
   };
+  const all = Array.from({ length: pieces }, (_, s) => s);
+  const dist = field(all);
   const out = shape2(dist, { min: [minx - half, miny - half], max: [maxx + half, maxy + half] }, pieces * COST_PER_PIECE);
   out.feature = filled ? thinnestWall(chain, co, dist, [minx, miny, maxx, maxy]) : wall;
+  const off = all.filter((s) => !onAxis(s));
+  if (filled && off.length < pieces && off.length > 0) out.revolveDist = field(off);
   return out;
 }
 

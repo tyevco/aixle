@@ -711,6 +711,13 @@ describe("smooth profiles", () => {
     const solid = S.revolve(vase);
     expect(solid.bound).toBeUndefined();
     expect(solid.dist(0, 0.02, 0.5)).toBeCloseTo(-0.02, 9);
+    // The run up the axis is inside the solid once spun: no zero along the axis (a line in the slices, a surface to
+    // the glass march), where the plain profile is zero on it. A moved profile has no axis, and keeps its distance.
+    expect(vase.dist(0, 0.1)).toBeCloseTo(0, 9);
+    expect(solid.dist(0, 0.1, 0)).toBeCloseTo(-0.1, 9);
+    expect(solid.dist(0.001, 0.12, 0)).toBeCloseTo(-0.08, 6);
+    expect(S.move2(vase, 0.5, 0).revolveDist).toBeUndefined();
+    expect(S.revolve(vase, 0, 180).dist(0, 0.1, 0.001)).toBeCloseTo(vase.dist(0.001, 0.1), 9);
     const r = surfaceNets(solid, { resolution: 64 });
     expect(isWatertight(r.mesh)).toBe(true);
     const mb = meshBounds(r.mesh);
