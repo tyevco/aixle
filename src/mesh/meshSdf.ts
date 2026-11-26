@@ -170,8 +170,10 @@ export interface MeshSamples {
 }
 
 /**
- * Bumped whenever a change here would sample the same mesh differently, so a cache of samples keyed by it never
- * serves a grid the current code would not have made.
+ * Bumped whenever a change would sample the same file differently, so a cache of samples keyed by it never serves a
+ * grid the current code would not have made. That is a change here or in the readers (`parseObj`, `parseGlb`): the
+ * cache is keyed by the file's bytes, and a hit is never parsed, so a reader that now reads a file's triangles
+ * differently would otherwise be served the samples of the old reading.
  */
 export const SAMPLER_VERSION = 1;
 

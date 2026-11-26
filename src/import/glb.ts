@@ -1,6 +1,8 @@
 /**
  * Parse a binary glTF into triangles: every mesh primitive of every node,
- * with node transforms applied, positions and indices only.
+ * with node transforms applied, positions and indices only. A change to
+ * what it reads from a file bumps SAMPLER_VERSION in src/mesh/meshSdf.ts,
+ * or the import cache serves the samples of the old reading.
  */
 import type { ImportedMesh } from "./obj.js";
 
