@@ -40,6 +40,8 @@ export type ViewName = "persp" | OrthoView;
 export interface ViewInfo {
   name: string;
   bounds: Bounds;
+  /** The size to print, when it is not the framing box's: the surface's extent within the model's bounds. */
+  size?: Bounds;
   /** Perspective camera direction, degrees; defaults 35 and 25. */
   azimuth?: number;
   elevation?: number;
@@ -139,7 +141,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
     renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor });
     floorGrid(cam, target, bounds, label);
     if (ghost) renderGhost(ghost, cam, target, { margin: opts.ghostMargin });
-    if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.bounds)}`, ghost ? GHOST_NOTE : undefined);
+    if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.size ?? info.bounds)}`, ghost ? GHOST_NOTE : undefined);
     opts.capture?.(target, cam);
     return target.canvas;
   }
@@ -194,7 +196,7 @@ export function renderSheet(mesh: Mesh, info: SheetInfo, size: number, ghost?: M
   const gutter = 4, bar = 30;
   const sheet = new Canvas(size * 2 + gutter * 3, size * 2 + gutter * 3 + bar, INK.page);
   sheet.fill(0, 0, sheet.width, bar, INK.bar);
-  const title = `${info.name.toUpperCase()}   ${dimsLabel(info.bounds)} units   ${info.triangles} tris   cell ${fmtCell(info.cellSize)}`;
+  const title = `${info.name.toUpperCase()}   ${dimsLabel(info.size ?? info.bounds)} units   ${info.triangles} tris   cell ${fmtCell(info.cellSize)}`;
   const w = info.warnings > 0 ? `${info.warnings} warning${info.warnings === 1 ? "" : "s"} in report.md` : "";
   // The title at 2x, the warning right-aligned; when they would collide (a small sheet), both at 1x.
   const scale = textWidth(title, 2) + textWidth(w, 2) + 30 <= sheet.width ? 2 : 1;
@@ -231,7 +233,10 @@ export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: P
   const gutter = 4, bar = 30;
   const out = new Canvas(size * 3 + gutter * 4, size + gutter * 2 + bar, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
-  drawText(out, 10, 8, `${info.name.toUpperCase()}   CROSS-SECTIONS   inside is filled, the outline is the surface${ghost ? ", the rest of the model faint" : ""}`, INK.barText, 2);
+  // The title at 2x, or at 1x when it would run off the bar (a slice through a named step has a long one).
+  const title = `${info.name.toUpperCase()}   CROSS-SECTIONS   inside is filled, the outline is the surface${ghost ? ", the rest of the model faint" : ""}`;
+  const big = textWidth(title, 2) + 20 <= out.width;
+  drawText(out, 10, big ? 8 : 11, title, INK.barText, big ? 2 : 1);
   const b = isEmpty(info.bounds) ? { min: [-1, -1, -1] as Vec3, max: [1, 1, 1] as Vec3 } : info.bounds;
   const c = boundsCenter(b);
   const s = boundsSize(b);

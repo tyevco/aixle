@@ -187,6 +187,8 @@ export interface Shape2 {
   gap?: number;
   /** What that gap is; see Shape3.gapWhat. */
   gapWhat?: string;
+  /** Lettering bent onto an arc: the nearest and farthest the ink comes to the arc's centre, the origin. */
+  arcSpan?: [number, number];
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

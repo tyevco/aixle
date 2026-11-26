@@ -8,7 +8,7 @@ import { toGlb } from "../src/export/glb.js";
 import { albedo, preset } from "../src/sdf/materials.js";
 import { bakeAtlas } from "../src/export/atlas.js";
 import { analyse, hull2, insideMargin } from "../src/mesh/physics.js";
-import { countPieces } from "../src/mesh/pieces.js";
+import { countPieces, loosePiece, meshedAnalysis, overhangFraction, type MeshCache } from "../src/mesh/pieces.js";
 import { splitCreases } from "../src/mesh/creases.js";
 import { decimate } from "../src/mesh/decimate.js";
 import { weldIndices } from "../src/mesh/mesh.js";
@@ -231,6 +231,21 @@ describe("pieces", () => {
     expect(countPieces(O.union([P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.9, 0, 0)]), 32)).toBe(1);
     expect(countPieces(O.shell(P.sphere(1), 0.2), 32)).toBe(1);
     expect(countPieces(P.empty(), 32)).toBe(0);
+  });
+  it("meshes a shape once per resolution for every query that shares a cache (round 10: check meshed a hub twice)", () => {
+    const two = O.union([P.sphere(1), O.move(P.box(1, 1, 1), 3, 0, 0)]);
+    const cache: MeshCache = new Map();
+    expect(countPieces(two, 32, cache)).toBe(countPieces(two, 32));
+    const first = meshedAnalysis(two, 32, cache);
+    expect(overhangFraction(two, 32, cache)).toBe(overhangFraction(two, 32));
+    expect(loosePiece(two, 32, cache)).toEqual(loosePiece(two, 32));
+    // One shape, one resolution: one entry, the same analysis object handed back each time.
+    expect(cache.size).toBe(1);
+    expect(cache.get(two)!.size).toBe(1);
+    expect(meshedAnalysis(two, 32, cache)).toBe(first);
+    countPieces(two, 24, cache);
+    expect(cache.get(two)!.size).toBe(2);
+    expect(meshedAnalysis(P.empty(), 32, cache)).toBeNull();
   });
 });
 

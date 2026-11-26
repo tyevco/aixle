@@ -506,3 +506,33 @@ function depthOfField(canvas: Canvas, samples: Sample[], size: number, strength:
 }
 
 
+
+/**
+ * What one light adds to a picture: the render under that light alone minus the render under no light at all (the
+ * ambient sky, the glows and the reflections), brightened so its brightest part is near white, on black. A small
+ * point light adds a few dim pixels to a whole render (round 10: a ring's spark could be seen in lights.png but not
+ * judged); here its reach and its colour fill the frame. The gain is the brightening, 1 to 32; both pictures must be
+ * the same shot, unlabelled.
+ */
+export function lightContribution(alone: Canvas, none: Canvas): { canvas: Canvas; gain: number } {
+  const w = alone.width, h = alone.height;
+  const out = new Canvas(w, h, 0);
+  const diff = new Float32Array(w * h * 3);
+  const peaks: number[] = [];
+  for (let i = 0; i < w * h; i++) {
+    let peak = 0;
+    for (let c = 0; c < 3; c++) {
+      const d = Math.max(0, alone.data[i * 4 + c] - none.data[i * 4 + c]);
+      diff[i * 3 + c] = d;
+      peak = Math.max(peak, d);
+    }
+    if (peak > 1) peaks.push(peak);
+  }
+  // The brightest part is a near-white highlight, but a few saturated pixels should not set the gain: the 99th
+  // percentile of what the light reaches does.
+  peaks.sort((a, b) => a - b);
+  const p = peaks.length ? peaks[Math.min(peaks.length - 1, Math.floor(peaks.length * 0.99))] : 0;
+  const gain = p > 0 ? Math.max(1, Math.min(32, 230 / p)) : 1;
+  for (let i = 0; i < w * h; i++) out.set(i % w, Math.floor(i / w), rgbf((diff[i * 3] * gain) / 255, (diff[i * 3 + 1] * gain) / 255, (diff[i * 3 + 2] * gain) / 255));
+  return { canvas: out, gain };
+}

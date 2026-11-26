@@ -255,6 +255,21 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     seg.length = 0;
     seg.push(...bent);
   }
+  // On an arc the box is not what a reader reasons about: the radii the ink spans are (round 10: an engraving on a
+  // boss's top broke out over its rim, and the box's y said so only to a reader who knew to look).
+  let arcSpan: [number, number] | undefined;
+  if (arc !== 0) {
+    let near = Infinity, far = 0;
+    for (let i = 0; i < seg.length; i += 4) {
+      const ax = seg[i], ay = seg[i + 1], bx = seg[i + 2], by = seg[i + 3];
+      far = Math.max(far, Math.hypot(ax, ay), Math.hypot(bx, by));
+      // The nearest point of the segment to the origin, which a chord can bring inside its two ends.
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+      near = Math.min(near, Math.hypot(ax + dx * t, ay + dy * t));
+    }
+    arcSpan = [Math.max(0, near - half), far + half];
+  }
   const s = new Float64Array(seg);
   const n = s.length / 4;
   const out = shape2((x, y) => {
@@ -273,6 +288,7 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     return Math.sqrt(best) - half;
   }, bounds, n);
   out.feature = weight;
+  if (arcSpan) out.arcSpan = arcSpan;
   // The narrowest counter: about 2 grid units between stroke centres for a lowercase e or a, 2.8 for capitals and
   // digits, less one stroke. Under half a cell it closes up (measured: "Best in Show" at 0.12 became non-manifold
   // blobs, while capitals at 0.13 with counters of 0.7 of a cell read fine).

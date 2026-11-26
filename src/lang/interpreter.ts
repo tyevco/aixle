@@ -10,7 +10,7 @@ import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } fro
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
 import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
-import { loosePiece } from "../mesh/pieces.js";
+import { loosePiece, type MeshCache } from "../mesh/pieces.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -18,7 +18,7 @@ import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type
 import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
-const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment"]);
+const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "slice"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
@@ -259,6 +259,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
   const settings: Settings = {};
+  // One mesh per shape and resolution for this evaluation's pieces() and overhang() (and a failing pieces()'s loose
+  // piece): measured on round 10's hub, check fell from 3.9 s to 2.5 s when the two queries shared the hub's mesh.
+  const meshes: MeshCache = new Map();
   // Whether this evaluation is a pose: any joint given a pose that is not rest.
   const posed = Object.values(options.jointPoses ?? {}).some((j) => j.angles.some((v) => v !== 0) || j.move.some((v) => v !== 0) || j.scale.some((v) => v !== 1));
   // Inside an assert's test, where a query in a pose reads a step where the pose put it; geometry built from a
@@ -744,7 +747,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A pieces() promise that fails names the loose piece, as the report's Pieces row does (round 10: four renders).
     if (assertDepth > 0 && callee === "pieces" && typeof result === "number" && result > 1 && isShape3(values[0].value)) {
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
-      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64);
+      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64, meshes);
       if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
     }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
@@ -782,7 +785,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const bound = bind(ov, args);
       if (typeof bound === "string") { failures.push(bound); continue; }
       try {
-        return ov.impl(bound.values, bound.rest);
+        return ov.impl(bound.values, bound.rest, { meshes });
       } catch (err) {
         const msg = (err as Error).message;
         throw new RuntimeError(msg.startsWith(`${b.name}(): `) ? msg : `${b.name}(): ${msg}`, line);
@@ -1117,6 +1120,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A sky the renderer has, a shot the program declared.
     if (settings.environment !== undefined && !ENVIRONMENT_NAMES.includes(String(settings.environment))) warnings.push(`set environment ${settings.environment}: no such environment; the skies are ${ENVIRONMENT_NAMES.join(", ")} (studio is the default)`);
     if (typeof settings.camera === "string" && !cameras.some((c) => c.name === settings.camera)) warnings.push(`set camera ${settings.camera}: no such camera${cameras.length ? `; cameras: ${cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; the render uses its own view`);
+    // `set slice name` puts the cross-sections through a step: a name that is no step is said here, before a render.
+    if (settings.slice !== undefined && (typeof settings.slice !== "string" || (!steps.has(settings.slice) && !(shown?.names ?? []).includes(settings.slice)))) warnings.push(`set slice ${settings.slice}: ${typeof settings.slice === "string" ? "no such step or object" : "takes a step's name (set slice_x 0.5 moves one plane)"}; the slices cut through the model's centre`);
     for (const c of cameras) if (c.focus && !steps.has(c.focus) && !(shown?.names ?? []).includes(c.focus)) warnings.push(`camera "${c.name}" (line ${c.line}): focus="${c.focus}" names no step or object; the shot frames the whole model`);
     for (const a of animations) {
       // Two keys are both ends: ease_ends=0 leaves nothing eased (round 8: a flick expected to settle ran linear).
@@ -1129,6 +1134,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // Roles: a part is anything the output is built from; below a cut name the subtree is a cut; a name only an
   // assert, a decal or a camera reads is a region. A part stays a part however else it is read.
   for (const c of cameras) if (c.focus) regionNames.add(c.focus);
+  // A step only sliced through (a probe the planes should cross) is a region too.
+  if (typeof settings.slice === "string" && steps.has(settings.slice)) regionNames.add(settings.slice);
   const roles = new Map<string, StepRole>();
   const rank = (r: StepRole | undefined) => (r === "part" ? 4 : r === "cut" ? 3 : r === "mask" ? 2 : r === "region" ? 1 : 0);
   const visit = (nme: string, role: StepRole) => {

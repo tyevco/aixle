@@ -64,6 +64,7 @@ function usage(): never {
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
+      "                          [--slice NAME]                     slices.png through one step, framed on it, the rest of the model faint",
       "                          [--camera NAME] [--environment NAME]  one declared shot only (the sheet takes its view); a sky over the program's",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
@@ -142,6 +143,9 @@ function main(argv: string[]): number {
         if (isShape2(st.value)) {
           const b = st.value.bounds;
           console.log(`${st.name.padEnd(18)} ${isEmpty2(b) ? "profile, empty" : `profile ${short(b.max[0] - b.min[0])} × ${short(b.max[1] - b.min[1])}`.padEnd(20) + ` x ${short(b.min[0])}..${short(b.max[0])}  y ${short(b.min[1])}..${short(b.max[1])}`}`);
+          // Lettering on an arc: the radii it spans from the origin, which is what meets a rim (round 10).
+          const span = st.value.arcSpan;
+          if (span) console.log(`${"  on the arc".padEnd(18)} r ${Number(span[0].toPrecision(3))}..${Number(span[1].toPrecision(3))} from the origin`);
           continue;
         }
         if (!isShape3(st.value)) continue;
@@ -361,6 +365,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       zoom: typeof opts.zoom === "string" ? Number(opts.zoom) : undefined,
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
       focus: typeof opts.focus === "string" ? opts.focus : undefined,
+      slice: typeof opts.slice === "string" ? opts.slice : undefined,
       pose: typeof opts.pose === "string" ? opts.pose : undefined,
       camera: typeof opts.camera === "string" ? opts.camera : undefined,
       environment: typeof opts.environment === "string" ? opts.environment : undefined,

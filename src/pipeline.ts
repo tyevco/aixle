@@ -21,9 +21,9 @@ import type { Vec3 } from "./core/vec.js";
 import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
-import { drawText } from "./render/font.js";
+import { drawText, textWidth } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
-import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertResult, evaluate, type Evaluation, type StepRole } from "./lang/interpreter.js";
@@ -35,6 +35,7 @@ import { surfaceNets } from "./mesh/surfaceNets.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
+import { sliceLevels } from "./sdf/measure.js";
 
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
 export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
@@ -97,6 +98,8 @@ export interface RunOptions {
   zoom?: number;
   /** Frame every view on this named step or object instead of the whole model (or `set focus name`). */
   focus?: string;
+  /** Put slices.png's three planes through this named step, framed on it (or `set slice name`). */
+  slice?: string;
 }
 
 export interface RunResult {
@@ -648,6 +651,19 @@ export function tightBounds(shape: Shape3, rays = 48): Bounds {
   return loose ? t : b;
 }
 
+/** A strip's title in its bar: at 2x, or at 1x when a strip of two frames is too narrow for it. */
+function barTitle(strip: Canvas, text: string): void {
+  const big = textWidth(text, 2) + 20 <= strip.width;
+  drawText(strip, 10, big ? 7 : 10, text, INK.barText, big ? 2 : 1);
+}
+
+/** `a` held within `b`, axis by axis: a mesh's extent within bounds that are never smaller than the surface. */
+export function clampBounds(a: Bounds, b: Bounds): Bounds {
+  const min = [0, 1, 2].map((k) => Math.min(Math.max(a.min[k], b.min[k]), b.max[k])) as [number, number, number];
+  const max = [0, 1, 2].map((k) => Math.max(Math.min(a.max[k], b.max[k]), min[k])) as [number, number, number];
+  return { min, max };
+}
+
 /** The grid and cell size a render of this evaluation would use, from its settings and bounds. */
 export function cellFor(evaluation: Evaluation, gridOverride?: number): { grid: number; cellSize: number } {
   const grid = Math.max(8, Math.round(gridOverride ?? (evaluation.settings.grid as number | undefined) ?? 128));
@@ -779,6 +795,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let ghosted: string | undefined;
   // Which steps callouts.png labelled, for the report.
   let calloutNote: string | undefined;
+  // The step slices.png cut through, when it was asked for one.
+  let sliceNote: string | undefined;
   let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[] } | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
@@ -830,9 +848,16 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; every shot is rendered`);
   const azimuth = opts.azimuth ?? shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
-  const environmentName = opts.environment ?? evaluation.settings.environment;
+  // `--environment all`, or a list `--environment studio,overcast`, renders the shot under each of those skies into
+  // environments.png in the one run (round 10: a glass dome compared under two skies took two full renders); a list
+  // gives beauty.png its first sky, as a single name does, and `all` leaves beauty.png the program's own.
+  const skyArg = opts.environment;
+  const skyList = skyArg === "all" ? [...ENVIRONMENTS] : skyArg && skyArg.includes(",") ? skyArg.split(",").map((x) => x.trim()).filter(Boolean) : undefined;
+  const badSkies = (skyList ?? (skyArg && skyArg !== "all" ? [skyArg] : [])).filter((x) => !ENVIRONMENTS.includes(x as Environment));
+  const skies = skyList?.filter((x): x is Environment => ENVIRONMENTS.includes(x as Environment));
+  const environmentName = skyArg === "all" ? evaluation.settings.environment : skyList ? skies?.[0] ?? evaluation.settings.environment : skyArg ?? evaluation.settings.environment;
   const environment: Environment | undefined = ENVIRONMENTS.includes(environmentName as Environment) ? (environmentName as Environment) : undefined;
-  if (opts.environment && opts.environment !== "all" && !environment) warnings.push(`--environment ${opts.environment}: no such environment; the skies are ${ENVIRONMENTS.join(", ")}, or all for a strip of every sky`);
+  if (badSkies.length) warnings.push(`--environment ${badSkies.join(",")}: no such environment; the skies are ${ENVIRONMENTS.join(", ")}, a list of them (studio,overcast), or all for a strip of every sky`);
 
   const crease = opts.crease ?? (typeof evaluation.settings.crease === "number" ? evaluation.settings.crease : undefined);
   let minecraftNote: string | undefined;
@@ -996,7 +1021,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
           : `yes at cell ${fmt(close.cellSize)} (the clip faces of the frame are not counted)`;
       }
     }
-    const info = { name: shownName, bounds: frame, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation };
+    // The size in the title is the mesh's extent held within the model's bounds, which are never smaller than the
+    // surface: a coarse cell's vertices stray past a face (round 10: a quick sheet titled a 0.5-tall flange 0.52,
+    // its engraving's vertices standing proud of the boss), and the frame keeps the mesh's own extent.
+    const shownSize = !focusStep && trueBounds ? clampBounds(trueBounds, bounds) : undefined;
+    const info = { name: shownName, bounds: frame, size: shownSize, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation };
     time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size, viewGhost, ghostCell).toPng()));
     // The perspective view with the largest visible steps named, a leader line each: what maps a picture back to
     // the program (roadmap 9: "the thing at the top left is lantern_ring" as a fact). Not on a quick pass.
@@ -1034,20 +1063,57 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       }
       // A scene's default cut goes through its first object, which is the one to list first; a focus wins over that.
       const first = evaluation.objects.length > 1 && !focusName ? evaluation.objects[0].shape.bounds : undefined;
-      const sliceInfo = first && !isEmpty(first) ? { ...info, bounds: first, name: `${info.name} → ${evaluation.objects[0].name}` } : info;
+      let sliceInfo: typeof info = first && !isEmpty(first) ? { ...info, bounds: first, name: `${info.name} → ${evaluation.objects[0].name}` } : info;
+      // A focus sheet's slices cut the part, with the cut through the rest of the model faint around it.
+      let sliced: Shape3 = viewGhost && focusShape ? focusShape : output;
+      let slicedGhost: Shape3 | undefined = viewGhost && focusShape ? output : undefined;
+      // The default planes, which a plane lying on a face moves off.
+      const levels: Partial<Record<"x" | "y" | "z", number>> = {};
+      // `set slice tree` (or --slice tree): the three planes through one step where the output puts it, framed on it
+      // with room round it for what it stands on, its own cut in full and the rest of the model's faint (round 10:
+      // a terrarium's planes through the model's centre showed a plant as a floating blob, its stem off them). The
+      // planes go through the step's solid centroid, or its widest section where the centroid's plane would cut
+      // little of it (measured on 74 parts in five programs: a plane through the box's centre missed the part on 4
+      // of 148 vertical cuts and cut under a quarter of its widest section on 8; the centroid rule on none).
+      const sliceName = opts.slice ?? (typeof evaluation.settings.slice === "string" ? evaluation.settings.slice : undefined);
+      let slicedThrough: string | undefined;
+      if (sliceName) {
+        const r = resolveFocus(sliceName);
+        const st = evaluation.steps.find((x) => x.name === sliceName && isShape3(x.value));
+        const role = st ? evaluation.roles.get(st.name) : undefined;
+        // The step itself where the output puts it: a region or a cutter is not geometry, so its own solid places the
+        // planes and the model is drawn in full.
+        const own = st ? ((output && placedShape(output, st.value as Shape3)) ?? (st.value as Shape3)) : r?.shape;
+        const lv = own ? sliceLevels(own, tightBounds(own), 40) : undefined;
+        if (r && own && lv) {
+          const ob = tightBounds(own);
+          const grow = Math.max(...boundsSize(ob)) * 0.25;
+          const frameS: Bounds = { min: [ob.min[0] - grow, ob.min[1] - grow, ob.min[2] - grow], max: [ob.max[0] + grow, ob.max[1] + grow, ob.max[2] + grow] };
+          sliceInfo = { ...info, bounds: frameS, name: `${shownJoints ? `${evaluation.outputName} in pose ${shownPose}` : evaluation.outputName} → slice ${sliceName}` };
+          const asPart = role !== "region" && role !== "cut";
+          sliced = asPart ? own : output;
+          slicedGhost = asPart ? output : undefined;
+          (["x", "y", "z"] as const).forEach((axis, k) => { levels[axis] = lv.at[k]; });
+          slicedThrough = `${sliceName}${asPart ? "" : ` (${role})`}`;
+        } else warnings.push(`slice ${sliceName}: no such step or object with a surface; the slices cut through the model's centre`);
+      }
       // A default plane that lies on a face (a 0.25-thick disc cut at y = 0.25) draws that face as outline, not as a
       // section: when a share of the mesh sits on the plane, it moves in by a cell and a half (round 10).
       if (!isEmpty(sliceInfo.bounds)) {
-        const sc = boundsCenter(sliceInfo.bounds), n = viewMesh.positions.length / 3;
+        const n = viewMesh.positions.length / 3;
         for (const [k, axis] of (["x", "y", "z"] as const).entries()) {
-          if (at[axis] !== undefined || n === 0) continue;
+          if (at[axis] !== undefined) continue;
+          if (n === 0) { if (levels[axis] !== undefined) at[axis] = levels[axis]; continue; }
+          const level = levels[axis] ?? (slicedThrough ? undefined : boundsCenter(sliceInfo.bounds)[k]);
+          if (level === undefined) continue;
           let on = 0;
-          for (let v = 0; v < n; v++) if (Math.abs(viewMesh.positions[v * 3 + k] - sc[k]) < viewCell * 0.5) on++;
-          if (on > n * 0.05) at[axis] = sc[k] - viewCell * 1.5;
+          for (let v = 0; v < n; v++) if (Math.abs(viewMesh.positions[v * 3 + k] - level) < viewCell * 0.5) on++;
+          if (on > n * 0.05) at[axis] = level - viewCell * 1.5;
+          else if (levels[axis] !== undefined) at[axis] = levels[axis];
         }
       }
-      // A focus sheet's slices cut the part, with the cut through the rest of the model faint around it.
-      time("slices", () => write("slices.png", renderSlices(viewGhost && focusShape ? focusShape : output, sliceInfo, Math.round(size * 0.75), at, viewGhost && focusShape ? output : undefined).toPng()));
+      time("slices", () => write("slices.png", renderSlices(sliced, sliceInfo, Math.round(size * 0.75), at, slicedGhost).toPng()));
+      if (slicedThrough) sliceNote = slicedThrough;
     }
     if (opts.turntable !== false) time("turntable", () => write("turntable.png", renderTurntable(mesh!, info, Math.round(size / 2)).toPng()));
     // The same turn as a picture that moves: 24 frames in an animated PNG, which a browser plays and a plain
@@ -1192,42 +1258,56 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // (measured: a focused beauty render fitted every point and framed the whole mug).
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
         write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label }).toPng());
-      time("beauty", () => shoot("beauty.png", beautyFrame, !!(shotFocus || focusName), azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(beautyFrame)}`));
-      // Every sky at once, for choosing one: --environment all writes environments.png beside the program's own.
-      if (opts.environment === "all") {
-        const frame = Math.max(96, Math.round(bsize * 0.4));
+      time("beauty", () => shoot("beauty.png", beautyFrame, !!(shotFocus || focusName), azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
+      // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders.
+      const stripFrame = Math.max(96, Math.round(bsize * 0.5));
+      const framed = !!(shotFocus || focusName);
+      const stripShot = (o: Partial<Parameters<typeof renderBeauty>[3]>) =>
+        renderBeauty(output, mesh!, beautyFrame, { size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: framed ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: framed ? modelBounds : undefined, ...o });
+      // Every sky at once, or the ones listed, for choosing one: environments.png beside beauty.png.
+      if (skies && skies.length) {
         const gutter = 6, bar = 26;
-        const strip = new Canvas((frame + gutter) * ENVIRONMENTS.length + gutter, bar + frame + gutter * 2, INK.page);
+        const strip = new Canvas((stripFrame + gutter) * skies.length + gutter, bar + stripFrame + gutter * 2, INK.page);
         strip.fill(0, 0, strip.width, bar, INK.bar);
-        drawText(strip, 10, 7, `ENVIRONMENTS   the same shot under each sky`, INK.barText, 2);
+        barTitle(strip, `ENVIRONMENTS   the same shot under ${skyArg === "all" ? "each sky" : skies.join(", ")}`);
         time("environments", () => {
-          ENVIRONMENTS.forEach((env, i) => {
-            strip.blit(renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment: env, fitPoints: shotFocus || focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocus || focusName ? modelBounds : undefined, label: env }), gutter + i * (frame + gutter), bar + gutter);
-          });
+          skies.forEach((env, i) => strip.blit(stripShot({ environment: env, label: env }), gutter + i * (stripFrame + gutter), bar + gutter));
         });
         write("environments.png", strip.toPng());
       }
       log(`beauty render ${bsize}px in ${timings.beauty} ms`);
-      // Every declared camera is a shot of its own, framed on its focus= when it has one.
       // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
-      // near-identical pictures (round 9: two agents could not tell whether a light did anything).
+      // near-identical pictures (round 9: two agents could not tell whether a light did anything); under it, what each
+      // light adds on its own, brightened, so a small point light's reach and colour can be judged (round 10: a
+      // ring's spark was a few pixels in the strip), and last the picture under no light at all.
       if (lights && lights.length >= 2) {
-        const frame = Math.max(96, Math.round(bsize * 0.4));
-        const gutter = 6, bar = 26;
-        const strip = new Canvas((frame + gutter) * (lights.length + 1) + gutter, bar + frame + gutter * 2, INK.page);
+        const gutter = 6, bar = 26, rowBar = 16;
+        const cols = lights.length + 1;
+        const strip = new Canvas((stripFrame + gutter) * cols + gutter, bar + (stripFrame + gutter) * 2 + rowBar + gutter, INK.page);
         strip.fill(0, 0, strip.width, bar, INK.bar);
-        drawText(strip, 10, 7, `LIGHTS   each alone, then all ${lights.length}`, INK.barText, 2);
-        const one = (ls: BeautyLight[] | undefined, label: string) =>
-          renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights: ls, environment, fitPoints: focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: focusName ? modelBounds : undefined, label });
+        barTitle(strip, `LIGHTS   each alone, then all ${lights.length}`);
+        const rowY = bar + gutter + stripFrame + gutter;
+        drawText(strip, 10, rowY + 3, "what each adds on its own, brightened by the gain shown. last: no light at all, the sky's ambient and the glows", INK.dim, 1);
+        const label = (c: Canvas, text: string, color = INK.dim) => drawText(c, 8, c.height - 12, text, color, 1);
         time("lights", () => {
+          // No light: the same shot with one light of no power, so the lights' floor shares and the sky stay as they are.
+          const none = stripShot({ lights: [{ ...lights[0], power: 0 }] });
           lights.forEach((l, i) => {
             const desc = l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`;
-            strip.blit(one([l], `${l.name}  ${desc}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}`), gutter + i * (frame + gutter), bar + gutter);
+            const alone = stripShot({ lights: [l] });
+            const adds = lightContribution(alone, none);
+            label(alone, `${l.name}  ${desc}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}`);
+            label(adds.canvas, `${l.name} adds${adds.gain > 1.05 ? `, ×${fmt(Number(adds.gain.toPrecision(2)))}` : ""}`, 0xb0b0b0);
+            strip.blit(alone, gutter + i * (stripFrame + gutter), bar + gutter);
+            strip.blit(adds.canvas, gutter + i * (stripFrame + gutter), rowY + rowBar);
           });
-          strip.blit(one(lights, "all"), gutter + lights.length * (frame + gutter), bar + gutter);
+          strip.blit(stripShot({ label: "all" }), gutter + lights.length * (stripFrame + gutter), bar + gutter);
+          label(none, "no light");
+          strip.blit(none, gutter + lights.length * (stripFrame + gutter), rowY + rowBar);
         });
         write("lights.png", strip.toPng());
       }
+      // Every declared camera is a shot of its own, framed on its focus= when it has one.
       for (const c of evaluation.cameras) {
         if (shot && opts.camera && c.name !== shot.name) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
@@ -1314,7 +1394,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       "| --- | --- |",
       `| Size (w × h × d) | ${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} units |`,
       `| Bounds | x ${fmt(bounds.min[0])}..${fmt(bounds.max[0])}, y ${fmt(bounds.min[1])}..${fmt(bounds.max[1])}, z ${fmt(bounds.min[2])}..${fmt(bounds.max[2])} (a box; loose after a cut, a rotation or a twist) |`,
-      ...(trueBounds ? [`| Surface extent | x ${fmt(trueBounds.min[0])}..${fmt(trueBounds.max[0])}, y ${fmt(trueBounds.min[1])}..${fmt(trueBounds.max[1])}, z ${fmt(trueBounds.min[2])}..${fmt(trueBounds.max[2])} (from the mesh) |`] : []),
+      ...(trueBounds ? (() => { const e = clampBounds(trueBounds!, bounds!); return [`| Surface extent | x ${fmt(e.min[0])}..${fmt(e.max[0])}, y ${fmt(e.min[1])}..${fmt(e.max[1])}, z ${fmt(e.min[2])}..${fmt(e.max[2])} (from the mesh, within the bounds) |`]; })() : []),
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
@@ -1393,7 +1473,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "sheet.png": `perspective, front, right and top views with grids${focusNote}`,
     "persp.png": "perspective view", "front.png": "front view (from +z)", "right.png": "right view (from +x)", "top.png": "top view (from +y)",
     "back.png": "back view", "left.png": "left view", "bottom.png": "bottom view",
-    "slices.png": "cross-sections through the centre on each axis",
+    "slices.png": sliceNote ? `cross-sections through ${sliceNote} at its centroid (or its widest section), framed on it, the rest of the model faint` : "cross-sections through the centre on each axis",
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
     "callouts.png": "the perspective view with the largest visible steps named, a leader line from each label to its part",
     "turntable.png": "eight views around the model",
@@ -1407,8 +1487,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
-    "lights.png": "the beauty render under each declared light alone, then all of them, so each light's contribution can be seen",
-    "environments.png": "the beauty render under each sky, from --environment all",
+    "lights.png": "the beauty render under each declared light alone, then all of them; under each, what that light adds on its own, brightened, and the picture under no light at all",
+    "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}`,
     ...cameraFiles,
   };
   for (const f of files) lines.push(`- \`${f}\`: ${descriptions[f] ?? (f.startsWith("anim_") ? "frames through the animation" : "")}`);

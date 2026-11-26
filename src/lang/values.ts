@@ -2,6 +2,7 @@
 import type { Expr } from "./ast.js";
 import type { Material, Shape2, Shape3 } from "../sdf/types.js";
 import { isCurve, type Curve } from "../sdf/curves.js";
+import type { MeshCache } from "../mesh/pieces.js";
 
 export interface UserFn {
   kind: "fn";
@@ -38,10 +39,15 @@ export interface Param {
   doc?: string;
 }
 
+/** What one evaluation lends a builtin: a mesh of a shape at a resolution, shared by every query that meshes it. */
+export interface CallContext {
+  meshes?: MeshCache;
+}
+
 export interface Overload {
   params: Param[];
   returns: "number" | "string" | "shape" | "shape2" | "material" | "list" | "curve" | "transform" | "any";
-  impl: (args: Value[], rest: Value[]) => Value;
+  impl: (args: Value[], rest: Value[], ctx?: CallContext) => Value;
 }
 
 export interface Builtin {

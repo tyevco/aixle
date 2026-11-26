@@ -117,7 +117,7 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
 
 ### text
 
-Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.
+Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell, and for text on an arc prints the radii the lettering spans from the origin (`r 0.255..0.385`), which is what meets a rim.
 
     text(text, size=1, weight=0.15, align="left", spacing=0, arc=0, face="sans") -> shape2
 
@@ -443,7 +443,7 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead.
 
     pieces(shape, resolution=64) -> number
 
@@ -451,7 +451,7 @@ How many separate pieces the shape meshes into at `resolution` cells on its long
 
 ### overhang
 
-The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment.
+The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment, the same mesh pieces() reads.
 
     overhang(shape, resolution=64) -> number
 
