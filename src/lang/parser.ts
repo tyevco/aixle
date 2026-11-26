@@ -63,7 +63,7 @@ class Parser {
   private expectIdent(what: string): Token {
     if (!this.at("ident")) throw new SyntaxError(`expected ${what} but found ${describe(this.peek())}`, this.peek().line);
     const t = this.next();
-    if (KEYWORDS.has(t.value)) throw new SyntaxError(`'${t.value}' is a keyword and cannot be a ${what}`, t.line);
+    if (KEYWORDS.has(t.value)) throw new SyntaxError(`'${t.value}' is a keyword and cannot be ${what}`, t.line);
     return t;
   }
   private skipNewlines(): void {

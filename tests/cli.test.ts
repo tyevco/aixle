@@ -56,6 +56,10 @@ describe("libraries", () => {
     expect(doc).toMatch(/^# hardware\n\nstd\/hardware: bolts, nuts/);
     expect(doc).toMatch(/## hex_bolt\(r=0\.1, len=0\.6\)\n\nA hex-head bolt/);
     expect(doc).toMatch(/Constants: steel, zinc/);
+    // A record default is printed whole, and a default is read for its own name, not one that ends like it.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-doc-"));
+    writeFileSync(join(dir, "seat.aix"), "# seats\nx = 1\n\n# A seat sized by a record.\ndef seat(s={w: 0.9, h: 0.45}, wh=2, h=3) = box(s.w, s.h, wh + h)\nshow seat()\n");
+    expect(cli("doc", join(dir, "seat.aix"))).toMatch(/## seat\(s=\{w: 0\.9, h: 0\.45\}, wh=2, h=3\)\n\nA seat sized by a record\./);
     const arm = cli("check", "examples/arm.aix");
     expect(arm).toMatch(/^joints:\n  \w+ at \(/m);
     const check = cli("check", "examples/workshop.aix");

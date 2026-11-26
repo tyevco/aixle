@@ -594,6 +594,7 @@ describe("records", () => {
     expect(() => parse("p = {x: 1 y: 2}")).toThrow(/expected ',' or '\}' in the record/);
     expect(() => parse("p = {x: 1\n")).toThrow(/the record opened on line 1 is never closed/);
     expect(() => parse("p = {1: 2}")).toThrow(/a record's entries are name: value/);
+    expect(() => parse("p = {in: 2}")).toThrow(/'in' is a keyword and cannot be a field name$/);
   });
   it("keeps the dot apart from numbers: p.x is a field, .5 and 1.5 numbers, p.0 an error that says to index", () => {
     const ev = run("p = {x: 2}\na = p.x*.5\nb = 1.5+p.x");

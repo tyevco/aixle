@@ -61,9 +61,9 @@ function libraryMarkdown(file: string): string {
     if (st.type !== "def") continue;
     const doc: string[] = [];
     for (let i = st.line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, ""));
-    // The default as written on the def's line when it is a plain value; a record or a call is printed from its tree,
-    // since the text up to the next comma would cut it in half.
-    const written = (name: string): string | undefined => lines[st.line - 1].match(new RegExp(`${name}\\s*=\\s*([^,)]+)`))?.[1]?.trim();
+    // The default as written on the def's line when it is a plain value, found by the parameter's own name (h, not
+    // the h of wh=2); a record or a call is printed from its tree, since the text up to the next comma would cut it.
+    const written = (name: string): string | undefined => lines[st.line - 1].match(new RegExp(`(?<![\\w.])${name}\\s*=\\s*([^,)]+)`))?.[1]?.trim();
     const balanced = (t: string) => [..."([{"].every((o, k) => t.split(o).length === t.split(")]}"[k]).length);
     const params = st.params.map((p) => { if (!p.default) return p.name; const w = written(p.name); return `${p.name}=${w !== undefined && balanced(w) ? w : exprText(p.default)}`; });
     out.push(`## ${st.name}(${params.join(", ")})`, "");
