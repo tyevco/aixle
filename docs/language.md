@@ -372,9 +372,13 @@ cut, blended, hollowed and painted like anything else. `size=` scales its
 longest side to that many units. Closed meshes work; an open mesh has no
 inside, and `check` says so. Positions and triangles only: the mesh's
 materials are not read, and `resolution` is the sampling of the import,
-separate from the render grid. Sampling a large mesh takes tens of
-seconds, and minutes for a scene at resolution 300, and `check` and
-`render` each do it. A mesh of overlapping closed shells (the tool's own
+separate from the render grid. Sampling takes a second or a few at the
+default resolution, and fifteen seconds or more at 200 (the cost grows
+with the cube of the resolution); the samples are then cached on disk by
+the file's content, so `check` and the `render` after it, and every run
+after those, sample a file once at each resolution (the log says "read
+from the cache"; `--no-cache` samples afresh, and an edited file is a
+new entry by itself). A mesh of overlapping closed shells (the tool's own
 GLB of a scene, where objects are sunk into each other) imports as one
 solid: the sign is the winding count of crossings, not their parity. The import's own detail is limited by its
 resolution: anything in the mesh thinner than about 1.2 of its sampling
@@ -869,7 +873,18 @@ viewer and the GLB; `set crease 60` splits only sharper corners, `set
 crease 0` keeps one smooth normal per vertex for a sculpted model that
 should read soft (`--crease` on the command line). `set texture
 2048` sizes the baked texture atlas (`0` turns it off and the GLB carries
-vertex colours instead). `set minecraft 16` also writes Minecraft Bedrock
+vertex colours instead). `set triangles 50000` caps the GLB, the OBJ and
+the viewer page at that many triangles (`--triangles` on the command
+line; 200000 when neither says, `0` for every triangle): past it the
+export is decimated before the atlas is baked, keeping material seams
+and creases, and the report's Exports row says from how many and how far
+the result strays from the model at a face centre, beside the full
+mesh's own; a decimation that strays more than a cell and further than
+the full mesh warns. The sheet and the STL are never decimated. Down to
+about a quarter of the mesh the export reads as the full one; below
+that, curved bands between soft corners (a lathe profile's bends) shade
+in streaks though the surface is in place, and the row says so: read
+`viewer.html` before shipping a cap that low. `set minecraft 16` also writes Minecraft Bedrock
 geometry (`--minecraft` on the command line, with an optional pixel
 count): the field is sampled at that many pixels per unit, a unit being
 one block, every filled voxel is a pixel of solid, and the voxels are

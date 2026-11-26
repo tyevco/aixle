@@ -366,3 +366,90 @@ describe("placed sets inside an object", () => {
     expect(new Set(set.children.map((c) => c.mesh)).size).toBe(1);
   });
 });
+
+describe("a triangle cap on the exports", () => {
+  it("decimates each mesh in its own frame and measures how far it strays from the field", async () => {
+    const { faceDeviation } = await import("../src/mesh/decimate.js");
+    const { triangleCount } = await import("../src/mesh/mesh.js");
+    // A body with a jointed leg: the leg's mesh is relative to its pivot, so a deviation read in the wrong frame
+    // would be the pivot's distance, not a fraction of a cell.
+    const leg = O.joint(O.move(P.cylinder(0.2, 1), 0.6, 0.5, 0), "leg", 0.6, 1, 0);
+    const pet = O.union([O.move(P.sphere(0.8), 0, 1, 0), leg]);
+    const cell = 0.02;
+    const full = buildHierarchy([{ name: "pet", shape: pet }], { cellSize: cell, texture: 0 });
+    expect(full.decimated).toBeUndefined();
+    const h = buildHierarchy([{ name: "pet", shape: pet }], { cellSize: cell, texture: 0, maxTriangles: 6000 });
+    expect(h.triangles).toBeLessThanOrEqual(6000);
+    expect(h.decimated!.before).toBe(full.triangles);
+    expect(h.decimated!.deviation).toBeGreaterThanOrEqual(h.decimated!.fullDeviation);
+    expect(h.decimated!.deviation).toBeLessThan(cell);
+    expect(h.decimated!.fullDeviation).toBeGreaterThan(0);
+    // The same measure by hand on the body: its sphere's field at its own face centres.
+    const sphereMesh = (await import("../src/mesh/surfaceNets.js")).surfaceNets(P.sphere(1), { resolution: 24 }).mesh;
+    expect(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x, y, z) - 1)).toBeLessThan(2 / 24);
+    expect(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x - 5, y, z) - 1, [5, 0, 0])).toBeCloseTo(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x, y, z) - 1), 9);
+    expect(triangleCount(h.meshes[0]) + triangleCount(h.meshes[1])).toBe(h.triangles);
+  });
+  it("caps the GLB, OBJ and viewer at set triangles, says so in the report, and leaves the sheet and the STL whole", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = 'v = (cylinder(1, 2, round=0.2) - (cylinder(0.8, 2) | move(0, 0.3, 0))) | paint("porcelain")\nset triangles 3000\nshow v';
+      const opts = { grid: 48, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 };
+      const r = run(src, "cup.aix", dir, opts);
+      const glb = readFileSync(join(dir, "model.glb"));
+      const json = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
+      let tris = 0;
+      for (const m of json.meshes) for (const p of m.primitives) tris += json.accessors[p.indices].count / 3;
+      expect(tris).toBeLessThanOrEqual(3000);
+      const obj = readFileSync(join(dir, "model.obj"), "utf8");
+      expect(obj.split("\n").filter((l) => l.startsWith("f ")).length).toBe(tris);
+      const report = readFileSync(join(dir, "report.md"), "utf8");
+      const full = r.mesh!.indices.length / 3;
+      expect(full).toBeGreaterThan(3000);
+      expect(report).toMatch(new RegExp(`\\| Exports \\| ${tris} triangles in the GLB, OBJ and viewer, decimated from \\d+ \\(set triangles 3000; 0 for all of them\\): at most [\\d.]+ from the surface at a face centre, [\\d.]+ of a cell \\(the full mesh [\\d.]+\\)`));
+      // The STL is the model as shown, whole: 84 bytes of header and count, 50 a triangle.
+      expect(readFileSync(join(dir, "model.stl")).length).toBe(84 + 50 * full);
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.exports.triangles).toBe(tris);
+      expect(data.exports.cap).toBe(3000);
+      expect(data.triangles).toBe(full);
+      // 0 is the full mesh, and the run's option wins over the program's setting.
+      const whole = run(src, "cup.aix", join(dir, "whole"), { ...opts, triangles: 0 });
+      expect(whole.report).not.toMatch(/\| Exports \|/);
+      const g2 = readFileSync(join(dir, "whole", "model.glb"));
+      const j2 = JSON.parse(g2.toString("utf8", 20, 20 + g2.readUInt32LE(12)));
+      expect(j2.meshes[0].primitives.reduce((s: number, p: { indices: number }) => s + j2.accessors[p.indices].count / 3, 0)).toBeGreaterThan(3000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("warns past a cell with a cap that would raise the count, though each mesh keeps a few triangles under any cap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // Three meshes keep at least four triangles each, so a cap of 1 exports 12: doubling the cap to 2 changes nothing.
+      const src = 'a = sphere(0.5) | paint("red")\nb = sphere(0.5) | move(2, 0, 0) | paint("red")\nc = sphere(0.5) | move(4, 0, 0) | paint("red")\nset triangles 1\nscene a, b, c';
+      const r = run(src, "balls.aix", dir, { grid: 48, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false, texture: 0 });
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.exports.triangles).toBeGreaterThan(1);
+      const w = r.warnings.find((x) => /The exports are decimated/.test(x));
+      expect(w).toBeDefined();
+      const suggested = Number(/raise the cap \(set triangles (\d+)\)/.exec(w!)![1]);
+      expect(suggested).toBeGreaterThan(data.exports.triangles);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("gives the Roblox row the full mesh's count, not the web export's, as what its budget was decimated from", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // An accessory (4000) under a web cap of 6000: the Roblox meshes are decimated from the full extraction.
+      const src = 'v = (cylinder(1, 2, round=0.2) - (cylinder(0.8, 2) | move(0, 0.3, 0))) | paint("porcelain")\nv = anchor(v, "HatAttachment", 0, 1, 0)\nset triangles 6000\nshow v';
+      const r = run(src, "cup.aix", dir, { grid: 64, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false, texture: 64, roblox: true });
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.exports.before).toBeGreaterThan(6000);
+      expect(r.report).toMatch(new RegExp(`\\| Roblox \\| one mesh, Handle, \\d+ triangles, decimated from ${data.exports.before};`));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

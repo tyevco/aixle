@@ -13,6 +13,7 @@ import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText,
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
+import { diskCache, type ImportCache } from "./import/cache.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { exprText } from "./lang/ast.js";
 import { watch } from "node:fs";
@@ -85,6 +86,7 @@ function usage(): never {
       "                          [--no-callouts]                    skip callouts.png, the perspective view with its visible steps named",
       "                          [--no-asserts]                     skip the program's asserts (a pieces() promise on a big rig can cost more than the render)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
+      "                          [--triangles N]                    the most triangles the GLB, OBJ and viewer carry, decimated past it (default 200000; 0 for all)",
       "                          [--beauty-only]                    the beauty render, its shots and the sheet alone (no steps, slices, turntable, callouts, exports): a lighting loop",
       "                          [--no-caption]                     no caption on beauty.png and the camera shots: a presentation copy",
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
@@ -96,6 +98,8 @@ function usage(): never {
       "                          [--camera NAME] [--environment NAME|A,B|all]  one declared shot only (the sheet takes its view); a sky over the program's, or several into environments.png",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
       "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
+      "  --no-cache   (check, render, explain, diff) sample every import afresh and store nothing; imports are otherwise cached by content",
+      "               in ~/.cache/aixle/imports (or $AIXLE_CACHE_DIR), at most 512 MB, least recently used first out",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle fmt    <file.aix>         the program in the one layout, to stdout (comments kept, meaning unchanged)",
@@ -176,13 +180,16 @@ function main(argv: string[]): number {
     console.error(`cannot read ${file}`);
     return 1;
   }
+  // An import's samples are kept on disk by the file's content, so a check and the render after it sample a large mesh
+  // once between them; --no-cache samples afresh and stores nothing.
+  const importCache: ImportCache | undefined = opts["no-cache"] ? undefined : diskCache();
   if (cmd === "check") {
     try {
-      const rest = check(source, file, (l) => console.log(l), undefined, undefined, !!opts["no-asserts"]);
+      const rest = check(source, file, (l) => console.log(l), undefined, undefined, !!opts["no-asserts"], importCache);
       // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.joints, pose.name, !!opts["no-asserts"]) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints, pose.name, !!opts["no-asserts"], importCache) : rest;
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
@@ -308,7 +315,7 @@ function main(argv: string[]): number {
       for (const l of presentationLines(ev, typeof ev.settings.camera === "string" ? ev.settings.camera : undefined, ENVIRONMENTS.includes(ev.settings.environment as never) ? String(ev.settings.environment) : undefined)) console.log(l);
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
-      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"])) : undefined; });
+      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"], importCache)) : undefined; });
       const failed = all.filter((a) => !a.passed);
       // A passing promise prints its numbers too, so how close it came is on the terminal and not only in
       // report.json (round 8: the gap between closed fingers), in line order, failures among the passes.
@@ -325,10 +332,10 @@ function main(argv: string[]): number {
     // step's own line of source, so the tree says what each part is made of without a reader tracing names by hand
     // (round 4: every agent taking over a program spent its first renders finding out which step fed which).
     try {
-      const rest = check(source, file);
+      const rest = check(source, file, undefined, undefined, undefined, false, importCache);
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.joints) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints, undefined, false, importCache) : rest;
       const lines = source.split(/\r?\n/);
       const byName = new Map(ev.steps.map((st) => [st.name, st]));
       const memo = new Map<Shape3, PaintState>();
@@ -404,7 +411,7 @@ function main(argv: string[]): number {
     }
     const outFile = typeof opts.out === "string" ? resolve(opts.out) : resolve("out", `diff_${basename(file).replace(/\.[^.]+$/, "")}_${basename(other).replace(/\.[^.]+$/, "")}.png`);
     try {
-      const r = diff({ source, name: file }, { source: b, name: other }, outFile);
+      const r = diff({ source, name: file }, { source: b, name: other }, outFile, { importCache });
       for (const w of r.warnings) console.log(`warning: ${w}`);
       console.log(`wrote ${outFile}: A on the left, B on the right`);
       return 0;
@@ -415,7 +422,7 @@ function main(argv: string[]): number {
   }
   if (cmd !== "render") usage();
   const outDir = typeof opts.out === "string" ? resolve(opts.out) : resolve("out", basename(file).replace(/\.[^.]+$/, ""));
-  const once = (src: string): number => renderOnce(src, file, outDir, opts);
+  const once = (src: string): number => renderOnce(src, file, outDir, opts, importCache);
   if (opts.watch) {
     console.log(`watching ${file}; render on every save, ctrl-c to stop`);
     once(source);
@@ -437,7 +444,7 @@ function main(argv: string[]): number {
   return once(source);
 }
 
-function renderOnce(source: string, file: string, outDir: string, opts: Record<string, string | boolean>): number {
+function renderOnce(source: string, file: string, outDir: string, opts: Record<string, string | boolean>, importCache?: ImportCache): number {
   try {
     const quick = opts.quick ? QUICK : {};
     const given: Record<string, unknown> = {
@@ -464,6 +471,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       minecraft: opts.minecraft === true ? 16 : typeof opts.minecraft === "string" ? Number(opts.minecraft) : undefined,
       minecraftEntity: opts["minecraft-entity"] ? true : undefined,
       texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,
+      triangles: typeof opts.triangles === "string" ? Number(opts.triangles) : undefined,
       azimuth: typeof opts.azimuth === "string" ? Number(opts.azimuth) : undefined,
       zoom: typeof opts.zoom === "string" ? Number(opts.zoom) : undefined,
       elevation: typeof opts.elevation === "string" ? Number(opts.elevation) : undefined,
@@ -475,7 +483,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       environment: typeof opts.environment === "string" ? opts.environment : undefined,
     };
     for (const k of Object.keys(given)) if (given[k] === undefined) delete given[k];
-    const result = run(source, file, outDir, { ...quick, ...given, log: (l) => console.log(l) });
+    const result = run(source, file, outDir, { ...quick, ...given, importCache, log: (l) => console.log(l) });
     console.log(`wrote ${result.files.length} files to ${outDir}`);
     for (const w of result.warnings) console.log(`warning: ${w}`);
     console.log(opts.quick ? `look at ${resolve(outDir, "sheet.png")}` : `look at ${resolve(outDir, "sheet.png")} first, then slices.png and steps.png; details in report.md`);

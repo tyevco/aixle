@@ -9,7 +9,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseObj } from "./import/obj.js";
 import { parseGlb } from "./import/glb.js";
-import { meshField } from "./mesh/meshSdf.js";
+import { fieldFromSamples, sampleMesh, type MeshSamples } from "./mesh/meshSdf.js";
+import { importKey, type ImportCache } from "./import/cache.js";
 import { box, primitive } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
@@ -39,6 +40,16 @@ import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, ren
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
 import { sliceLevels } from "./sdf/measure.js";
+
+/**
+ * The most triangles the GLB, the OBJ and the viewer page carry unless `set triangles` or `--triangles` says
+ * otherwise: past it the export is decimated, seams and creases kept. Measured on the examples at the command
+ * line's defaults: a GLB is about 30 bytes a triangle, so 200 thousand is about 6 MB and its viewer page 8. Four
+ * of twenty-three examples are over it, at their own grids: the chest (459 thousand; its GLB 13.7 MB to 6.4, its
+ * viewer 18.3 to 8.5), the plate of patterns (282), the tin (260) and the rope (205). Each came down with its
+ * largest distance from the surface at a face centre the full mesh's own, for 0.5 to 1.3 s more in the exports.
+ */
+export const WEB_TRIANGLES = 200000;
 
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
 export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
@@ -74,6 +85,8 @@ export interface RunOptions {
   viewer?: boolean;
   /** Bake the materials into a texture atlas of this many pixels square for the exports; 0 disables. Default 1024. */
   texture?: number;
+  /** The most triangles the GLB, OBJ and viewer carry, decimated past it (or `set triangles`); 0 for the full mesh. Default WEB_TRIANGLES. */
+  triangles?: number;
   /** Ray-march the field for beauty.png. Default false: it costs seconds. */
   beauty?: boolean;
   /** Pixels for the beauty render; default `size`. */
@@ -107,6 +120,8 @@ export interface RunOptions {
   slice?: string;
   /** false leaves the caption (the shot's name and size) off beauty.png and the camera shots (or `set caption 0`). */
   caption?: boolean;
+  /** Where an import's samples are kept between runs (the CLI's is on disk, `--no-cache` for none); none by default. */
+  importCache?: ImportCache;
 }
 
 export interface RunResult {
@@ -178,13 +193,17 @@ export function moduleResolver(sourceName: string) {
   };
 }
 
-/** Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field. */
-export function importResolver(sourceName: string, log: (line: string) => void = () => {}) {
-  const cache = new Map<string, Shape3>();
+/**
+ * Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field, once per file and
+ * resolution in a run. With a cache, the samples are looked up by the file's content first and stored after
+ * sampling, so a `check` and the `render` after it sample a large mesh once between them.
+ */
+export function importResolver(sourceName: string, log: (line: string) => void = () => {}, cache?: ImportCache) {
+  const memo = new Map<string, Shape3>();
   return (path: string, opts: { resolution: number }): Shape3 => {
     const file = resolve(dirname(resolve(sourceName)), path);
     const key = `${file}@${opts.resolution}`;
-    const hit = cache.get(key);
+    const hit = memo.get(key);
     if (hit) return hit;
     let data: Buffer;
     try {
@@ -193,15 +212,24 @@ export function importResolver(sourceName: string, log: (line: string) => void =
       throw new Error(`cannot read ${file}`);
     }
     const lower = file.toLowerCase();
-    const mesh = lower.endsWith(".glb") ? parseGlb(data) : lower.endsWith(".obj") ? parseObj(data.toString("utf8")) : undefined;
-    if (!mesh) throw new Error(`only .obj and .glb files can be imported`);
+    const format = lower.endsWith(".glb") ? "glb" : lower.endsWith(".obj") ? "obj" : undefined;
+    if (!format) throw new Error(`only .obj and .glb files can be imported`);
     const t0 = performance.now();
-    log(`import ${path}: sampling ${mesh.indices.length / 3} triangles at resolution ${opts.resolution}...`);
-    const field = meshField(mesh, opts.resolution);
-    log(`import ${path}: ${field.triangles} triangles sampled at cell ${fmt(field.cell)} in ${Math.round(performance.now() - t0)} ms${field.openness > 0.01 ? ` (mesh is not closed: ${(field.openness * 100).toFixed(0)}% of rays end inside)` : ""}`);
+    const cacheKey = cache ? importKey(data, format, opts.resolution) : undefined;
+    let samples = cacheKey ? cache!.get(cacheKey) : undefined;
+    const open = (s: MeshSamples) => (s.openness > 0.01 ? ` (mesh is not closed: ${(s.openness * 100).toFixed(0)}% of rays end inside)` : "");
+    if (samples) log(`import ${path}: ${samples.triangles} triangles at cell ${fmt(samples.cell)}, read from the cache in ${Math.round(performance.now() - t0)} ms${open(samples)}`);
+    else {
+      const mesh = format === "glb" ? parseGlb(data) : parseObj(data.toString("utf8"));
+      log(`import ${path}: sampling ${mesh.indices.length / 3} triangles at resolution ${opts.resolution}...`);
+      samples = sampleMesh(mesh, opts.resolution);
+      const notStored = cacheKey ? cache!.put(cacheKey, samples) : undefined;
+      log(`import ${path}: ${samples.triangles} triangles sampled at cell ${fmt(samples.cell)} in ${Math.round(performance.now() - t0)} ms${open(samples)}${!cacheKey ? "" : notStored ? `; not cached: ${notStored}` : `; cached in ${cache!.dir}`}`);
+    }
+    const field = fieldFromSamples(samples);
     const shape = primitive(field.dist, field.bounds, 8);
     shape.sampledAt = field.cell;
-    cache.set(key, shape);
+    memo.set(key, shape);
     return shape;
   };
 }
@@ -788,8 +816,9 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
+/** Parse and evaluate a program, nothing rendered; `cache` keeps an import's samples between runs (see importResolver). */
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
 }
 
 /**
@@ -918,7 +947,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   mkdirSync(outDir, { recursive: true });
 
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
-  const resolver = importResolver(sourceName, log);
+  const resolver = importResolver(sourceName, log, opts.importCache);
   const resolveImage = imageResolver(sourceName);
   const program = parse(source);
   const modules = moduleResolver(sourceName);
@@ -1019,6 +1048,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const minecraftEntity = opts.minecraftEntity ?? evaluation.settings.minecraft_entity === 1;
   let robloxNote: string | undefined;
   let mapsNote: string | undefined;
+  // Set when the GLB, OBJ and viewer were decimated to the web cap, for the report.
+  let exportsNote: { triangles: number; cap: number; cell: number; before: number; deviation: number; fullDeviation: number } | undefined;
   // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
   const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
@@ -1294,11 +1325,21 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
       const stepNames = new Map<Shape3, string>();
       for (const st of rest.steps) if (isShape3(st.value) && !stepNames.has(st.value)) stepNames.set(st.value, st.name);
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, wearProbe: wearScale }));
+      // A web export has a budget like a Roblox one: past it the meshes are decimated before the atlas is baked, and
+      // the report says by how much and how far the result strays from the model.
+      const cap = Math.max(0, Math.round(opts.triangles ?? (typeof evaluation.settings.triangles === "number" ? evaluation.settings.triangles : WEB_TRIANGLES)));
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, wearProbe: wearScale, maxTriangles: cap > 0 ? cap : undefined }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
       const extraMaps = [hierarchy.normalMap ? "normal" : "", hierarchy.metalRoughMap ? "metallic-roughness" : "", hierarchy.emissiveMap ? "emissive" : ""].filter(Boolean);
-      log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts${extraMaps.length ? ` and ${extraMaps.join(", ")} map${extraMaps.length === 1 ? "" : "s"}` : ""}` : ""}, in ${timings.hierarchy} ms`);
+      log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.decimated ? ` (decimated from ${hierarchy.decimated.before})` : ""}${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts${extraMaps.length ? ` and ${extraMaps.join(", ")} map${extraMaps.length === 1 ? "" : "s"}` : ""}` : ""}, in ${timings.hierarchy} ms`);
+      if (hierarchy.decimated) {
+        const dz = hierarchy.decimated;
+        exportsNote = { triangles: hierarchy.triangles, cap, cell: cellSize, ...dz };
+        // Past a cell, and further than the full mesh already was, the decimation is visible: say so and how to stop it.
+        if (dz.deviation > cellSize && dz.deviation > dz.fullDeviation * 1.05)
+          warnings.push(`The exports are decimated from ${dz.before} to ${hierarchy.triangles} triangles and stray up to ${fmt(dz.deviation)} from the surface at a face centre, ${fmt(dz.deviation / cellSize)} of the ${fmt(cellSize)} cell (the full mesh: ${fmt(dz.fullDeviation)}): raise the cap (set triangles ${Math.min(dz.before, Math.max(cap, hierarchy.triangles) * 2)}), or set triangles 0 for the full mesh.`);
+      }
       if (hierarchy.normalStats) log(`normal map: ${hierarchy.normalStats.written ? "baked" : "not baked"}, ${hierarchy.normalStats.reason}`);
       // Which materials the GLB's maps carry, so the finish can be checked without opening the PNGs.
       if (hierarchy.materialMaps) {
@@ -1359,10 +1400,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         // The colour atlas alone, as before the PBR maps: what Studio's importer makes of a normal or packed
         // metallic-roughness map on a decimated mesh is untested.
         const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget, maps: false }));
-        const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.triangles });
+        // The Roblox meshes are decimated from the full extraction, not from the web export's capped count.
+        const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.decimated?.before ?? hierarchy.triangles });
         write("model.roblox.glb", rb.glb);
         warnings.push(...rb.warnings);
-        robloxNote = rb.note;
+        robloxNote = rb.note + (rbHierarchy.decimated ? `; at most ${fmt(rbHierarchy.decimated.deviation)} from the surface at a face centre, ${fmt(rbHierarchy.decimated.deviation / cellSize)} of a cell` : "");
         log(`roblox: ${rb.note}, in ${timings.roblox} ms`);
       }
     }
@@ -1598,6 +1640,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Bounds | x ${fmt(bounds.min[0])}..${fmt(bounds.max[0])}, y ${fmt(bounds.min[1])}..${fmt(bounds.max[1])}, z ${fmt(bounds.min[2])}..${fmt(bounds.max[2])} (a box; loose after a cut, a rotation or a twist) |`,
       ...(trueBounds ? (() => { const e = clampBounds(trueBounds!, bounds!); return [`| Surface extent | x ${fmt(e.min[0])}..${fmt(e.max[0])}, y ${fmt(e.min[1])}..${fmt(e.max[1])}, z ${fmt(e.min[2])}..${fmt(e.max[2])} (from the mesh, within the bounds) |`]; })() : []),
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
+      ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
@@ -1716,6 +1759,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         bounds,
         size: bounds ? boundsSize(bounds) : undefined,
         triangles: mesh ? triangleCount(mesh) : 0,
+        exports: exportsNote ? { triangles: exportsNote.triangles, before: exportsNote.before, cap: exportsNote.cap, deviation: exportsNote.deviation, fullDeviation: exportsNote.fullDeviation } : undefined,
         cellSize,
         grid,
         materials: mesh?.materials.map((m) => m.name) ?? [],
@@ -1751,11 +1795,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
  * front views paired, with the size of each in its own bar. For comparing
  * a change against the version before it.
  */
-export function diff(a: { source: string; name: string }, b: { source: string; name: string }, outFile: string, opts: { size?: number; grid?: number } = {}): { warnings: string[] } {
+export function diff(a: { source: string; name: string }, b: { source: string; name: string }, outFile: string, opts: { size?: number; grid?: number; importCache?: ImportCache } = {}): { warnings: string[] } {
   const size = opts.size ?? 320;
   const warnings: string[] = [];
   const side = (prog: { source: string; name: string }) => {
-    const ev = check(prog.source, prog.name);
+    const ev = check(prog.source, prog.name, undefined, undefined, undefined, false, opts.importCache);
     if (!ev.output || isEmpty(ev.output.bounds)) return { canvases: [] as import("./render/canvas.js").Canvas[], label: `${prog.name}: nothing to show` };
     const nets = surfaceNets(ev.output, { resolution: opts.grid ?? 64 });
     const info = { name: ev.outputName, bounds: ev.output.bounds };

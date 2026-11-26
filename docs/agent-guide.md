@@ -81,10 +81,15 @@ npx aixle render model.aix --beauty-only --environment studio,overcast   environ
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
 npx aixle render model.aix --3mf           also model.3mf (written anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
+npx aixle render model.aix --triangles 50000   a lighter GLB, OBJ and viewer, decimated (default cap 200000; 0 keeps every triangle)
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
 npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check fails if it is not
 ```
+
+An `import()` is sampled once per file and resolution and cached on
+disk, so `check` and the `render` after it do not both pay for a large
+mesh; `--no-cache` samples afresh.
 
 ## Reading the sheet
 
@@ -192,7 +197,11 @@ plays a rig's animations (loop, speed, a scrub bar, all in turn), and
 `model.glb` carries the materials as a baked texture (`model.png`), with
 a normal map for bumps and fine `displace` relief, a metallic-roughness
 map for wear and rust and an emissive one for a patterned glow where the
-program has them, so it looks the same wherever it is loaded.
+program has them, so it looks the same wherever it is loaded. Past 200
+thousand triangles the GLB, OBJ and viewer are decimated (the report's
+Exports row says from how many and how far they stray); below a quarter
+of the mesh (`--triangles`) curved bands shade in streaks, so read the
+viewer.
 
 ## Rigs
 

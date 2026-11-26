@@ -15,7 +15,7 @@ import type { Vec3 } from "../core/vec.js";
 import { allJoints, findJoints, move as moveShape, reliefMaterials } from "../sdf/ops.js";
 import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
-import { decimate } from "../mesh/decimate.js";
+import { decimate, faceDeviation } from "../mesh/decimate.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
 import { bakeAtlas, type AtlasResult, type BakeField, type MaterialMaps, type NormalStats } from "./atlas.js";
 
@@ -56,6 +56,12 @@ export interface SceneHierarchy {
   triangles: number;
   /** Things the export could not carry, for the report: a rotation or a scale above a joint. */
   notes: string[];
+  /**
+   * Set when the meshes were decimated to `maxTriangles`: the count before, and the largest |field| at a face
+   * centre of the decimated meshes and of the same meshes before (each read with its own joints hidden, as it was
+   * extracted), so a report can say how far the export strays from the model and how much of that the mesher did.
+   */
+  decimated?: { before: number; deviation: number; fullDeviation: number };
 }
 
 export interface HierarchyOptions {
@@ -129,6 +135,19 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
   const meshes: Mesh[] = [];
   const sources: MeshSource[] = [];
   const addMesh = (m: Mesh, src: MeshSource): number => { meshes.push(m); sources.push(src); return meshes.length - 1; };
+  // How far a mesh in a source's place strays from the field it was extracted from: the shape with the same joints
+  // and placed sets hidden as at extraction, the mesh moved back by the node's offset.
+  const stray = (i: number, mm: Mesh): number => {
+    const src = sources[i];
+    for (const n of src.joints) n.joint!.hidden = true;
+    for (const st of src.sets) st.instanced!.hidden = true;
+    try {
+      return faceDeviation(mm, src.shape.dist, src.offset);
+    } finally {
+      for (const n of src.joints) n.joint!.hidden = false;
+      for (const st of src.sets) st.instanced!.hidden = false;
+    }
+  };
   const roots: SceneNode[] = [];
   const notes: string[] = [];
   const names = opts.names ?? new Map<Shape3, string>();
@@ -265,13 +284,23 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
   for (const m of meshes) triangles += triangleCount(m);
   // A budget is for the whole export: each mesh gives up the same share, so a jointed pet's ten bones together
   // come in under an accessory's four thousand rather than each taking four thousand of its own.
+  let decimated: SceneHierarchy["decimated"];
   if (opts.maxTriangles && triangles > opts.maxTriangles) {
     const share = opts.maxTriangles / triangles;
-    for (let i = 0; i < meshes.length; i++) meshes[i] = decimate(meshes[i], Math.max(4, Math.floor(triangleCount(meshes[i]) * share)), opts.crease ?? 35);
+    let deviation = 0, fullDeviation = 0;
+    for (let i = 0; i < meshes.length; i++) {
+      const d = decimate(meshes[i], Math.max(4, Math.floor(triangleCount(meshes[i]) * share)), opts.crease ?? 35);
+      if (d !== meshes[i]) {
+        fullDeviation = Math.max(fullDeviation, stray(i, meshes[i]));
+        deviation = Math.max(deviation, stray(i, d));
+      }
+      meshes[i] = d;
+    }
+    decimated = { before: triangles, deviation, fullDeviation };
     triangles = 0;
     for (const m of meshes) triangles += triangleCount(m);
   }
-  const out: SceneHierarchy = { roots, meshes, triangles, notes, pbr: opts.maps !== false };
+  const out: SceneHierarchy = { roots, meshes, triangles, notes, pbr: opts.maps !== false, ...(decimated ? { decimated } : {}) };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);
     // Each mesh's triangles read the field they were extracted from, with the same joints and sets hidden.

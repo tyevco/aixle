@@ -19,8 +19,6 @@
 import { splitCreases } from "./creases.js";
 import { weldIndices, type Mesh } from "./mesh.js";
 
-interface Heap { cost: number[]; a: number[]; b: number[]; stamp: number[] }
-
 export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35): Mesh {
   const triCount = mesh.indices.length / 3;
   if (triCount <= targetTriangles || triCount === 0) return mesh;
@@ -32,14 +30,14 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
   for (let i = 0; i < welded.length; i++) alive[welded[i]] = 1;
   const mat = mesh.materialIndex;
   // Triangles as mutable index triples; a dead triangle has -1.
-  const T = Array.from(welded);
+  const T = Int32Array.from(welded);
   const tris = triCount;
   // Vertex to triangles.
   const star: number[][] = Array.from({ length: nv }, () => []);
   for (let t = 0; t < tris; t++) for (let c = 0; c < 3; c++) star[T[t * 3 + c]].push(t);
   // Plane quadrics per vertex (a 4x4 symmetric matrix as ten numbers), area-weighted.
   const Q = new Float64Array(nv * 10);
-  const faceNormal = (t: number, out: number[]): number => {
+  const faceNormal = (t: number, out: Float64Array): number => {
     const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
     const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
     const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
@@ -48,52 +46,65 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
     if (l > 0) { out[0] /= l; out[1] /= l; out[2] /= l; }
     return l / 2;
   };
-  const n = [0, 0, 0];
+  const n = new Float64Array(3);
+  const q = new Float64Array(10);
   for (let t = 0; t < tris; t++) {
     const area = faceNormal(t, n);
     if (!(area > 0)) continue;
     const a = T[t * 3] * 3;
     const d = -(n[0] * P[a] + n[1] * P[a + 1] + n[2] * P[a + 2]);
-    const q = [n[0] * n[0], n[0] * n[1], n[0] * n[2], n[0] * d, n[1] * n[1], n[1] * n[2], n[1] * d, n[2] * n[2], n[2] * d, d * d];
+    q[0] = n[0] * n[0]; q[1] = n[0] * n[1]; q[2] = n[0] * n[2]; q[3] = n[0] * d; q[4] = n[1] * n[1];
+    q[5] = n[1] * n[2]; q[6] = n[1] * d; q[7] = n[2] * n[2]; q[8] = n[2] * d; q[9] = d * d;
     for (let c = 0; c < 3; c++) { const o = T[t * 3 + c] * 10; for (let k = 0; k < 10; k++) Q[o + k] += q[k] * area; }
   }
   const evalQ = (v: number, x: number, y: number, z: number): number => {
     const o = v * 10;
     return Q[o] * x * x + 2 * Q[o + 1] * x * y + 2 * Q[o + 2] * x * z + 2 * Q[o + 3] * x + Q[o + 4] * y * y + 2 * Q[o + 5] * y * z + 2 * Q[o + 6] * y + Q[o + 7] * z * z + 2 * Q[o + 8] * z + Q[o + 9];
   };
-  // A binary heap of candidate collapses a -> b, with a stamp per vertex so a stale entry is skipped.
+  // A binary heap of candidate collapses a -> b in typed arrays that double when full, with a stamp per vertex so a
+  // stale entry is skipped. Swapping by destructuring allocated two arrays per step, and the decimation of a chest at
+  // 459 thousand triangles took 7 s to reach 200 thousand (measured); the same heap moved by hand takes a fraction.
   const stamp = new Int32Array(nv);
-  const heap: Heap = { cost: [], a: [], b: [], stamp: [] };
+  let cap = Math.max(16, tris * 3);
+  let hCost = new Float64Array(cap), hA = new Int32Array(cap), hB = new Int32Array(cap), hStamp = new Int32Array(cap);
+  let size = 0;
   const push = (cost: number, a: number, b: number): void => {
-    const h = heap;
-    let i = h.cost.length;
-    h.cost.push(cost); h.a.push(a); h.b.push(b); h.stamp.push(stamp[a] + stamp[b]);
+    if (size === cap) {
+      cap *= 2;
+      const c2 = new Float64Array(cap), a2 = new Int32Array(cap), b2 = new Int32Array(cap), s2 = new Int32Array(cap);
+      c2.set(hCost); a2.set(hA); b2.set(hB); s2.set(hStamp);
+      hCost = c2; hA = a2; hB = b2; hStamp = s2;
+    }
+    let i = size++;
+    const st = stamp[a] + stamp[b];
+    // Sift up: move parents down until this entry's place is found, then write it once.
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (h.cost[p] <= h.cost[i]) break;
-      [h.cost[p], h.cost[i]] = [h.cost[i], h.cost[p]]; [h.a[p], h.a[i]] = [h.a[i], h.a[p]]; [h.b[p], h.b[i]] = [h.b[i], h.b[p]]; [h.stamp[p], h.stamp[i]] = [h.stamp[i], h.stamp[p]];
+      if (hCost[p] <= cost) break;
+      hCost[i] = hCost[p]; hA[i] = hA[p]; hB[i] = hB[p]; hStamp[i] = hStamp[p];
       i = p;
     }
+    hCost[i] = cost; hA[i] = a; hB[i] = b; hStamp[i] = st;
   };
-  // The popped entry is left in `top`; the arrays shrink by one.
-  const top = { a: -1, b: -1, stamp: 0 };
+  // The popped entry is left in topA, topB, topStamp; the heap shrinks by one.
+  let topA = -1, topB = -1, topStamp = 0;
   const pop = (): boolean => {
-    const h = heap;
-    const last = h.cost.length - 1;
-    if (last < 0) return false;
-    top.a = h.a[0]; top.b = h.b[0]; top.stamp = h.stamp[0];
-    h.cost[0] = h.cost[last]; h.a[0] = h.a[last]; h.b[0] = h.b[last]; h.stamp[0] = h.stamp[last];
-    h.cost.pop(); h.a.pop(); h.b.pop(); h.stamp.pop();
+    if (size === 0) return false;
+    topA = hA[0]; topB = hB[0]; topStamp = hStamp[0];
+    const last = --size;
+    const cost = hCost[last], a = hA[last], b = hB[last], st = hStamp[last];
+    // Sift down the last entry from the root, the smaller child moving up each step (the left one on a tie).
     let i = 0;
     while (true) {
       const l = 2 * i + 1, r = l + 1;
-      let m = i;
-      if (l < h.cost.length && h.cost[l] < h.cost[m]) m = l;
-      if (r < h.cost.length && h.cost[r] < h.cost[m]) m = r;
+      let m = i, mc = cost;
+      if (l < size && hCost[l] < mc) { m = l; mc = hCost[l]; }
+      if (r < size && hCost[r] < mc) { m = r; mc = hCost[r]; }
       if (m === i) break;
-      [h.cost[m], h.cost[i]] = [h.cost[i], h.cost[m]]; [h.a[m], h.a[i]] = [h.a[i], h.a[m]]; [h.b[m], h.b[i]] = [h.b[i], h.b[m]]; [h.stamp[m], h.stamp[i]] = [h.stamp[i], h.stamp[m]];
+      hCost[i] = hCost[m]; hA[i] = hA[m]; hB[i] = hB[m]; hStamp[i] = hStamp[m];
       i = m;
     }
+    if (size > 0) { hCost[i] = cost; hA[i] = a; hB[i] = b; hStamp[i] = st; }
     return true;
   };
   const offer = (a: number, b: number): void => {
@@ -111,35 +122,52 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
     }
 
   let live = tris;
-  const before = [0, 0, 0], after = [0, 0, 0];
+  const before = new Float64Array(3), after = new Float64Array(3);
+  // Scratch reused by every collapse: the triangles that move and die, and the survivor's neighbours in the order
+  // first met (a mark per vertex instead of a Set per collapse).
+  const moving: number[] = [], dying: number[] = [], around: number[] = [];
+  const mark = new Int32Array(nv).fill(-1);
+  let collapse = 0;
   while (live > targetTriangles) {
     if (!pop()) break;
-    const a = top.a, b = top.b;
-    if (top.stamp !== stamp[a] + stamp[b] || !alive[a] || !alive[b] || a === b) continue;
+    const a = topA, b = topB;
+    if (topStamp !== stamp[a] + stamp[b] || !alive[a] || !alive[b] || a === b) continue;
     // The triangles that vanish share both ends; the rest of a's star moves to b, unless a face would fold.
     let folds = false;
-    const moving: number[] = [], dying: number[] = [];
+    moving.length = 0; dying.length = 0;
     for (const t of star[a]) {
       if (T[t * 3] < 0) continue;
-      const has = T[t * 3] === b || T[t * 3 + 1] === b || T[t * 3 + 2] === b;
-      if (has) { dying.push(t); continue; }
+      const s0 = T[t * 3], s1 = T[t * 3 + 1], s2 = T[t * 3 + 2];
+      if (s0 === b || s1 === b || s2 === b) { dying.push(t); continue; }
       faceNormal(t, before);
-      const save = [T[t * 3], T[t * 3 + 1], T[t * 3 + 2]];
-      for (let c = 0; c < 3; c++) if (T[t * 3 + c] === a) T[t * 3 + c] = b;
+      if (s0 === a) T[t * 3] = b;
+      if (s1 === a) T[t * 3 + 1] = b;
+      if (s2 === a) T[t * 3 + 2] = b;
       const area = faceNormal(t, after);
-      for (let c = 0; c < 3; c++) T[t * 3 + c] = save[c];
+      T[t * 3] = s0; T[t * 3 + 1] = s1; T[t * 3 + 2] = s2;
       if (!(area > 0) || before[0] * after[0] + before[1] * after[1] + before[2] * after[2] < 0.1) { folds = true; break; }
       moving.push(t);
     }
     if (folds) { stamp[a]++; continue; }
     for (const t of dying) { T[t * 3] = T[t * 3 + 1] = T[t * 3 + 2] = -1; live--; }
-    for (const t of moving) { for (let c = 0; c < 3; c++) if (T[t * 3 + c] === a) T[t * 3 + c] = b; star[b].push(t); }
+    const sb = star[b];
+    for (const t of moving) { for (let c = 0; c < 3; c++) if (T[t * 3 + c] === a) T[t * 3 + c] = b; sb.push(t); }
     alive[a] = 0;
+    star[a] = [];
     for (let k = 0; k < 10; k++) Q[b * 10 + k] += Q[a * 10 + k];
     stamp[a]++; stamp[b]++;
-    // Fresh candidates round the survivor.
-    const around = new Set<number>();
-    for (const t of star[b]) if (T[t * 3] >= 0) for (let c = 0; c < 3; c++) { const v = T[t * 3 + c]; if (v !== b) around.add(v); }
+    // Fresh candidates round the survivor. Its star is compacted to its live triangles on the way, in order, so a
+    // vertex that has taken in a large flat face does not walk every triangle it ever had at each collapse.
+    around.length = 0;
+    const id = collapse++;
+    let w = 0;
+    for (let i = 0; i < sb.length; i++) {
+      const t = sb[i];
+      if (T[t * 3] < 0) continue;
+      sb[w++] = t;
+      for (let c = 0; c < 3; c++) { const v = T[t * 3 + c]; if (v !== b && mark[v] !== id) { mark[v] = id; around.push(v); } }
+    }
+    sb.length = w;
     for (const v of around) { offer(v, b); offer(b, v); }
   }
 
@@ -184,4 +212,21 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
     outMat[v] = materialIndex[s];
   }
   return { positions: split.positions, normals, local: outLocal, materialIndex: outMat, materials: mesh.materials, indices: split.indices };
+}
+
+/**
+ * The largest |field| at the centres of a mesh's faces, the mesh's positions offset by `origin` into the field's
+ * frame: how far a mesh strays from the surface it was cut from where it strays most, which for a decimated mesh is
+ * in the middle of its widest faces (its vertices are still the mesher's, on the surface). A field that is not an
+ * exact distance (a blend, a twist) gives its own value there, which is near the distance close to the surface.
+ */
+export function faceDeviation(mesh: Mesh, dist: (x: number, y: number, z: number) => number, origin: readonly [number, number, number] = [0, 0, 0]): number {
+  const p = mesh.positions, ix = mesh.indices;
+  let worst = 0;
+  for (let t = 0; t < ix.length; t += 3) {
+    const a = ix[t] * 3, b = ix[t + 1] * 3, c = ix[t + 2] * 3;
+    const d = Math.abs(dist((p[a] + p[b] + p[c]) / 3 + origin[0], (p[a + 1] + p[b + 1] + p[c + 1]) / 3 + origin[1], (p[a + 2] + p[b + 2] + p[c + 2]) / 3 + origin[2]));
+    if (d > worst) worst = d;
+  }
+  return worst;
 }
