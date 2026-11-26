@@ -525,7 +525,11 @@ describe("slice levels", () => {
     const ring = P.torus(1, 0.1);
     const rl = C_.sliceLevels(ring)!;
     expect(Math.abs(rl.at[1])).toBeLessThan(0.05);
-    expect(ring.bounds.min[0] <= rl.at[0] && rl.at[0] <= ring.bounds.max[0]).toBe(true);
+    // Through the centroid (the hole) a vertical plane cuts the tube twice across, far less than half of a cut along
+    // it near x = ±1, so x and z go there.
+    expect(Math.abs(rl.centroid[0])).toBeLessThan(0.05);
+    expect(Math.abs(rl.at[0])).toBeGreaterThan(0.85);
+    expect(Math.abs(rl.at[2])).toBeGreaterThan(0.85);
     expect(C_.sliceLevels(P.empty())).toBeUndefined();
   });
 });
