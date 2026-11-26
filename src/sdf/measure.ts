@@ -1,5 +1,5 @@
 import { surfacePoint } from "./ops.js";
-import { boundsSize, isEmpty, type Shape3 } from "./types.js";
+import { boundsSize, isEmpty, type Bounds, type Shape3 } from "./types.js";
 import type { Vec3 } from "../core/vec.js";
 
 /**
@@ -227,4 +227,54 @@ export function clearanceAt(a: Shape3, b: Shape3, n = 12): { d: number; at?: Vec
     best = d; p = back;
   }
   return { d: best, at: p };
+}
+
+/**
+ * Where three cross-sections through a part go: through its solid's centroid on each axis, or, where a plane there
+ * would cut less than half of the part's widest section along that axis (the hole of a ring, the air between a
+ * post and the lantern it carries), through that widest section, the one nearest the centroid. Sampled on a
+ * lattice of `n` cells along the box's longest side; undefined when no sample lies inside. The box's centre is
+ * not used: a tree whose canopy leans or a lamp whose arm reaches out has its centre in the air (round 10: a
+ * terrarium's slices showed a plant as a floating blob, its stem off every plane).
+ */
+export function sliceLevels(shape: Shape3, box: Bounds = shape.bounds, n = 40): { at: Vec3; centroid: Vec3; area: Vec3; widest: Vec3 } | undefined {
+  if (isEmpty(box)) return undefined;
+  const size = boundsSize(box);
+  const longest = Math.max(size[0], size[1], size[2]);
+  if (!(longest > 0)) return undefined;
+  const dims = [0, 1, 2].map((k) => Math.max(2, Math.round((n * size[k]) / longest)));
+  const step = [0, 1, 2].map((k) => size[k] / dims[k]);
+  const counts = [0, 1, 2].map((k) => new Float64Array(dims[k]));
+  const sum = [0, 0, 0];
+  let total = 0;
+  for (let i = 0; i < dims[0]; i++) {
+    const x = box.min[0] + (i + 0.5) * step[0];
+    for (let j = 0; j < dims[1]; j++) {
+      const y = box.min[1] + (j + 0.5) * step[1];
+      for (let k = 0; k < dims[2]; k++) {
+        const z = box.min[2] + (k + 0.5) * step[2];
+        if (shape.dist(x, y, z) >= 0) continue;
+        counts[0][i]++; counts[1][j]++; counts[2][k]++;
+        sum[0] += x; sum[1] += y; sum[2] += z;
+        total++;
+      }
+    }
+  }
+  if (total === 0) return undefined;
+  const centroid = sum.map((v) => v / total) as Vec3;
+  const at: Vec3 = [0, 0, 0], area: Vec3 = [0, 0, 0], widest: Vec3 = [0, 0, 0];
+  for (let a = 0; a < 3; a++) {
+    const c = counts[a];
+    let max = 0;
+    for (const v of c) max = Math.max(max, v);
+    const ic = Math.max(0, Math.min(dims[a] - 1, Math.floor((centroid[a] - box.min[a]) / step[a])));
+    // The widest section nearest the centroid, for when the centroid's own is thin or empty.
+    let best = ic, bd = Infinity;
+    for (let i = 0; i < dims[a]; i++) if (c[i] >= max * 0.95 && Math.abs(i - ic) < bd) { bd = Math.abs(i - ic); best = i; }
+    widest[a] = box.min[a] + (best + 0.5) * step[a];
+    const cell = step[(a + 1) % 3] * step[(a + 2) % 3];
+    if (c[ic] >= max * 0.5) { at[a] = centroid[a]; area[a] = c[ic] * cell; }
+    else { at[a] = widest[a]; area[a] = c[best] * cell; }
+  }
+  return { at, centroid, area, widest };
 }

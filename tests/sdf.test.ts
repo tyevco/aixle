@@ -442,6 +442,17 @@ describe("partial revolve, spline, lowercase, arc text", () => {
     const under = textProfile("ABC", 1, 0.2, 0, -4);
     expect(under.bounds.min[1]).toBeLessThan(-4);
   });
+  it("arc text knows the radii its ink spans, which check prints (round 10: an engraving broke out over a rim)", () => {
+    // The hub's label: size 0.1 and weight 0.03 on an arc of 0.27 spans 0.255 to 0.385 from the origin.
+    const label = textProfile("HB-7", 0.1, 0.03, 0, 0.27);
+    expect(label.arcSpan![0]).toBeCloseTo(0.255, 3);
+    expect(label.arcSpan![1]).toBeCloseTo(0.385, 3);
+    // Under the bottom the letters stand inward from the baseline's circle.
+    const under = textProfile("HB-7", 0.1, 0.03, 0, -0.27).arcSpan!;
+    expect(under[0]).toBeCloseTo(0.155, 3);
+    expect(under[1]).toBeCloseTo(0.285, 3);
+    expect(textProfile("HB-7", 0.1, 0.03).arcSpan).toBeUndefined();
+  });
 });
 
 describe("height query", () => {
@@ -501,6 +512,31 @@ describe("clearance", () => {
   });
 });
 
+describe("slice levels", () => {
+  it("put the planes through a part's solid, not its box's centre, and through its widest section when the centroid misses", () => {
+    // A lamp: a thin post at x = 0 and a heavy globe out at x = 1.2 on top. The box's centre (x 0.78) is in the air
+    // between them; the centroid is in the globe.
+    const lamp = O.union([P.cylinder(0.05, 2), O.move(P.sphere(0.4), 1.2, 1, 0)]);
+    const cuts = (level: number) => { for (let y = -1; y <= 1.4; y += 0.02) for (let z = -0.4; z <= 0.4; z += 0.02) if (lamp.dist(level, y, z) < 0) return true; return false; };
+    const box = lamp.bounds;
+    expect(cuts((box.min[0] + box.max[0]) / 2)).toBe(false);
+    const lv = C_.sliceLevels(lamp)!;
+    expect(cuts(lv.at[0])).toBe(true);
+    expect(lv.at[0]).toBeGreaterThan(0.9);
+    // A ring lying flat: the centroid is in its hole on every axis; y keeps it (the tube's middle), x and z move
+    // to a section through the tube only if the centre's cut is under half the widest.
+    const ring = P.torus(1, 0.1);
+    const rl = C_.sliceLevels(ring)!;
+    expect(Math.abs(rl.at[1])).toBeLessThan(0.05);
+    // Through the centroid (the hole) a vertical plane cuts the tube twice across, far less than half of a cut along
+    // it near x = ±1, so x and z go there.
+    expect(Math.abs(rl.centroid[0])).toBeLessThan(0.05);
+    expect(Math.abs(rl.at[0])).toBeGreaterThan(0.85);
+    expect(Math.abs(rl.at[2])).toBeGreaterThan(0.85);
+    expect(C_.sliceLevels(P.empty())).toBeUndefined();
+  });
+});
+
 describe("void, overlap and inside", () => {
   it("find solid in a region, the shared volume of two parts, and how much of one lies in another", () => {
     const cup = O.difference(P.cylinder(1, 2), O.move(P.cylinder(0.85, 2), 0, 0.2, 0));
@@ -517,6 +553,12 @@ describe("void, overlap and inside", () => {
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 1, 0, 0))).toBe(0);
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 3, 0, 0))).toBe(0);
+    // The language guide's worked number for a curved part: a ring's band (a torus of radius 0.42, tube 0.065)
+    // standing on a flat cushion and sunk 0.03 into it shares about 0.00047; a band half that size shares less.
+    const band = (r: number) => O.move(O.rotate(P.torus(r, 0.065), -90, 0, 0), 0, 0.41 - 0.03 + r + 0.065, 0);
+    const cushion = O.move(P.box(1.3, 0.34, 0.8), 0, 0.24, 0);
+    expect(C_.overlapVolume(band(0.42), cushion)).toBeCloseTo(0.00047, 5);
+    expect(C_.overlapVolume(band(0.2), cushion)).toBeLessThan(0.0004);
     // A small box wholly inside a big one is all inside; half out is half.
     expect(C_.insideFraction(P.box(0.5, 0.5, 0.5), P.box(2, 2, 2))).toBe(1);
     expect(C_.insideFraction(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);

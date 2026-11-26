@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -33,7 +33,7 @@ describe("pipeline", () => {
       // A declared camera is a shot of its own, framed on its focus; the report lists lights, cameras and the sky.
       const shots = run('m = box(1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5, color="#cfe0ff")\ncamera("hero", azimuth=20, zoom=1.2)\ncamera("knob", focus="k")\nset environment night\nshow both', "shots.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
       expect(shots.files).toEqual(expect.arrayContaining(["beauty.png", "beauty_hero.png", "beauty_knob.png", "lights.png"]));
-      expect(shots.report).toMatch(/\(lights\.png shows each alone\)/);
+      expect(shots.report).toMatch(/\(lights\.png shows each alone, and what each adds\)/);
       expect(shots.timings.lights).toBeDefined();
       expect(shots.report).toMatch(/Lights: key \(azimuth -30, elevation 40, size 1, white\); rim \(azimuth 160, elevation 20, size 1, #cfe0ff, power 0\.5\)/);
       expect(shots.report).toMatch(/Cameras: hero \(azimuth 20, zoom 1\.2\) → beauty_hero\.png; knob \(on k\) → beauty_knob\.png/);
@@ -45,9 +45,20 @@ describe("pipeline", () => {
       expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_side.png"]);
       expect(one.report).toMatch(/\(the sheet and beauty\.png use "side"\)/);
       expect(one.report).toMatch(/Environment: sunset/);
-      const all = run('m = box(1)\nshow m', "all.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "all" });
+      const all = run('m = box(1)\nset environment night\nshow m', "all.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "all" });
       expect(all.files).toContain("environments.png");
       expect(all.warnings.filter((w) => /environment/.test(w))).toEqual([]);
+      // `all` leaves beauty.png the program's own sky; a list gives it the first listed, and the strip only those.
+      expect(all.report).toMatch(/Environment: night/);
+      expect(readFileSync(join(dir, "environments.png")).readUInt32BE(16)).toBe((96 + 6) * 4 + 6);
+      const pair = run('m = box(1)\nshow m', "pair.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "overcast, sunset,mars" });
+      expect(pair.report).toMatch(/Environment: overcast/);
+      expect(pair.report).toMatch(/`environments\.png`: the beauty render under overcast, sunset, from --environment/);
+      expect(readFileSync(join(dir, "environments.png")).readUInt32BE(16)).toBe((96 + 6) * 2 + 6);
+      expect(pair.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--environment mars: no such environment/)]));
+      // lights.png: each light alone, then all, and under them what each adds on its own and the picture under none.
+      const lit = readFileSync(join(dir, "lights.png"));
+      expect([lit.readUInt32BE(16), lit.readUInt32BE(20)]).toEqual([(96 + 6) * 3 + 6, 26 + (96 + 6) * 2 + 16 + 6]);
       // A focus hidden behind the rest of the model from its camera is warned about; from the other side it is not.
       const hid = run('wall = box(2, 2, 0.2) | move(0, 1, 1)\nball = sphere(0.3) | move(0, 1, 0)\nboth = wall + ball\ncamera("front", focus="ball", azimuth=0, elevation=5)\ncamera("back", focus="ball", azimuth=180, elevation=5)\nshow both', "hid.aix", dir, { grid: 24, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
       expect(hid.warnings.filter((w) => /hidden behind/.test(w))).toEqual([expect.stringMatching(/^camera "front" \(line 4\): \d+% of ball is hidden behind the rest of the model from azimuth 0, elevation 5; from azimuth \d+ it is \d+%$/)]);
@@ -157,6 +168,56 @@ describe("pipeline", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+  it("slices through a named step: the planes through its solid, framed on it, the rest faint", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = "slab = box(2, 0.1, 2) | move(0, -0.05, 0)\npost = cylinder(0.05, 1) | move(0.6, 0.5, 0.3)\nglobe = sphere(0.25) | move(0.6, 1.2, 0.3)\nm = slab + post + globe\nshow m";
+      const r = run(src, "post.aix", dir, { grid: 32, size: 96, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "post" });
+      expect(r.files).toContain("slices.png");
+      expect(r.report).toMatch(/`slices\.png`: cross-sections through post at its centroid/);
+      expect(r.warnings.join()).not.toMatch(/slice/);
+      // A probe only the slice reads is a region, not an unused step; a name that is no step is said.
+      const probe = check("m = box(1)\nrod = cylinder(0.05, 2) | move(0.2, 0, 0)\nset slice rod\nshow m");
+      expect(probe.roles.get("rod")).toBe("region");
+      expect(probe.warnings.join()).not.toMatch(/rod/);
+      expect(check("m = box(1)\nset slice nope").warnings.join()).toMatch(/set slice nope: no such step or object/);
+      // --slice from the command line makes the same probe a region as `set slice` does: not an unused step, and
+      // its volume places the planes while the model is drawn in full.
+      const cli = run("m = box(1)\nrod = cylinder(0.05, 2) | move(0.2, 0, 0)\nshow m", "rod.aix", dir, { grid: 16, size: 64, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "rod" });
+      expect(cli.warnings.join()).not.toMatch(/'rod'.*not part of the output/);
+      expect(cli.report).toMatch(/`slices\.png`: cross-sections through rod \(a region: its volume places the planes/);
+      const bad = run("m = box(1)", "b.aix", dir, { grid: 16, size: 64, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "nope" });
+      expect(bad.warnings.join()).toMatch(/slice nope: no such step or object with a surface/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("says which named steps the callouts never saw, tags a cut named at open edges, and leaves the caption off when asked", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("plate = box(2, 0.2, 2)\nunder = box(0.4, 0.05, 0.4) | move(0, -0.2, 0)\nslot = box(0.2, 1, 1) | move(0.5, 0.2, 0)\nm = (plate - slot) + under\nshow m", "slot.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, elevation: 40 });
+      expect(r.report).toMatch(/not seen from this view, hidden or every visible face of theirs a smaller step's: under/);
+      const w = { ok: false, note: "Watertight: no.", where: { min: [0, 0, 0], max: [1, 1, 1] }, clusters: [{ at: [0.4, 0.1, 0] as [number, number, number], count: 4, box: { min: [0.4, 0.05, -0.1], max: [0.4, 0.15, 0.1] } }] } as unknown as Parameters<typeof watertightNote>[0];
+      const ev = check("plate = box(2, 0.2, 2)\nslot = box(0.2, 1, 1) | move(0.5, 0.2, 0)\nm = plate - slot\nshow m");
+      const note = watertightNote(w, ev, 0.05);
+      expect(note).toMatch(/'slot' \(cut: the face it cut\)/);
+      expect(note).toMatch(/move the part by half a cell \(0\.025\) along x/);
+      const plain = run('m = box(1)\nset caption 0\nshow m', "cap.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 });
+      expect(plain.files).toContain("beauty.png");
+      const bare = readFileSync(join(dir, "beauty.png"));
+      run('m = box(1)\nshow m', "cap.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 });
+      expect(readFileSync(join(dir, "beauty.png")).equals(bare)).toBe(false);
+      run('m = box(1)\nshow m', "cap.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64, caption: false });
+      expect(readFileSync(join(dir, "beauty.png")).equals(bare)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("titles a sheet with the surface's size held within the bounds", () => {
+    expect(clampBounds({ min: [-1.001, -0.0005, -1], max: [1.001, 0.513, 1] }, { min: [-1, 0, -1], max: [1, 0.5, 1] })).toEqual({ min: [-1, 0, -1], max: [1, 0.5, 1] });
+    // A mesh smaller than its loose bounds keeps its own extent.
+    expect(clampBounds({ min: [0, 0, 0], max: [1, 1, 1] }, { min: [-2, -2, -2], max: [2, 2, 2] })).toEqual({ min: [0, 0, 0], max: [1, 1, 1] });
   });
   it("check evaluates without rendering", () => {
     const ev = check("a = box(2)\nset grid 40");

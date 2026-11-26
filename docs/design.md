@@ -341,6 +341,19 @@ them in the other field, and tightens the best pair by alternating
 projections, so two parts that face each other get their exact gap and
 an overlap comes back negative by its depth.
 
+A failed promise is only useful if it says where, so each query carries
+a witness: a void the point and the step of the measured shape holding
+solid there (and, for a region made of copies, which copy), an overlap
+the point the two share or, when they share nothing, whether they touch,
+stand apart or overlap more thinly than the lattice resolves, which is
+the clearance between them read at its closest pair. The meshing
+queries share their work: one evaluation keeps a mesh and its analysis
+per shape and grid, so `pieces(hub)` and `overhang(hub)` mesh the hub
+once, and a failing `pieces()` names its loose piece from that same
+mesh (round 10's hub: `check` from 3.9 s to 2.5 s). The cache is keyed
+by the shape object, which never changes once built, so it needs no
+invalidation, and an evaluation in another pose has shapes of its own.
+
 ### Printing
 
 A slicer reads an STL in millimetres with z up, and Aixle's units are
@@ -716,6 +729,46 @@ out of it, meshed at twice the cell and drawn faint and see-through
 over the step wherever it is in front by more than a cell (round 7: the
 drone's body, clipped flat over the gimbal, was read as an unknown
 plate). The pose sheet and the strips do the same per pose.
+
+## Slices through a step
+
+`slices.png` cuts through the model's centre, which is right for a cup
+and wrong for a plant in a terrarium: its stem is off every plane, and
+the cut shows the canopy as a blob floating over the soil (round 10).
+`set slice name` cuts through one step instead, where the output puts
+it. Where the planes go was measured rather than guessed: the step's box
+centre is in the air for anything that leans or reaches (a lamp's arm,
+a ring of rocks, a placed set), and on 74 parts in five programs a
+vertical plane there missed the part on 4 of 148 cuts and cut under a
+quarter of its widest section on 8. The step's solid centroid, sampled
+on a 40-cell lattice over its own surface's box, missed none; it is
+used unless a plane there cuts less than half the step's widest section
+on that axis (a ring's centroid is in its hole), when the widest section
+nearest the centroid is used. The frame is the step's own box with a
+quarter of its size round it, enough for the soil it stands in or the
+wall it is fixed to, and the cut through the rest of the model is drawn
+faint, as a focus close-up draws it, so the step is the thing read and
+the rest is its context. A probe or a cutter places the planes with its
+own volume but is not drawn: what is read there is the model.
+
+## What each light adds
+
+`lights.png` began as each light alone, then all, which shows what a
+key or a rim light does but not a small point light: under one alone it
+changes a few dim pixels of a whole picture, and the ambient sky, which
+every frame keeps, swamps them (round 10: a ring's spark). So the strip
+has a second row, each light's own contribution: the frame under that
+light alone minus the frame under no light (one light of no power: the
+sky's ambient, the glows and the reflections, nothing from any light),
+clamped at zero and brightened
+until the 99th percentile of what the light reaches is near white, the
+gain printed. The lights add up in the shading (each adds its diffuse
+and its highlight, shadowed towards itself), so the difference is that
+light's term, and the brightening makes its reach and colour readable
+whatever its power. It costs one more render than the strip did, and
+the frames went from 0.4 to half the beauty size: 6.1 s to 9.6 s on the
+ring's three lights. The no-light frame closes the row, since it is
+what every light adds to.
 
 ## Lighting a metal, lighting a lamp
 

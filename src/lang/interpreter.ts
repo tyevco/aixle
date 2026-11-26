@@ -10,7 +10,7 @@ import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } fro
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
 import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
-import { loosePiece } from "../mesh/pieces.js";
+import { loosePiece, type MeshCache } from "../mesh/pieces.js";
 import { thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
@@ -19,9 +19,11 @@ import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type
 import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
-const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "units"]);
+const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "units", "slice"]);
 /** Settings whose value is several numbers: `set bed 220 220 250` or `set bed [220, 220, 250]`. */
 const LIST_SETTINGS = new Set(["bed"]);
+/** The transforms a mask can pass through and stay the half-space it was: `below | rotate(x=25) | move(0, h, 0)`. */
+const MASK_MOVES = new Set(["move", "rotate", "scale", "mirror", "flip"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
@@ -89,6 +91,8 @@ export interface EvalOptions {
   skipAsserts?: boolean;
   /** Load a picture for material(image=) and decal(image=): the file's pixels, or throw with why not. */
   resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
+  /** The step `--slice` cuts through, which is a region when nothing else reads it, as with `set slice name`. */
+  slice?: string;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -266,6 +270,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
   const settings: Settings = {};
+  // One mesh per shape and resolution for this evaluation's pieces() and overhang() (and a failing pieces()'s loose
+  // piece): measured on round 10's hub, check fell from 3.9 s to 2.5 s when the two queries shared the hub's mesh.
+  const meshes: MeshCache = new Map();
+  // Each top-level step's expression, for a warning that reads how a step was built (a turn before a ring).
+  const topAssigns = new Map<string, Expr>();
   // Whether this evaluation is a pose: any joint given a pose that is not rest.
   const posed = Object.values(options.jointPoses ?? {}).some((j) => j.angles.some((v) => v !== 0) || j.move.some((v) => v !== 0) || j.scale.some((v) => v !== 1));
   // Inside an assert's test, where a query in a pose reads a step where the pose put it; geometry built from a
@@ -778,6 +787,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
     if ((callee === "pieces" || callee === "overhang" || callee === "wall") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
     const result = callBuiltin(builtin, values, line);
+    if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
     if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const c = clearanceAt(values[0].value, values[1].value);
@@ -790,8 +800,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (p) {
         const at = `(${p.map(fmt3).join(", ")})`;
         const first = args[0].value, second = args[1].value;
-        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
+        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
         witness = what;
+      }
+      // An overlap of nothing says whether the two touch, stand apart, or overlap by less than the lattice can see
+      // (round 10: a sign board's back face exactly on the wall read 0 with no place, and a rim sunk 0.02 read 0).
+      if (callee === "overlap" && result === 0 && !isEmpty(a.bounds) && !isEmpty(b.bounds)) {
+        const c = clearanceAt(a, b);
+        const tol = Math.max(...boundsSize(a.bounds), ...boundsSize(b.bounds)) * 1e-4;
+        if (c.at) {
+          const at = `(${c.at.map(fmt3).join(", ")})`;
+          witness = c.d > tol ? `they do not meet: ${Number(c.d.toPrecision(3))} apart, closest at ${at}` : c.d >= -tol ? `they only touch, at ${at}: sink one into the other by a cell or more` : `they overlap by ${Number((-c.d).toPrecision(3))} at ${at}, thinner than the lattice measures over their shared box: promise it on a chunk of the part (part & box(...)) or with clearance(a, b) < 0`;
+        }
       }
       // A void whose region is nowhere near the shape holds for no reason (round 10: a probe in the standing frame
       // against a cutter in the flat frame promised nothing); a region just clear of the shape is a guard, and fine.
@@ -805,7 +825,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A pieces() promise that fails names the loose piece, as the report's Pieces row does (round 10: four renders).
     if (assertDepth > 0 && callee === "pieces" && typeof result === "number" && result > 1 && isShape3(values[0].value)) {
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
-      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64);
+      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64, meshes);
       if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
     }
     // A wall() promise says where the thinnest wall is and in which step, so the line to edit is in the message.
@@ -853,7 +873,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const bound = bind(ov, args);
       if (typeof bound === "string") { failures.push(bound); continue; }
       try {
-        return ov.impl(bound.values, bound.rest);
+        return ov.impl(bound.values, bound.rest, { meshes });
       } catch (err) {
         const msg = (err as Error).message;
         throw new RuntimeError(msg.startsWith(`${b.name}(): `) ? msg : `${b.name}(): ${msg}`, line);
@@ -961,7 +981,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (!currentStep) return;
     const vol = (s: Shape3) => (isEmpty(s.bounds) ? 0 : boundsSize(s.bounds).reduce((a, b) => a * b, 1));
     const bigger = vol(l) > vol(r) * 1.5 ? le : vol(r) > vol(l) * 1.5 ? re : undefined;
-    if (bigger && bigger.type === "ident") (currentStep.maskDeps ??= new Set()).add(bigger.name);
+    // The mask may be a named half-space turned and moved on the way in (`stone & (below | rotate(x=25) | move(...))`
+    // in a loop of facets, round 10): the name at the head of a chain of rigid transforms is the mask.
+    let e = bigger;
+    while (e && e.type === "call" && e.piped && MASK_MOVES.has(e.callee) && e.args.length && !e.args[0].name) e = e.args[0].value;
+    if (e && e.type === "ident") (currentStep.maskDeps ??= new Set()).add(e.name);
   }
 
   /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
@@ -970,6 +994,59 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (!currentStep) return;
     currentStep.cuts = true;
     (currentStep.cutDeps ??= new Set()).add(name);
+  }
+
+  /**
+   * `pocket | rotate(y=30) | ring(6, 0.7)` meant the ring turned half a pitch, but a ring pushes each copy out along +x
+   * first, so the turn only spins each copy in place, which a part round about the axis does not show: the pockets
+   * landed on the holes (round 10). Said when the part given to ring was turned about the ring's own axis just
+   * before, and the turn left its field as it was (sampled over its box).
+   */
+  function ringTurnedInPlace(args: Arg[], values: { name?: string; value: Value }[], scope: Scope, line: number): void {
+    const positional = args.filter((a) => !a.name);
+    let e: Expr | undefined = positional[0]?.value;
+    const from = e?.type === "ident" ? e.name : undefined;
+    // The turn's angle is read where it was written: here for an inline turn, at the top level for a step's.
+    let at = scope;
+    if (e?.type === "ident") {
+      // A def's parameter or a local that shares a step's name is not that step, and was not built by its line.
+      e = global.get(e.name) === values[0].value ? topAssigns.get(e.name) : undefined;
+      at = global;
+    }
+    if (!e || e.type !== "call" || e.callee !== "rotate" || !e.piped) return;
+    const axisValue = values.find((v) => v.name === "axis")?.value ?? values.filter((v) => !v.name)[3]?.value ?? "y";
+    if (axisValue !== "x" && axisValue !== "y" && axisValue !== "z") return;
+    const turns = e.args.filter((a) => a.name === "x" || a.name === "y" || a.name === "z");
+    if (turns.length !== 1 || turns[0].name !== axisValue || e.args.some((a, i) => i > 0 && !a.name)) return;
+    let deg: Value;
+    try { deg = evalExpr(turns[0].value, at); } catch { return; }
+    if (typeof deg !== "number" || Math.abs(deg % 360) < 1e-9) return;
+    const shape = values[0].value as Shape3;
+    if (isEmpty(shape.bounds)) return;
+    const b = shape.bounds, size = boundsSize(b);
+    const tol = Math.max(...size) * 1e-6;
+    const r = (deg * Math.PI) / 180, c = Math.cos(r), sn = Math.sin(r);
+    const k = "xyz".indexOf(axisValue), u = (k + 1) % 3, w = (k + 2) % 3;
+    for (let i = 0; i <= 4; i++)
+      for (let j = 0; j <= 4; j++)
+        for (let l = 0; l <= 4; l++) {
+          const p = [b.min[0] + (size[0] * (i + 0.37)) / 4.5, b.min[1] + (size[1] * (j + 0.37)) / 4.5, b.min[2] + (size[2] * (l + 0.37)) / 4.5];
+          const q = [...p];
+          q[u] = p[u] * c - p[w] * sn;
+          q[w] = p[u] * sn + p[w] * c;
+          if (Math.abs(shape.dist(p[0], p[1], p[2]) - shape.dist(q[0], q[1], q[2])) > tol) return;
+        }
+    warnings.push(`line ${line}: ring(): ${from ? `'${from}' was` : "the part was"} turned about ${axisValue} by ${fmt3(deg)} just before the ring, which leaves it as it was (it is round about that axis), so every copy sits where an unturned one would; ring pushes each copy out along +${axisValue === "x" ? "y" : "x"} before turning it, so to turn the whole ring, rotate after it: ... | ring(...) | rotate(${axisValue}=${fmt3(deg)})`);
+  }
+
+  /** Which copy of a region made of copies (a ring of probe rods) holds a point, or which named part: for a void failure. */
+  function regionPart(region: Shape3, p: Vec3, regionText: string): string {
+    const parts = region.parts;
+    if (!parts || parts.length < 2) return "";
+    const i = parts.findIndex((k) => k.dist(p[0], p[1], p[2]) < 0);
+    if (i < 0) return "";
+    const named = [...steps.values()].find((st) => st.value === parts[i]);
+    return named ? `, in ${regionText}'s part '${named.name}'` : `, in copy ${i + 1} of the ${parts.length} in ${regionText}`;
   }
 
   /**
@@ -1170,6 +1247,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   let showDeps: Set<string> = new Set();
+  for (const stmt of program.body) if (stmt.type === "assign") topAssigns.set(stmt.name, stmt.value);
   for (const stmt of program.body) exec(stmt, global, true);
 
   let outputName = "model";
@@ -1208,6 +1286,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (settings.bed !== undefined && !(Array.isArray(settings.bed) && settings.bed.length === 3 && settings.bed.every((v) => v > 0))) warnings.push(`set bed ${Array.isArray(settings.bed) ? settings.bed.join(" ") : settings.bed}: the bed is the printer's build volume as three numbers in millimetres, width, depth and height (set bed 220 220 250)`);
     if (settings.environment !== undefined && !ENVIRONMENT_NAMES.includes(String(settings.environment))) warnings.push(`set environment ${settings.environment}: no such environment; the skies are ${ENVIRONMENT_NAMES.join(", ")} (studio is the default)`);
     if (typeof settings.camera === "string" && !cameras.some((c) => c.name === settings.camera)) warnings.push(`set camera ${settings.camera}: no such camera${cameras.length ? `; cameras: ${cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; the render uses its own view`);
+    // `set slice name` puts the cross-sections through a step: a name that is no step is said here, before a render.
+    if (settings.slice !== undefined && (typeof settings.slice !== "string" || (!steps.has(settings.slice) && !(shown?.names ?? []).includes(settings.slice)))) warnings.push(`set slice ${settings.slice}: ${typeof settings.slice === "string" ? "no such step or object" : "takes a step's name (set slice_x 0.5 moves one plane)"}; the slices cut through the model's centre`);
     for (const c of cameras) if (c.focus && !steps.has(c.focus) && !(shown?.names ?? []).includes(c.focus)) warnings.push(`camera "${c.name}" (line ${c.line}): focus="${c.focus}" names no step or object; the shot frames the whole model`);
     for (const a of animations) {
       // Two keys are both ends: ease_ends=0 leaves nothing eased (round 8: a flick expected to settle ran linear).
@@ -1220,6 +1300,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // Roles: a part is anything the output is built from; below a cut name the subtree is a cut; a name only an
   // assert, a decal or a camera reads is a region. A part stays a part however else it is read.
   for (const c of cameras) if (c.focus) regionNames.add(c.focus);
+  // A step only sliced through (a probe the planes should cross) is a region too, whether `set slice` or `--slice`
+  // named it.
+  for (const sl of [settings.slice, options.slice]) if (typeof sl === "string" && steps.has(sl)) regionNames.add(sl);
   const roles = new Map<string, StepRole>();
   const rank = (r: StepRole | undefined) => (r === "part" ? 4 : r === "cut" ? 3 : r === "mask" ? 2 : r === "region" ? 1 : 0);
   const visit = (nme: string, role: StepRole) => {

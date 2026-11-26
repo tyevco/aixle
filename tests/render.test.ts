@@ -10,9 +10,9 @@ import { albedo, coverage, sampleImage } from "../src/sdf/materials.js";
 import type { ImageTexture } from "../src/sdf/types.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
 import { preset } from "../src/sdf/materials.js";
-import { Canvas } from "../src/render/canvas.js";
+import { Canvas, rgb } from "../src/render/canvas.js";
 import { drawText, textWidth } from "../src/render/font.js";
-import { renderBeauty } from "../src/render/beauty.js";
+import { lightContribution, renderBeauty } from "../src/render/beauty.js";
 
 const sphere = P.sphere(1);
 const mesh = surfaceNets(sphere, { resolution: 32 }).mesh;
@@ -157,6 +157,24 @@ describe("canvas and font", () => {
     const end = drawText(c, 0, 0, "AB 1", 0x000000);
     expect(end).toBe(textWidth("AB 1"));
     expect(c.get(1, 0)).toBe(0x000000);
+  });
+});
+
+describe("what a light adds", () => {
+  it("is the light-alone frame less the no-light frame, clamped at zero and brightened to near white", () => {
+    const none = new Canvas(10, 10, rgb(40, 40, 40));
+    const alone = new Canvas(10, 10, rgb(40, 40, 40));
+    // Half the frame is lit, more in red than in green; one pixel came out darker than under no light.
+    for (let i = 0; i < 50; i++) alone.set(i % 10, Math.floor(i / 10), rgb(90, 60, 40));
+    alone.set(9, 9, rgb(10, 10, 10));
+    const { canvas, gain } = lightContribution(alone, none);
+    expect(gain).toBeCloseTo(230 / 50, 5);
+    const px = (x: number, y: number) => [...canvas.data.slice((y * 10 + x) * 4, (y * 10 + x) * 4 + 3)];
+    expect(px(0, 0)).toEqual([230, 92, 0]);
+    expect(px(5, 7)).toEqual([0, 0, 0]);
+    expect(px(9, 9)).toEqual([0, 0, 0]);
+    // A light that reaches nothing adds a black frame at a gain of 1.
+    expect(lightContribution(none, none).gain).toBe(1);
   });
 });
 

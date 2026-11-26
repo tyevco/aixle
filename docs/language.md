@@ -194,7 +194,13 @@ roughens with noise.
 **Repetition**: `array(n, dx, dy, dz)` copies in a line, `grid(nx, nz, dx,
 dz)` on the ground, `ring(n, radius)` around y (each copy is first pushed
 out along +x by `radius`, then turned). These are real copies, so a rotated
-copy of a box is exactly a rotated box.
+copy of a box is exactly a rotated box. Turning a part round y before the
+ring turns it in place, which does nothing to a round part centred on the
+axis: copies between another ring's copies come from turning the ring,
+`pockets = pocket | ring(6, 0.7) | rotate(y=30)` beside `holes = hole |
+ring(6, 0.7)` (a hub's pockets once landed on its holes as `pocket |
+rotate(y=30) | ring(6, 0.7)`, and `check` now warns when a turn just
+before a ring leaves the part as it was).
 
 **Bounds** are boxes: exact for primitives and unions, loose after a cut
 (`a - b` keeps a's box however much was removed), a rotation or a twist;
@@ -701,7 +707,15 @@ out; `set camera hero` makes that shot the sheet's perspective view and
 environment, so a misspelt name is a warning before any render. With
 two or more lights `render --beauty` also writes `lights.png`, the
 picture under each light alone and then all of them, so what a rim
-light adds is seen rather than guessed from two near-identical shots.
+light adds is seen rather than guessed from two near-identical shots. Under
+each of those is what that light adds on its own: the picture under it
+alone minus the picture under no light at all, brightened until its
+brightest part is near white, with the gain printed (`spark adds, ×3`),
+and last the picture under no light, which is the sky's ambient, the
+glows and the metals' reflections. A small point light that changes a
+few pixels of the whole picture (a spark over a ring's stone) fills its
+own frame there, so its reach and its colour can be judged. The frames
+are half the beauty render's size.
 
 What the lights and the skies can and cannot do, measured in round 9:
 
@@ -730,7 +744,12 @@ What the lights and the skies can and cannot do, measured in round 9:
   `sunset`, olive under `night`. A coloured stone (`transmit` about
   0.5) shows what is behind it, so in a closed setting it reads dark;
   open the setting or keep transmit down. `--environment all` writes
-  `environments.png`, the same shot under every sky, for one render.
+  `environments.png`, the same shot under every sky, for one render;
+  a list, `--environment studio,overcast`, renders only those, and
+  beauty.png takes the first of them (with `all`, beauty.png keeps the
+  program's own sky). The strip's frames are half the beauty render's
+  size, at the full grid, so glass can be judged there, which a quick
+  pass cannot.
 - A camera's `elevation` is about the model's centre and may be
   negative: at 0 a perspective camera still looks down on the floor
   round a low model, so a low shot is `elevation=-8`. `elevation=90` is
@@ -756,7 +775,10 @@ What the lights and the skies can and cannot do, measured in round 9:
   `beauty.png` take its view, and its `focus=` framing) while a lighting
   loop runs, `--beauty-only` skips the steps, slices, turntable,
   callouts and exports for that loop, and `--environment NAME` tries a
-  sky without editing the program.
+  sky without editing the program. The caption at the foot of
+  `beauty.png` and of each shot names the shot and its size for whoever
+  checks it; `set caption 0` (or `--no-caption`) leaves it off a
+  presentation copy, where at a low camera it can overprint the model.
 - `--quick` meshes at 64 cells, so a glass wall thinner than that cell
   renders as a frosted solid and a `transmit` material cannot be judged
   there; judge glass at the full grid. A glowing part inside a glass
@@ -811,7 +833,10 @@ note under each caption, so a neighbour the frame clips reads as the
 context it is and not as a part (a drone's body over its gimbal); the
 slices draw the cut through it faint too. The sheet's title gives the
 frame's size (the step's box grown a little), not the step's own;
-`check` has the step's.
+`check` has the step's. Without a focus the title is the surface's
+extent from the mesh held within the model's bounds, since a coarse
+cell's vertices can stray a little past a face (a quick sheet once
+titled a 0.5-tall flange 0.51).
 `--out DIR` puts a render somewhere other than `out/<name>/`, so a focus
 render does not overwrite the main one. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
@@ -819,7 +844,22 @@ and `--elevation` override). `set grid N` sets the extraction resolution (cells 
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
 of a view and of the beauty render (`--beauty-size` overrides the latter). `set slice_x 0.5` (and `slice_y`, `slice_z`) moves a
 cross-section plane; a scene's default cut goes through its first
-object, so list the one to cut first. `set beauty 1` always writes the ray-marched
+object, so list the one to cut first. `set slice tree` (or `--slice
+tree`) puts the three planes through one step where the output puts
+it, framed on the step with a quarter of its size round it, its own cut
+in full and the rest of the model's faint: the check that a plant
+stands on the soil is a cut down its stem. The planes go through the
+step's solid centroid, or through its widest section where a plane at
+the centroid would cut less than half of it (the hole of a ring, the
+air between a post and the lamp it carries), never the box's centre,
+which a leaning canopy or a reaching arm puts in the air (measured on
+74 parts in five programs: through the box's centre a vertical plane
+missed the part on 4 of 148 cuts and cut under a quarter of its widest
+section on 8; through the centroid, on none). A `slice_x` given as well
+still sets that plane. Sliced through a probe or a cutter, the planes
+go through its volume and the model is drawn in full, so `--slice rods`
+cuts down the holes a promise's ring of rods stands in. A step only sliced
+through is a region. `set beauty 1` always writes the ray-marched
 `beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
 to rounded vertex placement if a sharp corner ever misbehaves. Edges are
 creases: a vertex whose faces meet at more than 35 degrees (a box's edge,
@@ -973,8 +1013,12 @@ and every comment stays where it was. The layout:
 ## What the tool checks for you
 
 `aixle check` (a second, or a few with `pieces()` and `overhang()`,
-which mesh) prints every step's size and the warnings: shapes as their
-box, 2D profiles as their box in the plane, numbers and lists of numbers
+which mesh: once per shape and grid in a run, so the two on one part
+share a mesh, and round 10's hub checked in 2.5 s rather than 3.9)
+prints every step's size and the warnings: shapes as their
+box, 2D profiles as their box in the plane (text on an arc adds the
+radii its lettering spans from the origin, `on the arc r 0.255..0.385`,
+which is the number to hold against a boss's rim), numbers and lists of numbers
 as their values (a number set inside a loop is the last iteration's and
 is not listed), then the program's `def`s with their parameters;
 `--brief` leaves the sizes out and prints the output, the warnings and
@@ -1015,7 +1059,9 @@ surfaces meet there, exposed ones first; "in 'panel' twice, as 'a' and
 'b'" when two placements of one step cross, "alone" when no other part is
 within a cell, which is a crease of the step's own surface or the
 mesher's noise at a few edges; and a cluster of edges all on one plane is called out as a face lying
-exactly on a sample plane, which a nudge of a fraction of a cell cures);
+exactly on a sample plane, which a nudge of half a cell cures, and the
+report gives the number and the axis; a cutter named there is tagged
+`(cut: the face it cut)`, the wall it left in its part);
 a named step transformed alone on the right of a `+` (`a + b | move(...)`
 moves b only, since `|` binds tighter; `(a + b) | move(...)` moves both,
 and `+ sphere(0.2) | move(...)` is the ordinary way to place one); a cut
@@ -1144,9 +1190,15 @@ hole goes through" is a thinner rod reaching past both faces,
 touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
 rather than sunk into it, and `assert overlap(handle, body) > 0.001`
 says a handle is joined to its wall, not just touching; a volume is
-small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take a "joined"
-threshold from the part's size, and a failure says where the two
-overlap. `inside(a, b)` is the fraction of a's volume inside b: `== 1`
+small (a pin of radius 0.05 sunk 0.07 shares 0.00055; a ring's band, a
+torus of radius 0.42 and tube 0.065 standing on a flat cushion, sunk
+0.03 into it shares 0.00047, and a band of radius 0.2 sunk as far
+0.00034), so take a "joined" threshold from the part's size, and a
+failure says where the two overlap. An overlap of 0 says why: the two
+only touch there (a board's back face exactly on a wall: sink it), they
+stand apart by so much, or they overlap by less than the lattice can
+measure over their shared box (promise that on a chunk of the part, `rim
+& box(...)`, or as `clearance(a, b) < 0`). `inside(a, b)` is the fraction of a's volume inside b: `== 1`
 for a spring that must stay in its housing, `== 0` for a handle that
 must stay out of the cavity, and a failure says where a is outside b.
 `b` is the solid volume: a mantle hangs in the air inside a shelled
@@ -1161,7 +1213,9 @@ walks the surface too, so a pin thinner than the lattice is caught), so
 measure parts, not a scene. The bound queries (`width`, `tall`,
 `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are the
 rest. A failing `pieces()` names the smallest loose piece and where it
-is. A `void` whose region's box never meets the shape's box holds for
+is. A failing `void` whose region is made of copies (a ring of probe
+rods) says which copy held the solid, `in copy 3 of the 6 in rods`, and
+one whose region is a union of named probes names the probe. A `void` whose region's box never meets the shape's box holds for
 no reason, and `check` says so: a probe built in one frame against a
 cutter in another promises nothing. A step only an assert reads (a
 probe rod, a cavity's region, a union of the neighbours) is a *region*:
@@ -1169,7 +1223,8 @@ not part of the output, not warned about, framed grey and tagged on the
 steps sheet, and never labelled in the callouts; a shape subtracted
 from a part is a *cut*, tagged so on the steps sheet, which draws it as
 the solid it removes; the larger operand of an `&` (a half-space box
-that trims a gem) is a *mask*, tagged so and never labelled. `check`
+that trims a gem, even turned and moved on its way in, `stone & (below
+| rotate(x=25) | move(0, h, 0))`) is a *mask*, tagged so and never labelled. `check`
 prints the asserts in line order, failures among the passes.
 
 ## Limits worth knowing
@@ -1199,7 +1254,9 @@ prints the asserts in line order, failures among the passes.
 - The sheet, the views, the pose sheets and the animation strips draw
   glass (a material with `transmit`) on every other pixel, so what is
   behind it shows through a checker: a pendulum behind a glazed door is
-  on the strip. The beauty render refracts it properly.
+  on the strip. A step's thumbnail that is all glass (a gem, a dome on
+  its own) has nothing of its own behind it and is drawn solid, so its
+  shape reads. The beauty render refracts it properly.
 - The sheet and the views colour the mesh per vertex, so a pattern or a
   decal near the cell size looks blocky there (a 0.07 speckle at a 0.03
   cell reads as camouflage); the beauty render and the baked atlas sample
@@ -1256,5 +1313,6 @@ prints the asserts in line order, failures among the passes.
   assigned to a name, which it then takes.
 - A cross-section draws the surface's outline a cell or so behind the cut
   plane as a thin line, so a plate just behind the plane shows as a dashed
-  line across an opening that is open. Move the slice (`set slice_x`) or
-  render a `--focus` close-up to be sure.
+  line across an opening that is open. Move the slice (`set slice_x`),
+  put the planes through the step itself (`set slice name`), or render
+  a `--focus` close-up to be sure.

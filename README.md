@@ -66,6 +66,7 @@ npx aixle fmt model.aix --write      # the one layout, comments kept, meaning un
 npx aixle render model.aix --beauty         # plus beauty.png (a second or a few)
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
+npx aixle render model.aix --slice stem         # slices.png through one step, framed on it, the rest faint
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
@@ -79,7 +80,7 @@ npx aixle doc                        # the reference, to stdout
 | File | What |
 | --- | --- |
 | `sheet.png` | perspective, front, right and top views on unit grids, with the model's size in the bar |
-| `slices.png` | cross-sections on x, y and z, inside filled with the material, outline where the surface is |
+| `slices.png` | cross-sections on x, y and z, inside filled with the material, outline where the surface is; through one step's solid with `--slice name` |
 | `steps.png` | one thumbnail per named shape in program order; red = not part of the output |
 | `callouts.png` | the perspective view with the largest visible steps named, a leader line from each label to its part |
 | `turntable.png` | eight views around the model |

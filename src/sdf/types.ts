@@ -214,6 +214,8 @@ export interface Shape2 {
    * transform or boolean drops it.
    */
   revolveDist?: DistFn2;
+  /** Lettering bent onto an arc: the nearest and farthest the ink comes to the arc's centre, the origin. */
+  arcSpan?: [number, number];
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

@@ -211,7 +211,12 @@ without naming the piece; and `beauty.png` under a focus camera was not
 framed. Their reports' three changes each are answered below. Not
 done: a warning when `attach` leaves two faces touching (documented
 instead), a per-step slice, a `--environment a,b` pair (`all` exists),
-a bigger lights strip, and `text(arc=)` printing its radial span.
+a bigger lights strip, and `text(arc=)` printing its radial span (all
+four since built: `set slice name`, `--environment a,b`, a row of what
+each light adds on its own, and an `on the arc` line in `check`; with
+them `check` meshes a shape once for `pieces()` and `overhang()`, an
+`overlap` of zero says why, a `void` on a ring of probes names the
+copy, and `attach(sink=)` answers the touching faces).
 
 ## What each round changed
 
