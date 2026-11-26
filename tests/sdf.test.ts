@@ -632,6 +632,14 @@ describe("smooth profiles", () => {
       const g = Math.hypot(vase.dist(x + h, y) - vase.dist(x - h, y), vase.dist(x, y + h) - vase.dist(x, y - h)) / (2 * h);
       expect(g).toBeCloseTo(1, 3);
     }
+    // A long outline searches through a grid and counts crossings by height bands: the same exact field.
+    const wavy: number[] = [];
+    for (let i = 0; i < 90; i++) { const a = (i / 90) * 2 * Math.PI, r = 1 + 0.1 * Math.sin(9 * a); wavy.push(r * Math.cos(a), r * Math.sin(a)); }
+    const long = C2.curve2(wavy), longPoly = S.polygon(C2.chainPoints(C2.chainThrough(wavy, true), 200).slice(0, -1).flat());
+    for (let i = 0; i < 300; i++) {
+      const x = -1.6 + rnd() * 3.2, y = -1.6 + rnd() * 3.2;
+      expect(Math.abs(long.dist(x, y) - longPoly.dist(x, y))).toBeLessThan(1e-6);
+    }
     // The underside runs straight between its two corners.
     expect(vase.dist(0.5, 0.02)).toBeCloseTo(-0.02, 9);
     expect(vase.dist(0.5, -0.1)).toBeCloseTo(0.1, 9);

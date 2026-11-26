@@ -482,6 +482,12 @@ where the polygons through the same points are off by their sagitta,
 16-piece outline against 120 ns for an 18-point polygon and 720 ns for the
 128-point polygon it would take to hide the facets; the vase's body
 meshes at grid 128 in 1.4 s against 0.65 s for the polygon it replaced.
+Past two dozen pieces the pieces go into the grid the sweeps use (see A
+grid over the pieces), laid flat, and the crossing count reads only the
+parts listed in the query's band of height, so a long outline costs about
+what a polygon through the same points does: extruded and meshed at grid
+128, 0.69 s against 0.44 s at 24 points, 1.0 s against 0.81 s at 120 and
+2.4 s against 2.0 s at 360.
 
 Corners are a point given twice, because a spline through a sharp turn
 overshoots (a foot's edge bows the underside down, the axis run bulges
@@ -506,7 +512,8 @@ and a partial revolve keeps the plain distance, since there the axis is
 an edge of the wedge's flat ends.
 
 A closed outline carries a feature size, its thinnest wall: from sixteen
-points per piece the march along the inward normal to the far side,
+points per piece (fewer past a hundred pieces, so the build stays under
+a second) the march along the inward normal to the far side,
 counted where the two sides face each other (normals within 10 degrees of
 opposite) and not within that distance of a corner, so a vase drawn as one
 outline with a wall under a cell is warned like a shell is. A spike counts

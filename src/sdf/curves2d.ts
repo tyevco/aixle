@@ -17,6 +17,7 @@
  * nothing.
  */
 import { shape2 } from "./shapes2d.js";
+import { buildSpatialIndex, cellsFor } from "./spatial.js";
 import type { Shape2 } from "./types.js";
 
 /** A chain of cubic pieces: control points flat, x, y, 8 numbers per piece; closed when the last piece ends on the first's start. */
@@ -310,10 +311,26 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
   const mono = new Float64Array(parts);
   const nparts = mono.length / 12;
   const bx0 = minx, by0 = miny, bx1 = maxx, by1 = maxy;
+  // Over a few dozen parts, horizontal bands listing the parts whose heights reach into each, so the crossing count
+  // reads only the parts at the query's height.
+  const bands = nparts > 32 && by1 > by0 ? Math.min(256, Math.ceil(nparts / 2)) : 0;
+  const bandH = bands ? (by1 - by0) / bands : 1;
+  const bandStart = new Int32Array(bands + 1);
+  let bandItems = new Int32Array(0);
+  if (bands) {
+    const lists: number[][] = Array.from({ length: bands }, () => []);
+    for (let k = 0; k < nparts; k++) {
+      const lo = Math.min(mono[k * 12 + 8], mono[k * 12 + 9]), hi = Math.max(mono[k * 12 + 8], mono[k * 12 + 9]);
+      const b0 = Math.max(0, Math.floor((lo - by0) / bandH)), b1 = Math.min(bands - 1, Math.floor((hi - by0) / bandH));
+      for (let b = b0; b <= b1; b++) lists[b].push(k);
+    }
+    for (let b = 0; b < bands; b++) bandStart[b + 1] = bandStart[b] + lists[b].length;
+    bandItems = Int32Array.from(lists.flat());
+  }
   /**
    * The field over the pieces listed in `use`: points on them (each piece's start and middle, and its end where no
    * listed piece starts) give an upper bound before any search, then a piece is searched only when its box is
-   * nearer than the best so far.
+   * nearer than the best so far; past two dozen pieces a grid picks the pieces to search.
    */
   const field = (use: number[]): ((x: number, y: number) => number) => {
     const idx = Int32Array.from(use);
@@ -329,26 +346,53 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
     }
     const up = new Float64Array(pts);
     const nu = up.length / 2;
+    // Over a couple of dozen pieces, the grid the 3D sweeps use, laid flat (z = 0), so a query searches the pieces
+    // near it and not every box.
+    let index: ReturnType<typeof buildSpatialIndex> | undefined;
+    if (n > 24) {
+      const bmin = new Float64Array(n * 3), bmax = new Float64Array(n * 3);
+      use.forEach((s, i) => {
+        bmin[i * 3] = box[s * 4]; bmin[i * 3 + 1] = box[s * 4 + 1];
+        bmax[i * 3] = box[s * 4 + 2]; bmax[i * 3 + 1] = box[s * 4 + 3];
+      });
+      const pad = Math.max(bx1 - bx0, by1 - by0) * 0.25 + half;
+      index = buildSpatialIndex(n, bmin, bmax, { min: [bx0 - pad, by0 - pad, 0], max: [bx1 + pad, by1 + pad, 0] }, cellsFor(n));
+    }
+    const pieceD = (i: number, x: number, y: number): number => Math.sqrt(nearestSq(co, idx[i] * 8, x, y));
+    const boxD = (i: number, x: number, y: number): number => {
+      const o = idx[i] * 4;
+      const ex = Math.max(box[o] - x, 0, x - box[o + 2]), ey = Math.max(box[o + 1] - y, 0, y - box[o + 3]);
+      return Math.sqrt(ex * ex + ey * ey);
+    };
     return (x: number, y: number): number => {
-      let best = Infinity;
-      for (let i = 0; i < nu; i++) {
-        const dx = up[i * 2] - x, dy = up[i * 2 + 1] - y;
-        const q = dx * dx + dy * dy;
-        if (q < best) best = q;
+      let d: number;
+      if (index) d = index.min(x, y, 0, pieceD, boxD, Infinity);
+      else {
+        let best = Infinity;
+        for (let i = 0; i < nu; i++) {
+          const dx = up[i * 2] - x, dy = up[i * 2 + 1] - y;
+          const q = dx * dx + dy * dy;
+          if (q < best) best = q;
+        }
+        for (let i = 0; i < n; i++) {
+          const s = idx[i], o = s * 4;
+          const ex = Math.max(box[o] - x, 0, x - box[o + 2]), ey = Math.max(box[o + 1] - y, 0, y - box[o + 3]);
+          if (ex * ex + ey * ey >= best) continue;
+          const q = nearestSq(co, s * 8, x, y);
+          if (q < best) best = q;
+        }
+        d = Math.sqrt(best);
       }
-      for (let i = 0; i < n; i++) {
-        const s = idx[i], o = s * 4;
-        const ex = Math.max(box[o] - x, 0, x - box[o + 2]), ey = Math.max(box[o + 1] - y, 0, y - box[o + 3]);
-        if (ex * ex + ey * ey >= best) continue;
-        const q = nearestSq(co, s * 8, x, y);
-        if (q < best) best = q;
-      }
-      const d = Math.sqrt(best);
       if (!filled) return d - half;
       if (x < bx0 || x > bx1 || y < by0 || y > by1) return d;
       let inside = false;
-      for (let k = 0; k < nparts; k++) {
-        const o = k * 12;
+      let k0 = 0, k1 = nparts;
+      if (bands) {
+        const b = Math.min(bands - 1, Math.max(0, Math.floor((y - by0) / bandH)));
+        k0 = bandStart[b]; k1 = bandStart[b + 1];
+      }
+      for (let j = k0; j < k1; j++) {
+        const o = (bands ? bandItems[j] : j) * 12;
         const ya = mono[o + 8], yb = mono[o + 9];
         if (!((ya <= y && y < yb) || (yb <= y && y < ya))) continue;
         if (x >= mono[o + 11]) continue;
@@ -404,7 +448,8 @@ function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: numb
     return true;
   };
   let best: number | undefined;
-  const PER = 16;
+  // Sixteen points a piece, fewer on a long outline so the build stays well under a second.
+  const PER = Math.max(2, Math.min(16, Math.floor(1600 / pieces)));
   for (let s = 0; s < pieces; s++) {
     if (onAxis(s)) continue;
     const o = s * 8;
