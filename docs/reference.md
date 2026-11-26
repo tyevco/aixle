@@ -457,6 +457,14 @@ The fraction of the shape's surface that faces down more than 45° (the faces re
 
 - `resolution`: cells on the longest side
 
+### wall
+
+The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (the program's `set grid` when none is given, 64 without one), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and in which step.
+
+    wall(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
 ### void
 
 1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught; a failure says where the solid is and in which step.

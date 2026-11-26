@@ -14,6 +14,7 @@ import { box, primitive } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
+import { to3mf } from "./export/threemf.js";
 import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedrock.js";
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
@@ -26,12 +27,13 @@ import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertResult, evaluate, type Evaluation, type StepRole } from "./lang/interpreter.js";
+import { assertLine, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
+import { bedFit, contactArea, supportVolume, UNIT_3MF, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
@@ -78,6 +80,8 @@ export interface RunOptions {
   sharp?: boolean;
   /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
   crease?: number;
+  /** Also write model.3mf beside model.stl (it is written anyway when the program sets units or a bed). */
+  threemf?: boolean;
   /** Also write model.roblox.glb: the GLB turned to face -Z with a Handle node and `_Att` attachment nodes from the anchors, sized against Roblox's accessory limits (or `set roblox 1`). */
   roblox?: boolean;
   /** Also write Minecraft Bedrock geometry (model.geo.json and its texture) at this many pixels per unit, a unit being a block; 16 is the game's own (or `set minecraft 16`). */
@@ -569,6 +573,48 @@ function cavitiesRow(physics: Physics, cellSize: number): string {
 }
 
 /**
+ * The steps to name for a point on the model, as the watertight row names
+ * an open edge: the innermost steps whose surfaces pass within two cells,
+ * exposed ones first, at most two; the nearest named one when none is
+ * innermost.
+ */
+function namesAt(evaluation: Evaluation, at: Vec3, cellSize: number): { name: string; leaf: boolean; d: number; parents: string[] }[] {
+  const near = stepsNearDetailed(evaluation, at, cellSize * 2);
+  const leaves = near.filter((n) => n.leaf).slice(0, 2);
+  return leaves.length ? leaves : near.slice(0, 1);
+}
+
+/**
+ * How far apart two steps' surfaces are around a point where both pass
+ * (round 4: "the barrel's side is 0.03 from the bracket's top"): points
+ * of each surface within a cell and a half of the point, read in the other
+ * step's field, the nearest reading kept. Positive is a gap, negative is
+ * how deep one reaches into the other; undefined when the steps cannot be
+ * placed in the output or neither surface comes near the point.
+ */
+export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec3, cellSize: number): { gap: number; into?: [string, string] } | undefined {
+  const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
+  const value = (n: string) => evaluation.steps.find((st) => st.name === n && isShape3(st.value))?.value as Shape3 | undefined;
+  const va = value(a), vb = value(b);
+  if (!va || !vb || !roots.length) return undefined;
+  const sa = placedUnder(roots, va), sb = placedUnder(roots, vb);
+  let best = Infinity, from: 0 | 1 = 0;
+  const r = cellSize * 1.5;
+  for (const [i, s, o] of [[0, sa, sb], [1, sb, sa]] as const)
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dz = -1; dz <= 1; dz++) {
+          const q = surfacePoint(s, at[0] + dx * r, at[1] + dy * r, at[2] + dz * r);
+          // Only the surface near the edge: a projection that ran off to another face of the step says nothing here.
+          if (Math.hypot(q[0] - at[0], q[1] - at[1], q[2] - at[2]) > cellSize * 3) continue;
+          const v = o.dist(q[0], q[1], q[2]);
+          if (v < best) { best = v; from = i; }
+        }
+  if (!Number.isFinite(best) || Math.abs(best) > cellSize * 3) return undefined;
+  return best < 0 ? { gap: best, into: from === 0 ? [a, b] : [b, a] } : { gap: best };
+}
+
+/**
  * The watertight line, with where the bad edges are and which steps hold
  * them, so it can be acted on. Each cluster names the steps whose surface
  * passes there; when only one step does, two of its own surfaces cross
@@ -578,24 +624,26 @@ function cavitiesRow(physics: Physics, cellSize: number): string {
  * A tally per step follows, so one construct carrying every edge shows
  * in one read.
  */
-export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[] }[] = [], posed = false): string {
+export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [], posed = false): string {
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
   const tally = new Map<string, number>();
-  let planar = 0;
+  let planar = 0, gaps = 0;
   const all = w.clusters ?? [];
   const spots = all.map((cl, index) => {
     // Named at an edge that is on the model, not at the cluster's mean, which for a ring of edges is inside the part.
-    const near = stepsNearDetailed(evaluation, cl.at, cellSize * 2);
-    const leaves = near.filter((n) => n.leaf).slice(0, 2);
-    const names = leaves.length ? leaves : near.slice(0, 1);
+    const names = namesAt(evaluation, cl.at, cellSize);
     for (const n of names) tally.set(n.name, (tally.get(n.name) ?? 0) + cl.count);
     // One step reached through two named parents is two placements of the same part crossing (two boards of one
     // panel), which is worth more than "with itself".
     const twice = names.length === 1 && names[0].parents.length >= 2 ? names[0].parents.slice(0, 2) : undefined;
     // One name alone: the step's own surface folds or creases there, or a sample-plane coincidence; a straight
     // tube has no second surface to cross, so it is not called "with itself" (round 6: that read as nonsense).
-    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
-    edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name) });
+    // Two steps meeting: how far apart their surfaces are there, which says which way to move one (round 4).
+    const g = names.length === 2 && index < 3 ? surfaceGap(evaluation, names[0].name, names[1].name, cl.at, cellSize) : undefined;
+    if (g) gaps++;
+    const gapText = !g ? "" : g.into ? `, '${g.into[0]}' only ${fmt(-g.gap)} into '${g.into[1]}' there (${(-g.gap / cellSize).toFixed(1)} of a cell)` : `, their surfaces ${fmt(g.gap)} apart there (${(g.gap / cellSize).toFixed(1)} of a cell)`;
+    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}${gapText}`;
+    edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name), ...(g ? { gap: g.gap } : {}) });
     if (index >= 3) return "";
     // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
     // plane, which the extractor cannot resolve (measured: a down tube's side and a tyre's equator on grid planes).
@@ -609,7 +657,8 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
   // and one that clears them here need not hold at rest (round 8: a lug blamed on a plane in two poses).
   const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : " Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part or the grid by a fraction of a cell, or change the radius a little.") : "";
   const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
-  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${planeNote}`;
+  const gapNote = gaps ? " Two parts closer than a cell, or sunk into each other by less than one, leave a seam: overlap them by a cell or more, or part them by a cell." : "";
+  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${planeNote}`;
 }
 
 /**
@@ -729,6 +778,98 @@ export function collectAsserts(rest: Evaluation, evalIn: (poseName: string) => E
   return out.sort((a, b) => a.line - b.line);
 }
 
+/** What a model unit is for printing, from `set units`: its name, millimetres per unit, and whether it was assumed. */
+export function printUnits(settings: Settings): { units: string; mm: number; assumed: boolean } {
+  const u = typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
+  return u ? { units: u, mm: UNITS[u], assumed: false } : { units: "mm", mm: 1, assumed: true };
+}
+
+/** The printer's bed from `set bed W D H`, in millimetres; undefined when unset or malformed (the evaluation warns). */
+export function printBed(settings: Settings): number[] | undefined {
+  const b = settings.bed;
+  return Array.isArray(b) && b.length === 3 && b.every((v) => v > 0) ? b : undefined;
+}
+
+const UNIT_WORDS: Record<string, string> = { mm: "a millimetre", cm: "a centimetre", m: "a metre", in: "an inch" };
+const UNIT_PLURALS: Record<string, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches" };
+
+/** The Units row, and the first words of check's print line. */
+export function unitsText(u: { units: string; mm: number; assumed: boolean }, heightMm?: number): string {
+  if (u.assumed) return `not set: a slicer reads a unit as a millimetre${heightMm !== undefined ? `, so this prints ${fmtMm(heightMm)} mm tall` : ""}; \`set units cm\` (or mm, m, in) says what a unit is`;
+  return `${u.units}: one unit is ${UNIT_WORDS[u.units]}${u.mm !== 1 ? ` (${fmt(u.mm)} mm)` : ""}`;
+}
+
+// Millimetres to a tenth, or three significant figures under ten.
+export const fmtMm = (v: number): string => (Math.abs(v) >= 10 ? v.toFixed(1).replace(/\.0$/, "") : String(Number(v.toPrecision(3))));
+
+/** Whether it fits the bed, in a sentence: as it stands, turned on the plate, lying down, or not at all. */
+export function fitText(fit: BedFit, bed: number[]): string {
+  const bedLabel = `the ${bed.map(fmtMm).join(" × ")} mm bed`;
+  if (fit.fits) return `fits ${bedLabel}`;
+  const over = [fit.size[0] > bed[0] ? `${fmtMm(fit.size[0])} wide for ${fmtMm(bed[0])}` : "", fit.size[1] > bed[1] ? `${fmtMm(fit.size[1])} deep for ${fmtMm(bed[1])}` : "", fit.size[2] > bed[2] ? `${fmtMm(fit.size[2])} tall for ${fmtMm(bed[2])}` : ""].filter(Boolean).join(", ");
+  if (fit.turned !== undefined) return `does not fit ${bedLabel} square (${over}); turned ${fit.turned}° about the vertical on the plate, it fits`;
+  if (fit.lying) return `does not fit ${bedLabel} standing (${over}); laid on its side with ${fit.lying.up} up${fit.lying.turned ? ` and turned ${fit.lying.turned}°` : ""}, it fits (the overhangs and supports then change)`;
+  return `does not fit ${bedLabel} whichever way it lies (${over}): scale it down, or cut it into parts that each fit`;
+}
+
+/**
+ * The Print section of the report: the unit, the size in millimetres, the
+ * bed, the thinnest wall and where, the support under the overhangs, what
+ * rests on the plate and how much material it takes, and a summary line.
+ * The wall and the supports are ray passes over the mesh through the
+ * field; a quick pass leaves them out.
+ */
+function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSize: number, physics: Physics, pieces: number, watertight: boolean, quick: boolean, time: <T>(key: string, f: () => T) => T, files: { stl: boolean; threemf: boolean }): { lines: string[]; json: Record<string, unknown> } {
+  const u = printUnits(evaluation.settings);
+  const bed = printBed(evaluation.settings);
+  const mm = u.mm;
+  const fit = bedFit(mesh.positions, mm, bed ?? [Infinity, Infinity, Infinity]);
+  const sizeMm = fit.size;
+  const rows: string[] = [];
+  const json: Record<string, unknown> = { units: u.units, unitsAssumed: u.assumed, mmPerUnit: mm, sizeMm };
+  rows.push(`| Units | ${unitsText(u, sizeMm[2])} |`);
+  rows.push(`| Size | ${sizeMm.map(fmtMm).join(" × ")} mm (x and z on the plate, y up; the surface, from the mesh) |`);
+  if (bed) {
+    rows.push(`| Bed | ${fitText(fit, bed)} |`);
+    Object.assign(json, { bed, fits: fit.fits, turned: fit.turned, lying: fit.lying });
+  } else rows.push(`| Bed | not set: \`set bed 220 220 250\` (width, depth, height in millimetres) checks the fit |`);
+  let summary: string[] = [];
+  if (!quick) {
+    const w = time("walls", () => wallThickness(output, mesh, cellSize));
+    if (w.thinnest) {
+      const t = w.thinnest;
+      const names = namesAt(evaluation, t.at, cellSize);
+      const far = namesAt(evaluation, t.to, cellSize);
+      const under = w.thicknesses.reduce((n, v) => n + (v * mm < 0.8 ? 1 : 0), 0);
+      const share = w.exits ? under / w.exits : 0;
+      const where = `at (${t.at.map(fmt).join(", ")})${names.length ? ` in ${names.map((n) => `'${n.name}'`).join(", ")}` : ""}, through to (${t.to.map(fmt).join(", ")})${far.length ? ` in ${far.map((n) => `'${n.name}'`).join(", ")}` : ""}`;
+      const cells = t.thickness / cellSize;
+      const meshNote = cells < 1.2 ? "; under the 1.2 cells the mesh needs to hold a wall: the mesh may be broken there" : cells < 2 ? "; under two cells: the mesh there may not be watertight" : "";
+      const shareNote = under ? `; ${share < 0.001 ? "under 0.1%" : `${(share * 100).toFixed(share < 0.095 ? 1 : 0)}%`} of the surface stands on walls under 0.8 mm (two lines of a 0.4 mm nozzle), which a slicer may thin or leave out` : "";
+      rows.push(`| Thinnest wall | ${fmtMm(t.thickness * mm)} mm (${fmt(t.thickness)} units, ${cells.toFixed(1)} cells) ${where}${meshNote}${shareNote} |`);
+      json.wall = { thickness: t.thickness, mm: t.thickness * mm, at: t.at, to: t.to, steps: names.map((n) => n.name), farSteps: far.map((n) => n.name), rays: w.rays, measured: w.exits, under08mm: share };
+      if (t.thickness * mm < 0.8) summary.push(`a wall ${fmtMm(t.thickness * mm)} mm thin`);
+    } else rows.push(`| Thinnest wall | no ray found a far side (${w.rays} rays) |`);
+    const sup = time("supports", () => supportVolume(output, mesh, cellSize, physics.floor));
+    const mm3 = mm * mm * mm;
+    const vol = (v: number) => (v * mm3 >= 1000 ? `${fmtMm((v * mm3) / 1000)} cm³` : `${fmtMm(v * mm3)} mm³`);
+    rows.push(`| Supports | ${sup.volume > 0 ? `about ${vol(sup.volume)} under the overhangs (${vol(sup.fromFloor)} standing on the plate, ${vol(sup.onModel)} on the model itself), over ${fmtMm(sup.area * mm * mm)} mm² of the plate; the tallest column is ${fmtMm(sup.tallest * mm)} mm under (${sup.at!.map(fmt).join(", ")}). An upper estimate: a slicer bridges short spans and fills support sparsely` : "none: nothing faces down more than 45° above the plate"} |`);
+    json.support = { volume: sup.volume, mm3: sup.volume * mm3, fromFloorMm3: sup.fromFloor * mm3, onModelMm3: sup.onModel * mm3, areaMm2: sup.area * mm * mm, tallestMm: sup.tallest * mm, at: sup.at };
+    if (sup.volume > 0) summary.push(`support under ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface`);
+  } else rows.push(`| Thinnest wall, supports | not measured on a quick pass |`);
+  const contact = contactArea(mesh, cellSize, physics.floor) * mm * mm;
+  rows.push(`| On the plate | ${fmtMm(contact)} mm² of the base rests flat on the bed${contact < 0.02 * sizeMm[0] * sizeMm[1] ? " (a small foothold for its size: a brim, or a flat cut under it, holds it down)" : ""} |`);
+  const volMm3 = Math.abs(physics.volume) * mm * mm * mm;
+  rows.push(`| Material | ${fmtMm(volMm3 / 1000)} cm³ solid, about ${fmtMm((volMm3 / 1000) * 1.24)} g of PLA (1.24 g/cm³) at full infill; a slicer's infill uses less |`);
+  rows.push(`| Files | ${[files.stl ? "model.stl in millimetres" : "", files.threemf ? `model.3mf in ${UNIT_PLURALS[u.units]} with the materials' colours` : ""].filter(Boolean).join(", ") || "none (exports off)"}${files.stl || files.threemf ? ", z up as a slicer's plate is" : ""} |`);
+  Object.assign(json, { contactMm2: contact, volumeMm3: volMm3 });
+  // Turned on the plate is no problem (a slicer turns it); lying down changes the supports, and not fitting is a warning.
+  const problems = [pieces > 1 ? `${pieces} pieces` : "", !watertight ? "not watertight" : "", bed && !fit.fits && fit.turned === undefined ? (fit.lying ? "fits the bed only lying down" : "does not fit the bed") : ""].filter(Boolean);
+  const good = [pieces === 1 ? "one piece" : "", watertight ? "watertight" : "", bed && fit.fits ? "fits the bed" : bed && fit.turned !== undefined ? `fits the bed turned ${fit.turned}°` : ""].filter(Boolean);
+  const head = `| Summary | ${problems.length ? `check first: ${problems.join(", ")}` : good.join(", ")}${summary.length ? `; ${summary.join(", ")}` : ""}${u.assumed ? "; units assumed to be millimetres" : ""} |`;
+  return { lines: ["## Print", "", "| | |", "| --- | --- |", head, ...rows, ""], json };
+}
+
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
   const log = opts.log ?? (() => {});
   const timings: Record<string, number> = {};
@@ -781,7 +922,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let calloutNote: string | undefined;
   let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[] } | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
-  const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
+  const edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
   const shapeAt: ShapeAt = (joints) => evalAt(joints).output;
   let grid = Math.max(8, Math.round(opts.grid ?? (evaluation.settings.grid as number | undefined) ?? opts.defaultGrid ?? 128));
@@ -885,6 +1026,12 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     warnings.push(...paintWarnings(evaluation));
     warnings.push(...cutWarnings(evaluation, fullCell));
     warnings.push(...glassWarnings(evaluation));
+    // A program that names its printer's bed is told when the model does not fit it standing, turned or not.
+    const bedSet = printBed(evaluation.settings);
+    if (bedSet && triangleCount(mesh) > 0) {
+      const fit = bedFit(mesh.positions, printUnits(evaluation.settings).mm, bedSet);
+      if (!fit.fits && fit.turned === undefined) warnings.push(`The model is ${fit.size.map(fmtMm).join(" × ")} mm and ${fitText(fit, bedSet)}.`);
+    }
     if (opts.quick) {
       // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
       const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];
@@ -996,7 +1143,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
           : `yes at cell ${fmt(close.cellSize)} (the clip faces of the frame are not counted)`;
       }
     }
-    const info = { name: shownName, bounds: frame, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation };
+    const shownUnits = printUnits(evaluation.settings);
+    const info = { name: shownName, bounds: frame, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation, units: shownUnits.assumed ? undefined : shownUnits.units };
     time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size, viewGhost, ghostCell).toPng()));
     // The perspective view with the largest visible steps named, a leader line each: what maps a picture back to
     // the program (roadmap 9: "the thing at the top left is lantern_ring" as a fact). Not on a quick pass.
@@ -1082,8 +1230,14 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const { obj, mtl } = toObjScene(hierarchy, name, "model.mtl", hierarchy.atlas ? "model.png" : undefined);
         write("model.obj", obj);
         write("model.mtl", mtl);
-        // The STL is the model as shown, posed if a pose is set: what a printer would print.
-        write("model.stl", toStl(mesh!, name));
+        // The STL is the model as shown, posed if a pose is set: what a printer would print. STL has no unit and a
+        // slicer reads millimetres, so it is written in millimetres from `set units` (a unit is a millimetre without).
+        write("model.stl", toStl(mesh!, name, printUnits(evaluation.settings).mm));
+        // The 3MF carries the unit and the colours, for a program that says it is a print (units or a bed) or --3mf.
+        if (opts.threemf || evaluation.settings.units !== undefined || evaluation.settings.bed !== undefined) {
+          const u = printUnits(evaluation.settings);
+          write("model.3mf", time("3mf", () => to3mf(mesh!, { name, unit: UNIT_3MF[u.units] })));
+        }
       }
       if (opts.glb !== false) {
         const glb = toGlbScene(hierarchy, name, glbAnimations);
@@ -1305,8 +1459,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   }
 
   // The report.
+  let printJson: Record<string, unknown> | undefined;
   if (mesh && bounds) {
     const s = boundsSize(bounds);
+    const wt = watertightReport(mesh);
     lines.push(
       "## Model",
       "",
@@ -1318,7 +1474,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList, !!shownJoints) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
+      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),
@@ -1342,6 +1498,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         `| Cavities | ${cavitiesRow(physics, cellSize)} |`,
         "",
       );
+      // What a slicer's user wants first: the unit, the size in millimetres, the bed, the thinnest wall, the supports.
+      const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics!, cellSize)).length;
+      const pr = printSection(evaluation, output!, mesh, cellSize, physics, quickDropped ? 0 : solid, wt.ok, !!opts.quick, time, { stl: files.includes("model.stl"), threemf: files.includes("model.3mf") });
+      lines.push(...pr.lines);
+      printJson = pr.json;
     }
   }
   if (evaluation.objects.length > 1 || joints.length > 0 || evaluation.poses.length > 0) {
@@ -1398,7 +1559,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "callouts.png": "the perspective view with the largest visible steps named, a leader line from each label to its part",
     "turntable.png": "eight views around the model",
     "turntable.apng": "the model turning, an animated PNG of 24 frames (a browser plays it)",
-    "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
+    "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown, in millimetres with z up",
+    "model.3mf": "3MF for a slicer: the model in the program's unit with z up, a colour per triangle from the materials", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
     "model.roblox.glb": "the GLB for Roblox Studio's 3D Importer: a Handle node facing -Z with _Att attachment nodes from the anchors",
     "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object and per joint",
@@ -1429,6 +1591,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         materials: mesh?.materials.map((m) => m.name) ?? [],
         objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
+        print: printJson,
         watertight: edgeList.length ? { clusters: edgeList } : undefined,
         asserts: asserts.length ? asserts : undefined,
         joints: joints.map((j) => ({ name: j.joint!.name, pivot: j.joint!.pivot })),

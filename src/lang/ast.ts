@@ -28,7 +28,8 @@ export interface Def { type: "def"; name: string; params: { name: string; defaul
 export interface For { type: "for"; name: string; iterable: Expr; body: Stmt[]; line: number }
 export interface Show { type: "show"; values: Expr[]; line: number }
 export interface Scene { type: "scene"; values: Expr[]; line: number }
-export interface Set { type: "set"; key: string; value: Expr; line: number }
+/** `set key value`; `values` holds every value when there are several (`set bed 220 220 250`), the first being `value`. */
+export interface Set { type: "set"; key: string; value: Expr; values?: Expr[]; line: number }
 export interface ExprStmt { type: "expr"; value: Expr; line: number }
 /** `use "parts/hardware.aix"` or `use "std/furniture" as f`: a library's defs under a prefix. */
 export interface Use { type: "use"; path: string; alias?: string; line: number }
