@@ -416,7 +416,9 @@ height at a local point, given the curvature there. The beauty render
 calls it per pixel and the atlas baker per texel, so the maps are the
 picture's surface, not a second description of it. A material with no
 wear, no bump and no rust takes the old path in both, which is why no
-existing render or GLB changed.
+existing render changed, and a GLB changed only where a `displace` gave
+it a normal map or a glow an emissive factor (the tree, the workshop,
+the Roblox plant and the two lamps).
 
 Wear reads curvature from second differences of `dist`, which is cheap
 (nine calls, paid only by a material that wears) and exact for the

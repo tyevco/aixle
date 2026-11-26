@@ -819,7 +819,6 @@ export function anchorAt(s: Shape3, name: string): Vec3 | undefined {
 /** The free anchor names every shape answers to, for messages. */
 export const FREE_ANCHORS = ["centre", "top", "bottom", "front", "back", "left", "right"];
 
-/** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
 /**
  * The materials that end up on a displaced surface: relief finer than a mesh follows, which the atlas baker writes
  * into the normal map for those materials' texels and no others. The material at a point is the outermost paint
@@ -858,6 +857,7 @@ export function reliefMaterials(s: Shape3): Set<Material> {
   return out;
 }
 
+/** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
 export function hasLooseBounds(s: Shape3): boolean {
   const seen = new Set<Shape3>();
   const walk = (n: Shape3): boolean => {
