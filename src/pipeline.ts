@@ -839,6 +839,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let minecraftNote: string | undefined;
   const minecraftEntity = opts.minecraftEntity ?? evaluation.settings.minecraft_entity === 1;
   let robloxNote: string | undefined;
+  let mapsNote: string | undefined;
   // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
   const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
@@ -1068,6 +1069,18 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const extraMaps = [hierarchy.normalMap ? "normal" : "", hierarchy.metalRoughMap ? "metallic-roughness" : "", hierarchy.emissiveMap ? "emissive" : ""].filter(Boolean);
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts${extraMaps.length ? ` and ${extraMaps.join(", ")} map${extraMaps.length === 1 ? "" : "s"}` : ""}` : ""}, in ${timings.hierarchy} ms`);
       if (hierarchy.normalStats) log(`normal map: ${hierarchy.normalStats.written ? "baked" : "not baked"}, ${hierarchy.normalStats.reason}`);
+      // Which materials the GLB's maps carry, so the finish can be checked without opening the PNGs.
+      if (hierarchy.materialMaps) {
+        const who = (k: "normal" | "metalRough" | "emissive") => [...hierarchy.materialMaps!].filter(([, mm]) => mm[k]).map(([m]) => m.name);
+        const glows = [...hierarchy.materialMaps].filter(([m, mm]) => m.glow > 0 && !mm.emissive).map(([m]) => m.name);
+        const parts = [
+          ...(who("normal").length ? [`normal map (model_normal.png) for ${who("normal").join(", ")}`] : []),
+          ...(who("metalRough").length ? [`metallic-roughness map (model_mr.png) for ${who("metalRough").join(", ")}`] : []),
+          ...(who("emissive").length ? [`emissive map (model_emissive.png) for ${who("emissive").join(", ")}`] : []),
+          ...(glows.length ? [`an emissive colour for ${glows.join(", ")}`] : []),
+        ];
+        if (parts.length) mapsNote = `${parts.join("; ")}; every material has the colour atlas (model.png)`;
+      }
       if (hierarchy.atlas) write("model.png", hierarchy.atlas.toPng());
       // The maps beside the atlas, on its UVs, each only when the bake found something for it: for reading.
       if (hierarchy.normalMap) write("model_normal.png", hierarchy.normalMap.toPng());
@@ -1334,6 +1347,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
       ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),
+      ...(mapsNote ? [`| Maps | ${mapsNote} |`] : []),
       ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),
       ...(minecraftNote ? [`| Minecraft | ${minecraftNote} (model.geo.json with model.geo.png; ${minecraftEntity ? "z is flipped: the entity's half turn and Bedrock's x mirror together" : "x is authored mirrored, as Bedrock draws it"}) |`] : []),
       "",
