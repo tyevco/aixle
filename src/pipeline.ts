@@ -1138,7 +1138,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const accessory = Object.keys(anchors).some((n) => /Attachment$/.test(n));
         const budget = accessory ? ACCESSORY_TRIANGLES : MESHPART_TRIANGLES;
         const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget }));
-        const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.triangles });
+        // The Roblox meshes are decimated from the full extraction, not from the web export's capped count.
+        const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.decimated?.before ?? hierarchy.triangles });
         write("model.roblox.glb", rb.glb);
         warnings.push(...rb.warnings);
         robloxNote = rb.note + (rbHierarchy.decimated ? `; at most ${fmt(rbHierarchy.decimated.deviation)} from the surface at a face centre, ${fmt(rbHierarchy.decimated.deviation / cellSize)} of a cell` : "");

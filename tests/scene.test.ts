@@ -423,4 +423,17 @@ describe("a triangle cap on the exports", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("gives the Roblox row the full mesh's count, not the web export's, as what its budget was decimated from", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // An accessory (4000) under a web cap of 6000: the Roblox meshes are decimated from the full extraction.
+      const src = 'v = (cylinder(1, 2, round=0.2) - (cylinder(0.8, 2) | move(0, 0.3, 0))) | paint("porcelain")\nv = anchor(v, "HatAttachment", 0, 1, 0)\nset triangles 6000\nshow v';
+      const r = run(src, "cup.aix", dir, { grid: 64, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false, texture: 64, roblox: true });
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.exports.before).toBeGreaterThan(6000);
+      expect(r.report).toMatch(new RegExp(`\\| Roblox \\| one mesh, Handle, \\d+ triangles, decimated from ${data.exports.before};`));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
