@@ -550,6 +550,12 @@ describe("void, overlap and inside", () => {
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 1, 0, 0))).toBe(0);
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 3, 0, 0))).toBe(0);
+    // The language guide's worked number for a curved part: a ring's band (a torus of radius 0.42, tube 0.065)
+    // standing on a flat cushion and sunk 0.03 into it shares about 0.00047; a band half that size shares less.
+    const band = (r: number) => O.move(O.rotate(P.torus(r, 0.065), -90, 0, 0), 0, 0.41 - 0.03 + r + 0.065, 0);
+    const cushion = O.move(P.box(1.3, 0.34, 0.8), 0, 0.24, 0);
+    expect(C_.overlapVolume(band(0.42), cushion)).toBeCloseTo(0.00047, 5);
+    expect(C_.overlapVolume(band(0.2), cushion)).toBeLessThan(0.0004);
     // A small box wholly inside a big one is all inside; half out is half.
     expect(C_.insideFraction(P.box(0.5, 0.5, 0.5), P.box(2, 2, 2))).toBe(1);
     expect(C_.insideFraction(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);

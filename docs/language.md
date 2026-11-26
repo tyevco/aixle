@@ -972,8 +972,9 @@ touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
 rather than sunk into it, and `assert overlap(handle, body) > 0.001`
 says a handle is joined to its wall, not just touching; a volume is
 small (a pin of radius 0.05 sunk 0.07 shares 0.00055; a ring's band, a
-torus of tube radius 0.065, sunk 0.03 into a flat cushion shares
-0.00046), so take a "joined" threshold from the part's size, and a
+torus of radius 0.42 and tube 0.065 standing on a flat cushion, sunk
+0.03 into it shares 0.00047, and a band of radius 0.2 sunk as far
+0.00034), so take a "joined" threshold from the part's size, and a
 failure says where the two overlap. An overlap of 0 says why: the two
 only touch there (a board's back face exactly on a wall: sink it), they
 stand apart by so much, or they overlap by less than the lattice can
