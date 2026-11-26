@@ -53,3 +53,13 @@ describe("libraries", () => {
     for (const lib of ["hardware", "furniture", "plants"]) expect(cli("check", `std/${lib}.aix`)).toMatch(/^output: /m);
   });
 });
+
+describe("printing", () => {
+  it("check prints the size in millimetres and the bed's verdict when a program sets units or a bed", { timeout: 30000 }, () => {
+    const out = cli("check", "tests/fixtures/print_bed.aix");
+    expect(out).toMatch(/\nprint: units cm: one unit is a centimetre \(10 mm\); 50 × 50 × 50 mm \(x and z on the plate, y up\); does not fit the 30 × 30 × 30 mm bed whichever way it lies \(50 wide for 30, 50 deep for 30, 50 tall for 30\)/);
+    expect(out).toMatch(/\nwarning: The model is 50 × 50 × 50 mm and does not fit the 30 × 30 × 30 mm bed/);
+    // A program that says nothing about printing gets no print line.
+    expect(cli("check", "examples/mug.aix")).not.toMatch(/^print:/m);
+  });
+});
