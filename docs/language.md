@@ -12,7 +12,9 @@ This document is the language around them.
 - Right-handed, **y up**. `x` to the right, `z` towards the viewer in the
   front view. `ground()` rests a shape on `y = 0`.
 - Units are unitless; pick one (metres, centimetres, "one unit is a brick")
-  and stay with it. The renders draw grids in whole units.
+  and stay with it. The renders draw grids in whole units. For a print,
+  `set units cm` (or `mm`, `m`, `in`) says which, and the exports and the
+  report's Print section use it (see Settings).
 - **Angles are degrees**, in `rotate`, `twist`, `bend` and in `sin`/`cos`.
 - Every primitive is centred on the origin. Anything with an axis
   (cylinder, cone, capsule, prism, capsule) stands along y; a torus lies
@@ -493,7 +495,8 @@ distances you compute are there to read.
 `hollow(shape, wall, x, y, z)` is `shell` with a drain hole at the point,
 for printing: the void is open, so it is not counted as a cavity and
 resin or support can escape; `model.stl` is written next to the OBJ and
-GLB, the model as shown. `decal(shape, region, m)` paints only the surface inside `region`, adding
+GLB, the model as shown, in millimetres with z up (Settings has `set
+units` and `set bed`). `decal(shape, region, m)` paints only the surface inside `region`, adding
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
 a jar; `region` is any shape, and it must cross the surface (a sphere
 centred on the skin, a box through it): a region that touches none of
@@ -773,6 +776,24 @@ the model stands a hair below the floor), which the voxeliser rounds
 away again; `check` warns about a part thinner than a voxel as `render`
 does.
 
+For a print, `set units mm` (or `cm`, `m`, `in`; `set units in` works
+though `in` is a keyword) says what one unit is, and `set bed 220 220
+250` (or `set bed [220, 220, 250]`) is the printer's build volume in
+millimetres: width along x, depth along z, height along y. Without
+units a unit is taken as a millimetre, which is what a slicer reads an
+STL as, and the report says how tall that would print, so a 2.4-unit
+mug is told it prints 2.4 mm tall. `model.stl` is always written in
+millimetres and with z up, the way a slicer's plate is (the model
+stands on it as it stands on the sheet, its front towards the front of
+the plate). A program that sets units or a bed also gets `model.3mf`
+(`--3mf` asks for it without them): the same mesh in the program's own
+unit, welded so a slicer sees it closed, with each material's colour
+on its triangles. With units set, the sheet's title gives the size in
+them (`3.76 × 2.4 × 2.4 cm`). With a bed set, a model that fits the bed
+neither square nor turned about the vertical is a warning, and `check`
+prints a `print:` line with the size in millimetres and the bed's
+verdict, from the surface's extent, in no time.
+
 ## The fast loop
 
 `aixle render model.aix --quick` renders the sheet only, at a small grid
@@ -853,12 +874,37 @@ and no warning, since nothing there is thin: overlap by a cell or more,
 or clear by a cell or more. When the mesh is not watertight the report
 prints the three largest clusters of open edges, and `report.json`
 lists every one under `watertight.clusters` (its position, its edge
-count and the steps whose surfaces pass there). A focused render adds a
+count and the steps whose surfaces pass there). Where a cluster is
+between two steps, it says how far apart their surfaces are there
+(`in 'barrel', 'bracket', their surfaces 0.012 apart there (0.4 of a
+cell)`) or how far one reaches into the other (`'pin' only 0.01 into
+'plate' there`, or `'pebbles' only 0.01 past the face 'recess' cut`
+when the other is a cutter, whose inside is air), from points of each
+surface within a cell and a half of the edge read in the other's field,
+so the fix is a number: the gap closed to an overlap of a cell, or
+opened to a cell; `report.json` has it as `gap`, negative for an
+overlap. A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
 overhangs (faces down more than 45°, which a printer would need support
-under).
+under). The Print section has what a slicer's user asks first: a
+summary line, the unit (or that it was assumed), the size in
+millimetres, the bed (fits; does not fit square, but turned so many
+degrees on the plate it does; only lying on its side; not at all), the
+thinnest wall with where it is and the steps on both sides of it, the
+support volume under the overhangs (standing on the plate and on the
+model, the tallest column and where, an upper estimate since a slicer
+bridges short spans), what rests flat on the plate, and the material in
+cubic centimetres and grams of PLA. The thinnest wall is measured by a
+ray from every vertex inward to the far side of the solid, through the
+field, so a wall under a cell is still read at its own thickness, and a
+cut's walls (a flute through a vase's side, an engraving's floor) are
+found where no step's feature size knows them; the tip of a corner
+sharper than a right angle is not a wall and is left out, a sliver
+between two cuts is not. The share of the surface on walls under 0.8 mm
+(two lines of a 0.4 mm nozzle) is given when there is any. `report.json`
+has all of it under `print`.
 
 ### Assertions
 
@@ -905,7 +951,11 @@ chair's floating back once passed); `overhang(shape, resolution)` is
 the fraction of the surface that faces down more than 45° with the
 floor faces left out, the report's Overhangs row, for `assert
 overhang(part) < 0.05` on something to be printed without support (it
-meshes too); `clearance(a, b)` is
+meshes too); `wall(shape, resolution)` is the thinnest wall, as the
+Print section measures it, in model units: with `set units mm`, `assert
+wall(model) > 0.8, "two lines of a 0.4 mm nozzle"`, and a failure says
+where the thinnest wall is and in which step (it meshes too, at the
+program's grid or 64); `clearance(a, b)` is
 the smallest gap between two surfaces, negative by how deep they overlap,
 zero when they touch, sampled from the fields at twelve points per side
 of each shape's box and then tightened, so it is exact for parts that

@@ -341,6 +341,55 @@ them in the other field, and tightens the best pair by alternating
 projections, so two parts that face each other get their exact gap and
 an overlap comes back negative by its depth.
 
+### Printing
+
+A slicer reads an STL in millimetres with z up, and Aixle's units are
+whatever the program says they are, with y up. So `set units` names the
+unit (millimetres assumed without it, which is what a slicer would
+assume too, and the report says how tall that prints), the STL is
+scaled to millimetres and turned a quarter turn about x on the way out
+(a rotation, so the winding holds and the front faces the front of the
+plate), and the 3MF keeps the program's unit in its `unit` attribute,
+since 3MF can say it. The 3MF's mesh is welded (the crease copies
+share a position, and a slicer sees unwelded copies as open edges) and
+each triangle names its material, the majority of its corners', from a
+`basematerials` group with each material's display colour. Both are the
+shown mesh, so what the sheet shows is what is sliced.
+
+The thinnest wall is the measure the feature size cannot give: a cut
+makes walls (a flute through a vase's side, an engraving's floor, a
+tube's bore), and no step knows how thick the cut left them. It is a
+ray from each vertex inward to the far side, marched in the field
+rather than intersected with the mesh: each step is the distance to the
+nearest surface, so the far wall cannot be stepped over, and a wall
+thinner than a cell is read at its own thickness wherever a vertex sits
+on it (measured: the teapot's 0.08 spout reads 0.08 at a 0.13 cell). The
+direction is the field's gradient at the vertex, not the vertex normal,
+because a crease copy's normal is its face's, and from a vertex on an
+edge that runs along the other face and reads nothing; the gradient
+points between the faces and reads long, which a minimum ignores. A
+vertex in the crease where two parts meet sits in a sliver of air, so
+the ray is marched in until it is inside rather than assumed to start
+there (measured: without it the mug's thinnest wall was 0.0015, where
+the handle meets the cup). A reading counts only where the far side
+faces back along the ray within 30 degrees: near a corner sharper than
+a right angle the ray leaves through the side face at a slant, and that
+is the corner, not a wall. A blade or a spike, whose faces meet at
+under 30 degrees, still counts, and a sliver left between two cuts
+counts at any size.
+
+Support is estimated the way a slicer would place it, under every face
+the Overhangs row counts: a ray straight down from the face's centre,
+in the field, to the plate or the first surface below, its height times
+the face's area on the plate. It is an upper estimate, because a slicer
+bridges short spans and fills support sparsely, and it is split into the
+part standing on the plate and the part standing on the model, which is
+the part that scars a surface. Whether the model fits the bed is judged
+from the hull of its vertices on the plate, turned a degree at a time,
+so a long model that fits across the diagonal is told so; a slicer turns
+a model freely, so only a model that fits no way standing is warned
+about.
+
 ## Feature sizes
 
 A bounding box sees a thin plate but not a thin wall: a shelled cup is as
@@ -540,6 +589,7 @@ spent their first renders working out.
 ## What is not here yet
 
 Proposals for what comes next, each with what must be prototyped first,
-are in `roadmap.md`: a full PBR bake from the field, `use` for libraries
-of parts, a print report, smooth 2D profiles, `assert`, image textures,
-lights and cameras in the language, and callouts on the views.
+are in `roadmap.md`: a full PBR bake from the field and smooth 2D
+profiles among them; the built ones (libraries, anchors, `assert`, the
+print report, image textures, lights and cameras, callouts) say there
+what was measured and what was left.
