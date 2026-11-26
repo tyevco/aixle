@@ -8,6 +8,7 @@ import { albedo, bumpSlope, customMaterial, fieldCurvature, preset, surface } fr
 import { bakeAtlas, chartTangent, type AtlasResult } from "../src/export/atlas.js";
 import { buildHierarchy } from "../src/export/hierarchy.js";
 import { toGlbScene } from "../src/export/glb.js";
+import { renderBeauty } from "../src/render/beauty.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { parse } from "../src/lang/parser.js";
 import type { Shape3 } from "../src/sdf/types.js";
@@ -328,5 +329,32 @@ describe("PBR in the GLB", () => {
     expect(json.images).toHaveLength(1);
     expect(json.materials[0].emissiveFactor).toBeUndefined();
     expect(json.materials[0].normalTexture).toBeUndefined();
+  });
+});
+
+describe("the finish in the beauty render", () => {
+  const lum = (p: number) => ((p >> 16) & 255) + ((p >> 8) & 255) + (p & 255);
+  /** How many pixels of `b` are brighter than `a`'s by more than `by`, and how many differ by more than it either way. */
+  const compare = (a: { get(x: number, y: number): number }, b: { get(x: number, y: number): number }, by: number) => {
+    let brighter = 0, differ = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const d = lum(b.get(x, y)) - lum(a.get(x, y));
+      if (d > by) brighter++;
+      if (Math.abs(d) > by) differ++;
+    }
+    return { brighter, differ };
+  };
+  const shoot = (shape: Shape3, wearProbe?: number) => {
+    const nets = surfaceNets(shape, { resolution: 24 });
+    return renderBeauty(shape, nets.mesh, shape.bounds, { size: 64, cellSize: nets.cellSize, wearProbe });
+  };
+  it("rubs a worn box's edges bright and mottles a bumped ball, where the same parts new and smooth are plain", () => {
+    const grey = { color: [0.45, 0.45, 0.45] as [number, number, number], rough: 0.7 };
+    const box = (m: ReturnType<typeof customMaterial>) => O.paint(P.box(1, 1, 1), m);
+    const worn = compare(shoot(box(customMaterial(grey)), 0.1), shoot(box(customMaterial({ ...grey, wear: 1 })), 0.1), 30);
+    expect(worn.brighter).toBeGreaterThan(300);
+    const ball = (m: ReturnType<typeof customMaterial>) => O.paint(P.sphere(0.5), m);
+    const bumped = compare(shoot(ball(customMaterial(grey))), shoot(ball(customMaterial({ ...grey, bump: 0.01, bumpScale: 0.08 }))), 12);
+    expect(bumped.differ).toBeGreaterThan(500);
   });
 });
