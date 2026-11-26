@@ -187,6 +187,13 @@ export interface Shape2 {
   gap?: number;
   /** What that gap is; see Shape3.gapWhat. */
   gapWhat?: string;
+  /**
+   * For an outline with straight runs on x = 0 (a lathe profile's axis): the distance a full revolve should
+   * use, those runs left out, since a revolve puts them inside the solid and the plain distance would leave a
+   * zero on the axis (a line in the slices, a surface the glass march meets). Set by curve2 and bezier2; any
+   * transform or boolean drops it.
+   */
+  revolveDist?: DistFn2;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

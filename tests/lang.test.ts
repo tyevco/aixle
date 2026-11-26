@@ -390,6 +390,16 @@ describe("curves and faces in the language", () => {
     expect(() => run("t = tube(0.2, bezier([0,0,0, 1,0,0]))")).toThrow(/4, 7, 10/);
     expect(() => run('t = sweep(rect(1, 1), "nope")')).toThrow(/sweep/);
   });
+  it("curve2 and bezier2 are profiles for revolve, extrude and the 2D booleans, wall= by name", () => {
+    const ev = run('wall = curve2([0,0, 0,0, 1,0, 1,0, 1.3,1, 0.9,2, 0,2, 0,2])\nvase = revolve(wall)\nleaf = bezier2([0,0, 0.5,0.4, 1.5,0.4, 2,0, 1.5,-0.4, 0.5,-0.4, 0,0]) - circle(0.1)\nplate = extrude(leaf, 0.05)\nline = revolve(curve2([0,0.05, 0.9,0.05, 1,1], wall=0.1))');
+    expect(isShape2(ev.steps.find((s) => s.name === "wall")!.value)).toBe(true);
+    expect(isShape3(ev.steps.find((s) => s.name === "vase")!.value)).toBe(true);
+    expect(isShape3(ev.steps.find((s) => s.name === "plate")!.value)).toBe(true);
+    expect((ev.steps.find((s) => s.name === "line")!.value as Shape3).feature).toBeCloseTo(0.1);
+    expect(() => run("p = bezier2([0,0, 1,0, 1,1, 0,1, 0,0])")).toThrow(/line 1.*bezier2 needs an anchor, then two handles and an anchor for each piece: 4, 7, 10/);
+    expect(() => run("p = curve2([0,0, 1,1])")).toThrow(/at least 3 different points/);
+    expect(() => run("p = curve2([0,0, 1,1, 2])")).toThrow(/x, y pairs, got 5 numbers/);
+  });
   it("text takes face=\"serif\"", () => {
     const ev = run('a = extrude(text("Ab", 1, face="serif"), 0.2)\nb = extrude(text("Ab", 1), 0.2)');
     const wa = (ev.steps.find((s) => s.name === "a")!.value as Shape3).bounds, wb = (ev.steps.find((s) => s.name === "b")!.value as Shape3).bounds;

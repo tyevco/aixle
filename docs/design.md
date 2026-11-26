@@ -346,7 +346,8 @@ an overlap comes back negative by its depth.
 A bounding box sees a thin plate but not a thin wall: a shelled cup is as
 big as the cup. So a shape carries `feature`, the thinnest thing it knows
 it contains: a shell sets its wall, a tube twice its radius, text its
-stroke weight, and every transform, boolean and union passes the smallest
+stroke weight, a smooth outline its thinnest wall (see Smooth profiles),
+and every transform, boolean and union passes the smallest
 one along (a scale multiplies it by its smallest factor). The thin-part
 warning reads it next to the cell size and names the step that introduced
 it, which is the line to edit.
@@ -449,6 +450,85 @@ minimising (double reflection at build time, re-orthogonalised against
 the exact tangent at the query), so a rectangle swept round a bend does
 not roll.
 
+## Smooth profiles
+
+`polygon` was the only way to draw an outline, so every lathe profile was a
+list of corners and a revolved vase showed them as bands. `curve2` and
+`bezier2` are the 2D counterpart of the exact curves: a chain of cubic
+pieces, through the points with the same Catmull-Rom handles `curve()`
+uses (closed, so the tangent at every point looks at both neighbours) or
+from anchors and handles. The distance is the nearest point on each piece,
+the scan and Newton of the 3D curves in the plane, with Newton kept inside
+the scan's bracket, except that Newton searches every basin the scan shows
+(round each sample lower than both its neighbours, and in each step over
+which the slope turns from falling to rising), not only the one round the
+nearest sample: a teardrop drawn as one piece from its point and back
+passes a point beside its tip twice, and searching only round the nearest
+sample read 0.28 there against a true 0.015. Before any search the distance to a few points on the
+curve (each piece's start and middle) gives an upper bound, and a piece
+whose exact box (from its turning points, not its handles) is farther is
+skipped, so a sample searches about two pieces of twenty. The sign is the
+even-odd count of crossings of a ray towards +x, which `polygon` already
+uses: each piece is split at build time where its height turns, and on a
+part that only rises or only falls the crossing is one root, found by
+Newton within the part, and only when the point is inside the part's box.
+Because the count changes exactly where the ray crosses the curve, the
+sign flips on the curve and nowhere else, and an outline that crosses
+itself still gives a field whose zero is the curve.
+
+Prototyped and measured: against a polygon of 4000 points per piece, the
+distance agreed to 6e-9 over 4000 random points round a vase outline,
+with the sign the same everywhere and the gradient's length 1.00000
+within 0.05 of the curve. A circle from four Bezier quarters with handles
+0.5523 r is within 2.8e-4 r of the true circle; a `curve2` through 8
+points of a circle is within 8.5e-3 r and through 16 within 5.5e-4 r,
+where the polygons through the same points are off by their sagitta,
+7.6e-2 and 1.9e-2. The cost is a distance call of about 500 ns for a
+16-piece outline (400 ns before every basin was searched) against 120 ns
+for an 18-point polygon and 720 ns for the 128-point polygon it would take
+to hide the facets; the vase's body meshes at grid 128 in 1.5 s against
+0.65 s for the polygon it replaced.
+Past two dozen pieces the pieces go into the grid the sweeps use (see A
+grid over the pieces), laid flat, and the crossing count reads only the
+parts listed in the query's band of height, so a long outline costs about
+what a polygon through the same points does: extruded and meshed at grid
+128, 0.69 s against 0.44 s at 24 points, 1.0 s against 0.81 s at 120 and
+2.4 s against 2.0 s at 360 (measured before every basin was searched,
+which adds 10 to 25%).
+
+Corners are a point given twice, because a spline through a sharp turn
+overshoots (a foot's edge bows the underside down, the axis run bulges
+past x = 0) and a model reaches for a sharp foot and a straight axis in
+every lathe profile: at a doubled point the curve leaves and arrives with
+one-sided tangents, as an open curve does at its ends, so the run between
+two corners is straight. `bezier2` closes with a straight edge when its
+last anchor is not its first, which is the other common lathe outline,
+drawn from the axis round to the axis. `wall=` takes the band along an
+open curve instead (the distance to the curve less half the wall), for a
+wall drawn as one line.
+
+A lathe profile's run up the axis is an edge of the outline but not of
+the solid: spun, it is inside. With the plain distance the revolved field
+is zero all along the axis, which the cross-sections draw as a line and
+the glass march takes for a surface (measured: a liquid revolved from a
+polygon, as in the tumbler, shows its two halves through the glass). So a
+`curve2` or `bezier2` whose outline has straight runs on x = 0 also
+carries the distance without them, and a full revolve with no offset uses
+that one; the sign still counts them. A transform or a boolean drops it,
+and a partial revolve keeps the plain distance, since there the axis is
+an edge of the wedge's flat ends.
+
+A closed outline carries a feature size, its thinnest wall: from sixteen
+points per piece (fewer past a hundred pieces: a thousand-point outline
+builds in about 0.3 s, though three thousand take about 2 s, since a march
+deep inside a long outline reads every piece's box) the march along the
+inward normal to the far side,
+counted where the two sides face each other (normals within 10 degrees of
+opposite) and not within that distance of a corner, so a vase drawn as one
+outline with a wall under a cell is warned like a shell is. A spike counts
+only once it is sharper than about 10 degrees, and a straight run on the
+axis is skipped, since a revolve doubles the solid there.
+
 ## Extents before extraction, and close-ups
 
 The bounding box sets the cell size, and a box is loose whenever a joint
@@ -541,5 +621,5 @@ spent their first renders working out.
 
 Proposals for what comes next, each with what must be prototyped first,
 are in `roadmap.md`: a full PBR bake from the field, `use` for libraries
-of parts, a print report, smooth 2D profiles, `assert`, image textures,
-lights and cameras in the language, and callouts on the views.
+of parts, a print report, `assert`, image textures, lights and cameras in
+the language, and callouts on the views.

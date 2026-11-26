@@ -88,21 +88,39 @@ inward along its normal).
 **Must prototype.** Whether the inward-ray wall thickness agrees with
 the feature sizes on the examples.
 
-## 5. Smooth 2D profiles
+## 5. Smooth 2D profiles: built
 
-**Why.** `polygon` is the only way to draw a profile, so a vase, a
-bottle, a chair's side or a car's outline is a list of corners and looks
-it once revolved; `curve()` exists for paths but not for profiles.
-
-**What.** `curve2([x,y, x,y, ...])` through the points and
-`bezier2([...])` from handles, as 2D profiles for `extrude`, `revolve`,
-`sweep` and `loft`, exact like their 3D counterparts.
-
-**How.** The nearest-point machinery in `curves.ts` restricted to a
-plane; a closed profile needs the sign from winding, which `polygon`
-already computes.
-
-**Must prototype.** Nothing; the 3D version is measured.
+`curve2([x,y, ...])` is a closed outline through the points (the curve
+`curve()` draws, closed) and `bezier2([...])` one from anchors and
+handles in `bezier()`'s layout; both are profiles for `revolve`,
+`extrude`, `sweep`, `loft`, the 2D booleans and `offset`. The distance is
+the nearest point on the true curve (the 3D curves' scan and Newton in the
+plane, pieces culled by their exact boxes) and the sign the even-odd
+crossing count, solved on each piece's rising and falling parts, so it
+flips exactly on the curve; a self-crossing outline is filled as
+`polygon` fills one. A point given twice is a corner and the run between
+two corners straight (the axis and the foot of a lathe profile); a
+`bezier2` whose last anchor is not its first closes with a straight edge;
+`wall=` takes an open curve's band instead, a wall drawn as one line. The
+bounds are the curve's own extent, the revolve of one is exact (no glass
+warning), and a closed outline carries its thinnest facing wall for the
+thin-part warning. The vase example is redrawn with one, and the guitar
+example extrudes one. Prototyped as asked, though the 3D curves were
+measured: against a dense polygon the distance agrees to 6e-9 with the
+same sign everywhere and a gradient of length 1; a Bezier circle at
+handles 0.5523 r is within 2.8e-4 r; a `curve2` through 8 points of a
+circle is within 8.5e-3 r where the 8-gon is off by 7.6e-2; a distance
+call costs about 500 ns for 16 pieces against 120 ns for an 18-point
+polygon, and the vase's body meshes in 1.5 s against 0.65 s. Not built: a
+gap size (the narrowest outside space, as text carries) for outlines; a
+note when a revolve's profile overshoots past the axis (the box `check`
+prints shows it); an open outline closed along the axis by a straight
+line for `curve2` (corners on the axis do it). A revolve of one leaves
+its runs on the axis out of the distance, so no line runs up the axis in
+the slices and glass or a liquid has no surface there; polygons still
+have that line (the tumbler's drink shows it), and the same few lines in
+`polygon` would answer it, at the cost of every polygon lathe example's
+renders.
 
 ## 6. `assert`: built
 

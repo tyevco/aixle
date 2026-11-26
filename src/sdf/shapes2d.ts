@@ -270,7 +270,9 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     ? { min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
     : { min: [-R, b.min[1], -R] as [number, number, number], max: [R, b.max[1], R] as [number, number, number] };
   if (angle >= 360) {
-    const full = primitive((x, y, z) => d(length2(x, z) - offset, y), bounds, profile.cost);
+    // An outline's runs on the axis are inside the solid once it is spun, so they are no surface (see Shape2.revolveDist).
+    const da = offset === 0 && profile.revolveDist ? profile.revolveDist : d;
+    const full = primitive((x, y, z) => da(length2(x, z) - offset, y), bounds, profile.cost);
     full.feature = profile.feature;
     full.gap = profile.gap;
     full.gapWhat = profile.gapWhat;

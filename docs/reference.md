@@ -115,6 +115,24 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
     polygon(points) -> shape2
     polygon(coords...) -> shape2
 
+### curve2
+
+A closed smooth profile through x, y pairs: the curve curve() draws, closed back to the first point, with the exact distance to it, so a revolve or an extrude has no facets at any grid. A point given twice in a row is a sharp corner, and the run between two corners is straight: give a revolve's points on the axis and the edge of a foot twice. The list may end on its first point again, which only closes it. `wall` > 0 leaves the curve open and makes the profile the band that wide centred on it, ends rounded: a vase's wall drawn as one line, revolved.
+
+    curve2(points, wall=0) -> shape2
+
+- `points`: a flat list [x,y, x,y, ...], at least 3 different points (2 with a wall)
+- `wall`: 0 for the enclosed outline; more for an open band that wide
+
+### bezier2
+
+A closed profile from cubic Bezier anchors and handles, laid out as bezier() takes them: an anchor, then two handles and an anchor for each piece (4, 7, 10, ... x, y pairs). The last anchor should be the first; when it is not, a straight edge runs from it back to the first, which closes an outline drawn from a revolve's axis round to the axis. Handles 0.5523 r along the tangents make a quarter circle of radius r; a corner is two handles that do not line up. Exact distance, like curve2. `wall` > 0 leaves it open: the band that wide along the curve, ends rounded.
+
+    bezier2(points, wall=0) -> shape2
+
+- `points`: a flat list [x,y, x,y, ...]: anchor, handle, handle, anchor, ...
+- `wall`: 0 for the enclosed outline; more for an open band that wide
+
 ### text
 
 Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.
