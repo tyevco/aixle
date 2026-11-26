@@ -731,6 +731,11 @@ describe("smooth profiles", () => {
     expect(b.dist(1.5, 0.05)).toBeCloseTo(0, 9);
     expect(b.dist(1.5, 0)).toBeCloseTo(-0.05, 9);
     expect(b.bounds).toEqual({ min: [-0.05, -0.05], max: [3.05, 0.05] });
+    // language.md's cup: the heel is a corner of the line, so the band is sharp inside it and round outside it, by
+    // half the wall (a point 0.07 out from the corner along the outer bisector is 0.02 outside).
+    const cup = C2.curve2([0, 0.05, 0.9, 0.05, 0.9, 0.05, 1.2, 1, 0.8, 2.4], 0.1);
+    const ox = 0.953, oy = -1.301, ol = Math.hypot(ox, oy);
+    expect(cup.dist(0.9 + (0.07 * ox) / ol, 0.05 + (0.07 * oy) / ol)).toBeCloseTo(0.02, 3);
   });
   it("works wherever a profile does, and a revolve of one is exact and meshes watertight", () => {
     const vase = C2.curve2(vasePts);

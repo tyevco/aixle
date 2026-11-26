@@ -214,8 +214,10 @@ circle (glass on it renders clean).
   centred on it, ends rounded: a cup's wall drawn as one line from the
   axis out along the floor and up to the lip, `revolve(curve2([0,0.05,
   0.9,0.05, 0.9,0.05, 1.2,1, 0.8,2.4], wall=0.1))`, is a cup with a flat
-  floor, a sharp heel, a 0.1 wall and a rounded rim. Corners work the same
-  in an open curve; its ends leave along the line to their neighbours.
+  floor, a heel sharp inside and rounded by half the wall outside (the
+  band is the distance to the line, so every outside corner rounds), a 0.1
+  wall and a rounded rim. Corners work the same in an open curve; its ends
+  leave along the line to their neighbours.
 - An outline that crosses itself is filled as `polygon` fills one (even
   and odd): the lobes of a figure eight are both solid, and where a loop
   overlaps itself the overlap is a hole.
