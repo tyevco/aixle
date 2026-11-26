@@ -222,6 +222,9 @@ describe("PBR in the GLB", () => {
     expect(json.images.map((i: { name: string }) => i.name)).toEqual(["m atlas", "m normal", "m metallic-roughness", "m emissive"]);
     expect(json.textures).toHaveLength(4);
     const prim = json.meshes[0].primitives[0];
+    // A textured mesh carries no vertex colours (a viewer would multiply them into the atlas).
+    expect(prim.attributes.COLOR_0).toBeUndefined();
+    expect(json.accessors).toHaveLength(json.meshes[0].primitives.length + 4);
     const tan = json.accessors[prim.attributes.TANGENT];
     expect(tan.type).toBe("VEC4");
     expect(tan.count).toBe(json.accessors[prim.attributes.POSITION].count);
@@ -246,7 +249,9 @@ describe("PBR in the GLB", () => {
     const json = glbJson(toGlbScene(h, "m"));
     expect(json.images).toHaveLength(1);
     expect(json.extensionsUsed).toBeUndefined();
-    for (const p of json.meshes[0].primitives) expect(p.attributes.TANGENT).toBeUndefined();
+    for (const p of json.meshes[0].primitives) { expect(p.attributes.TANGENT).toBeUndefined(); expect(p.attributes.COLOR_0).toBeUndefined(); }
+    // Positions, normals, UVs and an index list per primitive: nothing else.
+    expect(json.accessors).toHaveLength(3 + json.meshes[0].primitives.length);
     for (const m of json.materials) {
       expect(m.normalTexture).toBeUndefined();
       expect(m.emissiveFactor).toBeUndefined();

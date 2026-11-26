@@ -241,7 +241,6 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     const nrmAcc = floatAccessor(mesh.normals, "VEC3", false);
     let uvAcc = -1, colAcc = -1, tanAcc = -1;
     if (textured && h.uvs) uvAcc = floatAccessor(h.uvs[mi], "VEC2", false);
-    if (normalTex >= 0 && h.tangents) tanAcc = floatAccessor(h.tangents[mi], "VEC4", false);
     else {
       const colors = new Float32Array(n * 3);
       for (let v = 0; v < n; v++) {
@@ -250,6 +249,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
       }
       colAcc = floatAccessor(colors, "VEC3", false);
     }
+    if (normalTex >= 0 && h.tangents) tanAcc = floatAccessor(h.tangents[mi], "VEC4", false);
     const perMaterial = new Map<number, number[]>();
     const ix = mesh.indices;
     for (let t = 0; t < ix.length; t += 3) {
