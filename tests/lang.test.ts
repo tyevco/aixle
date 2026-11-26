@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/lang/lexer.js";
 import { parse } from "../src/lang/parser.js";
 import { assertLine, evaluate } from "../src/lang/interpreter.js";
-import { isShape2, isShape3 } from "../src/lang/values.js";
+import { isShape2, isShape3, type RecordValue } from "../src/lang/values.js";
 import type { Shape3 } from "../src/sdf/types.js";
 
 const run = (src: string) => evaluate(parse(src));
@@ -570,7 +570,7 @@ describe("records", () => {
   });
   it("makes a changed copy with ...: the original keeps its fields and its order, and a later entry wins", () => {
     const ev = run("p = {x: 1, y: 2, z: 3}\nq = {...p, y: 5, w: 4}\nr = {y: 0, ...p}");
-    const fields = (name: string) => [...((ev.steps.find((s) => s.name === name)!.value as { fields: Map<string, unknown> }).fields)];
+    const fields = (name: string) => [...((ev.steps.find((s) => s.name === name)!.value as RecordValue).fields)];
     expect(fields("p")).toEqual([["x", 1], ["y", 2], ["z", 3]]);
     expect(fields("q")).toEqual([["x", 1], ["y", 5], ["z", 3], ["w", 4]]);
     expect(fields("r")).toEqual([["y", 2], ["x", 1], ["z", 3]]);

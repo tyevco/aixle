@@ -70,6 +70,7 @@ npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
+npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check fails if it is not
 ```
 
 ## Reading the sheet
@@ -206,4 +207,6 @@ shown, so a lug welded to a boom is blamed as the lug, not the boom.
 - Keep the whole model within about 1 to 20 units; the grid resolution is
   relative to the longest side, so a giant scene loses small detail.
 - Name steps for what they are (`lid`, `left_arm`, `stair_3`), since the
-  names are what the steps sheet and the report show you.
+  names are what the steps sheet and the report show you, and a part's
+  sizes too: `seat = {w: 0.9, h: 0.45}` read as `seat.h` says what each
+  number is, where `chair(0.9, 0.45, 0.8)` makes the reader count.

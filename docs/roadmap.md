@@ -196,9 +196,24 @@ It is a printer over the dependencies the evaluation records. Not built:
 
 ## Smaller, worth doing when passing
 
-- `aixle fmt`: one layout for programs, comments kept, so diffs are
-  about the model.
-- Records: `p = {x: 1, y: 2}` with `p.x`, for readable parameters.
+- `aixle fmt`: built. `aixle fmt model.aix` prints the program in one
+  layout, `--write` rewrites it, `--check` fails naming each file that is
+  not in it. It moves only the space between tokens (numbers stay as
+  written, no line is joined or split, every comment stays), and keeps the
+  spacing the agents' programs carry meaning in: tight commas grouping
+  points, a column of `=` or of trailing comments, a call broken under its
+  first argument. Measured over the 109 programs in the repo: idempotent
+  on all, the same syntax tree, tokens and comments after as before, 20 of
+  6071 lines changed in 11 files, about 60 ms for all of them. The
+  committed programs are not reformatted. Not built: a line-length rule
+  (it would re-wrap the calls agents broke by hand) and a CI check.
+- Records: built. `{w: 0.9, h: 0.45, name: "seat"}` with `seat.h`,
+  nested, after an index or a call (`legs[0].x`), in lists, as parameters
+  and defaults, and `{...seat, h: 0.6}` for the changed copy; a missing
+  field names the fields there are, a repeated key is an error, and a
+  record of shapes is never taken for a shape. The workshop example
+  carries its bench's size in one and renders byte for byte as before.
+  Not built: string keys, and iterating a record's fields.
 - An import cache keyed by the file's hash, so `check` and `render` do
   not both sample a large mesh.
 - A `--stl`-style `--3mf` for slicers that want units and colours.

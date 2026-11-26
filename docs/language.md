@@ -819,6 +819,31 @@ on that sheet, since the dropped steps are often the joins or the feet; a bucket
 blobs or gone at a quick cell, so judge a working end at full grid, with
 `--focus` on the step to spend the cells there.
 
+## Layout: `aixle fmt`
+
+`aixle fmt model.aix` prints the program in the one layout the tool
+keeps; `--write` rewrites the file, `--check` changes nothing and fails
+naming each file that is not in it. It moves only the space between
+tokens, so it cannot change what a program means: no token is added,
+dropped or respelled (a number stays `0.50`), no line is joined or split,
+and every comment stays where it was. The layout:
+
+- one space around `=`, `|` and the operators; none around the `=` of a
+  named argument or a default (`round=0.1`), after a unary minus or a
+  call's name, inside brackets, before a comma, or around a field's dot;
+  `{x: 1, y: 2}` for a record;
+- after a comma, the space you wrote: `[x,y,z, x,y,z]` keeps its points
+  and a table of numbers stays lined up;
+- a loop's body two spaces in; a line that continues a statement keeps
+  its break, two in from the line that opened its bracket, or lined up
+  under the argument it was written under, which stays lined up however
+  the line above was respaced; a closing bracket that starts a line at
+  its opener's line;
+- an `=` (or a record's value) padded into a column with the line above
+  or below keeps the column; a trailing comment keeps its column unless
+  the code now reaches it, so a column of them stays a column;
+- one blank line where there were several, none at the ends.
+
 ## What the tool checks for you
 
 `aixle check` (a second, or a few with `pieces()` and `overhang()`,
