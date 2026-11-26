@@ -774,17 +774,17 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const program = parse(source);
   const modules = moduleResolver(sourceName);
   const skipAsserts = opts.asserts === false;
-  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts }));
+  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts, slice: opts.slice }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
-  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts }) : rest;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts, slice: opts.slice }) : rest;
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
   // asserts for a pose share it.
   const evalCache = new Map<string, Evaluation>();
   const evalAt = (joints: Record<string, JointPose>, poseName?: string): Evaluation => {
     const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
     let ev = evalCache.get(key);
-    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts }); evalCache.set(key, ev); }
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts, slice: opts.slice }); evalCache.set(key, ev); }
     return ev;
   };
   // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"

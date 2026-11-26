@@ -335,6 +335,12 @@ describe("interpreter", () => {
     // Inline, and about the ring's own axis only.
     expect(run('a = cylinder(0.1, 0.3) | rotate(y=45) | ring(4, 1)\nshow a').warnings.join()).toMatch(/line 1: ring\(\): the part was turned about y by 45/);
     expect(run('a = cylinder(0.1, 0.3) | rotate(x=45) | ring(4, 1)\nshow a').warnings.join()).not.toMatch(/ring\(\)/);
+    // A def's parameter that shares a turned step's name is not that step: the sphere handed in was never turned.
+    expect(run('p = box(0.2, 0.1, 0.1) | rotate(y=30)\ndef around(p) = p | ring(4, 1)\nq = around(sphere(0.1))\nm = q + p\nshow m').warnings.join()).not.toMatch(/ring\(\)/);
+    // ...but the step itself handed in is.
+    expect(run('p = cylinder(0.1, 0.3) | rotate(y=30)\ndef around(p) = p | ring(4, 1)\nq = around(p)\nshow q').warnings.join()).toMatch(/ring\(\): 'p' was turned about y by 30/);
+    // A ring about x pushes its copies out along +y, and the warning says so.
+    expect(run('a = sphere(0.1) | rotate(x=45) | ring(4, 1, "x")\nshow a').warnings.join()).toMatch(/turned about x by 45 .* ring pushes each copy out along \+y before turning it/);
   });
   it("says why an overlap is nothing, and which copy of a ring of probes a void failure is in (round 10)", () => {
     // A board whose back face lies exactly on the wall's front only touches; one held off stands apart.

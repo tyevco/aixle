@@ -182,6 +182,11 @@ describe("pipeline", () => {
       expect(probe.roles.get("rod")).toBe("region");
       expect(probe.warnings.join()).not.toMatch(/rod/);
       expect(check("m = box(1)\nset slice nope").warnings.join()).toMatch(/set slice nope: no such step or object/);
+      // --slice from the command line makes the same probe a region as `set slice` does: not an unused step, and
+      // its volume places the planes while the model is drawn in full.
+      const cli = run("m = box(1)\nrod = cylinder(0.05, 2) | move(0.2, 0, 0)\nshow m", "rod.aix", dir, { grid: 16, size: 64, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "rod" });
+      expect(cli.warnings.join()).not.toMatch(/'rod'.*not part of the output/);
+      expect(cli.report).toMatch(/`slices\.png`: cross-sections through rod \(a region: its volume places the planes/);
       const bad = run("m = box(1)", "b.aix", dir, { grid: 16, size: 64, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "nope" });
       expect(bad.warnings.join()).toMatch(/slice nope: no such step or object with a surface/);
     } finally {

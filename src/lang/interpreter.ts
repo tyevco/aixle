@@ -84,6 +84,8 @@ export interface EvalOptions {
   skipAsserts?: boolean;
   /** Load a picture for material(image=) and decal(image=): the file's pixels, or throw with why not. */
   resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
+  /** The step `--slice` cuts through, which is a region when nothing else reads it, as with `set slice name`. */
+  slice?: string;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -933,14 +935,20 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     const positional = args.filter((a) => !a.name);
     let e: Expr | undefined = positional[0]?.value;
     const from = e?.type === "ident" ? e.name : undefined;
-    if (e?.type === "ident") e = topAssigns.get(e.name);
+    // The turn's angle is read where it was written: here for an inline turn, at the top level for a step's.
+    let at = scope;
+    if (e?.type === "ident") {
+      // A def's parameter or a local that shares a step's name is not that step, and was not built by its line.
+      e = global.get(e.name) === values[0].value ? topAssigns.get(e.name) : undefined;
+      at = global;
+    }
     if (!e || e.type !== "call" || e.callee !== "rotate" || !e.piped) return;
     const axisValue = values.find((v) => v.name === "axis")?.value ?? values.filter((v) => !v.name)[3]?.value ?? "y";
     if (axisValue !== "x" && axisValue !== "y" && axisValue !== "z") return;
     const turns = e.args.filter((a) => a.name === "x" || a.name === "y" || a.name === "z");
     if (turns.length !== 1 || turns[0].name !== axisValue || e.args.some((a, i) => i > 0 && !a.name)) return;
     let deg: Value;
-    try { deg = evalExpr(turns[0].value, scope); } catch { return; }
+    try { deg = evalExpr(turns[0].value, at); } catch { return; }
     if (typeof deg !== "number" || Math.abs(deg % 360) < 1e-9) return;
     const shape = values[0].value as Shape3;
     if (isEmpty(shape.bounds)) return;
@@ -957,7 +965,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           q[w] = p[u] * sn + p[w] * c;
           if (Math.abs(shape.dist(p[0], p[1], p[2]) - shape.dist(q[0], q[1], q[2])) > tol) return;
         }
-    warnings.push(`line ${line}: ring(): ${from ? `'${from}' was` : "the part was"} turned about ${axisValue} by ${fmt3(deg)} just before the ring, which leaves it as it was (it is round about that axis), so every copy sits where an unturned one would; ring pushes each copy out along +x before turning it, so to turn the whole ring, rotate after it: ... | ring(...) | rotate(${axisValue}=${fmt3(deg)})`);
+    warnings.push(`line ${line}: ring(): ${from ? `'${from}' was` : "the part was"} turned about ${axisValue} by ${fmt3(deg)} just before the ring, which leaves it as it was (it is round about that axis), so every copy sits where an unturned one would; ring pushes each copy out along +${axisValue === "x" ? "y" : "x"} before turning it, so to turn the whole ring, rotate after it: ... | ring(...) | rotate(${axisValue}=${fmt3(deg)})`);
   }
 
   /** Which copy of a region made of copies (a ring of probe rods) holds a point, or which named part: for a void failure. */
@@ -1201,8 +1209,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // Roles: a part is anything the output is built from; below a cut name the subtree is a cut; a name only an
   // assert, a decal or a camera reads is a region. A part stays a part however else it is read.
   for (const c of cameras) if (c.focus) regionNames.add(c.focus);
-  // A step only sliced through (a probe the planes should cross) is a region too.
-  if (typeof settings.slice === "string" && steps.has(settings.slice)) regionNames.add(settings.slice);
+  // A step only sliced through (a probe the planes should cross) is a region too, whether `set slice` or `--slice`
+  // named it.
+  for (const sl of [settings.slice, options.slice]) if (typeof sl === "string" && steps.has(sl)) regionNames.add(sl);
   const roles = new Map<string, StepRole>();
   const rank = (r: StepRole | undefined) => (r === "part" ? 4 : r === "cut" ? 3 : r === "mask" ? 2 : r === "region" ? 1 : 0);
   const visit = (nme: string, role: StepRole) => {
