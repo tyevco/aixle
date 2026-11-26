@@ -251,9 +251,16 @@ of its 188 and a teapot at 11 of 108 keep their outline and their
 stray, but shade in streaks over their curved bands, since a sliver
 from one soft corner to the next interpolates their normals across the
 band; at a quarter of their triangles both read as the full mesh, so
-the row says so below a quarter. Not built: a decimator that weighs
-normals as well as positions, which a cap below a quarter would want;
-a separate cap for the viewer page, which embeds the GLB as it is; and
+the row says so below a quarter. The tin's capped GLB, read back
+through `import()` at resolution 160, is the tin, lid seam and knob
+intact. Found on the way: a decimated GLB is slower to import, since
+its long faces have long boxes that the sampler's search cannot prune
+(the tin's at resolution 64 took 25 s against 5 s for the full one, at
+160 five and a half minutes, once, then cached); a round trip that is
+not testing the web export wants `--triangles 0`. Not built: a
+decimator that weighs normals as well as positions, which a cap below
+a quarter would want; a sampler search that splits long faces; a
+separate cap for the viewer page, which embeds the GLB as it is; and
 decimating the STL, which is for a printer.
 
 ## Smaller, worth doing when passing

@@ -261,7 +261,11 @@ under the crease angle) becomes slivers from one corner to the next,
 whose normals are both blends of the two bands, and the band shades in
 streaks: measured on a vase at 12 thousand of 188 thousand triangles
 and a teapot at 11 of 108, both fine at a quarter. The default never
-goes that far on the examples; a program that asks for it is told.
+goes that far on the examples; a program that asks for it is told. A
+decimated export is also a slower import: the sampler's nearest-face
+search prunes by boxes, and a sliver up a tin's wall has a box the
+height of the wall, so a point inside is near every box (the tin's
+capped GLB at resolution 64: 25 s, the full one 5 s).
 
 ## Imported meshes
 
