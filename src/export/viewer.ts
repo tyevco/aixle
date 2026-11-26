@@ -1,8 +1,11 @@
 /**
  * A self-contained web page for orbiting the model: the GLB is embedded as
  * base64 so the file opens from disk with no server, and three.js comes from
- * a CDN, so it needs a network connection once. Vertex colours carry the
- * procedural materials.
+ * a CDN, so it needs a network connection once. The GLB's own materials are
+ * shown as they are, with the colour atlas and whichever normal,
+ * metallic-roughness and emissive maps it carries (vertex colours stand in
+ * only for a GLB without an atlas), in a room environment for the metals to
+ * reflect.
  */
 import type { Bounds } from "../sdf/types.js";
 
@@ -46,11 +49,12 @@ ${animations.length ? `<div id="anim"><button id="all">▶ All</button><button i
 <script type="module">
 const GLB = "${b64}";
 const centre = ${JSON.stringify(centre)}, radius = ${radius}, floorY = ${floorY};
-let THREE, GLTFLoader, OrbitControls;
+let THREE, GLTFLoader, OrbitControls, RoomEnvironment;
 try {
   THREE = await import("three");
   ({ GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js"));
   ({ OrbitControls } = await import("three/addons/controls/OrbitControls.js"));
+  ({ RoomEnvironment } = await import("three/addons/environments/RoomEnvironment.js"));
 } catch (e) { document.getElementById("err").style.display = "block"; throw e; }
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -60,12 +64,17 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe4e6ea);
+// A room for the metals to reflect: without one a metal shows only the key's highlight and reads black (measured on
+// the lantern's bare iron), and a metallic-roughness map has nothing to vary. It lights everything a little, so the
+// hemisphere light is lower than it was before the environment.
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, radius * 0.01, radius * 100);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(...centre);
-const hemi = new THREE.HemisphereLight(0xdfe6f0, 0xd0cbc0, 0.9);
+const hemi = new THREE.HemisphereLight(0xdfe6f0, 0xd0cbc0, 0.45);
 scene.add(hemi);
-const key = new THREE.DirectionalLight(0xffffff, 1.6);
+const key = new THREE.DirectionalLight(0xffffff, 1.4);
 key.position.set(centre[0] - radius * 2, centre[1] + radius * 3.5, centre[2] + radius * 2.5);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);

@@ -177,8 +177,12 @@ export function chartTangent(axis: number, nx: number, ny: number, nz: number): 
   return [tx, ty, tz, w];
 }
 
-/** A normal in 0..1 RGB as glTF stores it: (n + 1) / 2, so (0, 0, 1) is (128, 128, 255). */
-export const encodeNormal = (x: number, y: number, z: number): number => rgb(((x + 1) / 2) * 255, ((y + 1) / 2) * 255, ((z + 1) / 2) * 255);
+/**
+ * A normal in 0..1 RGB as glTF stores it: (n + 1) / 2, so (0, 0, 1) is (128, 128, 255). A zero lands on the tie
+ * at 127.5, where rounding noise of 1e-9 either way split a flat face between 127 and 128; a hundredth of a level
+ * breaks the tie upward.
+ */
+export const encodeNormal = (x: number, y: number, z: number): number => rgb((x + 1) * 127.5 + 0.01, (y + 1) * 127.5 + 0.01, (z + 1) * 127.5 + 0.01);
 
 export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
   const size = opts.size ?? 1024;
