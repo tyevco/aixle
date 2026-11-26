@@ -279,7 +279,6 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
   const box = new Float64Array(pieces * 4);
   let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
   for (let s = 0; s < pieces; s++) {
-    const o = s * 8;
     const [x0, x1] = pieceRange(ctrl, co, s, 0);
     const [y0, y1] = pieceRange(ctrl, co, s, 1);
     box[s * 4] = x0; box[s * 4 + 1] = y0; box[s * 4 + 2] = x1; box[s * 4 + 3] = y1;
