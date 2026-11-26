@@ -21,7 +21,7 @@
  *
  *   record    := '{' (NAME ':' expr | '...' expr) (',' ...)* ','? '}'
  */
-import { COMPARE_OPS, type Arg, type CompareOp, type Expr, type Program, type RecordEntry, type Stmt } from "./ast.js";
+import { COMPARE_OPS, exprText, type Arg, type CompareOp, type Expr, type Program, type RecordEntry, type Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token } from "./lexer.js";
 
 const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
@@ -318,7 +318,7 @@ class Parser {
     }
     // `p.0` lexes as a name and the number .0: a field is a name, an item is an index.
     if (this.at("num") && this.peek().value.startsWith(".") && this.peek().line === this.tokens[this.pos - 1].line && this.peek().start === this.tokens[this.pos - 1].end)
-      throw new SyntaxError(`'${exprTextShort(e)}${this.peek().value}': a field is read by name (p.x); an item of a list by its index, ${exprTextShort(e)}[${this.peek().value.slice(1)}]`, this.peek().line);
+      throw new SyntaxError(`'${exprText(e)}${this.peek().value}': a field is read by name (p.x); an item of a list by its index, ${exprText(e)}[${this.peek().value.slice(1)}]`, this.peek().line);
     return e;
   }
 
@@ -400,11 +400,6 @@ function pipeBase(e: Expr): Expr {
 
 /** Transforms and placements whose result on the right of '+' alone is rarely meant. */
 const PLACING = new Set(["move", "rotate", "scale", "flip", "mirror", "ground", "center", "attach", "twist", "bend", "wrap"]);
-
-/** A short text for an expression in a syntax error: a name, or what it is. */
-function exprTextShort(e: Expr): string {
-  return e.type === "ident" ? e.name : e.type === "field" ? `${exprTextShort(e.target)}.${e.name}` : "...";
-}
 
 function describe(t: Token): string {
   if (t.type === "eof") return "end of file";

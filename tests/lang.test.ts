@@ -600,6 +600,8 @@ describe("records", () => {
     const ev = run("p = {x: 2}\na = p.x*.5\nb = 1.5+p.x");
     expect(ev.steps.map((s) => s.value).slice(1)).toEqual([1, 3.5]);
     expect(() => parse("legs = [1]\na = legs.0")).toThrow(/'legs\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]/);
+    expect(() => parse("legs = [[1]]\na = legs[0].0 + dims().1")).toThrow(/'legs\[0\]\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]\[0\]/);
+    expect(() => parse("a = dims().1")).toThrow(/'dims\(\)\.1': .* dims\(\)\[1\]/);
     expect(tokenize("{...p}").map((t) => t.value).slice(0, 3)).toEqual(["{", "...", "p"]);
   });
   it("spans lines between entries, and a loop's braces are still a block", () => {
