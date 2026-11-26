@@ -243,7 +243,8 @@ would do. The GLB, the OBJ and the viewer therefore have a budget like
 a Roblox accessory's, 200 thousand triangles unless the program says
 otherwise, met by the same decimation before the atlas is baked. It is
 set where a model at the default grid is rarely touched (four of the
-twenty-three examples, all at finer grids of their own) and a scene at
+twenty-three examples: three at finer grids of their own, and the rope,
+whose twisted strands make 205 thousand at the default 128, by 2%) and a scene at
 grid 300 still makes a file a browser opens. The sheet and the STL are
 never decimated: the sheet is how the model is checked, and the STL is
 for a printer, which wants every cell.
