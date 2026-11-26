@@ -53,3 +53,22 @@ describe("libraries", () => {
     for (const lib of ["hardware", "furniture", "plants"]) expect(cli("check", `std/${lib}.aix`)).toMatch(/^output: /m);
   });
 });
+
+describe("the import cache", () => {
+  it("check samples an import once and reads it back after, unless --no-cache", { timeout: 60000 }, async () => {
+    const { mkdtempSync, readdirSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "aixle-cache-"));
+    try {
+      const run = (...args: string[]) => execFileSync("npx", ["tsx", "src/cli.ts", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AIXLE_CACHE_DIR: dir } });
+      expect(run("check", "examples/garden.aix", "--brief")).toMatch(/import assets\/rock.obj: 4440 triangles sampled at cell [\d.]+ in \d+ ms; cached in /);
+      expect(readdirSync(dir).filter((f) => f.endsWith(".samples")).length).toBe(1);
+      expect(run("check", "examples/garden.aix", "--brief")).toMatch(/import assets\/rock.obj: 4440 triangles at cell [\d.]+, read from the cache in \d+ ms/);
+      const fresh = run("check", "examples/garden.aix", "--brief", "--no-cache");
+      expect(fresh).toMatch(/import assets\/rock.obj: 4440 triangles sampled at cell [\d.]+ in \d+ ms\n/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

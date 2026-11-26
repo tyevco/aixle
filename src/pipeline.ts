@@ -9,7 +9,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseObj } from "./import/obj.js";
 import { parseGlb } from "./import/glb.js";
-import { meshField } from "./mesh/meshSdf.js";
+import { fieldFromSamples, sampleMesh, type MeshSamples } from "./mesh/meshSdf.js";
+import { importKey, type ImportCache } from "./import/cache.js";
 import { box, primitive } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
@@ -97,6 +98,8 @@ export interface RunOptions {
   zoom?: number;
   /** Frame every view on this named step or object instead of the whole model (or `set focus name`). */
   focus?: string;
+  /** Where an import's samples are kept between runs (the CLI's is on disk, `--no-cache` for none); none by default. */
+  importCache?: ImportCache;
 }
 
 export interface RunResult {
@@ -168,13 +171,17 @@ export function moduleResolver(sourceName: string) {
   };
 }
 
-/** Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field. */
-export function importResolver(sourceName: string, log: (line: string) => void = () => {}) {
-  const cache = new Map<string, Shape3>();
+/**
+ * Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field, once per file and
+ * resolution in a run. With a cache, the samples are looked up by the file's content first and stored after
+ * sampling, so a `check` and the `render` after it sample a large mesh once between them.
+ */
+export function importResolver(sourceName: string, log: (line: string) => void = () => {}, cache?: ImportCache) {
+  const memo = new Map<string, Shape3>();
   return (path: string, opts: { resolution: number }): Shape3 => {
     const file = resolve(dirname(resolve(sourceName)), path);
     const key = `${file}@${opts.resolution}`;
-    const hit = cache.get(key);
+    const hit = memo.get(key);
     if (hit) return hit;
     let data: Buffer;
     try {
@@ -183,15 +190,24 @@ export function importResolver(sourceName: string, log: (line: string) => void =
       throw new Error(`cannot read ${file}`);
     }
     const lower = file.toLowerCase();
-    const mesh = lower.endsWith(".glb") ? parseGlb(data) : lower.endsWith(".obj") ? parseObj(data.toString("utf8")) : undefined;
-    if (!mesh) throw new Error(`only .obj and .glb files can be imported`);
+    const format = lower.endsWith(".glb") ? "glb" : lower.endsWith(".obj") ? "obj" : undefined;
+    if (!format) throw new Error(`only .obj and .glb files can be imported`);
     const t0 = performance.now();
-    log(`import ${path}: sampling ${mesh.indices.length / 3} triangles at resolution ${opts.resolution}...`);
-    const field = meshField(mesh, opts.resolution);
-    log(`import ${path}: ${field.triangles} triangles sampled at cell ${fmt(field.cell)} in ${Math.round(performance.now() - t0)} ms${field.openness > 0.01 ? ` (mesh is not closed: ${(field.openness * 100).toFixed(0)}% of rays end inside)` : ""}`);
+    const cacheKey = cache ? importKey(data, format, opts.resolution) : undefined;
+    let samples = cacheKey ? cache!.get(cacheKey) : undefined;
+    const open = (s: MeshSamples) => (s.openness > 0.01 ? ` (mesh is not closed: ${(s.openness * 100).toFixed(0)}% of rays end inside)` : "");
+    if (samples) log(`import ${path}: ${samples.triangles} triangles at cell ${fmt(samples.cell)}, read from the cache in ${Math.round(performance.now() - t0)} ms${open(samples)}`);
+    else {
+      const mesh = format === "glb" ? parseGlb(data) : parseObj(data.toString("utf8"));
+      log(`import ${path}: sampling ${mesh.indices.length / 3} triangles at resolution ${opts.resolution}...`);
+      samples = sampleMesh(mesh, opts.resolution);
+      const notStored = cacheKey ? cache!.put(cacheKey, samples) : undefined;
+      log(`import ${path}: ${samples.triangles} triangles sampled at cell ${fmt(samples.cell)} in ${Math.round(performance.now() - t0)} ms${open(samples)}${!cacheKey ? "" : notStored ? `; not cached: ${notStored}` : `; cached in ${cache!.dir}`}`);
+    }
+    const field = fieldFromSamples(samples);
     const shape = primitive(field.dist, field.bounds, 8);
     shape.sampledAt = field.cell;
-    cache.set(key, shape);
+    memo.set(key, shape);
     return shape;
   };
 }
@@ -709,8 +725,9 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
+/** Parse and evaluate a program, nothing rendered; `cache` keeps an import's samples between runs (see importResolver). */
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
 }
 
 /**
@@ -747,7 +764,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   mkdirSync(outDir, { recursive: true });
 
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
-  const resolver = importResolver(sourceName, log);
+  const resolver = importResolver(sourceName, log, opts.importCache);
   const resolveImage = imageResolver(sourceName);
   const program = parse(source);
   const modules = moduleResolver(sourceName);
@@ -1458,11 +1475,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
  * front views paired, with the size of each in its own bar. For comparing
  * a change against the version before it.
  */
-export function diff(a: { source: string; name: string }, b: { source: string; name: string }, outFile: string, opts: { size?: number; grid?: number } = {}): { warnings: string[] } {
+export function diff(a: { source: string; name: string }, b: { source: string; name: string }, outFile: string, opts: { size?: number; grid?: number; importCache?: ImportCache } = {}): { warnings: string[] } {
   const size = opts.size ?? 320;
   const warnings: string[] = [];
   const side = (prog: { source: string; name: string }) => {
-    const ev = check(prog.source, prog.name);
+    const ev = check(prog.source, prog.name, undefined, undefined, undefined, false, opts.importCache);
     if (!ev.output || isEmpty(ev.output.bounds)) return { canvases: [] as import("./render/canvas.js").Canvas[], label: `${prog.name}: nothing to show` };
     const nets = surfaceNets(ev.output, { resolution: opts.grid ?? 64 });
     const info = { name: ev.outputName, bounds: ev.output.bounds };
