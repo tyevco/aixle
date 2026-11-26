@@ -205,6 +205,15 @@ describe("set units and set bed", () => {
     expect(a.detail).toMatch(/^0\.0[56]\d* > 0\.1$/);
     expect(a.where).toMatch(/^thinnest at \([-\d., ]+\) in 'cup'$/);
   });
+  it("wall() of a part the mesh drops altogether is 0, not a promise kept of nothing", () => {
+    // A 0.05 plate 100 wide meshes to nothing at 64 cells: it was Infinity, so wall(plate) > 0.8 held.
+    const ev = check("set units mm\nplate = box(100, 0.05, 100) | move(0, 0.025, 0)\nassert wall(plate, 64) > 0.8, \"two lines\"");
+    expect(ev.asserts[0].passed).toBe(false);
+    expect(ev.asserts[0].detail).toBe("0 > 0.8");
+    expect(ev.asserts[0].where).toMatch(/^no surface at a cell of 1\.56: the shape is empty or thinner than a cell everywhere/);
+    expect(thinnestWall(O.difference(P.box(1, 1, 1), P.box(2, 2, 2)), 32).thickness).toBe(0);
+    expect(thinnestWall(O.move(P.box(1, 0.4, 1), 0, 0.2, 0), 32).thickness).toBeCloseTo(0.4, 2);
+  });
 });
 
 describe("open edges between two parts", () => {

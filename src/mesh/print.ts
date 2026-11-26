@@ -257,20 +257,22 @@ export function boxCorners(min: ArrayLike<number>, max: ArrayLike<number>): numb
 
 /**
  * The thinnest wall of a shape on its own, meshed at `resolution` cells on its longest side: what `wall(shape)`
- * returns, in model units; Infinity when no ray found a far side (an empty shape).
+ * returns, in model units. 0 when the mesh has no surface at all (an empty shape, or one thinner than a cell
+ * everywhere, which the mesh and so the print drop), with `empty` saying so: a promise of a wall then fails rather
+ * than holding of nothing. Infinity when there is a surface but no ray found a far side.
  */
-export function thinnestWall(shape: Shape3, resolution = 64): { thickness: number; at?: Vec3; to?: Vec3 } {
+export function thinnestWall(shape: Shape3, resolution = 64): WallQuery {
   const res = Math.max(8, Math.round(resolution));
   const memo = WALLS.get(shape);
   const hit = memo?.get(res);
   if (hit) return hit;
-  let r: { thickness: number; at?: Vec3; to?: Vec3 } = { thickness: Infinity };
+  let r: WallQuery = { thickness: 0, empty: { cellSize: 0 } };
   if (!isEmpty(shape.bounds)) {
     const nets = surfaceNets(shape, { resolution: res });
     if (nets.mesh.indices.length) {
       const w = wallThickness(shape, nets.mesh, nets.cellSize);
-      if (w.thinnest) r = { thickness: w.thinnest.thickness, at: w.thinnest.at, to: w.thinnest.to };
-    }
+      r = w.thinnest ? { thickness: w.thinnest.thickness, at: w.thinnest.at, to: w.thinnest.to } : { thickness: Infinity };
+    } else r = { thickness: 0, empty: { cellSize: nets.cellSize } };
   }
   // An assert asks twice, once for the number and once for where (its failure says), so the reading is kept.
   if (memo) memo.set(res, r);
@@ -278,7 +280,15 @@ export function thinnestWall(shape: Shape3, resolution = 64): { thickness: numbe
   return r;
 }
 
-const WALLS = new WeakMap<Shape3, Map<number, { thickness: number; at?: Vec3; to?: Vec3 }>>();
+/** What `wall()` reads: the thickness, where, and whether there was no surface to measure (at that cell). */
+export interface WallQuery {
+  thickness: number;
+  at?: Vec3;
+  to?: Vec3;
+  empty?: { cellSize: number };
+}
+
+const WALLS = new WeakMap<Shape3, Map<number, WallQuery>>();
 
 /**
  * The area resting on the plate: faces within a cell and a half of the floor that face down within 25 degrees of

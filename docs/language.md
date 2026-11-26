@@ -958,7 +958,9 @@ meshes too); `wall(shape, resolution)` is the thinnest wall, as the
 Print section measures it, in model units: with `set units mm`, `assert
 wall(model) > 0.8, "two lines of a 0.4 mm nozzle"`, and a failure says
 where the thinnest wall is and in which step (it meshes too, at the
-program's grid or 64); `clearance(a, b)` is
+program's grid or 64; a shape with no surface in that mesh, empty or
+thinner than a cell everywhere, reads 0 and fails the promise);
+`clearance(a, b)` is
 the smallest gap between two surfaces, negative by how deep they overlap,
 zero when they touch, sampled from the fields at twelve points per side
 of each shape's box and then tightened, so it is exact for parts that

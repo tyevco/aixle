@@ -758,7 +758,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (assertDepth > 0 && callee === "wall" && typeof result === "number" && Number.isFinite(result) && isShape3(values[0].value)) {
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
       const w = thinnestWall(values[0].value, typeof res === "number" ? res : 64);
-      if (w.at && w.to) {
+      if (w.empty) witness = w.empty.cellSize > 0 ? `no surface at a cell of ${Number(w.empty.cellSize.toPrecision(3))}: the shape is empty or thinner than a cell everywhere, so there is no wall to measure (or to print)` : "the shape is empty: there is no wall to measure";
+      else if (w.at && w.to) {
         const mid: Vec3 = [(w.at[0] + w.to[0]) / 2, (w.at[1] + w.to[1]) / 2, (w.at[2] + w.to[2]) / 2];
         witness = `thinnest at (${w.at.map(fmt3).join(", ")})${stepAt(mid, [], values[0].value)}`;
       }
