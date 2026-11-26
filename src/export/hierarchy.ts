@@ -12,7 +12,7 @@
  * atlas: they are merged for baking and split again with their UVs.
  */
 import type { Vec3 } from "../core/vec.js";
-import { allJoints, findJoints, hasRelief, move as moveShape } from "../sdf/ops.js";
+import { allJoints, findJoints, move as moveShape, reliefMaterials } from "../sdf/ops.js";
 import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
 import { decimate } from "../mesh/decimate.js";
@@ -279,7 +279,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       for (const j of src.joints) j.joint!.hidden = on;
       for (const st of src.sets) st.instanced!.hidden = on;
     };
-    const fields: BakeField[] = ranges.map((range, i) => ({ range, dist: sources[i].shape.dist, offset: sources[i].offset, enter: () => hide(sources[i], true), leave: () => hide(sources[i], false), relief: hasRelief(sources[i].shape) }));
+    const fields: BakeField[] = ranges.map((range, i) => ({ range, dist: sources[i].shape.dist, offset: sources[i].offset, enter: () => hide(sources[i], true), leave: () => hide(sources[i], false), relief: reliefMaterials(sources[i].shape) }));
     const withMaps = opts.maps !== false;
     const baked = bakeAtlas(merged, { size: opts.texture, fields: withMaps ? fields : undefined, cellSize: opts.cellSize, wearProbe: opts.wearProbe, maps: withMaps });
     const parts = splitBaked(baked.mesh, baked.uv, ranges, materials, baked.tangents);

@@ -30,7 +30,7 @@
  * practice and visible only there.
  */
 import { albedo, bumpSlope, fieldCurvature, surface } from "../sdf/materials.js";
-import type { DistFn3 } from "../sdf/types.js";
+import type { DistFn3, Material } from "../sdf/types.js";
 import type { Vec3 } from "../core/vec.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { Canvas, rgb, rgbDithered } from "../render/canvas.js";
@@ -87,8 +87,8 @@ export interface BakeField {
   /** Called around the range's texels: the hierarchy hides a joint's children here, as it did to mesh it. */
   enter?: () => void;
   leave?: () => void;
-  /** The field carries relief finer than the mesh (a displace: see hasRelief), so the normal map is tested for. */
-  relief?: boolean;
+  /** The materials whose surface in this field carries relief finer than the mesh (a displace: see reliefMaterials). */
+  relief?: ReadonlySet<Material>;
 }
 
 export interface AtlasOptions {
@@ -403,12 +403,14 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
   const fn = new Float64Array(6), mn = new Float64Array(3);
   const anyBump = mats.some((m) => (m.bump ?? 0) > 0);
 
-  // Whether the normal map is worth baking: always for a bump; for a field with relief (a displace) a sparse
-  // lattice of texels (one in sixteen) is tested, and the map is baked when enough of them lean past BENT_DEGREES;
-  // never for a model with neither, whose mesh is its shape.
+  // Whether the normal map is worth baking: always for a bump; for a displaced surface a sparse lattice of its
+  // texels (one in sixteen) is tested, and the map is baked when enough of them lean past BENT_DEGREES; never for a
+  // model with neither, whose mesh is its shape. Only those materials' texels carry the field's normal: the rest
+  // stay flat, so the mesh's own error at a plain part's creases is neither baked nor paid for.
   let normalStats: NormalStats | undefined;
   let bakeNormals = false;
-  const relief = fields.some((f) => f.relief);
+  const relief = fields.some((f) => f.relief && f.relief.size > 0);
+  const detailed = (f: BakeField | undefined, m: Material): boolean => (m.bump ?? 0) > 0 || (!!f && (opts.testNormals || !!f.relief?.has(m)));
   if (fields.length) {
     let count = 0, bent = 0, maxDeg = 0, sumDeg = 0;
     if (!anyBump && (relief || opts.testNormals))
@@ -416,6 +418,7 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
         const f = fieldOf(t);
         if (!f) return;
         const a = newIdx[t * 3], b = newIdx[t * 3 + 1], c = newIdx[t * 3 + 2];
+        if (!detailed(f, mats[newMat[w0 >= w1 && w0 >= w2 ? a : w1 >= w2 ? b : c]])) return;
         interpNormal(a, b, c, w0, w1, w2, mn);
         const qx = newPos[a * 3] * w0 + newPos[b * 3] * w1 + newPos[c * 3] * w2 + f.offset[0];
         const qy = newPos[a * 3 + 1] * w0 + newPos[b * 3 + 1] * w1 + newPos[c * 3 + 1] * w2 + f.offset[1];
@@ -483,7 +486,8 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
       qz = newPos[a * 3 + 2] * w0 + newPos[b * 3 + 2] * w1 + newPos[c * 3 + 2] * w2 + f.offset[2];
     }
     let onField = false;
-    if (f && (normalImg || (m.wear ?? 0) > 0)) {
+    const wantsNormal = !!normalImg && detailed(f, m);
+    if (f && (wantsNormal || (m.wear ?? 0) > 0)) {
       interpNormal(a, b, c, w0, w1, w2, mn);
       onField = fieldNormal(f, qx, qy, qz, mn[0], mn[1], mn[2], fn);
     }
@@ -500,7 +504,7 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
       for (let k = 0; k < 3; k++) { r.cMin[k] = Math.min(r.cMin[k], s.color[k]); r.cMax[k] = Math.max(r.cMax[k], s.color[k]); r.cSum[k] += s.color[k]; }
       emImg.set(px, py, rgbDithered(s.color[0], s.color[1], s.color[2], px, py));
     }
-    if (normalImg) {
+    if (wantsNormal) {
       // The target: the field's normal under the texel, tilted by the bump's slope; the mesh's own normal where the
       // field gave none.
       let nx = onField ? fn[0] : mn[0], ny = onField ? fn[1] : mn[1], nz = onField ? fn[2] : mn[2];
@@ -584,6 +588,7 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
     const glows = m.glow > 0 && r.n > 0;
     const constant = glows && [0, 1, 2].every((k) => r.cMax[k] - r.cMin[k] <= step);
     return {
+      // Only a bumped or displaced material's texels were baked, so any bent texel is relief.
       normal: !!normalImg && ((m.bump ?? 0) > 0 || r.bent > 0),
       metalRough,
       emissive: glows && !constant,

@@ -149,6 +149,9 @@ export interface Shape3 {
   bound?: boolean;
   /** Set by displace: the noise's feature size. Relief like this is finer than the mesh can follow, so the atlas baker writes it into a normal map. */
   relief?: number;
+  /** Set by paint: the material it gives everything inside it; by decal, `decal` is the one it gives inside its region. */
+  material?: Material;
+  decal?: Material;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */

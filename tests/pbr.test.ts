@@ -20,7 +20,7 @@ function bake(shape: Shape3, cell: number, size = 512): AtlasResult {
   const b = shape.bounds;
   const longest = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
   const mesh = surfaceNets(shape, { resolution: Math.ceil(longest / cell) }).mesh;
-  return bakeAtlas(mesh, { size, fields: [{ range: [0, mesh.indices.length / 3], dist: shape.dist, offset: [0, 0, 0], relief: O.hasRelief(shape) }], cellSize: cell });
+  return bakeAtlas(mesh, { size, fields: [{ range: [0, mesh.indices.length / 3], dist: shape.dist, offset: [0, 0, 0], relief: O.reliefMaterials(shape) }], cellSize: cell });
 }
 
 /**
@@ -133,7 +133,8 @@ describe("normal map", () => {
     const t = chartTangent(4, 0.3, 0.2, Math.sqrt(1 - 0.13));
     expect(Math.abs(t[0] * 0.3 + t[1] * 0.2 + t[2] * Math.sqrt(1 - 0.13))).toBeLessThan(1e-9);
   });
-  const plainAndBumped = O.union([O.paint(P.box(1.2, 1.2, 1.2), preset("plastic")!), O.paint(O.move(P.sphere(0.4), 1.4, 0, 0), customMaterial({ color: [0.8, 0.8, 0.8], bump: 0.02, bumpScale: 0.15 }))]);
+  // The box is a displace of no height, so its texels go through the field like any relief's, and come out flat.
+  const plainAndBumped = O.union([O.paint(O.displace(P.box(1.2, 1.2, 1.2), 0, 1), preset("plastic")!), O.paint(O.move(P.sphere(0.4), 1.4, 0, 0), customMaterial({ color: [0.8, 0.8, 0.8], bump: 0.02, bumpScale: 0.15 }))]);
   const at = bake(plainAndBumped, 0.04);
   it("bakes a flat face to (128, 128, 255)", () => {
     expect(at.normal).toBeDefined();
@@ -200,6 +201,19 @@ describe("normal map", () => {
     expect(median(meshErrors)).toBeGreaterThan(4);
     expect(median(errors)).toBeLessThan(1.5);
     expect(errors[Math.floor(errors.length * 0.9)]).toBeLessThan(4);
+  });
+  it("bakes only the displaced material's texels: a plain part beside it stays flat and reads no map", () => {
+    const leaf = customMaterial({ name: "leaf", color: [0.3, 0.6, 0.2] });
+    const both = O.union([O.paint(O.displace(P.sphere(0.6), 0.03, 0.12), leaf), O.paint(O.move(P.box(1, 1, 1), 1.5, 0, 0), preset("oak")!)]);
+    expect([...O.reliefMaterials(both)].map((m) => m.name)).toEqual(["leaf"]);
+    const mixed = bake(both, 0.03);
+    const oak = mixed.mesh.materials.findIndex((m) => m.name === "oak");
+    expect(mixed.maps[oak].normal).toBe(false);
+    expect(mixed.maps[mixed.mesh.materials.findIndex((m) => m.name === "leaf")].normal).toBe(true);
+    for (const tx of decodedTexels(mixed)) if (tx.mat === oak) expect(Math.abs(tx.n[0] * tx.mesh[0] + tx.n[1] * tx.mesh[1] + tx.n[2] * tx.mesh[2] - 1)).toBeLessThan(1e-3);
+    // A displace under a paint takes that paint's material; one with no paint above takes the paints inside it.
+    expect([...O.reliefMaterials(O.paint(O.displace(O.paint(P.sphere(1), leaf), 0.1, 0.3), preset("oak")!))].map((m) => m.name)).toEqual(["oak"]);
+    expect([...O.reliefMaterials(O.displace(O.union([O.paint(P.sphere(1), leaf), P.box(1, 1, 1)]), 0.1, 0.3))].map((m) => m.name).sort()).toEqual(["clay", "leaf"]);
   });
   it("is not baked for a model with no displace and no bump", () => {
     const plain = bake(O.union([P.box(1, 1, 1), O.move(P.sphere(0.5), 1, 0, 0)]), 0.04);

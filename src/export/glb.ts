@@ -249,7 +249,9 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
       }
       colAcc = floatAccessor(colors, "VEC3", false);
     }
-    if (normalTex >= 0 && h.tangents) tanAcc = floatAccessor(h.tangents[mi], "VEC4", false);
+    // Tangents only for a mesh with a normal-mapped material: sixteen bytes a vertex, and the bulk of the growth.
+    const mapped = normalTex >= 0 && h.tangents && [...new Set(mesh.materialIndex)].some((i) => h.materialMaps?.get(mesh.materials[i])?.normal);
+    if (mapped) tanAcc = floatAccessor(h.tangents![mi], "VEC4", false);
     const perMaterial = new Map<number, number[]>();
     const ix = mesh.indices;
     for (let t = 0; t < ix.length; t += 3) {

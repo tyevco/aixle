@@ -621,6 +621,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
     gap: s.gap,
     gapWhat: s.gapWhat,
     painted: true,
+    material: m,
   };
 }
 
@@ -651,6 +652,7 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
+    decal: m,
   };
 }
 
@@ -818,18 +820,42 @@ export function anchorAt(s: Shape3, name: string): Vec3 | undefined {
 export const FREE_ANCHORS = ["centre", "top", "bottom", "front", "back", "left", "right"];
 
 /** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
-/** Whether anything in the tree carries relief finer than a mesh follows (a displace), so a normal map is worth testing for. */
-export function hasRelief(s: Shape3): boolean {
-  const seen = new Set<Shape3>();
-  const walk = (n: Shape3): boolean => {
-    if (seen.has(n)) return false;
-    seen.add(n);
-    if (n.relief !== undefined) return true;
-    for (const k of n.parts ?? n.inner ?? []) if (walk(k)) return true;
-    if (n.joint && walk(n.joint.child)) return true;
-    return n.instanced ? walk(n.instanced.base) : false;
+/**
+ * The materials that end up on a displaced surface: relief finer than a mesh follows, which the atlas baker writes
+ * into the normal map for those materials' texels and no others. The material at a point is the outermost paint
+ * above it (a paint answers for everything inside it), so a displace under a paint gives that paint's material;
+ * one with no paint above gives the paints inside it, the decals above or inside it, and the default material
+ * wherever a part is unpainted.
+ */
+export function reliefMaterials(s: Shape3): Set<Material> {
+  const out = new Set<Material>();
+  const seen = new Map<Shape3, Set<string>>();
+  const ids = new Map<Material, number>();
+  const id = (m: Material | undefined) => (m ? (ids.get(m) ?? ids.set(m, ids.size).get(m)!) : -1);
+  const walk = (n: Shape3, outer: Material | undefined, decals: Material[], under: boolean): void => {
+    const key = `${id(outer)}:${under ? 1 : 0}:${decals.map(id).join(",")}`;
+    const done = seen.get(n) ?? seen.set(n, new Set()).get(n)!;
+    if (done.has(key)) return;
+    done.add(key);
+    if (n.relief !== undefined && !under) {
+      under = true;
+      if (outer) { out.add(outer); return; }
+      for (const d of decals) out.add(d);
+    }
+    if (n.material && !outer) {
+      outer = n.material;
+      if (under) { out.add(outer); return; }
+    }
+    if (n.decal && !outer) {
+      if (under) out.add(n.decal);
+      else decals = [...decals, n.decal];
+    }
+    const kids = [...(n.parts ?? n.inner ?? []), ...(n.joint ? [n.joint.child] : []), ...(n.instanced ? [n.instanced.base] : [])];
+    if (!kids.length && under && !outer) out.add(DEFAULT_MATERIAL);
+    for (const k of kids) walk(k, outer, decals, under);
   };
-  return walk(s);
+  walk(s, undefined, [], false);
+  return out;
 }
 
 export function hasLooseBounds(s: Shape3): boolean {
