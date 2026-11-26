@@ -42,6 +42,13 @@ export interface MaterialMaps {
   emissive: boolean;
   /** A glowing material whose colour is the same everywhere: that colour (0..1, as the atlas stores it), for a factor instead of a map. */
   emissiveColor?: Vec3;
+  /**
+   * A material without a metallic-roughness map whose texels all took one roughness or metalness other than its
+   * own (a part smaller than a rust patch and wholly inside one, a thin part worn all over): that value, for its
+   * factor, or an engine shades the atlas's oxide as the material's polished metal.
+   */
+  rough?: number;
+  metal?: number;
 }
 
 /** What the normal map's test found, for the report and for choosing its thresholds. */
@@ -587,12 +594,16 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
     const metalRough = withMaps && r.n > 0 && (r.rMax - r.rMin > step || r.mMax - r.mMin > step);
     const glows = m.glow > 0 && r.n > 0;
     const constant = glows && [0, 1, 2].every((k) => r.cMax[k] - r.cMin[k] <= step);
+    // Without a map, one value the texels all took stands as the factor when it is not the material's own.
+    const factor = (lo: number, hi: number, own: number): number | undefined => (!metalRough && r.n > 0 && Math.abs((lo + hi) / 2 - own) > step ? Number(((lo + hi) / 2).toFixed(4)) : undefined);
     return {
       // Only a bumped or displaced material's texels were baked, so any bent texel is relief.
       normal: !!normalImg && ((m.bump ?? 0) > 0 || r.bent > 0),
       metalRough,
       emissive: glows && !constant,
       emissiveColor: glows && constant ? [r.cSum[0] / r.n, r.cSum[1] / r.n, r.cSum[2] / r.n] : m.glow > 0 && r.n === 0 ? m.color : undefined,
+      rough: factor(r.rMin, r.rMax, m.rough),
+      metal: factor(r.mMin, r.mMax, m.metal),
     };
   });
   if (normalStats && normalImg) normalStats = { ...normalStats, texels: fullCount, bent: fullBent, maxDeg: fullMax, meanDeg: fullCount ? fullSum / fullCount : 0 };

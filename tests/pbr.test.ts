@@ -285,6 +285,27 @@ describe("PBR in the GLB", () => {
     expect(byName.lamp.emissiveFactor).toEqual([0.8, 0.8, 0.8]);
     expect(byName.lamp.pbrMetallicRoughness.metallicRoughnessTexture).toBeUndefined();
   });
+  it("gives a material whose texels all took one roughness and metalness other than its own those as factors", () => {
+    // A bolt smaller than the rust's patches, sitting wholly inside one: every texel is rough oxide, not metal.
+    const rust = preset("rust")!;
+    let spot: [number, number, number] | undefined;
+    for (let i = 0; i < 400 && !spot; i++) {
+      const x = (i % 20) * 0.13, z = Math.floor(i / 20) * 0.11;
+      let all = true;
+      for (let k = 0; k < 60 && all; k++) {
+        const a = k * 2.4, b = Math.acos(1 - 2 * ((k + 0.5) / 60));
+        if (surface(rust, x + 0.06 * Math.sin(b) * Math.cos(a), 0.06 * Math.cos(b), z + 0.06 * Math.sin(b) * Math.sin(a)).metal > 0.01) all = false;
+      }
+      if (all) spot = [x, 0, z];
+    }
+    expect(spot).toBeDefined();
+    const h = buildHierarchy([{ name: "bolt", shape: O.paint(O.move(P.sphere(0.06), spot![0], spot![1], spot![2]), rust) }], { cellSize: 0.004, texture: 128 });
+    expect(h.metalRoughMap).toBeUndefined();
+    const pbr = glbJson(toGlbScene(h, "bolt")).materials[0].pbrMetallicRoughness;
+    // The atlas shows oxide; an engine must not shade it as the iron's polished metal.
+    expect(pbr.metallicFactor).toBeLessThan(0.05);
+    expect(pbr.roughnessFactor).toBeGreaterThan(0.85);
+  });
   it("gives a plain model the colour atlas and nothing more", () => {
     const h = scene(O.union([O.paint(P.box(1, 1, 1), preset("oak")!), O.paint(O.move(P.sphere(0.4), 0, 0.8, 0), preset("gold")!)]));
     expect(h.normalMap ?? h.metalRoughMap ?? h.emissiveMap ?? h.tangents).toBeUndefined();

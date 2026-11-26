@@ -466,8 +466,11 @@ of an edge the mesh rounds, not detail, and the mesh's normal stands.
 
 A map is written only where it carries something, because most models
 are plain and their GLBs should not grow. The metallic-roughness map is
-written when some material's texels vary in either (wear, rust), the
-emissive map when a glowing material's colour varies (a constant one is
+written when some material's texels vary in either (wear, rust); a
+material whose texels all took one value other than its own (a bolt
+smaller than a rust patch and wholly inside one) gets that value as its
+factor, or an engine would shade the atlas's oxide as polished iron. The
+emissive map is written when a glowing material's colour varies (a constant one is
 a factor, which needs no texture), and the normal map only for relief
 the program asked for: a `bump`, or the materials that end up on a
 `displace`. The mesh's own error was the reason for that last rule: on

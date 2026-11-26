@@ -210,7 +210,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     let id = matIds.get(m);
     if (id !== undefined) return id;
     const maps = h.materialMaps?.get(m);
-    const pbr: Record<string, unknown> = { baseColorFactor: [1, 1, 1, 1], metallicFactor: m.metal, roughnessFactor: m.rough };
+    const pbr: Record<string, unknown> = { baseColorFactor: [1, 1, 1, 1], metallicFactor: maps?.metal ?? m.metal, roughnessFactor: maps?.rough ?? m.rough };
     if (textured) pbr.baseColorTexture = { index: baseTex };
     const def: Record<string, unknown> = { name: m.name, pbrMetallicRoughness: pbr };
     // A map multiplies its factor, so a material that reads one has factors of 1.
