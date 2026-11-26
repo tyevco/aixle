@@ -839,8 +839,10 @@ and every comment stays where it was. The layout:
 - a loop's body two spaces in; a line that continues a statement keeps
   its break, two in from the line that opened its bracket, or lined up
   under the argument it was written under, which stays lined up however
-  the line above was respaced; a closing bracket that starts a line at
-  its opener's line;
+  the line above was respaced; inside brackets, a line that starts with
+  an operator written further in than the item above it carries that
+  item on and stays two in from it (`  box(1)` over `    | move(0, 1, 0)`);
+  a closing bracket that starts a line at its opener's line;
 - an `=` (or a record's value) padded into a column with the line above
   or below keeps the column, and every line of the column stays in it
   (pushed right together when one line's code now reaches past it); a

@@ -30,8 +30,11 @@
  *     open) is a hanging indent and stays one. Otherwise a line written under
  *     an argument, an item, an entry, a value or an `=` of an earlier line of
  *     the statement stays under it, wherever the formatting moved it (an
- *     argument lined up with the first stays lined up); anything else becomes
- *     a hanging indent;
+ *     argument lined up with the first stays lined up). Inside brackets, a
+ *     line that starts with an operator and was written further in than the
+ *     line above it in the same brackets carries that line's item on, and
+ *     stays two in from it (`  box(1)` over `    | move(0, 1, 0)`). Anything
+ *     else becomes a hanging indent;
  *   - blank lines: one where the author had one or more, none at the start
  *     or the end of the file;
  *   - a comment on its own line takes the indentation of the line it
@@ -47,6 +50,8 @@ import type { Token } from "./lexer.js";
 const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
 
 const isOp = (t: Token, v: string): boolean => t.type === "op" && t.value === v;
+/** The operators a line can start with to carry on the line above, as the lexer reads them. */
+const CARRIES = new Set(["+", "-", "*", "/", "|", "&"]);
 const isKeyword = (t: Token): boolean => t.type === "ident" && (KEYWORDS.has(t.value) || t.role === "keyword");
 const isBlockOpen = (t: Token): boolean => isOp(t, "{") && t.role !== "record";
 const isBlockClose = (t: Token): boolean => isOp(t, "}") && t.role !== "record";
@@ -137,6 +142,9 @@ export function format(source: string): string {
     let line = "";
     /** Each earlier line of the statement: where its tokens were written and where they are now. */
     let statementLines: { was: number; now: number }[][] = [];
+    /** Where each earlier line of the statement starts, as written and now, and the bracket it starts inside. */
+    let lineStarts: { was: number; now: number; inside: number }[] = [];
+    let lineInside = -1;
     let lineCols: { was: number; now: number }[] = [];
     let lineIndent = 0;
     /** How far the current line moved: its indentation now less the column its first token was written at. */
@@ -145,8 +153,8 @@ export function format(source: string): string {
     /** The column the statement's first token was written at: a continuation line is never lined up at or before it. */
     let statementWas = 0;
     let blockDepth = 0;
-    /** The open brackets, each with its line's indentation now and as written. */
-    const open: { indent: number; was: number }[] = [];
+    /** The open brackets, each with its line's indentation now and as written, and which bracket it is. */
+    const open: { indent: number; was: number; id: number }[] = [];
     // Whether the last thing emitted was a blank line, so a run of them is one.
     const blank = () => { if (out.length && out[out.length - 1] !== "") out.push(""); };
 
@@ -181,7 +189,7 @@ export function format(source: string): string {
       const text = src.slice(t.start, t.end);
       if (i > 0 && !gap.includes("\n")) {
         // A loop body on the brace's line starts its statement there.
-        if (startsStatement[i]) { statementIndent = lineIndent; statementWas = columnOf(t.start); statementLines = []; lineCols = []; }
+        if (startsStatement[i]) { statementIndent = lineIndent; statementWas = columnOf(t.start); statementLines = []; lineStarts = []; lineCols = []; }
         const was = linedUp.get(i);
         const want = was === undefined ? undefined : target.get(i) ?? was + lineShift;
         line += want === undefined ? spacing(toks[i - 1], t, gap) : " ".repeat(Math.max(1, want - line.length));
@@ -196,7 +204,8 @@ export function format(source: string): string {
         if (i > 0) { endLine(segments[0], gapStart); segments.shift(); }
         segments.pop();
         const statement = startsStatement[i];
-        if (!statement) statementLines.push(lineCols);
+        if (!statement) { statementLines.push(lineCols); lineStarts.push({ was: lineIndent - lineShift, now: lineIndent, inside: lineInside }); }
+        const inside = open.length ? open[open.length - 1].id : -1;
         let indent: number;
         if (isBlockClose(t)) indent = Math.max(0, blockDepth - 1) * 2;
         else if (statement) indent = blockDepth * 2;
@@ -209,20 +218,29 @@ export function format(source: string): string {
           const hangWas = (open.length ? open[open.length - 1].was : statementWas) + 2;
           let under: number | undefined;
           if (was !== hangWas && was > statementWas) for (let k = statementLines.length - 1; k >= 0 && under === undefined; k--) under = statementLines[k].find((c) => c.was === was)?.now;
+          // Inside brackets, a line that carries an item on with an operator (`  box(1)` over `    | move(0, 1, 0)`)
+          // stays two in from the line above it in the same brackets when it was written further in than that line,
+          // rather than flat with the items. Outside them every line of the statement continues it, so it hangs.
+          if (under === undefined && open.length && was !== hangWas && t.type === "op" && CARRIES.has(t.value) && t.role !== "unary") {
+            let k = lineStarts.length - 1;
+            while (k >= 0 && lineStarts[k].inside !== inside) k--;
+            if (k >= 0 && was > lineStarts[k].was) under = lineStarts[k].now + 2;
+          }
           indent = under ?? hang;
         }
         // A comment before a closing brace or bracket belongs inside it.
         const commentIndent = isBlockClose(t) ? blockDepth * 2 : isCloser(t) ? indent + 2 : indent;
         between(segments, commentIndent);
-        if (statement) { statementIndent = indent; statementWas = columnOf(t.start); statementLines = []; }
+        if (statement) { statementIndent = indent; statementWas = columnOf(t.start); statementLines = []; lineStarts = []; }
         lineIndent = indent;
+        lineInside = inside;
         lineShift = indent - columnOf(t.start);
         line = " ".repeat(indent) + text;
         lineCols = [{ was: columnOf(t.start), now: indent }];
       }
       if (isBlockOpen(t)) blockDepth++;
       else if (isBlockClose(t)) blockDepth = Math.max(0, blockDepth - 1);
-      else if (isOpener(t)) open.push({ indent: lineIndent, was: lineIndent - lineShift });
+      else if (isOpener(t)) open.push({ indent: lineIndent, was: lineIndent - lineShift, id: i });
       else if (isCloser(t)) open.pop();
     }
     const rest = src.slice(toks.length ? toks[toks.length - 1].end : 0).split("\n");

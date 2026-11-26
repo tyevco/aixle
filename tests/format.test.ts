@@ -110,6 +110,14 @@ describe("aixle fmt's layout", () => {
     // An operator lined up under the `=` stays there; one lined up under nothing is a hanging indent.
     expect(format("spots = sphere(1)\n      + sphere(2)\ndef part(r) =\n  cylinder(r, 1)\n     + sphere(r)\n")).toBe("spots = sphere(1)\n      + sphere(2)\ndef part(r) =\n  cylinder(r, 1)\n  + sphere(r)\n");
     expect(format("p = {\nx: 1,\n   y: 2,\n  }\n")).toBe("p = {\n  x: 1,\n  y: 2,\n}\n");
+    // A line that carries the line above on with an operator stays two in from it, inside a call or a loop too.
+    const items = "body = union(\n  box(1, 2, 3)\n    | move(0, 1, 0),\n  sphere(1)\n    | move(0, 2, 0),\n  k=0.1\n)\n";
+    expect(format(items)).toBe(items);
+    const looped = "for i in [1] {\n  body = union(\n    box(1)\n      | move(0, 1, 0),\n    sphere(1),\n  )\n}\n";
+    expect(format(looped)).toBe(looped);
+    expect(format("body = union(\n  box(1)\n         | move(0, 1, 0),\n)\n")).toBe("body = union(\n  box(1)\n    | move(0, 1, 0),\n)\n");
+    // A minus that negates starts an item of its own.
+    expect(format("xs = [\n  1,\n    -2,\n]\n")).toBe("xs = [\n  1,\n  -2,\n]\n");
   });
   it("keeps a column of = or of record values that the author lined up, and nothing else", () => {
     expect(format("post_front = a\npost_back  = b\nx  = 1\n\ny   = 2\n")).toBe("post_front = a\npost_back  = b\nx = 1\n\ny = 2\n");
