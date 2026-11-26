@@ -577,6 +577,7 @@ describe("records", () => {
     expect(() => run("p = 1\nq = {...p}")).toThrow(/'\.\.\.p' takes the fields of a record, and p is a number/);
     // Nothing changes a record in place; the error says how to make the new one.
     expect(() => parse("p = {x: 1}\np.x = 2")).toThrow(/line 2: p\.x = \.\.\.: a record's fields cannot be changed; make a new record with the change, p = \{\.\.\.p, x: value\}/);
+    expect(() => parse("p = {a: {b: 1}}\np.a.b = 2")).toThrow(/p = \{\.\.\.p, a: \{\.\.\.p\.a, b: value\}\}/);
   });
   it("names the fields there are when one is missing, and refuses a key given twice", () => {
     expect(() => run("p = {x: 1, y: 2}\na = p.z")).toThrow(/line 2: 'p' has no field 'z'; it has x, y/);
@@ -591,7 +592,7 @@ describe("records", () => {
   it("keeps the dot apart from numbers: p.x is a field, .5 and 1.5 numbers, p.0 an error that says to index", () => {
     const ev = run("p = {x: 2}\na = p.x*.5\nb = 1.5+p.x");
     expect(ev.steps.map((s) => s.value).slice(1)).toEqual([1, 3.5]);
-    expect(() => parse("p = [1]\na = p.0")).toThrow(/'p\.0': a field is read by name \(p\.x\); an item of a list by its index, p\[0\]/);
+    expect(() => parse("legs = [1]\na = legs.0")).toThrow(/'legs\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]/);
     expect(tokenize("{...p}").map((t) => t.value).slice(0, 3)).toEqual(["{", "...", "p"]);
   });
   it("spans lines between entries, and a loop's braces are still a block", () => {

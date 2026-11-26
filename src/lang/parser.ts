@@ -130,8 +130,15 @@ class Parser {
       return { type: "assert", test, message, pose, line: t.line };
     }
     // `p.x = 2`: a record, like everything else, is never changed in place; a new one is made from it.
-    if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === "." && this.peek(2).type === "ident" && this.peek(3).type === "op" && this.peek(3).value === "=")
-      throw new SyntaxError(`${t.value}.${this.peek(2).value} = ...: a record's fields cannot be changed; make a new record with the change, ${t.value} = {...${t.value}, ${this.peek(2).value}: value}`, t.line);
+    if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === ".") {
+      let k = 1;
+      while (this.peek(k).type === "op" && this.peek(k).value === "." && this.peek(k + 1).type === "ident") k += 2;
+      if (k > 1 && this.peek(k).type === "op" && this.peek(k).value === "=") {
+        const path = Array.from({ length: (k - 1) / 2 }, (_, j) => this.peek(2 + j * 2).value);
+        const change = path.reduceRight((inner, key, j) => `{...${[t.value, ...path.slice(0, j)].join(".")}, ${key}: ${inner}}`, "value");
+        throw new SyntaxError(`${[t.value, ...path].join(".")} = ...: a record's fields cannot be changed; make a new record with the change, ${t.value} = ${change}`, t.line);
+      }
+    }
     if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === "=") {
       const name = this.expectIdent("a name").value;
       this.expectOp("=");
@@ -311,7 +318,7 @@ class Parser {
     }
     // `p.0` lexes as a name and the number .0: a field is a name, an item is an index.
     if (this.at("num") && this.peek().value.startsWith(".") && this.peek().line === this.tokens[this.pos - 1].line && this.peek().start === this.tokens[this.pos - 1].end)
-      throw new SyntaxError(`'${exprTextShort(e)}${this.peek().value}': a field is read by name (p.x); an item of a list by its index, p[${this.peek().value.slice(1)}]`, this.peek().line);
+      throw new SyntaxError(`'${exprTextShort(e)}${this.peek().value}': a field is read by name (p.x); an item of a list by its index, ${exprTextShort(e)}[${this.peek().value.slice(1)}]`, this.peek().line);
     return e;
   }
 
