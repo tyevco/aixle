@@ -342,7 +342,16 @@ function main(argv: string[]): number {
       const roots = ev.objects.length > 1 ? ev.objects.map((o) => o.name) : ev.outputName ? [ev.outputName] : [];
       if (!roots.length) { console.log("no output: nothing to explain"); return 0; }
       if (pose) console.log(`pose: ${pose.name} (sizes in this pose)`);
-      for (const r of roots) walk(r, 0);
+      for (const r of roots) {
+        if (byName.has(r)) { walk(r, 0); continue; }
+        // An output that is no one step (a record's field that holds no step of its own, show box(1), show a, b):
+        // its size, then the steps it reads, rather than an empty tree.
+        const obj = ev.objects.find((o) => o.name === r);
+        console.log(`${r}  ${obj && !isEmpty(obj.shape.bounds) ? dimsLabel(obj.shape.bounds) : "empty"}  (shown, not a step)`);
+        if (ev.objects.length > 1) continue;
+        const read = new Set(ev.steps.filter((st) => ev.roles.get(st.name) === "part").flatMap((st) => [...st.deps]));
+        for (const st of ev.steps) if (ev.roles.get(st.name) === "part" && !read.has(st.name)) walk(st.name, 1);
+      }
       const left = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value)));
       const regions = left.filter((st) => ev.roles.get(st.name) === "region").map((st) => st.name);
       const unused = left.filter((st) => !ev.roles.has(st.name)).map((st) => st.name);

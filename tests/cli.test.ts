@@ -19,6 +19,15 @@ describe("aixle explain", () => {
     expect(out).toMatch(/joint "rotor" at \(0, 6\.85, 1\.6\)/);
     expect(out).toMatch(/\nposes: quarter/);
   });
+  it("explains an output that is no one step: a record's field, an expression, several names", { timeout: 60000 }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-explain-"));
+    const write = (name: string, src: string) => { const f = join(dir, name); writeFileSync(f, src); return f; };
+    const field = cli("explain", write("field.aix", "w = 2\nparts = {lid: box(w, 1, 1), cup: sphere(1)}\nshow parts.lid\n"));
+    expect(field).toMatch(/^parts\.lid  2 × 1 × 1  \(shown, not a step\)\n  parts \(line 2\)  = \{lid: a shape 2 × 1 × 1, cup: a shape 2 × 2 × 2\}\n/);
+    expect(field).toMatch(/\n    w \(line 1\)  = 2\n/);
+    const two = cli("explain", write("two.aix", "a = box(1)\nb = sphere(1) | move(3, 0, 0)\nshow a, b\n"));
+    expect(two).toMatch(/^a\+b  4\.5 × 2 × 2  \(shown, not a step\)\n  a \(line 1\)[^\n]*\n[^\n]*\n  b \(line 2\)/);
+  });
 });
 
 describe("asserts", () => {
