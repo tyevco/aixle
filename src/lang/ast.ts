@@ -20,8 +20,17 @@ export interface Call {
 }
 /** `list[i]`: one item of a list, 0-based; negative counts from the end. */
 export interface Index { type: "index"; target: Expr; index: Expr; line: number }
+/** One entry of a record literal: `key: value`, or `...value` to take every field of another record. */
+export interface RecordEntry { key?: string; value: Expr; spread?: boolean }
+/** `{x: 1, y: 2, name: "lid"}`, or `{...p, x: 2}`: named values, read back as `p.x`. */
+export interface RecordExpr { type: "record"; entries: RecordEntry[]; line: number }
+/**
+ * `expr.name` on anything but a plain name: `legs[0].x`, `dims().w`. A plain `p.x` is an Ident named "p.x",
+ * since only the interpreter knows whether `p` is a record or a used library.
+ */
+export interface Field { type: "field"; target: Expr; name: string; line: number }
 
-export type Expr = Num | Str | Ident | List | Unary | Binary | Call | Index;
+export type Expr = Num | Str | Ident | List | Unary | Binary | Call | Index | RecordExpr | Field;
 
 export interface Assign { type: "assign"; name: string; value: Expr; line: number }
 export interface Def { type: "def"; name: string; params: { name: string; default?: Expr }[]; body: Expr; line: number }
@@ -57,6 +66,8 @@ export function exprText(e: Expr): string {
     case "unary": return `-${exprText(e.arg)}`;
     case "binary": return `${exprText(e.left)} ${e.op} ${exprText(e.right)}`;
     case "index": return `${exprText(e.target)}[${exprText(e.index)}]`;
+    case "record": return `{${e.entries.map((en) => (en.spread ? `...${exprText(en.value)}` : `${en.key}: ${exprText(en.value)}`)).join(", ")}}`;
+    case "field": return `${exprText(e.target)}.${e.name}`;
     case "call": {
       const arg = (a: Arg) => (a.name ? `${a.name}=${exprText(a.value)}` : exprText(a.value));
       if (e.piped && e.args.length) {

@@ -46,7 +46,7 @@ Loops can rebuild the same name; the step keeps its last value:
 ```
 teeth = empty()
 for i in range(12) {
-  teeth = teeth + (box(0.3, 0.5, 0.2) | move(0, 2, 0) | rotate(z = i * 30))
+  teeth = teeth + (box(0.3, 0.5, 0.2) | move(0, 2, 0) | rotate(z=i * 30))
 }
 ```
 
@@ -77,10 +77,45 @@ for c in letters {
 | shape | `box(...)`, `a + b`, `a \| move(...)` | `+` union, `-` difference, `&` intersection |
 | profile (2D) | `circle(...)`, `rect(...)`, `polygon(...)` | same operators; `extrude`, `revolve` make it a shape |
 | material | `"oak"`, `material("#c04020", "stripes")` | `paint` |
+| record | `{w: 0.9, h: 0.45, name: "seat"}`, `{...seat, h: 0.6}` | `seat.w`, `cfg.leg.r`, `legs[0].x`; in lists, as parameters and defaults |
 
 Numbers and shapes share `+` and `-`; the interpreter tells them apart by
 what is on either side. A 2D profile and a 3D shape cannot be combined; the
 error says to extrude or revolve first.
+
+**Records** name the numbers a part is made from, so a call says what each
+one is rather than where it sits in a row of positions:
+
+```
+seat = {w: 0.9, h: 0.45, d: 0.8}
+legs = [{x: 0.38, z: 0.33}, {x: -0.38, z: 0.33}, {x: 0.38, z: -0.33}, {x: -0.38, z: -0.33}]
+def leg(p, h=seat.h) = cylinder(0.04, h) | move(p.x, h / 2, p.z)
+frame = empty()
+for p in legs { frame = frame + leg(p) }
+tall = {...seat, h: 0.6}        # a copy with h changed; seat is as it was
+```
+
+A field holds any value: a number, a string, a list, a shape, a material,
+a def, another record. A def in a field is called by its dotted name,
+`r.f(1)`; one reached through an index or a call is named first
+(`f = legs[0].f`, then `f(1)`). Reading a field that is not there is an error that
+names the fields there are, and a key written twice in one record is an
+error. A record never changes: `seat.h = 0.6` is an error that says to
+write `seat = {...seat, h: 0.6}`. `...other` takes another record's
+fields where it stands, and a later entry replaces an earlier one in its
+place, so `{...seat, h: 0.6}` keeps the order and `{w: 1, h: 2, ...given}`
+is defaults that `given` overrides. Entries may run over several lines.
+`p.x` and `list[i]` bind tightest of all, after a call or an index too
+(`dims().w`, `legs[0].x`); `p.0` is an error, since an item is read by its
+index. A used library's name wins over a record of the same name, and
+`check` warns whichever of the two came first.
+
+A record of shapes is not a shape: `show parts` is an error, `show
+parts.lid` shows that field, and the output is then the step the field
+holds, so a record's other parts are still reported as unused. `check`
+prints a record as it would be written (`seat = {w: 0.9, h: 0.45, d:
+0.8}`), or, when it holds shapes or is too long for a line, a line per
+field with a shape's box, as a step's would be.
 
 ## Calls and pipelines
 
@@ -96,8 +131,8 @@ base + cap | move(0, 1, 0)      # base + (cap moved up)
 ```
 
 Precedence, loosest to tightest: `< > <= >= == !=`, then `+ -`, then
-`&`, then `* / %`, then unary `-`, then `^`, then `|`. Parentheses when
-in doubt. A comparison is a number, 1 or 0, so `assert` can test it and
+`&`, then `* / %`, then unary `-`, then `^`, then `|`, then a field `.x`
+or an index `[i]`. Parentheses when in doubt. A comparison is a number, 1 or 0, so `assert` can test it and
 `min`/`max` can weigh it; `==` on numbers is exact, so compare a measured
 size with `<` and `>` and a tolerance, not `==`.
 
@@ -843,6 +878,35 @@ When it dropped any, the pieces count and the footprint are not judged
 on that sheet, since the dropped steps are often the joins or the feet; a bucket's teeth or a rail are
 blobs or gone at a quick cell, so judge a working end at full grid, with
 `--focus` on the step to spend the cells there.
+
+## Layout: `aixle fmt`
+
+`aixle fmt model.aix` prints the program in the one layout the tool
+keeps; `--write` rewrites the file, `--check` changes nothing and fails
+naming each file that is not in it. It moves only the space between
+tokens, so it cannot change what a program means: no token is added,
+dropped or respelled (a number stays `0.50`), no line is joined or split,
+and every comment stays where it was. The layout:
+
+- one space around `=`, `|` and the operators; none around the `=` of a
+  named argument or a default (`round=0.1`), after a unary minus or a
+  call's name, inside brackets, before a comma, or around a field's dot;
+  `{x: 1, y: 2}` for a record;
+- after a comma, the space you wrote: `[x,y,z, x,y,z]` keeps its points
+  and a table of numbers stays lined up;
+- a loop's body two spaces in; a line that continues a statement keeps
+  its break, two in from the line that opened its bracket, or lined up
+  under the argument it was written under, which stays lined up however
+  the line above was respaced; inside brackets, a line that starts with
+  an operator written further in than the item above it carries that
+  item on and stays two in from it (`  box(1)` over `    | move(0, 1, 0)`);
+  a closing bracket that starts a line at its opener's line;
+- an `=` (or a record's value) padded into a column with the line above
+  or below keeps the column, and every line of the column stays in it
+  (pushed right together when one line's code now reaches past it); a
+  trailing comment keeps its column unless the code now reaches it, so a
+  column of them stays a column;
+- one blank line where there were several, none at the ends.
 
 ## What the tool checks for you
 

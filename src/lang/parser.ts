@@ -17,9 +17,11 @@
  *   unary -
  *   ^          power (right-assoc)
  *   |          pipeline: `a | f(x)` is `f(a, x)`
- *   primary    number, string, name, call, list, ( expr )
+ *   primary    number, string, name, call, list, record, ( expr ), then any [i] or .name
+ *
+ *   record    := '{' (NAME ':' expr | '...' expr) (',' ...)* ','? '}'
  */
-import { COMPARE_OPS, type Arg, type CompareOp, type Expr, type Program, type Stmt } from "./ast.js";
+import { COMPARE_OPS, exprText, type Arg, type CompareOp, type Expr, type Program, type RecordEntry, type Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token } from "./lexer.js";
 
 const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
@@ -61,7 +63,7 @@ class Parser {
   private expectIdent(what: string): Token {
     if (!this.at("ident")) throw new SyntaxError(`expected ${what} but found ${describe(this.peek())}`, this.peek().line);
     const t = this.next();
-    if (KEYWORDS.has(t.value)) throw new SyntaxError(`'${t.value}' is a keyword and cannot be a ${what}`, t.line);
+    if (KEYWORDS.has(t.value)) throw new SyntaxError(`'${t.value}' is a keyword and cannot be ${what}`, t.line);
     return t;
   }
   private skipNewlines(): void {
@@ -103,7 +105,7 @@ class Parser {
       this.next();
       let alias: string | undefined;
       if (this.at("ident") && this.peek().value === "as") {
-        this.next();
+        this.next().role = "keyword";
         alias = this.expectIdent("a name for the library after 'as'").value;
       }
       return { type: "use", path: pathTok.value, alias, line: t.line };
@@ -118,7 +120,7 @@ class Parser {
         this.next();
         const k = this.peek();
         if (k.type === "ident" && k.value === "pose" && this.peek(1).type === "op" && this.peek(1).value === "=") {
-          this.next(); this.next();
+          this.next(); this.next().role = "named";
           const v = this.next();
           if (v.type !== "ident" && v.type !== "str") throw new SyntaxError(`assert's pose= names a pose, as a bare word or a string`, v.line);
           pose = v.value;
@@ -126,6 +128,16 @@ class Parser {
         else throw new SyntaxError(`assert takes a test, then a message and pose=name`, k.line);
       }
       return { type: "assert", test, message, pose, line: t.line };
+    }
+    // `p.x = 2`: a record, like everything else, is never changed in place; a new one is made from it.
+    if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === ".") {
+      let k = 1;
+      while (this.peek(k).type === "op" && this.peek(k).value === "." && this.peek(k + 1).type === "ident") k += 2;
+      if (k > 1 && this.peek(k).type === "op" && this.peek(k).value === "=") {
+        const path = Array.from({ length: (k - 1) / 2 }, (_, j) => this.peek(2 + j * 2).value);
+        const change = path.reduceRight((inner, key, j) => `{...${[t.value, ...path.slice(0, j)].join(".")}, ${key}: ${inner}}`, "value");
+        throw new SyntaxError(`${[t.value, ...path].join(".")} = ...: a record's fields cannot be changed; make a new record with the change, ${t.value} = ${change}`, t.line);
+      }
     }
     if (t.type === "ident" && this.peek(1).type === "op" && this.peek(1).value === "=") {
       const name = this.expectIdent("a name").value;
@@ -143,7 +155,7 @@ class Parser {
     while (!this.atOp(")")) {
       const p = this.expectIdent("a parameter name").value;
       let def: Expr | undefined;
-      if (this.atOp("=")) { this.next(); def = this.expr(); }
+      if (this.atOp("=")) { this.next().role = "named"; def = this.expr(); }
       params.push(def ? { name: p, default: def } : { name: p });
       if (this.atOp(",")) this.next();
       else if (!this.atOp(")")) throw new SyntaxError(`expected ',' or ')' in parameters of ${name}`, this.peek().line);
@@ -226,6 +238,7 @@ class Parser {
   private unary(): Expr {
     if (this.atOp("-")) {
       const t = this.next();
+      t.role = "unary";
       return { type: "unary", op: "-", arg: this.unary(), line: t.line };
     }
     return this.power();
@@ -264,7 +277,7 @@ class Parser {
         throw new SyntaxError(`the call to ${callee} opened on line ${open.line} is never closed: missing ')' before '${this.peek().value}' on line ${this.peek().line}`, open.line);
       if (this.at("ident") && this.peek(1).type === "op" && this.peek(1).value === "=") {
         const name = this.next().value;
-        this.next();
+        this.next().role = "named";
         args.push({ name, value: this.expr() });
       } else {
         args.push({ value: this.expr() });
@@ -285,15 +298,32 @@ class Parser {
     return name;
   }
 
-  /** A primary followed by any number of `[i]` indexes: `angle("boom")[0]`, `pts[len(pts) - 1]`. */
+  /**
+   * A primary followed by any number of `[i]` indexes and `.name` fields: `angle("boom")[0]`, `pts[len(pts) - 1]`,
+   * `legs[0].x`, `dims().w`. A field straight after a name was already taken into the name by `dotted`.
+   */
   private primary(): Expr {
     let e = this.atom();
-    while (this.atOp("[")) {
-      const t = this.next();
-      const index = this.expr();
-      this.expectOp("]");
-      e = { type: "index", target: e, index, line: t.line };
+    for (;;) {
+      if (this.atOp("[")) {
+        const t = this.next();
+        t.role = "index";
+        const index = this.expr();
+        this.expectOp("]");
+        e = { type: "index", target: e, index, line: t.line };
+      } else if (this.atOp(".") && this.peek(1).type === "ident" && e.type !== "num" && e.type !== "str") {
+        const t = this.next();
+        e = { type: "field", target: e, name: this.next().value, line: t.line };
+        // A call is on a name (r.f(1) is the name r.f); after an index or a call there is none to call.
+        if (this.atOp("("))
+          throw new SyntaxError(e.target.type === "ident"
+            ? `'(${exprText(e.target)}).${e.name}(...)': only a name is called; write ${exprText(e)}(...), without the parentheses`
+            : `'${exprText(e)}(...)': only a name is called, as r.f(1) is; name it first, ${e.name} = ${exprText(e)}, then ${e.name}(...)`, t.line);
+      } else break;
     }
+    // `p.0` lexes as a name and the number .0: a field is a name, an item is an index.
+    if (this.at("num") && this.peek().value.startsWith(".") && this.peek().line === this.tokens[this.pos - 1].line && this.peek().start === this.tokens[this.pos - 1].end)
+      throw new SyntaxError(`'${exprText(e)}${this.peek().value}': a field is read by name (p.x); an item of a list by its index, ${exprText(e)}[${this.peek().value.slice(1)}]`, this.peek().line);
     return e;
   }
 
@@ -326,7 +356,42 @@ class Parser {
       this.expectOp("]");
       return { type: "list", items, line: t.line };
     }
+    if (t.type === "op" && t.value === "{") return this.record();
     throw new SyntaxError(`expected a value but found ${describe(t)}`, t.line);
+  }
+
+  /**
+   * `{x: 1, y: 2}`, `{...p, x: 2}`. Line breaks between entries are allowed (the lexer only drops them inside
+   * parentheses and brackets, and a brace also opens a loop's body, so they are skipped here).
+   */
+  private record(): Expr {
+    const open = this.next();
+    open.role = "record";
+    const entries: RecordEntry[] = [];
+    const keys = new Set<string>();
+    this.skipNewlines();
+    while (!this.atOp("}")) {
+      if (this.at("eof")) throw new SyntaxError(`the record opened on line ${open.line} is never closed: missing '}'`, open.line);
+      if (this.atOp("...")) {
+        this.next();
+        entries.push({ value: this.expr(), spread: true });
+      } else {
+        const k = this.peek();
+        if (k.type !== "ident" || !(this.peek(1).type === "op" && this.peek(1).value === ":"))
+          throw new SyntaxError(`a record's entries are name: value (or ...other to take another record's fields), found ${describe(k)}`, k.line);
+        const key = this.expectIdent("a field name").value;
+        if (keys.has(key)) throw new SyntaxError(`the record has '${key}' twice; a field is given once (to change one of another record's, {...p, ${key}: value})`, k.line);
+        keys.add(key);
+        this.next();
+        entries.push({ key, value: this.expr() });
+      }
+      this.skipNewlines();
+      if (this.atOp(",")) { this.next(); this.skipNewlines(); }
+      else if (this.at("eof")) throw new SyntaxError(`the record opened on line ${open.line} is never closed: missing '}'`, open.line);
+      else if (!this.atOp("}")) throw new SyntaxError(`expected ',' or '}' in the record opened on line ${open.line}, found ${describe(this.peek())}`, this.peek().line);
+    }
+    this.next().role = "record";
+    return { type: "record", entries, line: open.line };
   }
 }
 
@@ -350,4 +415,10 @@ function describe(t: Token): string {
 
 export function parse(source: string): Program {
   return new Parser(tokenize(source)).parseProgram();
+}
+
+/** The program and its tokens, each with the role the parser gave it: what `aixle fmt` lays out. */
+export function parseTokens(source: string): { program: Program; tokens: Token[] } {
+  const tokens = tokenize(source);
+  return { program: new Parser(tokens).parseProgram(), tokens };
 }

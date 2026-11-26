@@ -22,7 +22,18 @@ export interface Xform {
   scale: [number, number, number];
 }
 
-export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn | Curve | Xform;
+/**
+ * `{x: 1, y: 2, name: "lid"}`: named values in the order written. The fields live in a map of their own, not as
+ * properties, so no field name (`kind`, `pattern`) can make a record look like a shape or a material.
+ */
+export interface RecordValue {
+  kind: "record";
+  fields: ReadonlyMap<string, Value>;
+}
+
+export type Value = number | string | Value[] | Shape3 | Shape2 | Material | UserFn | Curve | Xform | RecordValue;
+
+export const isRecord = (v: Value): v is RecordValue => typeof v === "object" && !Array.isArray(v) && (v as RecordValue).kind === "record";
 
 export const isXform = (v: Value): v is Xform => typeof v === "object" && !Array.isArray(v) && (v as Xform).kind === "xform";
 
@@ -61,6 +72,7 @@ export function typeName(v: Value): string {
   if (kind === "fn") return "function";
   if (kind === "curve") return "curve";
   if (kind === "xform") return "transform";
+  if (kind === "record") return "record";
   return "material";
 }
 

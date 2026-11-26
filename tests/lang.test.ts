@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/lang/lexer.js";
 import { parse } from "../src/lang/parser.js";
 import { assertLine, evaluate } from "../src/lang/interpreter.js";
-import { isShape2, isShape3 } from "../src/lang/values.js";
+import { isShape2, isShape3, type RecordValue } from "../src/lang/values.js";
 import type { Shape3 } from "../src/sdf/types.js";
 
 const run = (src: string) => evaluate(parse(src));
@@ -547,5 +547,105 @@ describe("use: libraries", () => {
     expect(() => ev('m = hardware.bolt()')).toThrow(/'hardware' is not a used library/);
     expect(() => ev('use "parts/missing.aix"')).toThrow(/cannot read parts\/missing.aix/);
     expect(() => ev('use "parts/hardware.aix"\nuse "parts/nested.aix" as hardware')).toThrow(/already a used library/);
+  });
+  it("reads a dotted name as the library's before a record's, and warns when a record takes a library's name", () => {
+    const e = ev('use "parts/hardware.aix"\nhardware = {head_h: 5}\nh = hardware.head_h\nsize = {r: 0.2}\nb = hardware.bolt(size.r)');
+    expect(e.steps.find((s) => s.name === "h")!.value).toBe(0.07);
+    expect(e.warnings).toEqual(["line 2: 'hardware' is a used library, so hardware.head_h reads the library, not this record; give the record another name"]);
+    expect((e.steps.find((s) => s.name === "b")!.value as Shape3).bounds.max[0]).toBeCloseTo(0.23, 6);
+  });
+});
+
+describe("records", () => {
+  const value = (src: string, name: string) => run(src).steps.find((s) => s.name === name)!.value;
+  it("holds named values of any kind and reads them back by field, nested, from a list, a call or a parameter", () => {
+    const src = [
+      'seat = {w: 0.9, h: 0.45, name: "seat", pts: [1, 2], wood: material("oak"), top: box(1, 0.1, 1)}',
+      "cfg = {seat: seat, leg: {r: 0.04, h: seat.h}}",
+      "legs = [{x: 1, z: 2}, {x: -1, z: 2}]",
+      "def leg(p, c=cfg) = cylinder(c.leg.r, c.leg.h) | move(p.x, 0, p.z)",
+      "def dims() = {w: 3}",
+      "a = cfg.seat.w + cfg.leg.h",
+      "b = legs[1].x",
+      "c = dims().w + ({k: 5}).k",
+      "frame = empty()",
+      "for p in legs { frame = frame + leg(p) }",
+      "n = cfg.seat.name + seat.pts[1]",
+    ].join("\n");
+    const ev = run(src);
+    const get = (name: string) => ev.steps.find((s) => s.name === name)!.value;
+    expect(get("a")).toBeCloseTo(1.35, 9);
+    expect(get("b")).toBe(-1);
+    expect(get("c")).toBe(8);
+    expect(get("n")).toBe("seat2");
+    expect((get("frame") as Shape3).bounds.max[0]).toBeCloseTo(1.04, 9);
+    expect(isShape3(get("frame"))).toBe(true);
+    // A record is not a shape, however many shapes it holds, and a field named like a shape's own does not make it one.
+    expect(isShape3(get("seat"))).toBe(false);
+    expect(isShape3(value("r = {kind: \"shape3\", pattern: \"stripes\"}", "r"))).toBe(false);
+  });
+  it("makes a changed copy with ...: the original keeps its fields and its order, and a later entry wins", () => {
+    const ev = run("p = {x: 1, y: 2, z: 3}\nq = {...p, y: 5, w: 4}\nr = {y: 0, ...p}");
+    const fields = (name: string) => [...((ev.steps.find((s) => s.name === name)!.value as RecordValue).fields)];
+    expect(fields("p")).toEqual([["x", 1], ["y", 2], ["z", 3]]);
+    expect(fields("q")).toEqual([["x", 1], ["y", 5], ["z", 3], ["w", 4]]);
+    expect(fields("r")).toEqual([["y", 2], ["x", 1], ["z", 3]]);
+    expect(() => run("p = 1\nq = {...p}")).toThrow(/'\.\.\.p' takes the fields of a record, and p is a number/);
+    // Nothing changes a record in place; the error says how to make the new one.
+    expect(() => parse("p = {x: 1}\np.x = 2")).toThrow(/line 2: p\.x = \.\.\.: a record's fields cannot be changed; make a new record with the change, p = \{\.\.\.p, x: value\}/);
+    expect(() => parse("p = {a: {b: 1}}\np.a.b = 2")).toThrow(/p = \{\.\.\.p, a: \{\.\.\.p\.a, b: value\}\}/);
+  });
+  it("names the fields there are when one is missing, and refuses a key given twice", () => {
+    expect(() => run("p = {x: 1, y: 2}\na = p.z")).toThrow(/line 2: 'p' has no field 'z'; it has x, y/);
+    expect(() => run("p = {a: {b: 1}}\na = p.a.c")).toThrow(/'p\.a' has no field 'c'; it has b/);
+    expect(() => run("p = [1, 2]\na = p.x")).toThrow(/'p' is a list, not a record, so it has no field 'x'; a list's items are read by index, p\[0\]/);
+    expect(() => run("a = q.x")).toThrow(/'q' is not a used library or a defined record/);
+    expect(() => parse("p = {x: 1, x: 2}")).toThrow(/line 1: the record has 'x' twice/);
+    expect(() => parse("p = {x: 1 y: 2}")).toThrow(/expected ',' or '\}' in the record/);
+    expect(() => parse("p = {x: 1\n")).toThrow(/the record opened on line 1 is never closed/);
+    expect(() => parse("p = {1: 2}")).toThrow(/a record's entries are name: value/);
+    expect(() => parse("p = {in: 2}")).toThrow(/'in' is a keyword and cannot be a field name$/);
+  });
+  it("keeps the dot apart from numbers: p.x is a field, .5 and 1.5 numbers, p.0 an error that says to index", () => {
+    const ev = run("p = {x: 2}\na = p.x*.5\nb = 1.5+p.x");
+    expect(ev.steps.map((s) => s.value).slice(1)).toEqual([1, 3.5]);
+    expect(() => parse("legs = [1]\na = legs.0")).toThrow(/'legs\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]/);
+    expect(() => parse("legs = [[1]]\na = legs[0].0 + dims().1")).toThrow(/'legs\[0\]\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]\[0\]/);
+    expect(() => parse("a = dims().1")).toThrow(/'dims\(\)\.1': .* dims\(\)\[1\]/);
+    expect(tokenize("{...p}").map((t) => t.value).slice(0, 3)).toEqual(["{", "...", "p"]);
+  });
+  it("spans lines between entries, and a loop's braces are still a block", () => {
+    const ev = run("p = {\n  x: 1,\n\n  y: 2 +\n    3,\n}\nfor i in [p] {\n  q = i.y\n}");
+    expect(ev.steps.find((s) => s.name === "q")!.value).toBe(5);
+  });
+  it("is never taken for a shape: show, scene, union and for say what a record is and how to use one", () => {
+    expect(() => run("parts = {lid: box(1)}\nshow parts")).toThrow(/show needs a 3D shape, got a record \(fields lid\); show its shapes by name, show parts\.lid/);
+    expect(() => run("parts = {lid: box(1)}\nscene parts")).toThrow(/scene needs a 3D shape, got a record/);
+    expect(() => run("parts = {lid: box(1)}\nm = union(parts, box(1))")).toThrow(/expected a 3D shape, got a record/);
+    expect(() => run("parts = {lid: box(1)}\nm = box(1) + parts")).toThrow(/'\+' does not apply to a shape and a record/);
+    expect(() => run("p = {x: 1}\nfor i in p { a = i }")).toThrow(/'for' needs a list \(use range\(n\)\), got a record; to run over several records, put them in a list/);
+    expect(() => run("p = {x: 1, y: 2, z: 3}\nt = tube(0.1, [p, p])")).toThrow(/a record in a list of numbers; write out its fields, \[p\.x, p\.y, p\.z\]/);
+  });
+  it("reads the step a shown field holds, so a record's other parts are still unused, and names the output after it", () => {
+    const ev = run("lid = box(1)\nspare = sphere(1)\nparts = {lid: lid, spare: spare}\nshow parts.lid");
+    expect(ev.outputName).toBe("lid");
+    expect(ev.roles.get("lid")).toBe("part");
+    expect(ev.warnings).toContainEqual("'spare' (line 2) is not part of the output; add it to the model or remove it");
+    // A field that holds no step of its own is named as written.
+    expect(run("parts = {lid: box(1)}\nshow parts.lid").outputName).toBe("parts.lid");
+    // A part used through a record is a part, and its line in the steps says so.
+    const used = run("lid = box(1)\ncup = cylinder(1, 1)\nparts = {lid: lid, cup: cup}\nm = parts.lid + parts.cup");
+    expect([...used.used].sort()).toEqual(["cup", "lid", "m"]);
+    expect(used.warnings).toEqual([]);
+  });
+  it("calls a def a record holds, takes records as parameters and defaults, and prints in an assert's text", () => {
+    const ev = run("def two(x) = x * 2\nr = {f: two, n: 3}\na = r.f(r.n)\ndef area(s={w: 2, d: 3}) = s.w * s.d\nb = area()\nc = area({w: 1, d: 1})\nassert {w: 1}.w == 1");
+    expect(ev.steps.filter((s) => ["a", "b", "c"].includes(s.name)).map((s) => s.value)).toEqual([6, 6, 1]);
+    expect(ev.asserts[0].text).toBe("{w: 1}.w == 1");
+    // Only a name calls: a def reached through an index or a call is named first, and the error says so.
+    expect(() => parse("legs = [r]\na = legs[0].f(1)")).toThrow(/line 2: 'legs\[0\]\.f\(\.\.\.\)': only a name is called, as r\.f\(1\) is; name it first, f = legs\[0\]\.f, then f\(\.\.\.\)/);
+    expect(run("def two(x) = x * 2\nlegs = [{f: two}]\nf = legs[0].f\na = f(4)").steps.find((s) => s.name === "a")!.value).toBe(8);
+    expect(() => parse("a = (r).f(1)")).toThrow(/'\(r\)\.f\(\.\.\.\)': only a name is called; write r\.f\(\.\.\.\), without the parentheses/);
+    expect(ev.defs.map((d) => d.name)).toEqual(["two", "area"]);
   });
 });

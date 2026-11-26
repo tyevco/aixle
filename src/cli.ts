@@ -2,6 +2,7 @@
 /**
  *   aixle render <file.aix> [--out DIR] [--grid N] [--size N] [--no-steps] [--no-slices] [--no-turntable] [--no-export]
  *   aixle check  <file.aix>
+ *   aixle fmt    <file.aix>... [--write | --check]
  *   aixle doc    [--write FILE]
  */
 import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
@@ -16,13 +17,32 @@ import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
-import { isShape2, isShape3, typeName } from "./lang/values.js";
+import { isMaterial, isRecord, isShape2, isShape3, isUserFn, typeName, type Value } from "./lang/values.js";
 import { parse } from "./lang/parser.js";
+import { format } from "./lang/format.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
 // Two decimals, one above ten, none above a hundred; below 0.1, two significant figures, so a small model's parts
 // (a 0.006 lens on a 0.4-unit drone, round 7) still print as themselves.
 const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.005 ? String(Number(v.toPrecision(2))) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
+
+/**
+ * A value on one line, as `check` and `explain` print it: numbers short, strings quoted, a shape by its size, a
+ * record as {name: value, ...}, so a record of parameters reads as it was written.
+ */
+function valueText(v: Value, depth = 0): string {
+  if (typeof v === "number") return short(v);
+  if (typeof v === "string") return JSON.stringify(v);
+  if (Array.isArray(v)) return depth > 3 ? `a list of ${v.length}` : `[${v.map((x) => valueText(x, depth + 1)).join(", ")}]`;
+  if (isRecord(v)) return depth > 3 ? "a record" : `{${[...v.fields].map(([k, x]) => `${k}: ${valueText(x, depth + 1)}`).join(", ")}}`;
+  if (isShape3(v)) return isEmpty(v.bounds) ? "an empty shape" : `a shape ${dimsLabel(v.bounds)}`;
+  if (isShape2(v)) return isEmpty2(v.bounds) ? "an empty profile" : `a profile ${short(v.bounds.max[0] - v.bounds.min[0])} × ${short(v.bounds.max[1] - v.bounds.min[1])}`;
+  if (isUserFn(v)) return `def ${v.name}`;
+  if (isMaterial(v)) return `material ${v.name}`;
+  return `a ${typeName(v)}`;
+}
+/** valueText cut to a line's worth. */
+const clip = (t: string, n = 100): string => (t.length > n ? `${t.slice(0, n - 3)}...` : t);
 
 /** A library's Markdown: its leading comment, then every top-level def with its signature and the comment above it. */
 function libraryMarkdown(file: string): string {
@@ -41,7 +61,11 @@ function libraryMarkdown(file: string): string {
     if (st.type !== "def") continue;
     const doc: string[] = [];
     for (let i = st.line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, ""));
-    const params = st.params.map((p) => (p.default ? `${p.name}=${lines[st.line - 1].match(new RegExp(`${p.name}\\s*=\\s*([^,)]+)`))?.[1]?.trim() ?? "?"}` : p.name));
+    // The default as written on the def's line when it is a plain value, found by the parameter's own name (h, not
+    // the h of wh=2); a record or a call is printed from its tree, since the text up to the next comma would cut it.
+    const written = (name: string): string | undefined => lines[st.line - 1].match(new RegExp(`(?<![\\w.])${name}\\s*=\\s*([^,)]+)`))?.[1]?.trim();
+    const balanced = (t: string) => [..."([{"].every((o, k) => t.split(o).length === t.split(")]}"[k]).length);
+    const params = st.params.map((p) => { if (!p.default) return p.name; const w = written(p.name); return `${p.name}=${w !== undefined && balanced(w) ? w : exprText(p.default)}`; });
     out.push(`## ${st.name}(${params.join(", ")})`, "");
     if (doc.length) out.push(doc.join("\n"), "");
   }
@@ -69,11 +93,40 @@ function usage(): never {
       "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
+      "  aixle fmt    <file.aix>         the program in the one layout, to stdout (comments kept, meaning unchanged)",
+      "  aixle fmt    <file.aix>... --write | --check   rewrite them in place, or list the ones not in it and fail",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
       "  aixle doc    <lib.aix>          a library's defs and their comments, for a program that would use it",
     ].join("\n"),
   );
   process.exit(2);
+}
+
+/**
+ * `aixle fmt`: the program in the one layout. Alone it prints the result; `--write` rewrites each file that is not
+ * in it; `--check` changes nothing and fails naming each file that is not, for CI or a hook. A program that does not
+ * parse is an error, never rewritten.
+ */
+function fmt(args: string[]): number {
+  const files = args.filter((a) => !a.startsWith("--"));
+  const write = args.includes("--write"), checkOnly = args.includes("--check");
+  const unknown = args.filter((a) => a.startsWith("--") && a !== "--write" && a !== "--check");
+  if (unknown.length || !files.length) usage();
+  if (write && checkOnly) { console.error("aixle fmt: --write or --check, not both"); return 2; }
+  if (!write && !checkOnly && files.length > 1) { console.error("aixle fmt prints one file; give --write or --check for several"); return 2; }
+  let status = 0;
+  for (const file of files) {
+    let source: string;
+    try { source = readFileSync(file, "utf8"); } catch { console.error(`cannot read ${file}`); status = 1; continue; }
+    let formatted: string;
+    try { formatted = format(source); } catch (err) { console.error(`${file}: ${(err as Error).message}`); status = 1; continue; }
+    if (checkOnly) {
+      if (formatted !== source) { console.log(`${file}: not formatted; aixle fmt --write ${file}`); status = 1; }
+    } else if (write) {
+      if (formatted !== source) { writeFileSync(file, formatted); console.log(`formatted ${file}`); }
+    } else process.stdout.write(formatted);
+  }
+  return status;
 }
 
 function flags(argv: string[]): { positional: string[]; opts: Record<string, string | boolean> } {
@@ -95,6 +148,8 @@ function flags(argv: string[]): { positional: string[]; opts: Record<string, str
 function main(argv: string[]): number {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") usage();
+  // fmt's flags take no value, so `fmt --write model.aix` is not --write=model.aix.
+  if (cmd === "fmt") return fmt(rest);
   const { positional, opts } = flags(rest);
   if (cmd === "doc") {
     // `aixle doc lib.aix` documents a library the way the reference documents builtins: each def with its
@@ -138,6 +193,21 @@ function main(argv: string[]): number {
         if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
         if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
         if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
+        // A record on one line when it fits; else a line per field (or per record of a list), a shape field with its
+        // box, as a step would have, so a record of parts reads like the parts.
+        const recordList = Array.isArray(st.value) && st.value.length > 0 && st.value.every(isRecord);
+        if (isRecord(st.value) || recordList) {
+          const inline = valueText(st.value);
+          const entries: [string, Value][] = isRecord(st.value) ? [...st.value.fields].map(([k, x]) => [`${st.name}.${k}`, x]) : (st.value as Value[]).map((x, i) => [`${st.name}[${i}]`, x]);
+          if (inline.length <= 100 && !entries.some(([, x]) => isShape3(x))) { console.log(`${st.name.padEnd(18)} = ${inline}`); continue; }
+          console.log(`${st.name.padEnd(18)} ${isRecord(st.value) ? `a record of ${entries.length}: ${clip([...st.value.fields.keys()].join(", "), 80)}` : `a list of ${entries.length} records`}`);
+          for (const [k, x] of entries.slice(0, 24)) {
+            if (isShape3(x)) console.log(`${`  ${k}`.padEnd(18)} ${isEmpty(x.bounds) ? "empty" : spanBox(x.bounds)}`);
+            else console.log(`${`  ${k}`.padEnd(18)} = ${clip(valueText(x))}`);
+          }
+          if (entries.length > 24) console.log(`  ... ${entries.length - 24} more`);
+          continue;
+        }
         // A 2D profile has a box too, and a part built from one is invisible until it is extruded (round 4 asked).
         if (isShape2(st.value)) {
           const b = st.value.bounds;
@@ -244,7 +314,8 @@ function main(argv: string[]): number {
         let what: string;
         if (typeof v === "number") what = `= ${short(v)}`;
         else if (typeof v === "string") what = `= "${v}"`;
-        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : `a list of ${v.length}`;
+        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : v.length && v.every(isRecord) ? clip(`= ${valueText(v)}`) : `a list of ${v.length}`;
+        else if (isRecord(v)) what = clip(`= ${valueText(v)}`);
         else if (isShape3(v)) {
           const b = v.bounds;
           const paintNote = paintState(v, memo);
@@ -271,7 +342,16 @@ function main(argv: string[]): number {
       const roots = ev.objects.length > 1 ? ev.objects.map((o) => o.name) : ev.outputName ? [ev.outputName] : [];
       if (!roots.length) { console.log("no output: nothing to explain"); return 0; }
       if (pose) console.log(`pose: ${pose.name} (sizes in this pose)`);
-      for (const r of roots) walk(r, 0);
+      for (const r of roots) {
+        if (byName.has(r)) { walk(r, 0); continue; }
+        // An output that is no one step (a record's field that holds no step of its own, show box(1), show a, b):
+        // its size, then the steps it reads, rather than an empty tree.
+        const obj = ev.objects.find((o) => o.name === r);
+        console.log(`${r}  ${obj && !isEmpty(obj.shape.bounds) ? dimsLabel(obj.shape.bounds) : "empty"}  (shown, not a step)`);
+        if (ev.objects.length > 1) continue;
+        const read = new Set(ev.steps.filter((st) => ev.roles.get(st.name) === "part").flatMap((st) => [...st.deps]));
+        for (const st of ev.steps) if (ev.roles.get(st.name) === "part" && !read.has(st.name)) walk(st.name, 1);
+      }
       const left = ev.steps.filter((st) => !printed.has(st.name) && (isShape3(st.value) || isShape2(st.value)));
       const regions = left.filter((st) => ev.roles.get(st.name) === "region").map((st) => st.name);
       const unused = left.filter((st) => !ev.roles.has(st.name)).map((st) => st.name);

@@ -47,7 +47,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    frame) is a close-up meshed at its own finer cell,
    where the step is in the pose shown, the rest of the model faint
    around it, with its own watertight row.
-   `npx aixle diff before.aix after.aix` shows two versions side by side.
+   `npx aixle diff before.aix after.aix` shows two versions side by side;
+   `npx aixle fmt model.aix --write` lays the program out in the one
+   layout (comments kept, meaning unchanged) before you hand it on.
    On a program you did not write, `npx aixle explain model.aix` first: the
    tree from the output down, each step with its source line, size,
    material and anchors, so you know which step feeds which before you
@@ -93,6 +95,7 @@ Reference: `docs/reference.md` (every function, generated from the code),
 name = expr                      # a step
 def part(a, b=1) = expr          # a parametric part
 for i in range(6) { ... }        # loops; range(a, b), range(a, b, step), [1, 2.5]
+seat = {w: 0.9, h: 0.45}         # a record: seat.h, legs[0].x, {...seat, h: 0.6} for a changed copy
 show name                        # the output (default: the last shape)
 assert pieces(m) == 1, "why"     # a promise; check fails with the numbers when it breaks
 
@@ -199,4 +202,6 @@ show arm
 
 Overlap parts slightly rather than butting them; `round=` on boxes and
 cylinders, `union(..., k=)` for organic joins; `ground()` last; name steps
-for what they are, since the names are what the sheets show you.
+for what they are, since the names are what the sheets show you, and a
+part's sizes too: `seat = {w: 0.9, h: 0.45}` read as `seat.h` says what
+each number is.

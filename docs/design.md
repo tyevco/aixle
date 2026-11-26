@@ -422,6 +422,44 @@ side-effects. A program is a straight-line construction with loops and
 parametric parts. That is enough for what has been tried, and it keeps every
 step renderable on its own.
 
+## Records
+
+A part with five numbers was a call with five positions, and the next
+reader counted commas to find the seat height. A record names them:
+`{w: 0.9, h: 0.45}` and `seat.h`. It is a value like a list, never
+changed in place (`{...seat, h: 0.6}` is the changed copy, and
+`seat.h = 0.6` is a syntax error that says so), so a step is still one
+value from one line and the program stays a straight-line construction.
+The dot was already a library's (`hw.bolt`), and only the interpreter
+knows which a name is, so the parser keeps a dotted name whole and the
+interpreter tries a used library first, as `use` already warns, then a
+record. The fields live in a map of their own rather than as properties
+of the value, so no field name (`kind`, `pattern`) can make a record
+pass for a shape or a material; a record of shapes is not a shape, and
+`show parts.lid` reads the step the field holds, so a record's other
+parts are still reported unused.
+
+## One layout
+
+`aixle fmt` re-lays the space between tokens and nothing else. The lexer
+keeps each token's offsets and the parser marks the tokens whose role
+the spelling does not give (a unary minus, a named argument's `=`, an
+index, a record's braces), so the layout is decided from the parse and
+printed from the source: tokens are never respelled, lines never joined
+or split, which is what makes it safe (a blank line ends a statement and
+a leading `|` continues one, so a formatter that re-wrapped could change
+a program). It is deliberately lenient where the agents' programs carry
+meaning in their spacing, and keeps it: of the 109 programs in the repo,
+21 write tight commas to group numbers (`polygon(0,0, 1.5,0)`, the
+reference's own `[x,y,z, x,y,z]`), 8 in four dogfood rounds pad a run of
+`=` into a column, 15 in seven rounds line up trailing comments, and a
+long `pose()` or `union()` is broken under its first argument. Measured
+over those programs: the formatter is idempotent on every one, the
+formatted program parses to the same tree with every token and comment
+in order, it changes 20 of 6071 lines in 11 files (a named argument
+written `x = 1`, an `=` padded out of line with its neighbours, one
+comment a space from its code), and it takes about 60 ms for all of them.
+
 ## Paths
 
 `tube` is a chain of capsules (exact). `sweep` gives each polyline segment

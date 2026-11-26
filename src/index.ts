@@ -1,4 +1,5 @@
 export { parse } from "./lang/parser.js";
+export { format } from "./lang/format.js";
 export { evaluate } from "./lang/interpreter.js";
 export { run, check } from "./pipeline.js";
 export { surfaceNets } from "./mesh/surfaceNets.js";
