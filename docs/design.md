@@ -459,7 +459,12 @@ pieces, through the points with the same Catmull-Rom handles `curve()`
 uses (closed, so the tangent at every point looks at both neighbours) or
 from anchors and handles. The distance is the nearest point on each piece,
 the scan and Newton of the 3D curves in the plane, with Newton kept inside
-the scan's bracket. Before any search the distance to a few points on the
+the scan's bracket, except that Newton searches every basin the scan shows
+(round each sample lower than both its neighbours, and in each step over
+which the slope turns from falling to rising), not only the one round the
+nearest sample: a teardrop drawn as one piece from its point and back
+passes a point beside its tip twice, and searching only round the nearest
+sample read 0.28 there against a true 0.015. Before any search the distance to a few points on the
 curve (each piece's start and middle) gives an upper bound, and a piece
 whose exact box (from its turning points, not its handles) is farther is
 skipped, so a sample searches about two pieces of twenty. The sign is the
@@ -478,16 +483,18 @@ within 0.05 of the curve. A circle from four Bezier quarters with handles
 0.5523 r is within 2.8e-4 r of the true circle; a `curve2` through 8
 points of a circle is within 8.5e-3 r and through 16 within 5.5e-4 r,
 where the polygons through the same points are off by their sagitta,
-7.6e-2 and 1.9e-2. The cost is a distance call of about 400 ns for a
-16-piece outline against 120 ns for an 18-point polygon and 720 ns for the
-128-point polygon it would take to hide the facets; the vase's body
-meshes at grid 128 in 1.4 s against 0.65 s for the polygon it replaced.
+7.6e-2 and 1.9e-2. The cost is a distance call of about 500 ns for a
+16-piece outline (400 ns before every basin was searched) against 120 ns
+for an 18-point polygon and 720 ns for the 128-point polygon it would take
+to hide the facets; the vase's body meshes at grid 128 in 1.5 s against
+0.65 s for the polygon it replaced.
 Past two dozen pieces the pieces go into the grid the sweeps use (see A
 grid over the pieces), laid flat, and the crossing count reads only the
 parts listed in the query's band of height, so a long outline costs about
 what a polygon through the same points does: extruded and meshed at grid
 128, 0.69 s against 0.44 s at 24 points, 1.0 s against 0.81 s at 120 and
-2.4 s against 2.0 s at 360.
+2.4 s against 2.0 s at 360 (measured before every basin was searched,
+which adds 10 to 25%).
 
 Corners are a point given twice, because a spline through a sharp turn
 overshoots (a foot's edge bows the underside down, the axis run bulges
@@ -512,8 +519,10 @@ and a partial revolve keeps the plain distance, since there the axis is
 an edge of the wedge's flat ends.
 
 A closed outline carries a feature size, its thinnest wall: from sixteen
-points per piece (fewer past a hundred pieces, so the build stays under
-a second) the march along the inward normal to the far side,
+points per piece (fewer past a hundred pieces: a thousand-point outline
+builds in about 0.3 s, though three thousand take about 2 s, since a march
+deep inside a long outline reads every piece's box) the march along the
+inward normal to the far side,
 counted where the two sides face each other (normals within 10 degrees of
 opposite) and not within that distance of a corner, so a vase drawn as one
 outline with a wall under a cell is warned like a shell is. A spike counts

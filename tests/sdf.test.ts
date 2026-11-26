@@ -645,6 +645,24 @@ describe("smooth profiles", () => {
     expect(vase.dist(0.5, -0.1)).toBeCloseTo(0.1, 9);
     expect(vase.dist(0.5, 1)).toBeGreaterThan(0);
   });
+  it("finds the nearest point in every basin of a piece, not only round its nearest sample", () => {
+    // A teardrop drawn as one piece from its point and back: beside the point the scan's nearest sample is the start,
+    // and the nearest point is near the end. Searching round the nearest sample alone read 0.28 there, against 0.015.
+    const b = [0, 0, 1.5, 1.5, -1.5, 1.5, 0, 0];
+    const drop = C2.bezier2(b);
+    const dropPoly = S.polygon(C2.chainPoints(C2.chainFromBezier(b, true), 4000).slice(0, -1).flat());
+    expect(drop.dist(-0.2, 0.2)).toBeCloseTo(dropPoly.dist(-0.2, 0.2), 6);
+    for (let i = 0; i < 30; i++)
+      for (let j = 0; j < 30; j++) {
+        const x = -0.6 + (1.2 * (i + 0.5)) / 30, y = -0.2 + (1.4 * (j + 0.5)) / 30;
+        expect(Math.abs(drop.dist(x, y) - dropPoly.dist(x, y))).toBeLessThan(1e-6);
+      }
+    // Inside the example vase's mouth, a sample whose nearest point is in a shallow basin away from the lowest sample
+    // (5.6e-5 too far before).
+    const ex = [0, 0, 0, 0, 1.0, 0, 1.0, 0, 1.18, 0.3, 1.45, 1.2, 1.3, 2.2, 0.9, 2.9, 0.8, 3.4, 1.0, 3.8, 1.06, 4.0, 0.985, 4.06, 0.91, 4.0, 0.85, 3.8, 0.68, 3.4, 0.78, 2.9, 1.15, 2.2, 1.3, 1.2, 1.05, 0.38, 0.8, 0.22, 0, 0.22, 0, 0.22];
+    const exPoly = S.polygon(C2.chainPoints(C2.chainThrough(ex, true), 2000).slice(0, -1).flat());
+    expect(Math.abs(C2.curve2(ex).dist(0.4823, 3.9417) - exPoly.dist(0.4823, 3.9417))).toBeLessThan(1e-6);
+  });
   it("carries bounds that contain the curve and touch it, and a feature for a wall drawn as an outline", () => {
     const chain = C2.chainThrough(vasePts, true);
     const vase = C2.curve2(vasePts);

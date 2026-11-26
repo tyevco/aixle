@@ -195,20 +195,69 @@ function pieceRange(ctrl: Float64Array, co: Float64Array, s: number, k: number):
 const SCAN = 8;
 const STEP = 1 / SCAN;
 
-/** Squared distance from (x, y) to piece `o` (an offset into the power form), exact up to a wrong basin the scan cannot see. */
+/** The scan's squared distances and slopes, reused by every call (the distance is never re-entered while it runs). */
+const scanQ = new Float64Array(SCAN + 1), scanF = new Float64Array(SCAN + 1);
+
+/**
+ * Squared distance from (x, y) to piece `o` (an offset into the power form). The scan reads the squared distance and
+ * its slope at each sample, and every sample (the ends among them) is a candidate. Newton then searches every basin
+ * the scan shows: round each sample lower than both its neighbours, and inside each other step over which the slope
+ * turns from falling to rising. Searching only round the lowest sample is not enough where a piece passes the point
+ * twice: a teardrop drawn as one piece from its point and back, or a hook into a corner, has its nearest point in a
+ * basin away from its nearest sample (measured: 0.3 too far beside a one-piece teardrop's point, where the true
+ * distance was 0.003). Exact up to a dip and a rise both inside one step of the scan that leave no trace on it.
+ */
 function nearestSq(co: Float64Array, o: number, x: number, y: number): number {
   const Ax = co[o], Bx = co[o + 1], Cx = co[o + 2], Dx = co[o + 3] - x;
   const Ay = co[o + 4], By = co[o + 5], Cy = co[o + 6], Dy = co[o + 7] - y;
-  let ct = 0, cd = Infinity;
+  let best = Infinity;
   for (let i = 0; i <= SCAN; i++) {
     const t = i * STEP;
     const X = ((Ax * t + Bx) * t + Cx) * t + Dx, Y = ((Ay * t + By) * t + Cy) * t + Dy;
+    const X1 = (3 * Ax * t + 2 * Bx) * t + Cx, Y1 = (3 * Ay * t + 2 * By) * t + Cy;
     const q = X * X + Y * Y;
-    if (q < cd) { cd = q; ct = t; }
+    scanQ[i] = q;
+    scanF[i] = X * X1 + Y * Y1;
+    if (q < best) best = q;
   }
-  // Newton on the derivative of the squared distance, kept inside the scan's bracket and bisecting when it leaves.
-  let lo = ct > STEP ? ct - STEP : 0, hi = ct < 1 - STEP ? ct + STEP : 1;
-  let t = ct;
+  // Steps already searched, one bit each.
+  let done = 0;
+  for (let i = 0; i <= SCAN; i++) {
+    const q = scanQ[i];
+    if ((i > 0 && q > scanQ[i - 1]) || (i < SCAN && q > scanQ[i + 1])) continue;
+    // Beside an end, Newton starts in the middle of the end's step: from the end itself it stalls where the slope is
+    // exactly zero there (a piece ending square to the line through the point, with its nearest point just inside).
+    let t0 = i * STEP;
+    if (i === 0 || i === SCAN) {
+      t0 = i === 0 ? 0.5 * STEP : 1 - 0.5 * STEP;
+      if (i === 0 ? scanF[0] > 0 : scanF[SCAN] < 0) {
+        // The slope runs down into the end, so the end is the bottom of its basin unless a dip hides in the step beside
+        // it: look once in the middle of that step, and search it only if the middle is lower or still falling.
+        const X = ((Ax * t0 + Bx) * t0 + Cx) * t0 + Dx, Y = ((Ay * t0 + By) * t0 + Cy) * t0 + Dy;
+        const X1 = (3 * Ax * t0 + 2 * Bx) * t0 + Cx, Y1 = (3 * Ay * t0 + 2 * By) * t0 + Cy;
+        const qm = X * X + Y * Y, fm = X * X1 + Y * Y1;
+        if (qm < best) best = qm;
+        if (!(qm < q || (i === 0 ? fm < 0 : fm > 0))) {
+          done |= 1 << (i === 0 ? 0 : SCAN - 1);
+          continue;
+        }
+      }
+    }
+    const r = refine(Ax, Bx, Cx, Dx, Ay, By, Cy, Dy, i > 0 ? (i - 1) * STEP : 0, i < SCAN ? (i + 1) * STEP : 1, t0);
+    if (r < best) best = r;
+    if (i > 0) done |= 1 << (i - 1);
+    if (i < SCAN) done |= 1 << i;
+  }
+  for (let i = 0; i < SCAN; i++) {
+    if (done & (1 << i) || !(scanF[i] < 0 && scanF[i + 1] > 0)) continue;
+    const r = refine(Ax, Bx, Cx, Dx, Ay, By, Cy, Dy, i * STEP, (i + 1) * STEP, i * STEP + (STEP * scanF[i]) / (scanF[i] - scanF[i + 1]));
+    if (r < best) best = r;
+  }
+  return best;
+}
+
+/** Newton on the slope (B - p) . B' from `t`, kept inside [lo, hi] (which shrinks round the root) and bisecting when it leaves; the squared distance where it stops. */
+function refine(Ax: number, Bx: number, Cx: number, Dx: number, Ay: number, By: number, Cy: number, Dy: number, lo: number, hi: number, t: number): number {
   for (let it = 0; it < 10; it++) {
     const X = ((Ax * t + Bx) * t + Cx) * t + Dx, Y = ((Ay * t + By) * t + Cy) * t + Dy;
     const X1 = (3 * Ax * t + 2 * Bx) * t + Cx, Y1 = (3 * Ay * t + 2 * By) * t + Cy;
@@ -222,8 +271,7 @@ function nearestSq(co: Float64Array, o: number, x: number, y: number): number {
     t = nt;
   }
   const X = ((Ax * t + Bx) * t + Cx) * t + Dx, Y = ((Ay * t + By) * t + Cy) * t + Dy;
-  const q = X * X + Y * Y;
-  return q < cd ? q : cd;
+  return X * X + Y * Y;
 }
 
 /** On a y-monotone part (power form at `o`, 12 numbers), the x where it reaches height y, which lies between its ends. */

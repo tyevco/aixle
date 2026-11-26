@@ -222,18 +222,19 @@ circle (glass on it renders clean).
 - The profile's box (what `check` prints) is the curve's own extent, not
   its handles'; a box reaching past x = 0 on a revolve's profile means the
   spline overshot the axis, which the corners fix.
-- A straight run on x = 0 is inside the solid once revolved, and `revolve`
-  measures the outline without it, so the cross-sections show no line up
-  the axis and glass or a liquid revolved from one has no surface there (a
-  polygon's edge on the axis still leaves that line: draw a liquid as a
-  `curve2`).
+- A straight run on x = 0 is inside the solid once revolved all the way
+  round, and a full `revolve` measures the outline without it, so the
+  cross-sections show no line up the axis and glass or a liquid revolved
+  from one has no surface there (a polygon's edge on the axis still leaves
+  that line: draw a liquid as a `curve2`). With `angle` under 360 the axis
+  is an edge of the wedge and is kept.
 - A closed outline carries its thinnest wall (two sides facing each other)
   for the thin-part warning, so a vase drawn as one outline with a wall
   under a cell is named; a straight run on x = 0 is not counted, since the
   solid there is twice what the profile shows.
 
 A smooth profile costs more per sample than a polygon of as many points
-(measured: a 22-point vase meshes in 1.4 s against 0.65 s for the 18-point
+(measured: a 22-point vase meshes in 1.5 s against 0.65 s for the 18-point
 polygon it replaced), and less than a polygon with enough points to hide
 its facets.
 

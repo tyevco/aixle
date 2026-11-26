@@ -110,8 +110,8 @@ measured: against a dense polygon the distance agrees to 6e-9 with the
 same sign everywhere and a gradient of length 1; a Bezier circle at
 handles 0.5523 r is within 2.8e-4 r; a `curve2` through 8 points of a
 circle is within 8.5e-3 r where the 8-gon is off by 7.6e-2; a distance
-call costs about 400 ns for 16 pieces against 120 ns for an 18-point
-polygon, and the vase's body meshes in 1.4 s against 0.65 s. Not built: a
+call costs about 500 ns for 16 pieces against 120 ns for an 18-point
+polygon, and the vase's body meshes in 1.5 s against 0.65 s. Not built: a
 gap size (the narrowest outside space, as text carries) for outlines; a
 note when a revolve's profile overshoots past the axis (the box `check`
 prints shows it); an open outline closed along the axis by a straight
