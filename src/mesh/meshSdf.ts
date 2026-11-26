@@ -155,7 +155,31 @@ export interface MeshField {
   openness: number;
 }
 
+/**
+ * The sampled grid as plain data: everything `fieldFromSamples` needs to read it back, and so what an import cache
+ * stores. Samples are signed distances at `origin + (i, j, k) * cell`, x fastest.
+ */
+export interface MeshSamples {
+  samples: Float32Array;
+  dims: [number, number, number];
+  origin: [number, number, number];
+  cell: number;
+  bounds: Bounds;
+  triangles: number;
+  openness: number;
+}
+
+/**
+ * Bumped whenever a change here would sample the same mesh differently, so a cache of samples keyed by it never
+ * serves a grid the current code would not have made.
+ */
+export const SAMPLER_VERSION = 1;
+
 export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
+  return fieldFromSamples(sampleMesh(mesh, resolution));
+}
+
+export function sampleMesh(mesh: ImportedMesh, resolution = 96): MeshSamples {
   const P = mesh.positions, I = mesh.indices;
   const nt = I.length / 3;
   const bounds: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
@@ -182,6 +206,33 @@ export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
   // shells (a canopy overlapping its pole, an object sunk into the paving, as the tool's own GLB of a scene is
   // written) as outside, so a round trip split a terrace into five pieces (measured). The nonzero rule keeps the
   // overlap solid and reads a mesh wound either way; the openness measure stays the parity of the count.
+  //
+  // Each line used to test every triangle, which was nine tenths of the time on a large mesh (measured: the chest's
+  // GLB, 459 thousand triangles at resolution 96, 31 of 34 s). Each triangle is now binned first into the lines its
+  // xy box may cover, a line wider each way than rounding could need, in triangle order; a line then runs the same
+  // exact tests over its own bin, so it finds the same crossings in the same order and the field is the same to the bit.
+  const lines = nx * ny;
+  const start = new Int32Array(lines + 1);
+  const span = (t: number, out: Int32Array): boolean => {
+    const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+    out[0] = Math.max(0, Math.floor((Math.min(P[a], P[b], P[c]) - ox) / cell) - 1);
+    out[1] = Math.min(nx - 1, Math.ceil((Math.max(P[a], P[b], P[c]) - ox) / cell) + 1);
+    out[2] = Math.max(0, Math.floor((Math.min(P[a + 1], P[b + 1], P[c + 1]) - oy) / cell) - 1);
+    out[3] = Math.min(ny - 1, Math.ceil((Math.max(P[a + 1], P[b + 1], P[c + 1]) - oy) / cell) + 1);
+    return out[0] <= out[1] && out[2] <= out[3];
+  };
+  const box = new Int32Array(4);
+  for (let t = 0; t < nt; t++) {
+    if (!span(t, box)) continue;
+    for (let j = box[2]; j <= box[3]; j++) for (let i = box[0]; i <= box[1]; i++) start[j * nx + i + 1]++;
+  }
+  for (let l = 0; l < lines; l++) start[l + 1] += start[l];
+  const bin = new Int32Array(start[lines]);
+  const fill = start.slice(0, lines);
+  for (let t = 0; t < nt; t++) {
+    if (!span(t, box)) continue;
+    for (let j = box[2]; j <= box[3]; j++) for (let i = box[0]; i <= box[1]; i++) bin[fill[j * nx + i]++] = t;
+  }
   let odd = 0;
   const crossings: number[] = [];
   const signs: number[] = [];
@@ -191,7 +242,8 @@ export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
       const x = ox + i * cell, y = oy + j * cell;
       crossings.length = 0;
       signs.length = 0;
-      for (let t = 0; t < nt; t++) {
+      for (let e = start[j * nx + i], end = start[j * nx + i + 1]; e < end; e++) {
+        const t = bin[e];
         // Ray along +z from z = -inf: does the triangle's xy projection contain (x, y)? Then record its z there.
         const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
         const ax = P[a], ay = P[a + 1], bx = P[b], by = P[b + 1], cx = P[c], cy = P[c + 1];
@@ -219,6 +271,15 @@ export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
       }
     }
   const openness = odd / (nx * ny);
+  return { samples: field, dims: [nx, ny, nz], origin: [ox, oy, oz], cell, bounds, triangles: nt, openness };
+}
+
+/** The field over a sampled grid: trilinear inside it, clamped outside to the distance to its box plus the edge value. */
+export function fieldFromSamples(s: MeshSamples): MeshField {
+  const field = s.samples;
+  const [nx, ny, nz] = s.dims;
+  const [ox, oy, oz] = s.origin;
+  const cell = s.cell;
   const sample = (i: number, j: number, k: number) => field[(k * ny + j) * nx + i];
   const dist = (x: number, y: number, z: number): number => {
     let fx = (x - ox) / cell, fy = (y - oy) / cell, fz = (z - oz) / cell;
@@ -238,5 +299,5 @@ export function meshField(mesh: ImportedMesh, resolution = 96): MeshField {
     const v = (c00 * (1 - ty) + c10 * ty) * (1 - tz) + (c01 * (1 - ty) + c11 * ty) * tz;
     return outside > 0 ? v + Math.sqrt(outside) * cell : v;
   };
-  return { dist, bounds, cell, triangles: nt, openness };
+  return { dist, bounds: s.bounds, cell, triangles: s.triangles, openness: s.openness };
 }
