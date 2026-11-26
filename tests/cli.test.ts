@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const cli = (...args: string[]) => execFileSync("npx", ["tsx", "src/cli.ts", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
@@ -51,5 +54,28 @@ describe("libraries", () => {
     expect(check).toMatch(/no warnings/);
     // Each shipped library renders on its own: its plate is its test.
     for (const lib of ["hardware", "furniture", "plants"]) expect(cli("check", `std/${lib}.aix`)).toMatch(/^output: /m);
+  });
+});
+
+describe("aixle fmt", () => {
+  it("prints the program in the one layout, rewrites with --write, and fails --check naming the file", { timeout: 60000 }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-fmt-"));
+    const file = join(dir, "messy.aix");
+    writeFileSync(file, "a=box(1,2, 3)|move( 0 , 1, 0 )   # up\nshow a\n");
+    const tidy = "a = box(1,2, 3) | move(0, 1, 0)  # up\nshow a\n";
+    expect(cli("fmt", file)).toBe(tidy);
+    // An already formatted program passes --check silently.
+    expect(cli("fmt", "--check", "examples/mug.aix")).toBe("");
+    let failed = "";
+    try {
+      cli("fmt", "--check", file, "examples/mug.aix");
+    } catch (e) {
+      failed = (e as { stdout: string; status: number }).stdout;
+      expect((e as { status: number }).status).toBe(1);
+    }
+    expect(failed).toBe(`${file}: not formatted; aixle fmt --write ${file}\n`);
+    expect(cli("fmt", "--write", file)).toBe(`formatted ${file}\n`);
+    expect(readFileSync(file, "utf8")).toBe(tidy);
+    expect(cli("fmt", "--check", file)).toBe("");
   });
 });

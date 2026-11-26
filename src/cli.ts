@@ -2,6 +2,7 @@
 /**
  *   aixle render <file.aix> [--out DIR] [--grid N] [--size N] [--no-steps] [--no-slices] [--no-turntable] [--no-export]
  *   aixle check  <file.aix>
+ *   aixle fmt    <file.aix>... [--write | --check]
  *   aixle doc    [--write FILE]
  */
 import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
@@ -18,6 +19,7 @@ import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
 import { isMaterial, isRecord, isShape2, isShape3, isUserFn, typeName, type Value } from "./lang/values.js";
 import { parse } from "./lang/parser.js";
+import { format } from "./lang/format.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
 // Two decimals, one above ten, none above a hundred; below 0.1, two significant figures, so a small model's parts
@@ -59,7 +61,11 @@ function libraryMarkdown(file: string): string {
     if (st.type !== "def") continue;
     const doc: string[] = [];
     for (let i = st.line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, ""));
-    const params = st.params.map((p) => (p.default ? `${p.name}=${lines[st.line - 1].match(new RegExp(`${p.name}\\s*=\\s*([^,)]+)`))?.[1]?.trim() ?? "?"}` : p.name));
+    // The default as written on the def's line when it is a plain value; a record or a call is printed from its tree,
+    // since the text up to the next comma would cut it in half.
+    const written = (name: string): string | undefined => lines[st.line - 1].match(new RegExp(`${name}\\s*=\\s*([^,)]+)`))?.[1]?.trim();
+    const balanced = (t: string) => [..."([{"].every((o, k) => t.split(o).length === t.split(")]}"[k]).length);
+    const params = st.params.map((p) => { if (!p.default) return p.name; const w = written(p.name); return `${p.name}=${w !== undefined && balanced(w) ? w : exprText(p.default)}`; });
     out.push(`## ${st.name}(${params.join(", ")})`, "");
     if (doc.length) out.push(doc.join("\n"), "");
   }
@@ -87,11 +93,40 @@ function usage(): never {
       "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
+      "  aixle fmt    <file.aix>         the program in the one layout, to stdout (comments kept, meaning unchanged)",
+      "  aixle fmt    <file.aix>... --write | --check   rewrite them in place, or list the ones not in it and fail",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
       "  aixle doc    <lib.aix>          a library's defs and their comments, for a program that would use it",
     ].join("\n"),
   );
   process.exit(2);
+}
+
+/**
+ * `aixle fmt`: the program in the one layout. Alone it prints the result; `--write` rewrites each file that is not
+ * in it; `--check` changes nothing and fails naming each file that is not, for CI or a hook. A program that does not
+ * parse is an error, never rewritten.
+ */
+function fmt(args: string[]): number {
+  const files = args.filter((a) => !a.startsWith("--"));
+  const write = args.includes("--write"), checkOnly = args.includes("--check");
+  const unknown = args.filter((a) => a.startsWith("--") && a !== "--write" && a !== "--check");
+  if (unknown.length || !files.length) usage();
+  if (write && checkOnly) { console.error("aixle fmt: --write or --check, not both"); return 2; }
+  if (!write && !checkOnly && files.length > 1) { console.error("aixle fmt prints one file; give --write or --check for several"); return 2; }
+  let status = 0;
+  for (const file of files) {
+    let source: string;
+    try { source = readFileSync(file, "utf8"); } catch { console.error(`cannot read ${file}`); status = 1; continue; }
+    let formatted: string;
+    try { formatted = format(source); } catch (err) { console.error(`${file}: ${(err as Error).message}`); status = 1; continue; }
+    if (checkOnly) {
+      if (formatted !== source) { console.log(`${file}: not formatted; aixle fmt --write ${file}`); status = 1; }
+    } else if (write) {
+      if (formatted !== source) { writeFileSync(file, formatted); console.log(`formatted ${file}`); }
+    } else process.stdout.write(formatted);
+  }
+  return status;
 }
 
 function flags(argv: string[]): { positional: string[]; opts: Record<string, string | boolean> } {
@@ -113,6 +148,8 @@ function flags(argv: string[]): { positional: string[]; opts: Record<string, str
 function main(argv: string[]): number {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") usage();
+  // fmt's flags take no value, so `fmt --write model.aix` is not --write=model.aix.
+  if (cmd === "fmt") return fmt(rest);
   const { positional, opts } = flags(rest);
   if (cmd === "doc") {
     // `aixle doc lib.aix` documents a library the way the reference documents builtins: each def with its
