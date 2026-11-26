@@ -67,7 +67,9 @@ wear 0.5, a box's edges and a twisted bar's spiralling edges get a
 steady bright band. Atlas memory and time, on the lantern (62,000
 triangles, four maps): at 1024 the bake takes 4.2 s against 0.6 s for
 the colour atlas alone and peaks 75 to 87 MB over the meshing against
-48 to 55; at 2048, 17.8 s against 2.1 s and 150 MB against 55. A plain
+48 to 55; at 2048, 17.8 s against 2.1 s and 150 MB against 55. Its
+beauty render at 512 pixels takes 4.6 s against 3.4 s without the wear
+and the bumps, nearly every pixel being worn and bumped. A plain
 model's bake is within the run-to-run spread of what it was (the noise
 and the dilation got faster, which pays for the roughness texel), and
 its GLB is byte for byte what it was: 27 of the 32 examples. The two
