@@ -24,6 +24,13 @@ export interface RenderOptions {
   flatColor?: Vec3;
   /** Draw glass solid rather than as a screen door: for a depth pass that primes rays, which must not see holes. */
   solidGlass?: boolean;
+  /**
+   * Shade from something other than the materials: called per pixel with the triangle's three vertices, the
+   * perspective-correct weights and the interpolated view-space normal, it returns the colour, metal, roughness,
+   * glow and, optionally, a view-space normal to light instead. A mesh read back from a GLB is drawn this way with
+   * its own texture maps, which is how the export is checked against the beauty render.
+   */
+  surfaceAt?: (a: number, b: number, c: number, w0: number, w1: number, w2: number, viewNormal: Vec3) => { base: Vec3; metal: number; rough: number; glow: number; normal?: Vec3 };
 }
 
 export interface RenderTarget {
@@ -144,6 +151,12 @@ export function renderMesh(mesh: Mesh, cam: Camera, target: RenderTarget, opts: 
         const nl = Math.hypot(nx, ny, nz) || 1;
         nx /= nl; ny /= nl; nz /= nl;
         normal[di * 3] = nx; normal[di * 3 + 1] = ny; normal[di * 3 + 2] = nz;
+        if (opts.surfaceAt) {
+          const sf = opts.surfaceAt(a, b, c, w0, w1, w2, [nx, ny, nz]);
+          const col = shade(sf.normal ?? [nx, ny, nz], sf.base, sf.metal, sf.rough, sf.glow);
+          canvas.set(px, py, rgbDithered(col[0], col[1], col[2], px, py));
+          continue;
+        }
         const nearest = w0 >= w1 && w0 >= w2 ? a : w1 >= w2 ? b : c;
         const mat = mesh.materials[mesh.materialIndex[nearest]];
         let base: Vec3;

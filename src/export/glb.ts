@@ -137,6 +137,9 @@ export interface GlbAnimation {
   scales?: Record<string, [number, number, number][]>;
 }
 
+/** sRGB-encoded 0..1 to linear, for a factor where the texture it stands in for would have been sRGB. */
+export const srgbToLinear = (v: number): number => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+
 /** Quaternion for rotations about x, then y, then z, in degrees (the joint convention). */
 /** A quaternion for `deg` degrees about an axis, for a joint declared with one: the animation then turns about it. */
 export function axisAngleToQuat(axis: [number, number, number], deg: number): [number, number, number, number] {
@@ -186,22 +189,49 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     return accessors.length - 1;
   };
 
+  // Textures: the colour atlas first, then whichever of the normal, metallic-roughness and emissive maps the bake
+  // found worth writing, all on the atlas's UVs.
+  const textured = !!h.atlas;
+  const images: object[] = [];
+  const addImage = (png: Buffer, what: string): number => {
+    images.push({ bufferView: pushView(png, 0), mimeType: "image/png", name: `${name} ${what}` });
+    return images.length - 1;
+  };
+  const baseTex = h.atlas ? addImage(h.atlas.toPng(), "atlas") : -1;
+  const normalTex = textured && h.normalMap && h.tangents ? addImage(h.normalMap.toPng(), "normal") : -1;
+  const mrTex = textured && h.metalRoughMap ? addImage(h.metalRoughMap.toPng(), "metallic-roughness") : -1;
+  const emTex = textured && h.emissiveMap ? addImage(h.emissiveMap.toPng(), "emissive") : -1;
+  const extensionsUsed = new Set<string>();
+
   // Materials, shared across meshes.
   const materials: object[] = [];
   const matIds = new Map<Material, number>();
-  const textured = !!h.atlas;
   const materialId = (m: Material): number => {
     let id = matIds.get(m);
     if (id !== undefined) return id;
+    const maps = h.materialMaps?.get(m);
     const pbr: Record<string, unknown> = { baseColorFactor: [1, 1, 1, 1], metallicFactor: m.metal, roughnessFactor: m.rough };
-    if (textured) pbr.baseColorTexture = { index: 0 };
-    materials.push({ name: m.name, pbrMetallicRoughness: pbr });
+    if (textured) pbr.baseColorTexture = { index: baseTex };
+    const def: Record<string, unknown> = { name: m.name, pbrMetallicRoughness: pbr };
+    // A map multiplies its factor, so a material that reads one has factors of 1.
+    if (mrTex >= 0 && maps?.metalRough) { pbr.metallicRoughnessTexture = { index: mrTex }; pbr.metallicFactor = 1; pbr.roughnessFactor = 1; }
+    if (normalTex >= 0 && maps?.normal) def.normalTexture = { index: normalTex };
+    if (m.glow > 0 && h.pbr !== false) {
+      // glTF's emissive factor is at most 1; a glow above that is the emissive strength extension's.
+      const k = Math.min(1, m.glow);
+      if (emTex >= 0 && maps?.emissive) { def.emissiveTexture = { index: emTex }; def.emissiveFactor = [k, k, k]; }
+      else {
+        // One colour: a factor, linear where the atlas is sRGB.
+        const c = maps?.emissiveColor ?? m.color;
+        def.emissiveFactor = c.map((v) => Number((srgbToLinear(v) * k).toFixed(4)));
+      }
+      if (m.glow > 1) { def.extensions = { KHR_materials_emissive_strength: { emissiveStrength: m.glow } }; extensionsUsed.add("KHR_materials_emissive_strength"); }
+    }
+    materials.push(def);
     id = materials.length - 1;
     matIds.set(m, id);
     return id;
   };
-  let imageView = -1;
-  if (h.atlas) imageView = pushView(h.atlas.toPng(), 0);
 
   // Meshes.
   const meshes: object[] = [];
@@ -209,8 +239,9 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     const n = mesh.positions.length / 3;
     const posAcc = floatAccessor(mesh.positions, "VEC3", true);
     const nrmAcc = floatAccessor(mesh.normals, "VEC3", false);
-    let uvAcc = -1, colAcc = -1;
+    let uvAcc = -1, colAcc = -1, tanAcc = -1;
     if (textured && h.uvs) uvAcc = floatAccessor(h.uvs[mi], "VEC2", false);
+    if (normalTex >= 0 && h.tangents) tanAcc = floatAccessor(h.tangents[mi], "VEC4", false);
     else {
       const colors = new Float32Array(n * 3);
       for (let v = 0; v < n; v++) {
@@ -233,6 +264,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
       const view = pushView(Buffer.from(arr.buffer), 34963);
       accessors.push({ bufferView: view, componentType: 5125, count: arr.length, type: "SCALAR" });
       const attributes: Record<string, number> = { POSITION: posAcc, NORMAL: nrmAcc };
+      if (tanAcc >= 0) attributes.TANGENT = tanAcc;
       if (uvAcc >= 0) attributes.TEXCOORD_0 = uvAcc; else attributes.COLOR_0 = colAcc;
       primitives.push({ attributes, indices: accessors.length - 1, material: materialId(mesh.materials[m]) });
     }
@@ -309,10 +341,11 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     buffers: [{ byteLength: offset }],
   };
   if (textured) {
-    json.images = [{ bufferView: imageView, mimeType: "image/png", name: `${name} atlas` }];
+    json.images = images;
     json.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 }];
-    json.textures = [{ sampler: 0, source: 0 }];
+    json.textures = images.map((_, i) => ({ sampler: 0, source: i }));
   }
+  if (extensionsUsed.size) json.extensionsUsed = [...extensionsUsed];
   if (anims.length) json.animations = anims;
   let jsonBuf = Buffer.from(JSON.stringify(json), "utf8");
   jsonBuf = Buffer.concat([jsonBuf, Buffer.alloc((4 - (jsonBuf.length % 4)) % 4, 0x20)]);

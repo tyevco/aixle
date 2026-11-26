@@ -532,9 +532,9 @@ Paint only the part of the surface inside `region`, adding no geometry: a pupil 
 
 ### material
 
-A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
+A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots, rust. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp; bump (a height) and bump_scale (a size) for a surface rougher than the mesh, a hammered or cast or pitted finish; wear 0..1 for edges rubbed bright and dirt in the hollows. The `rust` pattern eats patches of `scale` across into the base, rough and not metal (oxide colour unless color2 is given), and wear rubs them off the edges. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
-    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?, image="", projection="") -> material
+    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?, bump=?, bump_scale=?, wear=?, image="", projection="") -> material
 
 - `color`: a colour, or a preset name to start from
 - `color2`: second colour for two-tone patterns
@@ -542,6 +542,9 @@ A custom material, from a colour or from a preset with some of its fields change
 - `transmit`: 0 opaque .. 1 clear glass (beauty render only)
 - `axis`: the pattern's axis: stripes stack along it, grain runs along it
 - `glow`: light the surface gives off, 0..2 (unshadowed, for flames and lamps)
+- `bump`: bumps finer than the mesh, this high either way, in units: shaded in the beauty render and baked into the GLB's normal map, no geometry added
+- `bump_scale`: the bumps' feature size in units (default ten times bump)
+- `wear`: 0..1, how used it looks: convex edges lighter (bare metal on a metal) and smoother, cavities darker and rougher, read from the shape's curvature
 - `image`: a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape
 - `projection`: how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)
 
@@ -848,9 +851,10 @@ Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a
 | porcelain | solid |  | #f6f4ee | rough 0.2 |
 | snow | noise | 0.3 units | #f8f9fb / #dfe6ef | rough 0.9 |
 | lava | marble | 0.8 units | #f06a1a / #3a1a10 | rough 0.6 |
+| rust | rust | 0.3 units | #5c5e62 / #8a4422 | metal, rough 0.55 |
 
 A pattern's feature size is in model units: a wood ring every 0.25 units suits a table leg, not a 20-unit floor. Use `material(color, pattern, color2, scale=)` with the two colours from this table for the same look at another size.
 
 ## Patterns
 
-For `material(color, pattern, ...)`: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots.
+For `material(color, pattern, ...)`: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots, rust.

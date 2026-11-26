@@ -481,6 +481,7 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     cost: s.cost + 8,
     inner: [s],
     bound: true,
+    relief: size,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -817,6 +818,20 @@ export function anchorAt(s: Shape3, name: string): Vec3 | undefined {
 export const FREE_ANCHORS = ["centre", "top", "bottom", "front", "back", "left", "right"];
 
 /** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
+/** Whether anything in the tree carries relief finer than a mesh follows (a displace), so a normal map is worth testing for. */
+export function hasRelief(s: Shape3): boolean {
+  const seen = new Set<Shape3>();
+  const walk = (n: Shape3): boolean => {
+    if (seen.has(n)) return false;
+    seen.add(n);
+    if (n.relief !== undefined) return true;
+    for (const k of n.parts ?? n.inner ?? []) if (walk(k)) return true;
+    if (n.joint && walk(n.joint.child)) return true;
+    return n.instanced ? walk(n.instanced.base) : false;
+  };
+  return walk(s);
+}
+
 export function hasLooseBounds(s: Shape3): boolean {
   const seen = new Set<Shape3>();
   const walk = (n: Shape3): boolean => {

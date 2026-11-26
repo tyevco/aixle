@@ -8,7 +8,7 @@
  * degrees and one convention is kinder to a model writing code than two.
  */
 import { rad } from "../core/vec.js";
-import { albedo, customMaterial, materialFromString, PATTERNS, parseColor, preset } from "../sdf/materials.js";
+import { albedo, customMaterial, materialFromString, PATTERNS, parseColor, preset, RUST_COLOR } from "../sdf/materials.js";
 import * as O from "../sdf/ops.js";
 import * as P from "../sdf/primitives.js";
 import * as S from "../sdf/shapes2d.js";
@@ -64,9 +64,13 @@ function makeMaterial(args: Value[]): Material {
   const pattern = args[1] as string, c2text = args[2] as string;
   const scale = n(args[3]), metal = n(args[4]), rough = n(args[5]), seed = n(args[6]), transmit = n(args[7]);
   const axisText = args[8] as string, glow = n(args[9]);
+  const bump = n(args[10]), bumpScale = n(args[11]), wear = n(args[12]);
   if (axisText !== "" && !["x", "y", "z"].includes(axisText)) throw new Error(`material(): axis must be "x", "y" or "z"`);
   const axis = axisText === "" ? undefined : (axisText as "x" | "y" | "z");
   const given = (v: number) => !Number.isNaN(v);
+  if (given(bump) && bump < 0) throw new Error(`material(): bump is a height, 0 or more`);
+  if (given(bumpScale) && !(bumpScale > 0)) throw new Error(`material(): bump_scale is the bumps' size, more than 0`);
+  if (given(wear) && (wear < 0 || wear > 1)) throw new Error(`material(): wear is 0 (new) to 1 (worn hard)`);
   // A preset name: start from it and override only what was given.
   const base = preset(first);
   if (base) {
@@ -76,7 +80,8 @@ function makeMaterial(args: Value[]): Material {
     return customMaterial({
       name: `${base.name}*`,
       color: base.color,
-      color2: color2 ?? base.color2,
+      // A preset turned to rust takes the oxide colour, not its own colour twice.
+      color2: color2 ?? (pattern === "rust" && base.pattern !== "rust" ? RUST_COLOR : base.color2),
       pattern: pattern === "" ? base.pattern : (pattern as PatternKind),
       scale: given(scale) ? scale : base.scale,
       metal: given(metal) ? metal : base.metal,
@@ -85,6 +90,9 @@ function makeMaterial(args: Value[]): Material {
       transmit: given(transmit) ? transmit : base.transmit,
       axis: axis ?? base.axis,
       glow: given(glow) ? glow : base.glow,
+      bump: given(bump) ? bump : base.bump,
+      bumpScale: given(bumpScale) ? bumpScale : base.bumpScale,
+      wear: given(wear) ? wear : base.wear,
     });
   }
   const color = parseColor(first);
@@ -93,7 +101,7 @@ function makeMaterial(args: Value[]): Material {
   if (!PATTERNS.includes(pat as PatternKind)) throw new Error(`material(): unknown pattern "${pat}"; one of ${PATTERNS.join(", ")}`);
   const color2 = c2text === "" ? undefined : parseColor(c2text);
   if (c2text !== "" && !color2) throw new Error(`material(): "${c2text}" is not a colour`);
-  return customMaterial({ color, color2, pattern: pat as PatternKind, scale: given(scale) ? scale : 1, metal: given(metal) ? metal : 0, rough: given(rough) ? rough : 0.6, seed: given(seed) ? seed : 0, transmit: given(transmit) ? transmit : 0, axis, glow: given(glow) ? glow : 0 });
+  return customMaterial({ color, color2, pattern: pat as PatternKind, scale: given(scale) ? scale : 1, metal: given(metal) ? metal : 0, rough: given(rough) ? rough : 0.6, seed: given(seed) ? seed : 0, transmit: given(transmit) ? transmit : 0, axis, glow: given(glow) ? glow : 0, bump: given(bump) ? bump : 0, bumpScale: given(bumpScale) ? bumpScale : undefined, wear: given(wear) ? wear : 0 });
 }
 
 function hexOf(r: number, g: number, b: number): string {
@@ -312,8 +320,8 @@ export const BUILTINS: Builtin[] = [
   def("decal", "Materials", "Paint only the part of the surface inside `region`, adding no geometry: a pupil on an eye (decal(eye, sphere(0.1) | move(...), \"black\")), a mouth line along a thin tube, a label on a jar. The region is any shape; its inside picks the material. With `image=\"label.png\"` (a PNG beside the program) the picture is fitted to the region's box across its shortest side, its transparent texels leaving the base material: a label on a jar, a logo, a face.",
     ov([shape(), shape("region", "the part of the surface inside this shape gets the material"), mat()], "shape", (a) => O.decal(s3(a[0]), s3(a[1]), a[2] as Material)),
     ov([shape(), shape("region", "the box the picture is fitted to, across its shortest side"), str("image", "a PNG file, relative to the program")], "shape", () => { throw new Error("a picture cannot be loaded here"); })),
-  def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis=\"x\" for stripes running the other way.",
-    ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN), str("axis", "the pattern's axis: stripes stack along it, grain runs along it", ""), num("glow", "light the surface gives off, 0..2 (unshadowed, for flames and lamps)", NaN), str("image", "a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape", ""), str("projection", "how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)", "")], "material", makeMaterial)),
+  def("material", "Materials", "A custom material, from a colour or from a preset with some of its fields changed: material(\"granite\", scale=0.3). Patterns: " + PATTERNS.join(", ") + ". `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp; bump (a height) and bump_scale (a size) for a surface rougher than the mesh, a hammered or cast or pitted finish; wear 0..1 for edges rubbed bright and dirt in the hollows. The `rust` pattern eats patches of `scale` across into the base, rough and not metal (oxide colour unless color2 is given), and wear rubs them off the edges. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis=\"x\" for stripes running the other way.",
+    ov([str("color", "a colour, or a preset name to start from"), str("pattern", "", ""), str("color2", "second colour for two-tone patterns", ""), num("scale", "feature size in units", NaN), num("metal", "", NaN), num("rough", "", NaN), num("seed", "", NaN), num("transmit", "0 opaque .. 1 clear glass (beauty render only)", NaN), str("axis", "the pattern's axis: stripes stack along it, grain runs along it", ""), num("glow", "light the surface gives off, 0..2 (unshadowed, for flames and lamps)", NaN), num("bump", "bumps finer than the mesh, this high either way, in units: shaded in the beauty render and baked into the GLB's normal map, no geometry added", NaN), num("bump_scale", "the bumps' feature size in units (default ten times bump)", NaN), num("wear", "0..1, how used it looks: convex edges lighter (bare metal on a metal) and smoother, cavities darker and rougher, read from the shape's curvature", NaN), str("image", "a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape", ""), str("projection", "how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)", "")], "material", makeMaterial)),
   def("rgb", "Materials", "A colour string from red, green, blue in 0..255.", ov([num("r"), num("g"), num("b")], "string", (a) => hexOf(n(a[0]), n(a[1]), n(a[2])))),
   def("hsl", "Materials", "A colour string from hue in degrees, saturation and lightness in 0..1.", ov([num("h"), num("s"), num("l")], "string", (a) => hslToHex(n(a[0]), n(a[1]), n(a[2])))),
 

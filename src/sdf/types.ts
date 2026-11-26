@@ -36,7 +36,8 @@ export type PatternKind =
   | "speckle"
   | "brick"
   | "tiles"
-  | "dots";
+  | "dots"
+  | "rust";
 
 /** A picture painted on a surface: decoded pixels and how the surface's local point maps into them. */
 export interface ImageTexture {
@@ -80,6 +81,20 @@ export interface Material {
   glow: number;
   /** A picture instead of a pattern: sampled at the local point; its alpha is what a decal falls through. */
   image?: ImageTexture;
+  /**
+   * Bumps finer than the mesh, in model units: the height of a noise the
+   * beauty render shades and the atlas bakes into a normal map, adding no
+   * geometry. 0 (or absent) for none.
+   */
+  bump?: number;
+  /** The bumps' feature size in model units; absent, ten times `bump`. */
+  bumpScale?: number;
+  /**
+   * 0..1: how used the surface looks, read from the field's curvature.
+   * Convex edges go lighter (bare metal on a metal) and smoother, cavities
+   * darker and rougher. 0 (or absent) for new.
+   */
+  wear?: number;
 }
 
 export interface Hit {
@@ -132,6 +147,8 @@ export interface Shape3 {
   loose?: boolean;
   /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
   bound?: boolean;
+  /** Set by displace: the noise's feature size. Relief like this is finer than the mesh can follow, so the atlas baker writes it into a normal map. */
+  relief?: number;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */

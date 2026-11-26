@@ -17,6 +17,7 @@ import { toStl } from "./export/stl.js";
 import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedrock.js";
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
+import { wearProbe } from "./sdf/materials.js";
 import type { Vec3 } from "./core/vec.js";
 import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
@@ -1054,15 +1055,24 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // viewer shows as its first frame. Not on a quick pass.
     if (opts.turntable !== false && !opts.quick) time("turntable:apng", () => { const fr = turntableFrames(mesh!, info, Math.round(size / 2)); write("turntable.apng", encodeApng(fr[0].width, fr[0].height, fr.map((c) => c.data), 80)); });
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
+    // Wear reads curvature over a distance set by the model's size, the same in the bake and the beauty render, so
+    // the GLB's worn edges are the picture's and a quick pass shows the band the full render will.
+    const wearScale = triangleCount(mesh!) > 0 ? wearProbe(Math.max(...boundsSize(meshBounds(mesh!)))) : undefined;
     if (opts.obj !== false || opts.glb !== false) {
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
       const stepNames = new Map<Shape3, string>();
       for (const st of rest.steps) if (isShape3(st.value) && !stepNames.has(st.value)) stepNames.set(st.value, st.name);
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, wearProbe: wearScale }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
-      log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
+      const extraMaps = [hierarchy.normalMap ? "normal" : "", hierarchy.metalRoughMap ? "metallic-roughness" : "", hierarchy.emissiveMap ? "emissive" : ""].filter(Boolean);
+      log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts${extraMaps.length ? ` and ${extraMaps.join(", ")} map${extraMaps.length === 1 ? "" : "s"}` : ""}` : ""}, in ${timings.hierarchy} ms`);
+      if (hierarchy.normalStats) log(`normal map: ${hierarchy.normalStats.written ? "baked" : "not baked"}, ${hierarchy.normalStats.reason}`);
       if (hierarchy.atlas) write("model.png", hierarchy.atlas.toPng());
+      // The maps beside the atlas, on its UVs, each only when the bake found something for it: for reading.
+      if (hierarchy.normalMap) write("model_normal.png", hierarchy.normalMap.toPng());
+      if (hierarchy.metalRoughMap) write("model_mr.png", hierarchy.metalRoughMap.toPng());
+      if (hierarchy.emissiveMap) write("model_emissive.png", hierarchy.emissiveMap.toPng());
       const glbAnimations: GlbAnimation[] = clips.map((c) => {
         const rotations: Record<string, [number, number, number, number][]> = {};
         const moves: Record<string, Vec3[]> = {};
@@ -1096,7 +1106,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const anchors = rest.output ? anchorsOf(rest.output) : {};
         const accessory = Object.keys(anchors).some((n) => /Attachment$/.test(n));
         const budget = accessory ? ACCESSORY_TRIANGLES : MESHPART_TRIANGLES;
-        const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget }));
+        // The colour atlas alone, as before the PBR maps: what Studio's importer makes of a normal or packed
+        // metallic-roughness map on a decimated mesh is untested.
+        const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget, maps: false }));
         const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.triangles });
         write("model.roblox.glb", rb.glb);
         warnings.push(...rb.warnings);
@@ -1191,7 +1203,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
       // (measured: a focused beauty render fitted every point and framed the whole mug).
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
-        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label }).toPng());
+        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label, wearProbe: wearScale }).toPng());
       time("beauty", () => shoot("beauty.png", beautyFrame, !!(shotFocus || focusName), azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(beautyFrame)}`));
       // Every sky at once, for choosing one: --environment all writes environments.png beside the program's own.
       if (opts.environment === "all") {
@@ -1202,7 +1214,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         drawText(strip, 10, 7, `ENVIRONMENTS   the same shot under each sky`, INK.barText, 2);
         time("environments", () => {
           ENVIRONMENTS.forEach((env, i) => {
-            strip.blit(renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment: env, fitPoints: shotFocus || focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocus || focusName ? modelBounds : undefined, label: env }), gutter + i * (frame + gutter), bar + gutter);
+            strip.blit(renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment: env, fitPoints: shotFocus || focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocus || focusName ? modelBounds : undefined, label: env, wearProbe: wearScale }), gutter + i * (frame + gutter), bar + gutter);
           });
         });
         write("environments.png", strip.toPng());
@@ -1218,7 +1230,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         strip.fill(0, 0, strip.width, bar, INK.bar);
         drawText(strip, 10, 7, `LIGHTS   each alone, then all ${lights.length}`, INK.barText, 2);
         const one = (ls: BeautyLight[] | undefined, label: string) =>
-          renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights: ls, environment, fitPoints: focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: focusName ? modelBounds : undefined, label });
+          renderBeauty(output, mesh!, beautyFrame, { size: frame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights: ls, environment, fitPoints: focusName ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: focusName ? modelBounds : undefined, label, wearProbe: wearScale });
         time("lights", () => {
           lights.forEach((l, i) => {
             const desc = l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`;
@@ -1400,6 +1412,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "turntable.apng": "the model turning, an animated PNG of 24 frames (a browser plays it)",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
     "model.png": "the texture atlas: the materials baked per chart",
+    "model_normal.png": "the GLB's tangent-space normal map on the atlas's UVs: the field's detail finer than the mesh and the bumps (lavender is flat)",
+    "model_mr.png": "the GLB's metallic-roughness map on the atlas's UVs (green roughness, blue metalness), where wear or rust varies them",
+    "model_emissive.png": "the GLB's emissive map on the atlas's UVs, where a glowing material's colour varies",
     "model.roblox.glb": "the GLB for Roblox Studio's 3D Importer: a Handle node facing -Z with _Att attachment nodes from the anchors",
     "model.geo.json": "Minecraft Bedrock geometry: the model voxelised and merged into cuboids, a bone per object and per joint",
     "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
