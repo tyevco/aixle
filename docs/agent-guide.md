@@ -65,7 +65,10 @@ npx aixle render model.aix --no-anims      skip the animation strips (--anim tur
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
 npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
+npx aixle render model.aix --slice stem    slices.png through one step, framed on it, the rest of the model faint
                                            with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png, a sky
+npx aixle render model.aix --beauty-only --camera hero   one shot and the sheet, nothing else: the lighting loop
+npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all)
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
@@ -88,7 +91,15 @@ npx aixle diff before.aix after.aix        the two sheets side by side
   surface" in the warning colour means the step really has none.
 - **Slices** are the truth about interiors: a cup that is not hollow, a wall
   that is thicker on one side, a hole that does not go through, a cavity
-  that broke out where it should not. Filled means solid.
+  that broke out where it should not. Filled means solid. To cut through
+  one part (a plant's stem down into the soil it stands in), `--slice
+  plant` or `set slice plant`: the planes go through that step's solid,
+  framed on it, its cut in full and the rest faint.
+- **`lights.png`** (two or more lights, with `--beauty`): the top row is
+  each light alone and then all; the bottom row is what each light adds
+  on its own, brightened by the gain printed under it, so a small point
+  light's reach and colour fill the frame, and last the picture under
+  no light at all.
 - A small part of a large model is a few pixels on the sheet: `--focus
   name` (or `--focus name_3` for one copy of a placed set) frames every
   view on that step alone, meshed at the frame's own
@@ -146,9 +157,13 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | stripes run the wrong way, or a pattern is missing on a thin sheet | patterns are stacked along the material's axis (y) in the paint frame | `material(..., axis="x")`, or paint the part standing and then lay it down |
 | the counter under the awning is black, the flame is a dark blob | the key light is fixed at the upper left and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |
 | gold looks olive, silver looks charcoal | a metal is mostly what it reflects, and the sheet has no environment | judge metals in the beauty render, which reflects the sky, ground and the model itself |
+| slices show a plant, a lamp or a probe as a floating blob | the planes go through the model's centre, and its stem is off them | `--slice plant`: the planes through that step's own solid |
+| a point light's effect is a few pixels in `lights.png` | the light reaches a small part of a whole picture | read the bottom row: what it adds on its own, brightened |
+| `overlap(a, b) > ...` fails at 0 | the failure says why: they only touch, they stand apart by so much, or they overlap thinner than the lattice | sink one into the other; or promise a chunk, `overlap(rim & box(...), base)` |
 | a steel boss shows a row of blobs at its foot | a metal reflects the model's own cut faces (a ring of counterbores) | nothing is wrong; the slices and the plan view are the truth about holes |
 | `--focus` on a probe region or a cutter | it is not geometry | the frame is the region's, and what is drawn is the model inside it |
 | "separate pieces" but everything looks joined | a part stops a hair short of its neighbour | the warning names the loose piece's volume, centre and step; overlap by a little |
+| copies meant to sit between another ring's copies land on them | a part centred on y turned before `ring` only turns in place | turn the ring: `pocket \| ring(6, 0.7) \| rotate(y=30)` |
 | a rig's part swings about the wrong point | the joint's pivot is not where the part turns | give `joint` the world point of the hinge, after the part is moved into place |
 | a part placed with `attach` is a loose piece at a finer grid | `attach` sets face on face, exactly touching | `attach(..., sink=0.02)` pushes it in, or put the anchor a cell inside the part |
 | text wrapped inside a band reads backwards | `wrap` reads left to right from outside | `flip("x")` the extruded text before the `wrap` for an inscription read from inside |

@@ -194,6 +194,45 @@ printed as "(see above)", and the steps not in the output at the end.
 It is a printer over the dependencies the evaluation records. Not built:
 `--json`, which waits for a tool that wants it.
 
+## 11. Round 10's leftovers: built
+
+Round 10 left a per-step slice, a pair of skies in one run, a bigger
+lights strip and the radial span of lettering on an arc undone, and its
+hub report measured `check` at 4.9 s. `set slice name` (or `--slice`)
+puts the cross-sections through one step where the output puts it,
+framed on it with the rest of the model faint; `--environment a,b`
+renders `environments.png` under the skies listed, beauty.png under the
+first; `lights.png` gained a row of what each light adds on its own,
+brightened, and the no-light picture, at frames half the beauty size;
+`text(arc=)` carries the radii its ink spans and `check` prints them;
+an evaluation meshes a shape once per grid for `pieces()`, `overhang()`
+and a failing `pieces()`'s witness. Prototyped as asked: where the
+planes go was measured on 74 parts in five programs (the terrarium, the
+street corner, the lamp, the garden, the fence): a vertical plane
+through the step's box centre missed the part on 4 of 148 cuts and cut
+under a quarter of its widest section on 8, the centroid rule (the
+solid's centroid, or the widest section where the centroid's plane cuts
+under half of it) on none. On the hub, `check` went from 3.9 s to
+2.5 s with the output unchanged (the report measured 4.9 s; the tool as
+it was took 3.9 s here); on the ring the lights strip went from 6.1 s to 9.6 s for
+three lights. Every friction point in the four reports was checked
+against the tool as it stands and answered where it was not: an
+`overlap` of zero says whether the two touch, stand apart or overlap
+thinner than the lattice; a `void` failure on a ring of probes names
+the copy; the sample-plane note gives the nudge (half a cell, with the
+axis); a cutter named at open edges is tagged as the face it cut; an
+all-glass step's thumbnail is drawn solid; a half-space turned on its
+way into an `&` is a mask; the callouts line names the steps not seen;
+the quick sheet's title is the surface's extent held within the bounds
+(it said 0.51 for a 0.5-tall flange); `set caption 0` leaves the caption
+off a presentation copy. Not built: a warning when `rotate(y=)` turns a
+part that is round about y before a `ring` (documented instead, since
+the tool cannot know the part is round), a slice plane chosen to show a
+contact rather than a section (the centroid shows the stem; whether it
+meets the soil is still read, not computed), and a `--focus` whose
+slices use the centroid rule (they still cut through the frame's
+centre, which is the step's box grown).
+
 ## Smaller, worth doing when passing
 
 - `aixle fmt`: one layout for programs, comments kept, so diffs are
@@ -203,7 +242,6 @@ It is a printer over the dependencies the evaluation records. Not built:
   not both sample a large mesh.
 - A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
-- A per-step slice (round 10).
 
 ## What was considered and set aside
 

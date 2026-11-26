@@ -1104,7 +1104,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
           sliced = asPart ? own : output;
           slicedGhost = asPart ? output : undefined;
           (["x", "y", "z"] as const).forEach((axis, k) => { levels[axis] = lv.at[k]; });
-          slicedThrough = `${sliceName}${asPart ? "" : ` (${role})`}`;
+          slicedThrough = asPart ? `${sliceName} at its centroid (or its widest section), framed on it, the rest of the model faint` : `${sliceName} (a ${role}: its volume places the planes, and the model is drawn in full), framed on it`;
         } else warnings.push(`slice ${sliceName}: no such step or object with a surface; the slices cut through the model's centre`);
       }
       // A default plane that lies on a face (a 0.25-thick disc cut at y = 0.25) draws that face as outline, not as a
@@ -1486,7 +1486,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "sheet.png": `perspective, front, right and top views with grids${focusNote}`,
     "persp.png": "perspective view", "front.png": "front view (from +z)", "right.png": "right view (from +x)", "top.png": "top view (from +y)",
     "back.png": "back view", "left.png": "left view", "bottom.png": "bottom view",
-    "slices.png": sliceNote ? `cross-sections through ${sliceNote} at its centroid (or its widest section), framed on it, the rest of the model faint` : "cross-sections through the centre on each axis",
+    "slices.png": sliceNote ? `cross-sections through ${sliceNote}` : "cross-sections through the centre on each axis",
     "steps.png": "one thumbnail per named shape, in program order; red frames are not in the output",
     "callouts.png": "the perspective view with the largest visible steps named, a leader line from each label to its part",
     "turntable.png": "eight views around the model",
@@ -1582,7 +1582,7 @@ export function roleLabel(role: StepRole | undefined): string {
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */
 export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false): string[] {
   const lines: string[] = [];
-  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}${evaluation.lights.length >= 2 ? " (lights.png shows each alone)" : ""}`);
+  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}${evaluation.lights.length >= 2 ? " (lights.png shows each alone, and what each adds)" : ""}`);
   if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
   if (environment) lines.push(`Environment: ${environment}`);
   return lines;
