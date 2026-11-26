@@ -101,9 +101,10 @@ class Parser {
         return { type: "set", key, value: { type: "ident", name: w.value, line: w.line }, line: t.line };
       }
       const value = this.expr();
-      // More than one value is a list: `set bed 220 220 250` (commas allowed between them).
+      // More than one value is a list: `set bed 220 220 250` (commas allowed between them). The values end where the
+      // statement does, at a newline or at the `}` closing a one-line loop (`for i in [1] { set grid 64 }`).
       const more: Expr[] = [];
-      while (!this.at("newline") && !this.at("eof")) {
+      while (!this.at("newline") && !this.at("eof") && !this.atOp("}")) {
         if (this.atOp(",")) this.next();
         more.push(this.expr());
       }

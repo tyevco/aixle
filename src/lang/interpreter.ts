@@ -20,6 +20,8 @@ import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, t
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "units"]);
+/** Settings whose value is several numbers: `set bed 220 220 250` or `set bed [220, 220, 250]`. */
+const LIST_SETTINGS = new Set(["bed"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
@@ -1057,6 +1059,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // `set pose reading` and `set focus lid` name things; a bare word there is the name, not a variable read.
         const v = many ?? (stmt.value.type === "ident" && NAME_SETTINGS.has(stmt.key) ? stmt.value.name : evalExpr(stmt.value, scope));
         if (Array.isArray(v)) {
+          // Only the bed is several numbers; every other setting is read as one, and a list there would be read as
+          // nothing (`set grid 64 128` meshed at a grid of NaN and found no surface).
+          if (!LIST_SETTINGS.has(stmt.key)) throw new RuntimeError(`set ${stmt.key}: expected one value, a number or a name (only ${[...LIST_SETTINGS].map((k) => `set ${k}`).join(", ")} takes several)`, stmt.line);
           if (!v.every((x) => typeof x === "number")) throw new RuntimeError(`set ${stmt.key}: expected numbers`, stmt.line);
           settings[stmt.key] = v as number[];
           return;

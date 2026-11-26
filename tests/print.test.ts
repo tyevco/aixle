@@ -159,6 +159,14 @@ describe("set units and set bed", () => {
     expect(check("set units ft\nm = box(1)").warnings.join()).toMatch(/set units ft: no such unit; a unit can be mm, cm, m, in/);
     expect(check("set bed 200 200\nm = box(1)").warnings.join()).toMatch(/set bed 200 200: the bed is the printer's build volume as three numbers/);
   });
+  it("takes several values for the bed only, and ends a set at the brace of a one-line loop", () => {
+    // A set inside a one-line loop parsed before several values did, and still does.
+    expect(check("for i in [1] { set grid 64 }\nm = box(1)").settings.grid).toBe(64);
+    expect(check("for i in [1] { set bed 220 220 250 }\nm = box(1)").settings.bed).toEqual([220, 220, 250]);
+    // Every other setting is one value: a list there was stored and read as NaN (a grid of NaN meshed nothing).
+    expect(() => check("set grid 64 128\nm = box(1)")).toThrow(/set grid: expected one value, a number or a name \(only set bed takes several\)/);
+    expect(() => check("set size [256]\nm = box(1)")).toThrow(/set size: expected one value/);
+  });
   it("a render reports the print, warns when it does not fit the bed, and writes the 3MF and a millimetre STL", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
