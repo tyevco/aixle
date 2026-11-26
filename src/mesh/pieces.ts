@@ -2,15 +2,20 @@ import type { Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "./surfaceNets.js";
 import { analyse, isSpeck, type Physics } from "./physics.js";
 import { boundsSize, isEmpty } from "../sdf/types.js";
+import type { Mesh } from "./mesh.js";
 
 /** A shape meshed at a resolution and analysed: what pieces(), overhang() and a failing pieces() promise all read. */
 export interface MeshedAnalysis {
   physics: Physics;
   cell: number;
+  /** The mesh itself and the mesher's own cell, for a query that reads the surface rather than the analysis (wall()). */
+  mesh: Mesh;
+  meshCell: number;
 }
 
 /**
- * One analysis per shape and resolution, shared by every query on that shape in one evaluation: `pieces(hub)` and
+ * One analysis per shape and resolution, shared by every query on that shape in one evaluation (`wall()` reads its
+ * mesh): `pieces(hub)` and
  * `overhang(hub)` at grid 160 meshed the hub twice, and a failing `pieces()` a third time to name its loose piece
  * (round 10: check took 4.9 s on a small flange). Keyed by the shape itself, which never changes once built, so a
  * shape posed by a different evaluation is a different key.
@@ -28,7 +33,7 @@ export function meshedAnalysis(shape: Shape3, resolution = 64, cache?: MeshCache
   if (nets.mesh.indices.length) {
     const size = boundsSize(shape.bounds);
     const cell = Math.max(size[0], size[1], size[2]) / resolution;
-    out = { physics: analyse(nets.mesh, cell), cell };
+    out = { physics: analyse(nets.mesh, cell), cell, mesh: nets.mesh, meshCell: nets.cellSize };
   }
   if (cache) {
     if (byRes) byRes.set(resolution, out);

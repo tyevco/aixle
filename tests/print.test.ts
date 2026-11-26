@@ -6,6 +6,7 @@ import { inflateRawSync } from "node:zlib";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { countPieces, type MeshCache } from "../src/mesh/pieces.js";
 import { bedFit, boxCorners, supportVolume, thinnestWall, wallThickness } from "../src/mesh/print.js";
 import { to3mf } from "../src/export/threemf.js";
 import { unzip, zip } from "../src/export/zip.js";
@@ -39,6 +40,18 @@ describe("wall thickness", () => {
     const r = thinnestWall(plate, 64);
     expect(r.thickness).toBeCloseTo(0.02, 2);
     expect(Math.abs(r.at![0])).toBeLessThan(0.02);
+  });
+  it("reads the evaluation's mesh when pieces() already meshed the shape at that grid, with the same result", () => {
+    // A program promising one piece and a wall meshed the cup twice: 3.0 s for check at grid 160, 2.0 s shared.
+    const build = () => O.difference(O.move(P.cylinder(1.2, 2.4), 0, 1.2, 0), O.move(P.cylinder(1.06, 2.4), 0, 1.4, 0));
+    const cache: MeshCache = new Map();
+    const shared = build();
+    expect(countPieces(shared, 96, cache)).toBe(1);
+    const meshed = cache.get(shared)!.get(96)!.mesh;
+    expect(thinnestWall(shared, 96, cache)).toEqual(thinnestWall(build(), 96));
+    // Nothing was meshed again: the one entry is the mesh pieces() made.
+    expect(cache.get(shared)!.size).toBe(1);
+    expect(cache.get(shared)!.get(96)!.mesh).toBe(meshed);
   });
 });
 

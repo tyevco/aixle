@@ -412,8 +412,8 @@ the point the two share or, when they share nothing, whether they touch,
 stand apart or overlap more thinly than the lattice resolves, which is
 the clearance between them read at its closest pair. The meshing
 queries share their work: one evaluation keeps a mesh and its analysis
-per shape and grid, so `pieces(hub)` and `overhang(hub)` mesh the hub
-once, and a failing `pieces()` names its loose piece from that same
+per shape and grid, so `pieces(hub)`, `overhang(hub)` and `wall(hub)`
+mesh the hub once, and a failing `pieces()` names its loose piece from that same
 mesh (round 10's hub: `check` from 3.9 s to 2.5 s). The cache is keyed
 by the shape object, which never changes once built, so it needs no
 invalidation, and an evaluation in another pose has shapes of its own.

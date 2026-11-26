@@ -21,6 +21,7 @@ import { isEmpty, boundsSize } from "../sdf/types.js";
 import { hull2 } from "./physics.js";
 import { weldIndices, type Mesh } from "./mesh.js";
 import { surfaceNets } from "./surfaceNets.js";
+import { meshedAnalysis, type MeshCache } from "./pieces.js";
 
 /** Millimetres in one model unit, for `set units`. */
 export const UNITS: Record<string, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
@@ -269,14 +270,17 @@ export function boxCorners(min: ArrayLike<number>, max: ArrayLike<number>): numb
  * everywhere, which the mesh and so the print drop), with `empty` saying so: a promise of a wall then fails rather
  * than holding of nothing. Infinity when there is a surface but no ray found a far side.
  */
-export function thinnestWall(shape: Shape3, resolution = 64): WallQuery {
+export function thinnestWall(shape: Shape3, resolution = 64, cache?: MeshCache): WallQuery {
   const res = Math.max(8, Math.round(resolution));
   const memo = WALLS.get(shape);
   const hit = memo?.get(res);
   if (hit) return hit;
   let r: WallQuery = { thickness: 0, empty: { cellSize: 0 } };
   if (!isEmpty(shape.bounds)) {
-    const nets = surfaceNets(shape, { resolution: res });
+    // The evaluation's mesh when pieces() or overhang() already meshed this shape at this grid, so a program that
+    // promises one piece and a wall meshes once.
+    const shared = cache ? meshedAnalysis(shape, res, cache) : null;
+    const nets = shared ? { mesh: shared.mesh, cellSize: shared.meshCell } : surfaceNets(shape, { resolution: res });
     if (nets.mesh.indices.length) {
       const w = wallThickness(shape, nets.mesh, nets.cellSize);
       r = w.thinnest ? { thickness: w.thinnest.thickness, at: w.thinnest.at, to: w.thinnest.to } : { thickness: Infinity };
