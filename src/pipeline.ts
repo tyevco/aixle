@@ -1337,7 +1337,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
             if (best < hidden - 0.2) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}; from azimuth ${fmt(((bestAz % 360) + 360) % 360)} it is ${Math.round(best * 100)}%`);
           }
         }
-        time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(b)}`));
+        // An unfocused shot gives the model's size as beauty.png does, the mesh's extent held within the bounds.
+        time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(!r && shownSize ? shownSize : b)}`));
       }
     }
   }
