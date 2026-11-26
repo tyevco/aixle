@@ -192,21 +192,28 @@ export interface BedFit {
   size: Vec3;
   /** Fits as it stands, square to the bed. */
   fits: boolean;
-  /** When it does not fit square: the smallest turn about the vertical, in degrees, at which it does, if any. */
+  /**
+   * When it does not fit square: the smallest turn about the vertical at which it does, if any, in degrees as
+   * `rotate(y=)` turns (counter-clockwise seen from above, as a slicer turns about z), -89 to 90.
+   */
   turned?: number;
   /** When it fits neither way standing: an axis that, turned up, makes it fit ("x" or "z" up: lying on its side). */
   lying?: { up: "x" | "z"; turned: number };
 }
 
-/** The best turn (0..179 degrees) at which a set of points on the plate fits w by d; undefined when none does. */
+/**
+ * The smallest turn at which a set of points on the plate fits w by d, tried 0, 1, -1, 2, -2 ... 90 degrees (a half
+ * turn more is the same footprint), each as `rotate(y=deg)` turns (x, z); undefined when none does.
+ */
 function turnToFit(pts: [number, number][], w: number, dd: number): number | undefined {
   const hull = hull2(pts);
   if (!hull.length) return 0;
-  for (let deg = 0; deg < 180; deg++) {
+  for (let k = 0; k < 180; k++) {
+    const deg = k === 0 ? 0 : k % 2 ? (k + 1) / 2 : -k / 2;
     const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const [x, z] of hull) {
-      const u = x * c - z * s, v = x * s + z * c;
+      const u = x * c + z * s, v = -x * s + z * c;
       x0 = Math.min(x0, u); x1 = Math.max(x1, u); z0 = Math.min(z0, v); z1 = Math.max(z1, v);
     }
     if (x1 - x0 <= w && z1 - z0 <= dd) return deg;

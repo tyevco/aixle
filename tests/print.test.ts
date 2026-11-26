@@ -77,6 +77,20 @@ describe("the bed", () => {
     // Units scale the points: 25 cm is 250 mm.
     expect(bedFit(boxCorners([0, 0, 0], [25, 1, 1]), 10, [200, 200, 200]).turned).toBeDefined();
   });
+  it("gives the smallest turn, in the direction rotate(y=) turns, so turning the model by it makes it fit", () => {
+    // A bar 250 long at rotate(y=30) fits a 200 bed across the diagonal: turned on by 8 to 22 degrees, or back by
+    // 68 to 82. The answer was 69, meant the other way: rotate(y=69) as the report said made it 248 deep.
+    const bar = (deg: number) => O.rotate(P.box(250, 10, 10), 0, deg, 0);
+    const fitOf = (deg: number) => bedFit(surfaceNets(bar(deg), { resolution: 96 }).mesh.positions, 1, [200, 200, 200]);
+    const t = fitOf(30).turned!;
+    expect(t).toBeGreaterThan(7);
+    expect(t).toBeLessThan(23);
+    expect(fitOf(30 + t).fits).toBe(true);
+    // The mirror image turns the other way (by as much, to a degree: the mesh is not quite symmetric).
+    const m = fitOf(-30).turned!;
+    expect(Math.abs(m + t)).toBeLessThanOrEqual(1);
+    expect(fitOf(-30 + m).fits).toBe(true);
+  });
 });
 
 describe("3MF and STL", () => {
@@ -176,12 +190,12 @@ describe("set units and set bed", () => {
       expect(r.report).toMatch(/\| Units \| cm: one unit is a centimetre \(10 mm\) \|/);
       expect(r.report).toMatch(/\| Size \| 40 × 10 × 20 mm/);
       // 40 mm long on a 36 mm plate: turned across it, it fits, so that is said and not warned.
-      expect(r.report).toMatch(/\| Bed \| does not fit the 36 × 36 × 30 mm bed square \(40 wide for 36\); turned \d+° about the vertical on the plate, it fits \|/);
+      expect(r.report).toMatch(/\| Bed \| does not fit the 36 × 36 × 30 mm bed square \(40 wide for 36\); turned (-?\d+)° about the vertical on the plate \(as rotate\(y=\1\) turns it, counter-clockwise seen from above\), it fits \|/);
       expect(r.warnings.join()).not.toMatch(/does not fit/);
       expect(r.report).toMatch(/\| Thinnest wall \| 10 mm \(1 units, [\d.]+ cells\) at /);
       expect(r.report).toMatch(/\| Supports \| none/);
       expect(r.report).toMatch(/\| Material \| (7\.9\d|8) cm³ solid/);
-      expect(r.report).toMatch(/\| Summary \| one piece, watertight, fits the bed turned \d+° \|/);
+      expect(r.report).toMatch(/\| Summary \| one piece, watertight, fits the bed turned -?\d+° \|/);
       const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
       expect(json.print.units).toBe("cm");
       expect(json.print.wall.thickness).toBeCloseTo(1, 2);

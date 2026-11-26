@@ -891,7 +891,8 @@ overhangs (faces down more than 45°, which a printer would need support
 under). The Print section has what a slicer's user asks first: a
 summary line, the unit (or that it was assumed), the size in
 millimetres, the bed (fits; does not fit square, but turned so many
-degrees on the plate it does; only lying on its side; not at all), the
+degrees on the plate it does, the smallest turn, in degrees as
+`rotate(y=)` turns; only lying on its side; not at all), the
 thinnest wall with where it is and the steps on both sides of it, the
 support volume under the overhangs (standing on the plate and on the
 model, the tallest column and where, an upper estimate since a slicer

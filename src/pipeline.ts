@@ -814,7 +814,7 @@ export function fitText(fit: BedFit, bed: number[]): string {
   const bedLabel = `the ${bed.map(fmtMm).join(" × ")} mm bed`;
   if (fit.fits) return `fits ${bedLabel}`;
   const over = [fit.size[0] > bed[0] ? `${fmtMm(fit.size[0])} wide for ${fmtMm(bed[0])}` : "", fit.size[1] > bed[1] ? `${fmtMm(fit.size[1])} deep for ${fmtMm(bed[1])}` : "", fit.size[2] > bed[2] ? `${fmtMm(fit.size[2])} tall for ${fmtMm(bed[2])}` : ""].filter(Boolean).join(", ");
-  if (fit.turned !== undefined) return `does not fit ${bedLabel} square (${over}); turned ${fit.turned}° about the vertical on the plate, it fits`;
+  if (fit.turned !== undefined) return `does not fit ${bedLabel} square (${over}); turned ${fit.turned}° about the vertical on the plate (as rotate(y=${fit.turned}) turns it, counter-clockwise seen from above), it fits`;
   if (fit.lying) return `does not fit ${bedLabel} standing (${over}); laid on its side with ${fit.lying.up} up${fit.lying.turned ? ` and turned ${fit.lying.turned}°` : ""}, it fits (the overhangs and supports then change)`;
   return `does not fit ${bedLabel} whichever way it lies (${over}): scale it down, or cut it into parts that each fit`;
 }
