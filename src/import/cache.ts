@@ -35,6 +35,8 @@ export const CACHE_BYTES = 512 * 1024 * 1024;
 const MAGIC = "AIXS";
 const LAYOUT = 1;
 const HEADER = 128;
+/** An entry being written: `<key>.<pid>.samples.tmp`, renamed to `<key>.samples` once whole. */
+const TEMP = /\.\d+\.samples\.tmp$/;
 
 /** The key for a file's samples: its bytes, how they are read, the resolution and the sampler's version. */
 export function importKey(data: Uint8Array, format: "obj" | "glb", resolution: number): string {
@@ -105,8 +107,9 @@ export function diskCache(dirs: string | string[] = cacheDirs(), maxBytes = CACH
       const path = join(dir, name);
       let st;
       try { st = statSync(path); } catch { continue; }
-      // A write that never finished (a run killed mid-write) is removed once it is clearly abandoned.
-      if (name.endsWith(".tmp")) { if (Date.now() - st.mtimeMs > 10 * 60 * 1000) try { unlinkSync(path); } catch { /* gone */ } continue; }
+      // A write that never finished (a run killed mid-write) is removed once it is clearly abandoned: only the cache's
+      // own, since $AIXLE_CACHE_DIR may name a folder other programs keep their .tmp files in.
+      if (TEMP.test(name)) { if (Date.now() - st.mtimeMs > 10 * 60 * 1000) try { unlinkSync(path); } catch { /* gone */ } continue; }
       if (!name.endsWith(".samples")) continue;
       entries.push({ path, size: st.size, time: st.mtimeMs });
       total += st.size;
@@ -139,7 +142,7 @@ export function diskCache(dirs: string | string[] = cacheDirs(), maxBytes = CACH
       for (; at < candidates.length; at++) {
         const dir = candidates[at];
         // Written beside its place and renamed into it, so a reader never sees half an entry.
-        const tmp = join(dir, `${key}.${process.pid}.tmp`);
+        const tmp = join(dir, `${key}.${process.pid}.samples.tmp`);
         try {
           mkdirSync(dir, { recursive: true });
           writeFileSync(tmp, data);

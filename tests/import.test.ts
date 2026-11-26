@@ -194,6 +194,25 @@ describe("the import cache", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("clears only its own abandoned writes from a folder it shares", () => {
+    // AIXLE_CACHE_DIR may name a folder other programs use, such as /tmp: a stale .tmp of theirs is not the cache's.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-cache-"));
+    try {
+      const old = new Date(Date.now() - 3600 * 1000);
+      writeFileSync(join(dir, "notes.tmp"), "someone else's");
+      utimesSync(join(dir, "notes.tmp"), old, old);
+      const key = importKey(Buffer.from("v 0 0 0\n"), "obj", 96);
+      const abandoned = `${key}.12345.samples.tmp`;
+      writeFileSync(join(dir, abandoned), "half an entry");
+      utimesSync(join(dir, abandoned), old, old);
+      expect(diskCache(dir).put(key, samples)).toBeUndefined();
+      expect(existsSync(join(dir, "notes.tmp"))).toBe(true);
+      expect(existsSync(join(dir, abandoned))).toBe(false);
+      expect(readdirSync(dir).sort()).toEqual([`${key}.samples`, "notes.tmp"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("gives check and render the same field and the same files with or without it", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-cache-"));
     try {
