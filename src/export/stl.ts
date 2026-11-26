@@ -4,10 +4,17 @@
  * corners so any viewer agrees with the winding. Little-endian, as every
  * slicer expects: an 80-byte header, a triangle count, then 50 bytes per
  * triangle.
+ *
+ * STL has no unit and slicers read it in millimetres, so the coordinates
+ * are multiplied by `scale`, the millimetres in one model unit (1 when the
+ * program sets no units, which is then what a unit is taken to be). A
+ * slicer's plate is the xy plane with z up: the y-up model is turned a
+ * quarter turn about x, (x, y, z) to (x, -z, y), so it stands on the plate
+ * as it stands on the sheet, its front towards the front of the plate.
  */
 import type { Mesh } from "../mesh/mesh.js";
 
-export function toStl(mesh: Mesh, name = "aixle"): Buffer {
+export function toStl(mesh: Mesh, name = "aixle", scale = 1): Buffer {
   const p = mesh.positions, ix = mesh.indices;
   const count = ix.length / 3;
   const buf = Buffer.alloc(84 + count * 50);
@@ -21,10 +28,10 @@ export function toStl(mesh: Mesh, name = "aixle"): Buffer {
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    buf.writeFloatLE(nx, o); buf.writeFloatLE(ny, o + 4); buf.writeFloatLE(nz, o + 8);
+    buf.writeFloatLE(nx, o); buf.writeFloatLE(-nz, o + 4); buf.writeFloatLE(ny, o + 8);
     o += 12;
     for (const v of [a, b, c]) {
-      buf.writeFloatLE(p[v], o); buf.writeFloatLE(p[v + 1], o + 4); buf.writeFloatLE(p[v + 2], o + 8);
+      buf.writeFloatLE(p[v] * scale, o); buf.writeFloatLE(-p[v + 2] * scale, o + 4); buf.writeFloatLE(p[v + 1] * scale, o + 8);
       o += 12;
     }
     buf.writeUInt16LE(0, o);

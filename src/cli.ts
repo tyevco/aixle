@@ -9,7 +9,9 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, QUICK, run, thinWarnings, type PaintState } from "./pipeline.js";
+import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { bedFit, boxCorners } from "./mesh/print.js";
+import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { exprText } from "./lang/ast.js";
@@ -87,6 +89,7 @@ function usage(): never {
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
+      "                          [--3mf]                             also write model.3mf (written anyway when the program sets units or a bed)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--camera NAME] [--environment NAME]  one declared shot only (the sheet takes its view); a sky over the program's",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
@@ -258,7 +261,25 @@ function main(argv: string[]): number {
       else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
       const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
+      let bedWarning: string | undefined;
       if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units`);
+      // A program that says it is a print (set units, set bed) gets its size in millimetres and the bed's verdict,
+      // from the surface's extent (rays, no mesh); the thinnest wall and the supports are the render's report.
+      if ((ev.settings.units !== undefined || ev.settings.bed !== undefined) && ev.output && !isEmpty(ev.output.bounds)) {
+        const u = printUnits(ev.settings);
+        const bed = printBed(ev.settings);
+        const e = surfaceExtent(ev.output, 48);
+        let fit = bedFit(boxCorners(e.min, e.max), u.mm, bed ?? [Infinity, Infinity, Infinity]);
+        // The box holds the outline but is wider than it turned: a bar across the diagonal fits turned where its box
+        // fits only lying down. When the box does not fit square, the outline is judged turned and lying as the render
+        // judges its own, from a coarse mesh, so check and the report give one verdict and warn alike.
+        if (bed && !fit.fits) {
+          const coarse = surfaceNets(ev.output, { resolution: Math.min(64, Math.max(16, grid)) }).mesh.positions;
+          if (coarse.length) fit = bedFit(coarse, u.mm, bed);
+        }
+        console.log(`print: units ${unitsText(u, fit.size[2])}; ${fit.size.map(fmtMm).join(" × ")} mm (x and z on the plate, y up)${bed ? `; ${fitText(fit, bed)}` : ""}; the report has the thinnest wall and the supports`);
+        if (bed && !fit.fits && fit.turned === undefined) bedWarning = `The model is ${fit.size.map(fmtMm).join(" × ")} mm and ${fitText(fit, bed)}.`;
+      }
       if (ev.output && !isEmpty(ev.output.bounds)) {
         // The surface's lowest point, not the bounds': the note a render would make, without the render.
         const bottom = surfaceBottom(ev.output);
@@ -272,7 +293,7 @@ function main(argv: string[]): number {
       }
       // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
       const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : [])];
+      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : []), ...(bedWarning ? [bedWarning] : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
       if (warnings.length === 0) console.log("no warnings");
       // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike.
@@ -434,6 +455,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       sharp: opts.soft ? false : undefined,
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,
       roblox: opts.roblox ? true : undefined,
+      threemf: opts["3mf"] ? true : undefined,
       minecraft: opts.minecraft === true ? 16 : typeof opts.minecraft === "string" ? Number(opts.minecraft) : undefined,
       minecraftEntity: opts["minecraft-entity"] ? true : undefined,
       texture: opts["no-texture"] ? 0 : typeof opts.texture === "string" ? Number(opts.texture) : undefined,

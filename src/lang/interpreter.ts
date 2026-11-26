@@ -11,6 +11,7 @@ import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
 import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
 import { loosePiece } from "../mesh/pieces.js";
+import { thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -18,7 +19,9 @@ import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type
 import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
-const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment"]);
+const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "units"]);
+/** Settings whose value is several numbers: `set bed 220 220 250` or `set bed [220, 220, 250]`. */
+const LIST_SETTINGS = new Set(["bed"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
@@ -60,7 +63,11 @@ export type StepRole = "part" | "cut" | "mask" | "region";
 export interface Settings {
   grid?: number;
   size?: number;
-  [key: string]: number | string | undefined;
+  /** What one model unit is, for printing: mm, cm, m or in. */
+  units?: string;
+  /** The printer's build volume in millimetres: width (x), depth (z), height (y). */
+  bed?: number[];
+  [key: string]: number | string | number[] | undefined;
 }
 
 export interface EvalOptions {
@@ -221,7 +228,7 @@ export function assertLine(a: AssertResult): string {
 const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
 
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
@@ -769,7 +776,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     // pieces() counts at the program's grid unless told otherwise, so a promise made at rest and the report's Pieces
     // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
-    if ((callee === "pieces" || callee === "overhang") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
+    if ((callee === "pieces" || callee === "overhang" || callee === "wall") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
     const result = callBuiltin(builtin, values, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
     if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
@@ -800,6 +807,16 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
       const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64);
       if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
+    }
+    // A wall() promise says where the thinnest wall is and in which step, so the line to edit is in the message.
+    if (assertDepth > 0 && callee === "wall" && typeof result === "number" && Number.isFinite(result) && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const w = thinnestWall(values[0].value, typeof res === "number" ? res : 64);
+      if (w.empty) witness = w.empty.cellSize > 0 ? `no surface at a cell of ${Number(w.empty.cellSize.toPrecision(3))}: the shape is empty or thinner than a cell everywhere, so there is no wall to measure (or to print)` : "the shape is empty: there is no wall to measure";
+      else if (w.at && w.to) {
+        const mid: Vec3 = [(w.at[0] + w.to[0]) / 2, (w.at[1] + w.to[1]) / 2, (w.at[2] + w.to[2]) / 2];
+        witness = `thinnest at (${w.at.map(fmt3).join(", ")})${stepAt(mid, [], values[0].value)}`;
+      }
     }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
     // beside the wrong part).
@@ -1099,8 +1116,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "set": {
+        // Several values, or a list, are a list of numbers: `set bed 220 220 250`, `set bed [220, 220, 250]`.
+        const many = stmt.values ? stmt.values.map((e) => evalExpr(e, scope)) : undefined;
         // `set pose reading` and `set focus lid` name things; a bare word there is the name, not a variable read.
-        const v = stmt.value.type === "ident" && NAME_SETTINGS.has(stmt.key) ? stmt.value.name : evalExpr(stmt.value, scope);
+        const v = many ?? (stmt.value.type === "ident" && NAME_SETTINGS.has(stmt.key) ? stmt.value.name : evalExpr(stmt.value, scope));
+        if (Array.isArray(v)) {
+          // Only the bed is several numbers; every other setting is read as one, and a list there would be read as
+          // nothing (`set grid 64 128` meshed at a grid of NaN and found no surface).
+          if (!LIST_SETTINGS.has(stmt.key)) throw new RuntimeError(`set ${stmt.key}: expected one value, a number or a name (only ${[...LIST_SETTINGS].map((k) => `set ${k}`).join(", ")} takes several)`, stmt.line);
+          if (!v.every((x) => typeof x === "number")) throw new RuntimeError(`set ${stmt.key}: expected numbers`, stmt.line);
+          settings[stmt.key] = v as number[];
+          return;
+        }
         if (typeof v !== "number" && typeof v !== "string") throw new RuntimeError(`set ${stmt.key}: expected a number or a string`, stmt.line);
         settings[stmt.key] = v;
         return;
@@ -1176,6 +1203,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (a.pose && a.pose !== "rest" && !poses.some((p) => p.name === a.pose)) warnings.push(`assert (line ${a.line}) is for pose "${a.pose}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}; it is never tested`);
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
     // A sky the renderer has, a shot the program declared.
+    // What a unit is and the printer's bed, for the report's Print section and the 3MF.
+    if (settings.units !== undefined && !Object.hasOwn(UNITS, String(settings.units))) warnings.push(`set units ${settings.units}: no such unit; a unit can be ${Object.keys(UNITS).join(", ")} (millimetres are assumed when units are not set)`);
+    if (settings.bed !== undefined && !(Array.isArray(settings.bed) && settings.bed.length === 3 && settings.bed.every((v) => v > 0))) warnings.push(`set bed ${Array.isArray(settings.bed) ? settings.bed.join(" ") : settings.bed}: the bed is the printer's build volume as three numbers in millimetres, width, depth and height (set bed 220 220 250)`);
     if (settings.environment !== undefined && !ENVIRONMENT_NAMES.includes(String(settings.environment))) warnings.push(`set environment ${settings.environment}: no such environment; the skies are ${ENVIRONMENT_NAMES.join(", ")} (studio is the default)`);
     if (typeof settings.camera === "string" && !cameras.some((c) => c.name === settings.camera)) warnings.push(`set camera ${settings.camera}: no such camera${cameras.length ? `; cameras: ${cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; the render uses its own view`);
     for (const c of cameras) if (c.focus && !steps.has(c.focus) && !(shown?.names ?? []).includes(c.focus)) warnings.push(`camera "${c.name}" (line ${c.line}): focus="${c.focus}" names no step or object; the shot frames the whole model`);

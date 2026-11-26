@@ -42,7 +42,8 @@ the inside is cut open.
    a thinner rod reaching past both faces, never on the cutter, which is
    empty by construction; `inside` wants the solid, not a shell; a
    failing `void`, `inside` or `overlap` says where and in which step;
-   `assert overhang(part) < 0.05` for a print), and for a rig a promise
+   `assert overhang(part) < 0.05` and `assert wall(model) > 0.8` for a
+   print), and for a rig a promise
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing
@@ -50,6 +51,14 @@ the inside is cut open.
    what the pictures once showed.
 6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
+   For a print, say what a unit is and what the printer holds (`set units
+   mm`, `set bed 220 220 250` in millimetres): `check` then prints the
+   size in millimetres and whether it fits the bed, and the report's
+   Print section has the thinnest wall and where it is, the support
+   under the overhangs and what rests on the plate; `model.stl` is in
+   millimetres with z up and `model.3mf` carries the unit and the
+   colours. Promise the walls with `assert wall(model) > 0.8` (model
+   units: 0.8 mm is two lines of a 0.4 mm nozzle).
 
 ## The commands
 
@@ -68,6 +77,7 @@ npx aixle render model.aix --focus lid --beauty   the beauty render framed on on
                                            with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png, a sky
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
+npx aixle render model.aix --3mf           also model.3mf (written anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
 npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check fails if it is not

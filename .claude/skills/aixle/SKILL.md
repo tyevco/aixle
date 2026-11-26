@@ -59,7 +59,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    void(cavity, mug)` (nothing pokes into the cup), `assert overlap(frog,
    pad) < 0.001` (on the pad, not sunk in), `assert
    tall(model) < 2.2`, `assert overhang(part) < 0.05` (printable without
-   support). A hole that must go through is `void` on a thin rod past
+   support), `assert wall(model) > 0.8` (walls a 0.4 mm nozzle lays in
+   two lines, with `set units mm`; the number is in model units). A hole that must go through is `void` on a thin rod past
    both faces, not on the cutter (empty by construction); `inside` wants
    the solid, not a shell; a probe step only an assert reads is a region
    and is not warned about. `check` then fails, with the numbers and
@@ -75,7 +76,14 @@ Reference: `docs/reference.md` (every function, generated from the code),
    animations go to `model.animation.json`); `--roblox` when it
    is for Roblox Studio: `model.roblox.glb` facing -Z with an
    `anchor(m, "HatAttachment", ...)` as the attachment, one mesh under
-   4000 triangles for an accessory (`set grid 40`), a unit a stud.
+   4000 triangles for an accessory (`set grid 40`), a unit a stud. For a
+   print, `set units mm` (what one unit is; a millimetre is assumed
+   without) and `set bed 220 220 250` (the build volume in millimetres):
+   `check` prints the size in millimetres and whether it fits, the
+   report's Print section has the thinnest wall and where, the support
+   under the overhangs and what rests on the plate, `model.stl` is in
+   millimetres with z up, and `model.3mf` carries the unit and the
+   materials' colours (`--3mf` without units).
 
 ## Reading the sheet
 
@@ -110,8 +118,9 @@ import("part.obj", size=2)                                                      
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
-pieces(s)  overhang(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b   # measure for assert
+pieces(s)  overhang(s)  wall(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b   # measure for assert
 set grid 200   set size 768   set focus lid   set pose reach   set azimuth 60             # settings (CLI flags override)
+set units mm   set bed 220 220 250                                                       # a print: the report's Print section, model.stl in mm, model.3mf
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")  light("rim", azimuth=150, elevation=20, power=0.5)  light("fire", position=[0, 0.4, 0], range=2)   # several lights, a point light; lights.png shows each alone
 camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky (--camera NAME, --environment NAME|all, --beauty-only for the loop)

@@ -70,6 +70,7 @@ npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
 npx aixle render model.aix --roblox             # also model.roblox.glb for Roblox Studio (facing -Z, _Att attachment nodes)
+npx aixle render model.aix --3mf                # also model.3mf for a slicer (written anyway when the program sets units or a bed)
 npx aixle doc                        # the reference, to stdout
 ```
 
@@ -84,7 +85,8 @@ npx aixle doc                        # the reference, to stdout
 | `turntable.png` | eight views around the model |
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
 | `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |
-| `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set |
+| `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set, in millimetres with z up |
+| `model.3mf` | with `set units`, `set bed` or `--3mf`: the same mesh for a slicer in the program's unit, a colour per triangle from the materials |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
 | `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
 | `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
@@ -93,7 +95,7 @@ npx aixle doc                        # the reference, to stdout
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
 | `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, a bone per object and per joint, with its texture |
 | `model.animation.json` | with `--minecraft` and joints: the animations as Bedrock keyframes on the joint bones |
-| `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings |
+| `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings; and for printing the size in millimetres, whether it fits the bed, the thinnest wall and where, the support under the overhangs |
 
 ## The language in one screen
 
@@ -117,6 +119,7 @@ anchor(part, "tip", x, y, z)   at(part, "tip")   lamp | attach("bottom", arm, "t
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render
+set units mm   set bed 220 220 250   assert wall(model) > 0.8                           # a print: the report's Print section
 decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stripes", axis="x")  # surface paint
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
@@ -126,7 +129,7 @@ a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
   | ground() | center() | paint("wood")
 ```
 
-Units are whatever you say they are; y is up; angles are degrees. Every
+Units are whatever you say they are (`set units mm` for a print); y is up; angles are degrees. Every
 primitive is centred on the origin and stands along y. `a | f(x)` is
 `f(a, x)`. Paint parts before combining them if they should keep different
 materials.

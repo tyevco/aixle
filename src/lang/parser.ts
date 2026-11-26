@@ -96,7 +96,21 @@ class Parser {
     if (t.type === "ident" && t.value === "set") {
       this.next();
       const key = this.expectIdent("a setting name").value;
-      return { type: "set", key, value: this.expr(), line: t.line };
+      // A bare word alone after the key is a name even when it is a keyword: `set units in`.
+      const w = this.peek();
+      if (w.type === "ident" && KEYWORDS.has(w.value) && (this.peek(1).type === "newline" || this.peek(1).type === "eof")) {
+        this.next();
+        return { type: "set", key, value: { type: "ident", name: w.value, line: w.line }, line: t.line };
+      }
+      const value = this.expr();
+      // More than one value is a list: `set bed 220 220 250` (commas allowed between them). The values end where the
+      // statement does, at a newline or at the `}` closing a one-line loop (`for i in [1] { set grid 64 }`).
+      const more: Expr[] = [];
+      while (!this.at("newline") && !this.at("eof") && !this.atOp("}")) {
+        if (this.atOp(",")) this.next();
+        more.push(this.expr());
+      }
+      return more.length ? { type: "set", key, value, values: [value, ...more], line: t.line } : { type: "set", key, value, line: t.line };
     }
     if (t.type === "ident" && t.value === "use") {
       this.next();

@@ -67,26 +67,77 @@ scene's cell with no warning) is answered; the anchors a library def should carr
 place it without reading it (proposal 1, now built) are the next thing
 to add to the shipped parts.
 
-## 4. Printing: STL, hollowing, a print report
+## 4. Printing: STL, hollowing, a print report: built
 
-**Why.** Round 4's bar was print-readiness, and the pieces, cavity,
-watertight, stands and overhang checks exist, as do `model.stl` and
-`hollow(shape, wall, x, y, z)` (built for that round); what is missing
-is the report a slicer's user wants before opening it.
+`set units mm|cm|m|in` says what one model unit is (a millimetre is
+assumed without it, which is what a slicer reads an STL as, and the
+report says so with the height that would print) and `set bed W D H` is
+the printer's build volume in millimetres. Every full render's report has
+a Print section: a summary, the unit, the size in millimetres, whether it
+fits the bed square, turned about the vertical on the plate (the hull of
+the vertices, turned a degree at a time), or only lying on a side, the
+thinnest wall with where it is and the steps there (named as the
+watertight row names an open edge), the support under the overhangs (a
+ray straight down from every face the Overhangs row counts, to the plate
+or the model below, its height times the face's area on the plate, split
+into the part standing on the plate and the part on the model), what
+rests flat on the plate, and the material in cubic centimetres and grams
+of PLA. A bed the model fits neither square nor turned is a warning;
+`check` prints the size and the bed's verdict from the surface's extent
+(and a coarse mesh's outline when that box does not fit square) when a
+program sets units or a bed. `wall(shape)` is the thinnest wall as
+a query, for `assert wall(model) > 0.8`. `model.stl` is written in
+millimetres with z up (it was y up, so a slicer laid every model on its
+back), and `model.3mf` beside it when the program sets units or a bed or
+`--3mf` asks: the program's own unit, the welded mesh, and a
+`basematerials` group with a display colour per material that every
+triangle names, in a zip written with Node's zlib (stored and deflated
+entries, a CRC each, a fixed date so it is reproducible). Open edges
+between two named steps now say how far apart their surfaces are there,
+or how far one reaches into the other, which round 4 asked for.
 
-**What.** A print section in the report: minimum wall thickness found
-(from the feature sizes and the mesh), support volume estimate from the
-overhang faces, whether it fits a named bed (`set bed 200 200 200`), and
-the unit assumed (`set units mm`). Round 4 also asked for the distance
-between the two surfaces at an open edge ("the barrel's side is 0.03
-from the bracket's top"), which the same inward-ray pass can give.
+Prototyped as asked: whether the inward-ray wall agrees with the feature
+sizes. The ray runs from each vertex along the field's gradient, marched
+in the field (so a wall under a cell is read at its own thickness), and
+counts where the far side faces back within 30 degrees. At the default
+grid of each example:
 
-**How.** The print report reads what physics already computes plus one
-pass over the mesh for the thinnest local wall (ray from each vertex
-inward along its normal).
+| Example | Feature size `check` knows | Thinnest wall by rays | Where | Rays, ms |
+| --- | --- | --- | --- | --- |
+| lamp | 0.1 (`stem`) | 0.1 | the stem | 32972, 957 |
+| robot | 0.08 (`mouth`) | 0.08 | the mouth | 20116, 277 |
+| table | 0.05 (a chair's slat) | 0.05 | a chair | 38760, 1139 |
+| stairs | 0.06 (`post`) | 0.06 | a stair | 33703, 2112 |
+| chest | 0.0625 (`band`) | 0.0625 | the lock's band | 38281, 537 |
+| medal | 0.06 (`under_text`'s stroke) | 0.0564 | the lower lettering | 20995, 683 |
+| tin | 0.06 (`lid_top`) | 0.215 | the knob | 32463, 331 |
+| mug | none | 0.131 | the rim, cup wall to the rounded edge | 32139, 184 |
+| tumbler | 0.18 (`straw`) | 0.164 | the glass's foot, inner wall to outer | 28040, 324 |
+| teapot | 0.12 (`pot`'s shell) | 0.08 | the spout, a tube minus a tube | 26946, 379 |
+| vase | 0.28 (`flute`) | 0.062 | the wall left behind a flute | 31419, 676 |
+| nameplate | 0.05 (`title`'s stroke) | 0.02 | the floor the engraving leaves | 25823, 517 |
+| sign | 0.09 (`line`'s stroke) | 0.008 | a sliver between two engraved letters | 25082, 694 |
 
-**Must prototype.** Whether the inward-ray wall thickness agrees with
-the feature sizes on the examples.
+Where a step carries its thickness (a shell, a slat, a tube, a stroke),
+the two agree to within 6% in six of six; the tin's 0.06 disc is fused to
+the lid below it, so no wall there is 0.06 thick, and the rays say so.
+Where the thinnest wall is made by a cut, the feature size cannot see it
+and the rays find it: the vase's flutes leave 0.06 of a 0.15 wall, the
+teapot's spout is 0.08 thick, the nameplate's engraving leaves a 0.02
+floor and the sign's leaves a 0.008 sliver between two letters, a fifth
+of a cell. The reading does not move with the grid: the teapot's spout is
+0.08 at grids 48, 64, 128 and 256 (0.6 to 3.2 cells), the vase's flute
+wall 0.060 to 0.062. At 45 degrees the medal's star points (43 degrees)
+and the sliver of rim under the mug's rounding read a third of a cell, so
+the angle is 30. A full report adds 0.2 to 2 s for the walls (40000 rays
+at most, the stairs' field being the slowest) and under 0.05 s for the
+supports; the 3MF of the mug, 128556 triangles, is 1.2 MB and takes 0.4 s.
+
+Not built: one 3MF object per scene object (the file holds the fused
+mesh, as the STL does), a hollowing pass that picks the wall and the
+drain itself (`hollow()` is still the program's choice), support that
+counts a short bridge as needing none, and an orientation search that
+turns the model to need the least support.
 
 ## 5. Smooth 2D profiles: built
 
@@ -234,7 +285,6 @@ It is a printer over the dependencies the evaluation records. Not built:
   Not built: string keys, and iterating a record's fields.
 - An import cache keyed by the file's hash, so `check` and `render` do
   not both sample a large mesh.
-- A `--stl`-style `--3mf` for slicers that want units and colours.
 - Mesh decimation for web exports.
 - A per-step slice (round 10).
 
