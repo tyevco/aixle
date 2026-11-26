@@ -225,9 +225,10 @@ all-glass step's thumbnail is drawn solid; a half-space turned on its
 way into an `&` is a mask; the callouts line names the steps not seen;
 the quick sheet's title is the surface's extent held within the bounds
 (it said 0.51 for a 0.5-tall flange); `set caption 0` leaves the caption
-off a presentation copy. Not built: a warning when `rotate(y=)` turns a
-part that is round about y before a `ring` (documented instead, since
-the tool cannot know the part is round), a slice plane chosen to show a
+off a presentation copy; a turn about a ring's axis just before the
+ring that leaves a round part as it was is warned about (sampled: the
+field read at 125 points of the part's box and at the same points
+turned). Not built: a slice plane chosen to show a
 contact rather than a section (the centroid shows the stem; whether it
 meets the soil is still read, not computed), and a `--focus` whose
 slices use the centroid rule (they still cut through the frame's

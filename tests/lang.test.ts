@@ -329,6 +329,13 @@ describe("interpreter", () => {
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
     expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
   });
+  it("warns when a part round about the ring's axis is turned just before the ring, which turns nothing (round 10)", () => {
+    const ev = run('pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0) | rotate(y=30)\npockets = pocket | ring(6, 0.7)\nslot = box(0.3, 0.1, 0.1) | rotate(y=30)\nslots = slot | ring(6, 0.7)\nright = cylinder(0.1, 0.3) | ring(6, 0.7) | rotate(y=30)\nshow pockets + slots + right');
+    expect(ev.warnings.filter((w) => /ring\(\)/.test(w))).toEqual([expect.stringMatching(/^line 2: ring\(\): 'pocket' was turned about y by 30 just before the ring, which leaves it as it was .* rotate after it: \.\.\. \| ring\(\.\.\.\) \| rotate\(y=30\)$/)]);
+    // Inline, and about the ring's own axis only.
+    expect(run('a = cylinder(0.1, 0.3) | rotate(y=45) | ring(4, 1)\nshow a').warnings.join()).toMatch(/line 1: ring\(\): the part was turned about y by 45/);
+    expect(run('a = cylinder(0.1, 0.3) | rotate(x=45) | ring(4, 1)\nshow a').warnings.join()).not.toMatch(/ring\(\)/);
+  });
   it("says why an overlap is nothing, and which copy of a ring of probes a void failure is in (round 10)", () => {
     // A board whose back face lies exactly on the wall's front only touches; one held off stands apart.
     const ev = run('wall = box(2, 1, 0.2)\nboard = box(0.6, 0.3, 0.05) | move(0, 0, 0.125)\nfar = box(0.6, 0.3, 0.05) | move(0, 0, 0.2)\nassert overlap(board, wall) > 0.002\nassert overlap(far, wall) > 0.002\nshow wall + board + far');

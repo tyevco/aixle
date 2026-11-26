@@ -162,7 +162,8 @@ ring turns it in place, which does nothing to a round part centred on the
 axis: copies between another ring's copies come from turning the ring,
 `pockets = pocket | ring(6, 0.7) | rotate(y=30)` beside `holes = hole |
 ring(6, 0.7)` (a hub's pockets once landed on its holes as `pocket |
-rotate(y=30) | ring(6, 0.7)`).
+rotate(y=30) | ring(6, 0.7)`, and `check` now warns when a turn just
+before a ring leaves the part as it was).
 
 **Bounds** are boxes: exact for primitives and unions, loose after a cut
 (`a - b` keeps a's box however much was removed), a rotation or a twist;

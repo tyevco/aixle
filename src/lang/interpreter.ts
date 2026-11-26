@@ -264,6 +264,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // One mesh per shape and resolution for this evaluation's pieces() and overhang() (and a failing pieces()'s loose
   // piece): measured on round 10's hub, check fell from 3.9 s to 2.5 s when the two queries shared the hub's mesh.
   const meshes: MeshCache = new Map();
+  // Each top-level step's expression, for a warning that reads how a step was built (a turn before a ring).
+  const topAssigns = new Map<string, Expr>();
   // Whether this evaluation is a pose: any joint given a pose that is not rest.
   const posed = Object.values(options.jointPoses ?? {}).some((j) => j.angles.some((v) => v !== 0) || j.move.some((v) => v !== 0) || j.scale.some((v) => v !== 1));
   // Inside an assert's test, where a query in a pose reads a step where the pose put it; geometry built from a
@@ -722,6 +724,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
     if ((callee === "pieces" || callee === "overhang") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
     const result = callBuiltin(builtin, values, line);
+    if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
     if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const c = clearanceAt(values[0].value, values[1].value);
@@ -920,6 +923,43 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     (currentStep.cutDeps ??= new Set()).add(name);
   }
 
+  /**
+   * `pocket | rotate(y=30) | ring(6, 0.7)` meant the ring turned half a pitch, but a ring pushes each copy out along +x
+   * first, so the turn only spins each copy in place, which a part round about the axis does not show: the pockets
+   * landed on the holes (round 10). Said when the part given to ring was turned about the ring's own axis just
+   * before, and the turn left its field as it was (sampled over its box).
+   */
+  function ringTurnedInPlace(args: Arg[], values: { name?: string; value: Value }[], scope: Scope, line: number): void {
+    const positional = args.filter((a) => !a.name);
+    let e: Expr | undefined = positional[0]?.value;
+    const from = e?.type === "ident" ? e.name : undefined;
+    if (e?.type === "ident") e = topAssigns.get(e.name);
+    if (!e || e.type !== "call" || e.callee !== "rotate" || !e.piped) return;
+    const axisValue = values.find((v) => v.name === "axis")?.value ?? values.filter((v) => !v.name)[3]?.value ?? "y";
+    if (axisValue !== "x" && axisValue !== "y" && axisValue !== "z") return;
+    const turns = e.args.filter((a) => a.name === "x" || a.name === "y" || a.name === "z");
+    if (turns.length !== 1 || turns[0].name !== axisValue || e.args.some((a, i) => i > 0 && !a.name)) return;
+    let deg: Value;
+    try { deg = evalExpr(turns[0].value, scope); } catch { return; }
+    if (typeof deg !== "number" || Math.abs(deg % 360) < 1e-9) return;
+    const shape = values[0].value as Shape3;
+    if (isEmpty(shape.bounds)) return;
+    const b = shape.bounds, size = boundsSize(b);
+    const tol = Math.max(...size) * 1e-6;
+    const r = (deg * Math.PI) / 180, c = Math.cos(r), sn = Math.sin(r);
+    const k = "xyz".indexOf(axisValue), u = (k + 1) % 3, w = (k + 2) % 3;
+    for (let i = 0; i <= 4; i++)
+      for (let j = 0; j <= 4; j++)
+        for (let l = 0; l <= 4; l++) {
+          const p = [b.min[0] + (size[0] * (i + 0.37)) / 4.5, b.min[1] + (size[1] * (j + 0.37)) / 4.5, b.min[2] + (size[2] * (l + 0.37)) / 4.5];
+          const q = [...p];
+          q[u] = p[u] * c - p[w] * sn;
+          q[w] = p[u] * sn + p[w] * c;
+          if (Math.abs(shape.dist(p[0], p[1], p[2]) - shape.dist(q[0], q[1], q[2])) > tol) return;
+        }
+    warnings.push(`line ${line}: ring(): ${from ? `'${from}' was` : "the part was"} turned about ${axisValue} by ${fmt3(deg)} just before the ring, which leaves it as it was (it is round about that axis), so every copy sits where an unturned one would; ring pushes each copy out along +x before turning it, so to turn the whole ring, rotate after it: ... | ring(...) | rotate(${axisValue}=${fmt3(deg)})`);
+  }
+
   /** Which copy of a region made of copies (a ring of probe rods) holds a point, or which named part: for a void failure. */
   function regionPart(region: Shape3, p: Vec3, regionText: string): string {
     const parts = region.parts;
@@ -1111,6 +1151,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   let showDeps: Set<string> = new Set();
+  for (const stmt of program.body) if (stmt.type === "assign") topAssigns.set(stmt.name, stmt.value);
   for (const stmt of program.body) exec(stmt, global, true);
 
   let outputName = "model";
