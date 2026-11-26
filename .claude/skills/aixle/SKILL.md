@@ -73,7 +73,13 @@ Reference: `docs/reference.md` (every function, generated from the code),
    animations go to `model.animation.json`); `--roblox` when it
    is for Roblox Studio: `model.roblox.glb` facing -Z with an
    `anchor(m, "HatAttachment", ...)` as the attachment, one mesh under
-   4000 triangles for an accessory (`set grid 40`), a unit a stud.
+   4000 triangles for an accessory (`set grid 40`), a unit a stud. The
+   GLB, OBJ and viewer are decimated past 200 thousand triangles
+   (`--triangles N` or `set triangles N`, 0 for all; the report's
+   Exports row says how far they stray; below a quarter of the mesh
+   curved bands shade in streaks, so read the viewer). An `import()` is
+   sampled once and cached on disk for the next `check` or `render`
+   (`--no-cache` samples afresh).
 
 ## Reading the sheet
 

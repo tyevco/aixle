@@ -68,9 +68,14 @@ npx aixle render model.aix --focus lid --beauty   the beauty render framed on on
                                            with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png, a sky
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
+npx aixle render model.aix --triangles 50000   a lighter GLB, OBJ and viewer, decimated (default cap 200000; 0 keeps every triangle)
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
 ```
+
+An `import()` is sampled once per file and resolution and cached on
+disk, so `check` and the `render` after it do not both pay for a large
+mesh; `--no-cache` samples afresh.
 
 ## Reading the sheet
 
@@ -159,7 +164,10 @@ When the model is right, `npx aixle render model.aix --beauty` adds
 checking; `viewer.html` next to it orbits the mesh in a browser and
 plays a rig's animations (loop, speed, a scrub bar, all in turn), and
 `model.glb` carries the materials as a baked texture (`model.png`), so it
-looks the same wherever it is loaded.
+looks the same wherever it is loaded. Past 200 thousand triangles the
+GLB, OBJ and viewer are decimated (the report's Exports row says from
+how many and how far they stray); below a quarter of the mesh
+(`--triangles`) curved bands shade in streaks, so read the viewer.
 
 ## Rigs
 

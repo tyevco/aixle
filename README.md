@@ -69,6 +69,8 @@ npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
 npx aixle render model.aix --roblox             # also model.roblox.glb for Roblox Studio (facing -Z, _Att attachment nodes)
+npx aixle render model.aix --triangles 50000    # cap the GLB, OBJ and viewer (decimated; default 200000, 0 for all)
+npx aixle check model.aix --no-cache            # sample imports afresh; they are otherwise cached on disk by content
 npx aixle doc                        # the reference, to stdout
 ```
 
@@ -85,7 +87,7 @@ npx aixle doc                        # the reference, to stdout
 | `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |
 | `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
-| `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
+| `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead); this, the OBJ and the viewer are decimated past 200 thousand triangles (`--triangles`) |
 | `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |

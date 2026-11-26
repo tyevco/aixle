@@ -34,7 +34,7 @@ export function referenceMarkdown(): string {
     "",
     "### import",
     "",
-    "An existing mesh as a shape: `import(\"part.obj\")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so.",
+    "An existing mesh as a shape: `import(\"part.obj\")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so. The samples are cached on disk by the file's content, so `check` and `render` sample a file once at each resolution (`--no-cache` samples afresh).",
     "",
     "    import(path, size=?, resolution=96) -> shape",
     "",

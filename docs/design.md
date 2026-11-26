@@ -233,6 +233,36 @@ result re-split by the same rule. A top hat meshed at 71 thousand
 triangles comes out at 4000 with its brim, band and crown intact, read
 back through `import()`.
 
+## A budget for the web
+
+A mesh at a fine grid is what the sheet needs and what a web page does
+not: the GLB is about 30 bytes a triangle, so the chest example at its
+grid of 160 shipped 459 thousand triangles as a 13.7 MB file and an
+18.3 MB viewer page, most of the triangles on flat boards where four
+would do. The GLB, the OBJ and the viewer therefore have a budget like
+a Roblox accessory's, 200 thousand triangles unless the program says
+otherwise, met by the same decimation before the atlas is baked. It is
+set where a model at the default grid is rarely touched (four of the
+twenty-three examples, all at finer grids of their own) and a scene at
+grid 300 still makes a file a browser opens. The sheet and the STL are
+never decimated: the sheet is how the model is checked, and the STL is
+for a printer, which wants every cell.
+
+How far a decimated export strays is measured where it strays most:
+the vertices are the mesher's own and lie on the surface, so the
+error is in the middle of the widest faces, and the report gives the
+largest |field| at a face centre, each mesh read in its own frame with
+its joints hidden as it was extracted, beside the same number for the
+full mesh. On the examples the two are equal: the worst face is the
+mesher's, at a crease, not the decimation's. What that number cannot
+see is shading. A collapse costs nothing when its faces stay in their
+planes, so a band between two soft corners (a lathe profile's bends,
+under the crease angle) becomes slivers from one corner to the next,
+whose normals are both blends of the two bands, and the band shades in
+streaks: measured on a vase at 12 thousand of 188 thousand triangles
+and a teapot at 11 of 108, both fine at a quarter. The default never
+goes that far on the examples; a program that asks for it is told.
+
 ## Imported meshes
 
 An imported mesh becomes a field by sampling: unsigned distance on a grid
@@ -247,6 +277,35 @@ strict interior crossings count (a ray on a shared edge then counts zero
 for both triangles, which leaves the parity right). The imported detail is
 bounded by the sampling grid, and a sampled field is only approximately a
 distance, which extraction does not mind.
+
+Sampling is the cost of an import, and on a large mesh it was the sign
+pass more than the distances: every grid line tested every triangle, so
+the tool's own GLB of the chest (459 thousand triangles) spent 31 of its
+34 s there. Each triangle is now binned into the grid lines its box
+covers, a line wider each way than rounding could need, and a line runs
+the same exact tests over its own bin in triangle order, so it finds the
+same crossings in the same order and the field is the same to the bit:
+a faster pass that changes no render. The distance search, a BVH query
+per sample, remains, and it grows with the cube of the resolution (the
+rock at resolution 200: 15 s).
+
+`check` and `render` are two processes, and an agent runs both (and
+`--watch` renders on every save, and a pose check evaluates the program
+again), so the samples are cached on disk, keyed by a hash of the file's
+bytes, how it is read, the resolution and the sampler's version:
+everything that decides them and nothing that does not, so an edited
+file misses and a renamed or copied one hits. The entry is the grid as
+the sampler made it, float32 samples with the origin and cell as
+doubles, so the field read back is the same field and every render from
+it is the same file. It lives in the user's cache folder rather than
+beside the program or in `out/`: keyed by content, one entry serves
+every project, it is never in a diff, and an agent clearing `out/` or
+rendering elsewhere with `--out` keeps it. It is kept under 512 MB, the
+least recently read entries going first, and written beside its place
+and renamed in, so a run killed mid-write never leaves half an entry for
+the next to read. The sampler stays pure; the cache is the file-system
+side, handed to the resolver by the command line, so the library calls
+and the tests sample afresh unless they pass one.
 
 ## Scenes, joints and poses
 
@@ -542,4 +601,5 @@ spent their first renders working out.
 Proposals for what comes next, each with what must be prototyped first,
 are in `roadmap.md`: a full PBR bake from the field, `use` for libraries
 of parts, a print report, smooth 2D profiles, `assert`, image textures,
-lights and cameras in the language, and callouts on the views.
+lights and cameras in the language, callouts on the views, an import
+cache and a budget for web exports.
