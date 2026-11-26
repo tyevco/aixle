@@ -84,7 +84,8 @@ into the part standing on the plate and the part on the model), what
 rests flat on the plate, and the material in cubic centimetres and grams
 of PLA. A bed the model fits neither square nor turned is a warning;
 `check` prints the size and the bed's verdict from the surface's extent
-when a program sets units or a bed. `wall(shape)` is the thinnest wall as
+(and a coarse mesh's outline when that box does not fit square) when a
+program sets units or a bed. `wall(shape)` is the thinnest wall as
 a query, for `assert wall(model) > 0.8`. `model.stl` is written in
 millimetres with z up (it was y up, so a slicer laid every model on its
 back), and `model.3mf` beside it when the program sets units or a bed or

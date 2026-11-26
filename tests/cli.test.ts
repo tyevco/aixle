@@ -62,4 +62,10 @@ describe("printing", () => {
     // A program that says nothing about printing gets no print line.
     expect(cli("check", "examples/mug.aix")).not.toMatch(/^print:/m);
   });
+  it("check judges the outline turned, as the render does, where the box would not fit", { timeout: 30000 }, () => {
+    // The box of a bar across the diagonal fits only lying down; check warned so while the render said it fits turned.
+    const out = cli("check", "tests/fixtures/print_turned.aix");
+    expect(out).toMatch(/\nprint: .*does not fit the 200 × 200 × 200 mm bed square \([\d.]+ wide for 200\); turned (\d+)° about the vertical on the plate \(as rotate\(y=\1\) turns it/);
+    expect(out).toMatch(/\nno warnings\n/);
+  });
 });

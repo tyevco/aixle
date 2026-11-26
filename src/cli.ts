@@ -10,6 +10,7 @@ import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
 import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
+import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { exprText } from "./lang/ast.js";
@@ -198,7 +199,14 @@ function main(argv: string[]): number {
         const u = printUnits(ev.settings);
         const bed = printBed(ev.settings);
         const e = surfaceExtent(ev.output, 48);
-        const fit = bedFit(boxCorners(e.min, e.max), u.mm, bed ?? [Infinity, Infinity, Infinity]);
+        let fit = bedFit(boxCorners(e.min, e.max), u.mm, bed ?? [Infinity, Infinity, Infinity]);
+        // The box holds the outline but is wider than it turned: a bar across the diagonal fits turned where its box
+        // fits only lying down. When the box does not fit square, the outline is judged turned and lying as the render
+        // judges its own, from a coarse mesh, so check and the report give one verdict and warn alike.
+        if (bed && !fit.fits) {
+          const coarse = surfaceNets(ev.output, { resolution: Math.min(64, Math.max(16, grid)) }).mesh.positions;
+          if (coarse.length) fit = bedFit(coarse, u.mm, bed);
+        }
         console.log(`print: units ${unitsText(u, fit.size[2])}; ${fit.size.map(fmtMm).join(" × ")} mm (x and z on the plate, y up)${bed ? `; ${fitText(fit, bed)}` : ""}; the report has the thinnest wall and the supports`);
         if (bed && !fit.fits && fit.turned === undefined) bedWarning = `The model is ${fit.size.map(fmtMm).join(" × ")} mm and ${fitText(fit, bed)}.`;
       }

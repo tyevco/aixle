@@ -1,0 +1,4 @@
+# A bar 250 mm long at rotate(y=30): its box (221 x 133 mm) fits a 200 mm bed no way standing, the bar turned 9 degrees on does.
+set units mm
+set bed 200 200 200
+bar = box(250, 10, 10) | rotate(y=30) | ground()

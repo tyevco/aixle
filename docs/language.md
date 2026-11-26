@@ -790,9 +790,11 @@ the plate). A program that sets units or a bed also gets `model.3mf`
 unit, welded so a slicer sees it closed, with each material's colour
 on its triangles. With units set, the sheet's title gives the size in
 them (`3.76 × 2.4 × 2.4 cm`). With a bed set, a model that fits the bed
-neither square nor turned about the vertical is a warning, and `check`
-prints a `print:` line with the size in millimetres and the bed's
-verdict, from the surface's extent, in no time.
+neither square nor turned about the vertical is a warning. With units or
+a bed set, `check` prints a `print:` line with the size in millimetres
+and the bed's verdict, from the surface's extent, in no time; when that
+box does not fit square, the outline is judged turned and lying from a
+coarse mesh, as the render judges its own, so the two agree.
 
 ## The fast loop
 
