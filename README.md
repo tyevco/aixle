@@ -104,6 +104,7 @@ show name                        # what to output (default: the last shape)
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(sides, r, h)
 circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("Hi", size, arc=r)   # 2D
+curve2([x,y, ...])  bezier2([x,y, ...])  curve2(points, wall=0.1)                        # smooth 2D outlines, exact
 extrude(profile, h)  revolve(profile, angle=180)  loft(a, b, h)                          # to solids
 tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, taper=1)   # along a path
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # point lists
@@ -136,8 +137,9 @@ The docs, the gallery and the dogfooding record are published at
 [`examples/`](examples/) has eighteen models exercising the language, each
 with its sheet, slices, steps and beauty render under
 [`examples/renders/`](examples/renders/): a mug, a fluted vase from a
-revolved profile, a teapot with a tube spout and a swept handle, a desk
-lamp with a lofted shade, a reel of three-strand rope swept along a helix
+revolved smooth profile, a teapot with a tube spout and a swept handle, a desk
+lamp with a lofted shade, an acoustic guitar whose body is one smooth
+outline extruded, a reel of three-strand rope swept along a helix
 with a twist, a hanging sign with raised and engraved text, a rock garden
 from an imported mesh, a robot arm with three joints and a waving
 animation, a fenced plot with placed panels and trees, a table with
@@ -155,7 +157,7 @@ along exact Bezier curves.
 | ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) | ![table](examples/renders/table_beauty.png) |
 | ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) | ![garden](examples/renders/garden_beauty.png) |
 | ![medal](examples/renders/medal_beauty.png) | ![nameplate](examples/renders/nameplate_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
-| ![arm](examples/renders/arm_beauty.png) | ![fence](examples/renders/fence_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
+| ![arm](examples/renders/arm_beauty.png) | ![fence](examples/renders/fence_beauty.png) | ![guitar](examples/renders/guitar_beauty.png) |
 
 ## How it works
 

@@ -98,6 +98,7 @@ assert pieces(m) == 1, "why"     # a promise; check fails with the numbers when 
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(n, r, h)
 circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x,y, ...)  text("Abc", size, arc=r)   # 2D
+curve2([x,y, ...])  bezier2([x,y, ...])  curve2(points, wall=0.1)   # smooth outlines: a point twice is a corner; wall= an open band
 extrude(profile, h)  revolve(profile, angle=360)  loft(a, b, h)                          # 2D to 3D
 tube(r, [x,y,z, ...], smooth=6, taper=1, cap="flat")  sweep(profile, [x,y,z, ...], smooth=6, twist=0, taper=1)
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # path lists
@@ -186,6 +187,8 @@ show arm
 | stone or wood reads as flat colour | the pattern is larger than the part | `material("granite", scale=0.3)` |
 | eyes, a mouth or a label bulge out of the surface | painted geometry | `decal(shape, region, material)` paints a region of the surface, adds nothing |
 | a limb has no knee | one rotated capsule | `tube(r, [hip, knee])` then `tube(r, [knee, ankle])` |
+| a revolved or extruded outline looks faceted | `polygon` is straight between points | `curve2([...])` through the same points, or `bezier2` from handles |
+| a smooth profile's base rocks, or its box passes x = 0 | the spline overshoots at a sharp turn | give the axis points and the foot's edge twice: corners, straight between |
 | a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
 | stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
 | gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty` is a few seconds, but it cannot judge glass: its grid is coarse) |

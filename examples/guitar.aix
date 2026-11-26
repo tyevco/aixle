@@ -1,0 +1,33 @@
+# An acoustic guitar standing on its end, its top facing +z. The body is one
+# smooth outline through twenty points (curve2: the points on one side, then
+# the same mirrored back down the other), extruded 0.45 deep with its edges
+# rounded, hollowed, and cut through the top for the sound hole. The
+# headstock is a curve2 too, its two bottom points given twice so the joint
+# with the neck is square; the pickguard is a bezier2 teardrop from anchors
+# and handles, its point a corner where the handles do not line up. A
+# walnut body with a pine top, a rosette and the pickguard painted on as
+# decals.
+set grid 160
+outline = curve2([
+  0, 0,  0.62, 0.08,  1.0, 0.42,  1.1, 0.95,  1.0, 1.5,  0.8, 1.85,
+  0.8, 2.15,  0.88, 2.5,  0.75, 2.88,  0.4, 3.04,  0, 3.08,
+  -0.4, 3.04,  -0.75, 2.88,  -0.88, 2.5,  -0.8, 2.15,  -0.8, 1.85,
+  -1.0, 1.5,  -1.1, 0.95,  -1.0, 0.42,  -0.62, 0.08
+])
+shell_body = extrude(offset(outline, -0.04), 0.37, "z") | round(0.04) | shell(0.07) | paint("walnut")
+hole = cylinder(0.3, 0.3) | rotate(x=90) | move(0, 2.0, 0.2)
+top = box(3, 4, 0.1) | move(0, 1.5, 0.255)
+rosette = (cylinder(0.4, 0.3) - cylinder(0.34, 0.4)) | rotate(x=90) | move(0, 2.0, 0.2)
+guard = extrude(bezier2([0, 0.62,  0.15, 0.5,  0.42, 0.38,  0.42, 0.18,  0.42, 0.02,  0.32, -0.05,  0.2, -0.05,  0.08, -0.05,  -0.02, 0.03,  -0.02, 0.18,  -0.02, 0.35,  -0.02, 0.5,  0, 0.62]), 0.3, "z") | move(0.3, 1.08, 0.2)
+body = decal(decal(decal(shell_body - hole, top, "pine"), rosette, "ebony"), guard, material("#5a2a14", rough=0.3))
+neck = box(0.3, 2.3, 0.18, round=0.04) | move(0, 4.1, 0.08) | paint("walnut")
+board = box(0.32, 2.45, 0.07) | move(0, 3.95, 0.2) | paint("ebony")
+head = extrude(curve2([-0.16, 0,  -0.16, 0,  0.16, 0,  0.16, 0,  0.24, 0.4,  0.27, 0.75,  0.12, 0.86,  0, 0.8,  -0.12, 0.86,  -0.27, 0.75,  -0.24, 0.4]), 0.1, "z") | move(0, 5.2, 0.08) | paint("ebony")
+pegs = empty()
+for i in range(3) {
+  pegs = pegs + (cylinder(0.03, 0.7) | rotate(z=90) | move(0, 5.42 + i * 0.17, 0.08)) + (box(0.07, 0.11, 0.05, round=0.015) | move(0.36, 5.42 + i * 0.17, 0.08)) + (box(0.07, 0.11, 0.05, round=0.015) | move(-0.36, 5.42 + i * 0.17, 0.08))
+}
+tuners = pegs | paint("chrome")
+bridge = box(0.62, 0.14, 0.08, round=0.02) | move(0, 0.8, 0.24) | paint("ebony")
+guitar = body + neck + board + head + tuners + bridge
+show guitar

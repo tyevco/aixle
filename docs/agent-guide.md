@@ -142,6 +142,8 @@ npx aixle diff before.aix after.aix        the two sheets side by side
 | a box or a join reads soft, as if bevelled, in the viewer or a GLB | one smooth normal per vertex, from `set crease 0` | leave `crease` at its default (35), which splits vertices at edges |
 | a limb built with `rotate` and `move` has no knee | one capsule per limb | `tube(r, [hip, knee])` and `tube(r, [knee, ankle])`: a point list is the joint chain |
 | "watertight: no" with edges you cannot find | two surfaces pass through one cell | the report says where the edges are and which steps hold them |
+| a vase, bottle or body outline looks faceted once revolved or extruded | `polygon` is straight between its points | `curve2([...])` through the same points, or `bezier2` from handles: exact, no facets at any grid |
+| a smooth profile's base rocks, or its box in `check` reaches past x = 0 | the spline overshoots where the outline turns sharply | give the points on the axis and at the foot's edge twice: a doubled point is a corner, and the run between two is straight |
 | letters or a label need to go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)`; `bend(deg)` curves about z instead |
 | stripes run the wrong way, or a pattern is missing on a thin sheet | patterns are stacked along the material's axis (y) in the paint frame | `material(..., axis="x")`, or paint the part standing and then lay it down |
 | the counter under the awning is black, the flame is a dark blob | the key light is fixed at the upper left and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |

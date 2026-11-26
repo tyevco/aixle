@@ -169,7 +169,8 @@ the surface's true extent from the mesh. Queries read the box:
 stone can be set on a rough rock: `stone | move(1, height(rock, 1, 2), 2)`.
 
 **2D profiles** live in the x/y plane: `circle`, `rect`, `ellipse`, `ngon`,
-`star`, `polygon(x1,y1, x2,y2, ...)` (either winding). They take the same booleans, `move(x,
+`star`, `polygon(x1,y1, x2,y2, ...)` (either winding), and the smooth
+outlines `curve2` and `bezier2` below. They take the same booleans, `move(x,
 y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
 
 - `revolve(profile)` spins it around y; the profile's x is the radius, so
@@ -184,6 +185,57 @@ y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
   the profile's x runs along -z, a side profile drawn with its front on
   the right comes out facing -z, and `| flip("z")` turns it to face +z
   (measured by an agent on an excavator's counterweight).
+
+**Smooth profiles**: a polygon is straight between its points, so a vase,
+a bottle or a guitar's body drawn as one looks it once revolved or
+extruded. `curve2([x,y, x,y, ...])` is a closed outline through the
+points, the same curve `curve()` draws, closed back to the first point;
+`bezier2([...])` is one from cubic Bezier anchors and handles, laid out as
+`bezier()` takes them (an anchor, then two handles and an anchor for each
+piece: 4, 7, 10, ... pairs). Either is a profile like any other, for
+`revolve`, `extrude`, `sweep`, `loft`, the 2D booleans and `offset`, and
+its distance is exact: the nearest point on the true curve, so there are
+no facets at any grid, and a revolve of one is as exact as a revolve of a
+circle (glass on it renders clean).
+
+- A point given twice in a row in `curve2` is a sharp corner, and the run
+  between two corners is straight. A spline through a sharp turn
+  overshoots, so give the points on a revolve's axis and at a foot's edge
+  twice: `curve2([0,0, 0,0, 1,0, 1,0, 1.3,1.2, ..., 0,3, 0,3])` has a flat
+  underside, a sharp foot and a straight run up the axis. The list wraps,
+  and may end on its first point again, which only closes it (give it
+  twice there for a corner at the start).
+- In `bezier2` a corner is two handles that do not line up, and a handle
+  0.5523 r along the tangent makes a quarter circle of radius r (within
+  0.03%). The last anchor should be the first; when it is not, a straight
+  edge closes the outline back to the first anchor, so an outline drawn
+  from the axis round to the axis is closed along the axis.
+- `wall=w` leaves the curve open and makes the profile the band `w` wide
+  centred on it, ends rounded: a cup's wall drawn as one line from the
+  axis out along the floor and up to the lip, `revolve(curve2([0,0.05,
+  0.9,0.05, 0.9,0.05, 1.2,1, 0.8,2.4], wall=0.1))`, is a cup with a flat
+  floor, a sharp heel, a 0.1 wall and a rounded rim. Corners work the same
+  in an open curve; its ends leave along the line to their neighbours.
+- An outline that crosses itself is filled as `polygon` fills one (even
+  and odd): the lobes of a figure eight are both solid, and where a loop
+  overlaps itself the overlap is a hole.
+- The profile's box (what `check` prints) is the curve's own extent, not
+  its handles'; a box reaching past x = 0 on a revolve's profile means the
+  spline overshot the axis, which the corners fix.
+- A straight run on x = 0 is inside the solid once revolved, and `revolve`
+  measures the outline without it, so the cross-sections show no line up
+  the axis and glass or a liquid revolved from one has no surface there (a
+  polygon's edge on the axis still leaves that line: draw a liquid as a
+  `curve2`).
+- A closed outline carries its thinnest wall (two sides facing each other)
+  for the thin-part warning, so a vase drawn as one outline with a wall
+  under a cell is named; a straight run on x = 0 is not counted, since the
+  solid there is twice what the profile shows.
+
+A smooth profile costs more per sample than a polygon of as many points
+(measured: a 22-point vase meshes in 1.4 s against 0.65 s for the 18-point
+polygon it replaced), and less than a polygon with enough points to hide
+its facets.
 
 **Paths**: `tube(r, [x,y,z, x,y,z, ...])` is a round tube along the
 points with rounded joins and hemispherical ends that reach `r` past
