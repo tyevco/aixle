@@ -17,41 +17,81 @@ for them unprompted (a dinghy's rigging fitting to fitting, with the
 mainsheet following the boom's pose), two built a clock and a treehouse
 without them and did not miss them. Nobody hit the first-part-wins rule.
 
-## 2. PBR textures baked from the field
+## 2. PBR textures baked from the field: built
 
-**Why.** The GLB carries one baked albedo atlas and per-material
-metal/rough factors. A viewer shows flat plastic where the beauty render
-shows displaced skin, brushed metal and a glowing flame, because those
-live only in the field. "Beautiful" in a browser or a game engine needs
-the rest of the PBR set.
+`albedo()` is the colour part of `surface()`, which returns colour,
+roughness, metalness, glow and a bump height at a point, with the wear
+a material reads from the field's curvature; the beauty render and the
+atlas baker both call it. `material()` takes `bump=` (a height),
+`bump_scale=` (a size, ten times the height if not given) and `wear=`
+(0..1: convex edges lighter and smoother, bare metal on a metal,
+cavities darker and rougher), and a `rust` pattern (and preset) eats
+rough, non-metal oxide into the base, which wear rubs off the edges.
+The baker writes up to three maps beside the colour atlas, each only
+where it carries something: a tangent-space normal map from the field's
+gradient under each texel against the mesh's interpolated normal, for
+the materials on a displaced surface and the bumped ones; a
+metallic-roughness map where a material varies them; an emissive map
+where a glowing material's colour varies (a constant one is an
+`emissiveFactor`, and a glow above 1 is
+`KHR_materials_emissive_strength`). The GLB gains `TANGENT` on the
+meshes that read the normal map, the report a Maps row, the output
+folder `model_normal.png`, `model_mr.png` and `model_emissive.png`, and
+`viewer.html` a room environment for the metals to reflect. The lantern
+example wears all four maps.
 
-**What.** No new syntax for the common case: the atlas baker writes a
-normal map from the field's own detail (a `displace` or a fine pattern
-becomes bumps on a coarser mesh), a metallic-roughness map wherever a
-material varies them, and an emissive map from `glow`. Materials gain
-what patterns already imply:
+Prototyped as asked. Tangents: a chart's two projection axes, laid onto
+each vertex's tangent plane along the chart's axis, are the directions
+of increasing u and decreasing v; the ±y charts are mirrored and carry a
+handedness of -1. On a displaced sphere, a displaced rounded box, a
+displaced torus and bumped spheres and boxes (25,000 to 39,000 vertices,
+6 to 339 charts) no triangle's UVs disagree with its vertices'
+handedness, and the normal map decoded across a chart seam through each
+side's own frame agrees to 0.9 degrees on average for a bump; for a
+displace it is 5.4 degrees at 1024 and 2.7 at 2048, so that is the map's
+resolution against the displace's finest octave, not the frames. Decoded
+through three.js's frame (bitangent `cross(N, T) * w` per vertex,
+interpolated), a bump comes back within 0.26 degrees at the median and
+1.6 at the 95th percentile on all six chart axes, and a displace within
+1.1 degrees of the field's gradient where the mesh alone is 5.3 off.
+Curvature: the Laplacian of `dist` alone counts a bound's own bending
+as curvature; less the second derivative along the normal and over the
+gradient's length it is the level set's curvature for any field whose
+sign is right. Measured against that at a twentieth of the probe, it is
+within 0.001 at the median in a smooth union's fillet (the Laplacian
+alone is 12 to 24% off there), on a loft, a non-uniformly scaled sphere
+and a twisted box, and smooth along a fillet (-0.21 to -0.25 round a
+k=0.1 blend). Wear reads it over 1.2% of the model's longest side: a
+hard crease (-0.86) gathers grime, a fillet of k 0.1 or more does not at
+wear 0.5, a box's edges and a twisted bar's spiralling edges get a
+steady bright band. Atlas memory and time, on the lantern (62,000
+triangles, four maps): at 1024 the bake takes 4.2 s against 0.6 s for
+the colour atlas alone and peaks 75 to 87 MB over the meshing against
+48 to 55; at 2048, 17.8 s against 2.1 s and 150 MB against 55. Its
+beauty render at 512 pixels takes 4.6 s against 3.4 s without the wear
+and the bumps, nearly every pixel being worn and bumped. A plain
+model's bake is within the run-to-run spread of what it was (the noise
+and the dilation got faster, which pays for the roughness texel), and
+its GLB is byte for byte what it was: 27 of the 32 examples. The two
+lamps gain an emissive factor (32 and 40 bytes), and the tree, the
+workshop and the Roblox plant, whose foliage is displaced, a normal map
+and tangents (2.27 to 3.73 MB, 5.59 to 6.40, 0.61 to 1.27).
 
-```
-m = material("#8a6a3a", "rust", rough=0.9, metal=1, wear=0.3)   # edges worn to bright metal
-p = material("plastic", bump=0.02, bump_scale=0.1)               # baked as a normal map
-```
+Found on the way: the normal map's test cannot be a share of bent
+texels alone, since the dual-contoured mesh leans 3 degrees or more off
+the field in a band at creases and junctions on every plain example (1
+to 23% of their texels); baking that would have added a map to every
+GLB. The map is for the program's relief, a `displace` or a `bump`, and
+for those materials' texels only.
 
-`wear` reads the field's curvature (second differences of `dist`, cheap
-and exact) so convex edges brighten and cavities darken, which is what
-makes a rendered object look used rather than new; the same curvature
-feeds the beauty render.
-
-**How.** `albedo()` becomes `surface()` returning colour, roughness,
-metal, emission and a height; the baker already has the local point per
-texel and calls the same function, so the three extra atlases are the
-same loop; the GLB writer adds `normalTexture`,
-`metallicRoughnessTexture`, `emissiveTexture`. Normals come from the
-field gradient at the texel's surface point minus the mesh normal,
-tangent-space encoded.
-
-**Must prototype.** Tangent generation on dual-contoured meshes (charts
-are axis-aligned, which helps); whether curvature from `dist` is stable
-enough on blended shapes; atlas memory at four maps.
+Not built: wear on the sheet (it shows the pattern; the finish is the
+beauty render's and the exports'), the maps in the OBJ (its MTL keeps
+`map_Kd`) and the Roblox and Bedrock exports (the colour atlas alone, as
+before; what Studio's importer makes of a packed metallic-roughness map
+on a decimated mesh is untested), an occlusion map, transmission, a
+wear width of its own (it is the model's size, so a small part in a big
+scene reads more of its surface as edge), and a bump that follows a
+pattern (mortar lower than brick).
 
 ## 3. Modules: built
 

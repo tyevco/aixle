@@ -88,7 +88,8 @@ npx aixle doc                        # the reference, to stdout
 | `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set, in millimetres with z up |
 | `model.3mf` | with `set units`, `set bed` or `--3mf`: the same mesh for a slicer in the program's unit, a colour per triangle from the materials |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
-| `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
+| `model_normal.png`, `model_mr.png`, `model_emissive.png` | when the program has them: the normal map (bumps, and `displace` relief finer than the mesh), the metallic-roughness map (wear, rust) and the emissive map (a patterned glow), on the atlas's UVs |
+| `model.glb` | binary glTF with the atlas and those maps embedded, tangents for the normal map (`--no-texture` for vertex colours instead) |
 | `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
@@ -121,6 +122,7 @@ pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   anima
 set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render
 set units mm   set bed 220 220 250   assert wall(model) > 0.8                           # a print: the report's Print section
 decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stripes", axis="x")  # surface paint
+material("rust", wear=0.4, bump=0.003)   # a finish: edges worn bright, creases dark, rust, bumps (beauty and GLB)
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
@@ -153,7 +155,9 @@ spiral staircase from a loop, a robot with per-part materials, a tree
 with smooth blends and displacement, a glass tumbler for refraction and
 depth of field, a medal with text on an arc and a partial revolve, and a
 desk nameplate with serif lettering engraved in brass and scrolls swept
-along exact Bezier curves.
+along exact Bezier curves, and a worn iron lantern whose rust, rubbed
+edges, hammered skin and glowing flame are baked into the GLB's normal,
+metallic-roughness and emissive maps.
 
 | | | |
 | --- | --- | --- |
@@ -176,7 +180,9 @@ rasteriser draws and what the exporters write, so the pictures show the
 file you get. The beauty render marches the field itself, primed by that
 mesh so it costs about a second. For the exports, the procedural materials
 are baked into a texture atlas with UVs, so the GLB looks the same in an
-engine as it does here. Materials are procedural patterns evaluated in the
+engine as it does here; wear, bumps and a displace finer than the mesh
+are baked from the field into normal and metallic-roughness maps beside
+it. Materials are procedural patterns evaluated in the
 painted part's own frame, sampled per pixel when rendering and per vertex
 when exporting; there are no UVs. [`docs/design.md`](docs/design.md) has
 the reasoning and the limits.

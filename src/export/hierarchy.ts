@@ -12,12 +12,12 @@
  * atlas: they are merged for baking and split again with their UVs.
  */
 import type { Vec3 } from "../core/vec.js";
-import { allJoints, findJoints, move as moveShape } from "../sdf/ops.js";
+import { allJoints, findJoints, move as moveShape, reliefMaterials } from "../sdf/ops.js";
 import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
 import { decimate } from "../mesh/decimate.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
-import { bakeAtlas, type AtlasResult } from "./atlas.js";
+import { bakeAtlas, type AtlasResult, type BakeField, type MaterialMaps, type NormalStats } from "./atlas.js";
 
 export interface SceneNode {
   name: string;
@@ -42,6 +42,17 @@ export interface SceneHierarchy {
   uvs?: Float32Array[];
   atlas?: AtlasResult["image"];
   atlasCharts?: number;
+  /** The maps beside the colour atlas, each present only where it carries something (see atlas.ts), sharing its UVs. */
+  normalMap?: AtlasResult["image"];
+  metalRoughMap?: AtlasResult["image"];
+  emissiveMap?: AtlasResult["image"];
+  /** Per mesh, x, y, z, w per vertex: the tangents the normal map was baked against; with `normalMap`. */
+  tangents?: Float32Array[];
+  /** Per material, which maps it reads. */
+  materialMaps?: Map<Material, MaterialMaps>;
+  /** false when built with `maps: false`: the writer then leaves the materials as the colour atlas alone (no emissive either). */
+  pbr?: boolean;
+  normalStats?: NormalStats;
   triangles: number;
   /** Things the export could not carry, for the report: a rotation or a scale above a joint. */
   notes: string[];
@@ -59,6 +70,19 @@ export interface HierarchyOptions {
   maxResolution?: number;
   /** Decimate the meshes to at most this many triangles in all (a Roblox budget), each taking its share, before the atlas is baked. */
   maxTriangles?: number;
+  /** false bakes the colour atlas alone, as before the PBR maps (the Roblox export keeps to that). Default true. */
+  maps?: boolean;
+  /** The distance wear reads curvature over, `wearProbe` of the model's size, so the bake matches the beauty render. */
+  wearProbe?: number;
+}
+
+/** The field a mesh was extracted from, and what was hidden to extract it, so the baker can read the same surface. */
+interface MeshSource {
+  shape: Shape3;
+  /** Mesh point plus this is the point in the shape's frame (a joint's mesh is stored relative to its pivot). */
+  offset: Vec3;
+  joints: Shape3[];
+  sets: Shape3[];
 }
 
 function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
@@ -103,7 +127,8 @@ export function offsetToJoint(root: Shape3, j: Shape3): { offset: Vec3; rigid: b
 
 export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts: HierarchyOptions): SceneHierarchy {
   const meshes: Mesh[] = [];
-  const addMesh = (m: Mesh): number => { meshes.push(m); return meshes.length - 1; };
+  const sources: MeshSource[] = [];
+  const addMesh = (m: Mesh, src: MeshSource): number => { meshes.push(m); sources.push(src); return meshes.length - 1; };
   const roots: SceneNode[] = [];
   const notes: string[] = [];
   const names = opts.names ?? new Map<Shape3, string>();
@@ -133,7 +158,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     for (const n of baseJoints) n.joint!.hidden = true;
     const m = extract(base, opts);
     for (const n of baseJoints) n.joint!.hidden = false;
-    const mi = triangleCount(m) ? addMesh(m) : -1;
+    const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }) : -1;
     return {
       name,
       mesh: -1,
@@ -168,7 +193,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     const pivot: Vec3 = [st.pivot[0] + offset[0], st.pivot[1] + offset[1], st.pivot[2] + offset[2]];
     const node: SceneNode = {
       name: st.name,
-      mesh: triangleCount(own) ? addMesh(shifted(own, pivot)) : -1,
+      mesh: triangleCount(own) ? addMesh(shifted(own, pivot), { shape: child, offset: pivot, joints: nested, sets }) : -1,
       translation: [pivot[0] - parentOrigin[0], pivot[1] - parentOrigin[1], pivot[2] - parentOrigin[2]],
       yaw: 0,
       scale: 1,
@@ -187,7 +212,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       for (const n of baseJoints) n.joint!.hidden = true;
       const m = extract(base, opts);
       for (const n of baseJoints) n.joint!.hidden = false;
-      const mi = triangleCount(m) ? addMesh(m) : -1;
+      const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }) : -1;
       roots.push({
         name: obj.name,
         mesh: -1,
@@ -216,7 +241,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     for (const s of sets) s.instanced!.hidden = false;
     roots.push({
       name: obj.name,
-      mesh: triangleCount(own) ? addMesh(own) : -1,
+      mesh: triangleCount(own) ? addMesh(own, { shape: obj.shape, offset: [0, 0, 0], joints, sets }) : -1,
       translation: [0, 0, 0],
       yaw: 0,
       scale: 1,
@@ -246,15 +271,28 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     triangles = 0;
     for (const m of meshes) triangles += triangleCount(m);
   }
-  const out: SceneHierarchy = { roots, meshes, triangles, notes };
+  const out: SceneHierarchy = { roots, meshes, triangles, notes, pbr: opts.maps !== false };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);
-    const baked = bakeAtlas(merged, { size: opts.texture });
-    const parts = splitBaked(baked.mesh, baked.uv, ranges, materials);
+    // Each mesh's triangles read the field they were extracted from, with the same joints and sets hidden.
+    const hide = (src: MeshSource, on: boolean) => {
+      for (const j of src.joints) j.joint!.hidden = on;
+      for (const st of src.sets) st.instanced!.hidden = on;
+    };
+    const fields: BakeField[] = ranges.map((range, i) => ({ range, dist: sources[i].shape.dist, offset: sources[i].offset, enter: () => hide(sources[i], true), leave: () => hide(sources[i], false), relief: reliefMaterials(sources[i].shape) }));
+    const withMaps = opts.maps !== false;
+    const baked = bakeAtlas(merged, { size: opts.texture, fields: withMaps ? fields : undefined, cellSize: opts.cellSize, wearProbe: opts.wearProbe, maps: withMaps });
+    const parts = splitBaked(baked.mesh, baked.uv, ranges, materials, baked.tangents);
     out.meshes = parts.map((p) => p.mesh);
     out.uvs = parts.map((p) => p.uv);
     out.atlas = baked.image;
     out.atlasCharts = baked.charts;
+    out.normalMap = baked.normal;
+    out.metalRoughMap = baked.metalRough;
+    out.emissiveMap = baked.emissive;
+    if (baked.tangents) out.tangents = parts.map((p) => p.tangents!);
+    out.materialMaps = new Map(materials.map((m, i) => [m, baked.maps[i]]));
+    out.normalStats = baked.normalStats;
   }
   return out;
 }
@@ -289,12 +327,12 @@ export function mergeMeshes(meshes: Mesh[]): { merged: Mesh; ranges: [number, nu
   return { merged: { positions, normals, local, materialIndex, materials, indices }, ranges, materials };
 }
 
-/** Cut a baked mesh back into parts by triangle range, compacting each part's vertices. */
-export function splitBaked(mesh: Mesh, uv: Float32Array, ranges: [number, number][], materials: Material[]): { mesh: Mesh; uv: Float32Array }[] {
+/** Cut a baked mesh back into parts by triangle range, compacting each part's vertices (and their tangents, when given). */
+export function splitBaked(mesh: Mesh, uv: Float32Array, ranges: [number, number][], materials: Material[], tangents?: Float32Array): { mesh: Mesh; uv: Float32Array; tangents?: Float32Array }[] {
   return ranges.map(([t0, t1]) => {
     const map = new Map<number, number>();
     const idx = new Uint32Array((t1 - t0) * 3);
-    const pos: number[] = [], nrm: number[] = [], loc: number[] = [], mat: number[] = [], uvs: number[] = [];
+    const pos: number[] = [], nrm: number[] = [], loc: number[] = [], mat: number[] = [], uvs: number[] = [], tan: number[] = [];
     for (let t = t0; t < t1; t++)
       for (let k = 0; k < 3; k++) {
         const v = mesh.indices[t * 3 + k];
@@ -307,12 +345,14 @@ export function splitBaked(mesh: Mesh, uv: Float32Array, ranges: [number, number
           loc.push(mesh.local[v * 3], mesh.local[v * 3 + 1], mesh.local[v * 3 + 2]);
           mat.push(mesh.materialIndex[v]);
           uvs.push(uv[v * 2], uv[v * 2 + 1]);
+          if (tangents) tan.push(tangents[v * 4], tangents[v * 4 + 1], tangents[v * 4 + 2], tangents[v * 4 + 3]);
         }
         idx[(t - t0) * 3 + k] = nv;
       }
     return {
       mesh: { positions: new Float32Array(pos), normals: new Float32Array(nrm), local: new Float32Array(loc), materialIndex: new Uint16Array(mat), materials, indices: idx },
       uv: new Float32Array(uvs),
+      tangents: tangents ? new Float32Array(tan) : undefined,
     };
   });
 }

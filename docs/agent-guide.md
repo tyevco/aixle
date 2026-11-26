@@ -159,6 +159,9 @@ npx aixle fmt model.aix --write            the program in the one layout (commen
 | stripes run the wrong way, or a pattern is missing on a thin sheet | patterns are stacked along the material's axis (y) in the paint frame | `material(..., axis="x")`, or paint the part standing and then lay it down |
 | the counter under the awning is black, the flame is a dark blob | the key light is fixed at the upper left and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |
 | gold looks olive, silver looks charcoal | a metal is mostly what it reflects, and the sheet has no environment | judge metals in the beauty render, which reflects the sky, ground and the model itself |
+| the model looks new, like plastic, in the beauty render or the viewer | every surface is one smooth colour | `material("iron", wear=0.4)` rubs the edges bright and darkens the creases; `bump=0.003` roughens it below the mesh; `"rust"` (a pattern and a preset) for oxide; all shown in `--beauty` and baked into the GLB, never on the sheet |
+| wear or a bump does not show on the sheet | the sheet draws the mesh and the pattern, not the finish | judge it in `--beauty`; the report's Maps row says which materials the GLB's maps carry |
+| a thin rod or a ring is worn bright all over | wear's band is about 1.2% of the model's size, and a part thinner than two bands is all edge | thicken it, or give it a material with less wear (or none) |
 | a steel boss shows a row of blobs at its foot | a metal reflects the model's own cut faces (a ring of counterbores) | nothing is wrong; the slices and the plan view are the truth about holes |
 | `--focus` on a probe region or a cutter | it is not geometry | the frame is the region's, and what is drawn is the model inside it |
 | "separate pieces" but everything looks joined | a part stops a hair short of its neighbour | the warning names the loose piece's volume, centre and step; overlap by a little |
@@ -171,8 +174,10 @@ When the model is right, `npx aixle render model.aix --beauty` adds
 `beauty.png`, the field ray-marched with shadows, for showing rather than
 checking; `viewer.html` next to it orbits the mesh in a browser and
 plays a rig's animations (loop, speed, a scrub bar, all in turn), and
-`model.glb` carries the materials as a baked texture (`model.png`), so it
-looks the same wherever it is loaded.
+`model.glb` carries the materials as a baked texture (`model.png`), with
+a normal map for bumps and fine `displace` relief, a metallic-roughness
+map for wear and rust and an emissive one for a patterned glow where the
+program has them, so it looks the same wherever it is loaded.
 
 ## Rigs
 

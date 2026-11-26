@@ -625,7 +625,46 @@ start from the preset, change only what is given. Pattern sizes are in
 model units (the reference lists each preset's), so wood grain 0.25
 apart suits a table and a 20-unit floor wants `scale=2`.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
-tiles, dots. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
+tiles, dots, rust. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
+
+A material can also carry a finish, which adds no geometry and shows in
+the beauty render and the GLB, not on the sheet (the sheet draws the
+pattern, so it stays a check of the mesh):
+
+```
+iron = material("rust", wear=0.45, bump=0.003, bump_scale=0.05)   # rusty, edges worn bright, hammered
+wax = material("#efe2c4", rough=0.5, bump=0.003, bump_scale=0.04)
+flame = material("#ffd27a", "noise", color2="#ff8a2a", scale=0.04, glow=1.6)
+```
+
+`wear` (0 new, 1 worn hard) reads the shape's curvature: convex edges go
+lighter and smoother (bare metal on a metal), creases and hollows darker
+and rougher. The band it brightens is about 1.2% of the model's longest
+side, the same at any grid; a part thinner than about two bands (a thin
+rod, a ring) is all edge and rubbed bright along its length; a smooth
+blend (`union(..., k=)`) is a gentle hollow and gathers little grime,
+where a hard crease gathers a lot. `bump` is the height of a fractal
+noise in model units, either way of the surface, and `bump_scale` its
+feature size (ten times the height when not given, which tilts the
+surface about ten degrees; a fifth of it reads as stucco). The bumps are
+laid out in the frame the part is painted in, height and size alike, so
+they move, turn and scale with it: a bumped part scaled after painting
+keeps its finish, as a pattern does. The
+`rust` pattern (and the `rust` preset, iron with rust on it) eats
+patches about `scale` across into the base colour, in the oxide colour
+unless `color2` is given; the patches are rough and not metal, and wear
+rubs them off the edges. A material with `glow` keeps glowing in the GLB:
+a constant colour as the material's emissive colour, a pattern as an
+emissive map, a glow above 1 at that strength.
+
+The GLB carries what the beauty render shows: `model.png` is the colour
+(wear included), and beside it, only when something needs it,
+`model_normal.png` (the bumps, and the relief of a `displace` finer than
+the mesh, on the parts that have it), `model_mr.png` (roughness and
+metalness, where wear or rust varies them) and `model_emissive.png` (a
+glow whose colour varies). The report's Maps row says which materials
+each map is for. A plain model's GLB is the colour atlas alone, as it
+always was.
 
 Paint applies to everything inside the shape, so **paint parts before
 combining them** when they should differ:
@@ -1164,7 +1203,15 @@ prints the asserts in line order, failures among the passes.
 - The sheet and the views colour the mesh per vertex, so a pattern or a
   decal near the cell size looks blocky there (a 0.07 speckle at a 0.03
   cell reads as camouflage); the beauty render and the baked atlas sample
-  the material exactly. Judge fine patterns in the beauty render.
+  the material exactly. Judge fine patterns in the beauty render. `wear`
+  and `bump` are not on the sheet at all: judge them in `--beauty`.
+- Wear's band is a share of the whole model's size, so in a big scene a
+  small part reads more of its surface as edge; a lantern in a market
+  wears wider than the same lantern alone.
+- Only `model.glb` carries the normal, metallic-roughness and emissive
+  maps. The OBJ's MTL names `model.png`, the colour with wear in it; the
+  Roblox GLB and the Bedrock texture take the pattern's colour alone, no
+  wear.
 - Non-uniform `scale`, `twist`, `bend` and `displace` distort distances; the
   surface is still right, but a `round` or smooth blend applied *after* them
   is approximate.

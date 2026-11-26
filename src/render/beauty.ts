@@ -12,8 +12,8 @@
  * samples, so silhouettes are smooth without paying for it everywhere.
  */
 import { normalize, type Vec3 } from "../core/vec.js";
-import { albedo } from "../sdf/materials.js";
-import { boundsCenter, boundsDistance, boundsGrow, boundsSize, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
+import { albedo, bumpScaleOf, bumpSlope, fieldCurvature, hasFinish, surface, wearProbe } from "../sdf/materials.js";
+import { boundsCenter, boundsDistance, boundsGrow, boundsSize, type Bounds, type Hit, type Material, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { perspective, toView, type Camera } from "./camera.js";
 import { Canvas, rgbf, rgbDithered } from "./canvas.js";
@@ -87,6 +87,8 @@ export interface BeautyOptions {
   fitPoints?: Float32Array;
   /** The whole model's box when `bounds` is a focus frame: the march, the shadows and the floor reach all of it. */
   reachBounds?: Bounds;
+  /** The distance wear reads curvature over (the worn band's width); default `wearProbe` of the model's longest side, as the atlas baker uses. */
+  wearProbe?: number;
 }
 
 /** The default key light: upper left, from the front. */
@@ -132,6 +134,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   const shadowBox = boundsGrow(model, cell);
   const reach = Math.hypot(...boundsSize(model)) * 1.5;
   const dist = shape.dist;
+  const probe = opts.wearProbe ?? wearProbe(Math.max(...boundsSize(model)));
 
   // Prime with the mesh: view depth per pixel.
   const prime = createTarget(size, size, 0);
@@ -150,6 +153,36 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   const eps = cell * 0.5;
   const gradient = (x: number, y: number, z: number): Vec3 =>
     normalize([dist(x + eps, y, z) - dist(x - eps, y, z), dist(x, y + eps, z) - dist(x, y - eps, z), dist(x, y, z + eps) - dist(x, y, z - eps)]);
+
+  /**
+   * What the shader needs at a surface point: the material's own colour and fields, or, for a material with a
+   * finish (wear, bump, rust), `surface()` with the curvature wear reads and the normal tilted by the bump's slope,
+   * which is the same function and the same slope the atlas baker writes into the GLB's maps. A plain material
+   * pays nothing for this.
+   */
+  const finishAt = (p: Vec3, n: Vec3, h: Hit): { base: Vec3; metal: number; rough: number; glow: number; n: Vec3 } => {
+    const m = h.mat;
+    if (!hasFinish(m)) return { base: albedo(m, h.lx, h.ly, h.lz), metal: m.metal, rough: m.rough, glow: m.glow, n };
+    const c = (m.wear ?? 0) > 0 ? fieldCurvature(dist, p[0], p[1], p[2], probe) : 0;
+    const sf = surface(m, h.lx, h.ly, h.lz, c);
+    let nn = n;
+    if ((m.bump ?? 0) > 0) {
+      // Two tangents, and how far the paint frame's point moves along each per world unit (from two nearby hits),
+      // so the slope is measured in the frame the bumps were painted in: they move and turn with the part.
+      const ref: Vec3 = Math.abs(n[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+      const t1 = normalize([n[1] * ref[2] - n[2] * ref[1], n[2] * ref[0] - n[0] * ref[2], n[0] * ref[1] - n[1] * ref[0]]);
+      const t2: Vec3 = [n[1] * t1[2] - n[2] * t1[1], n[2] * t1[0] - n[0] * t1[2], n[0] * t1[1] - n[1] * t1[0]];
+      const e = bumpScaleOf(m) * 0.1;
+      const along = (t: Vec3): Vec3 => {
+        const q = shape.hit(p[0] + t[0] * e, p[1] + t[1] * e, p[2] + t[2] * e);
+        // A neighbour in another material (a decal's edge) is no slope.
+        return q.mat === m ? [(q.lx - h.lx) / e, (q.ly - h.ly) / e, (q.lz - h.lz) / e] : [0, 0, 0];
+      };
+      const [s1, s2] = bumpSlope(m, h.lx, h.ly, h.lz, along(t1), along(t2));
+      nn = normalize([n[0] - s1 * t1[0] - s2 * t2[0], n[1] - s1 * t1[1] - s2 * t2[1], n[2] - s1 * t1[2] - s2 * t2[2]]);
+    }
+    return { base: sf.color, metal: sf.metal, rough: sf.rough, glow: sf.glow, n: nn };
+  };
 
   /** 0 = fully shadowed, 1 = lit, towards one light; skipped when the ray cannot reach the model's box. */
   const shadow = (p: Vec3, LIGHT: Vec3 = lights[0].dir, softness: number = lights[0].softness, limit = Infinity): number => {
@@ -335,14 +368,15 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const p: Vec3 = [from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t];
       const n = gradient(p[0], p[1], p[2]);
       const h = shape.hit(p[0], p[1], p[2]);
-      const base = albedo(h.mat, h.lx, h.ly, h.lz);
       if (h.mat.transmit > 0) {
         // Glass again (a second pane, or the same one at a grazing angle): the backdrop through it, tinted, no more bounces.
+        const base = albedo(h.mat, h.lx, h.ly, h.lz);
         const bd = backdrop(dir);
         const tr = h.mat.transmit;
         return [bd[0] * (base[0] * tr + (1 - tr)), bd[1] * (base[1] * tr + (1 - tr)), bd[2] * (base[2] * tr + (1 - tr))];
       }
-      return shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir, depth, h.mat.glow);
+      const f = finishAt(p, n, h);
+      return shadePoint(p, f.n, f.base, f.metal, f.rough, dir, depth, f.glow);
     }
     if (dir[1] < -1e-6) {
       const tf = (floorY - from[1]) / dir[1];
@@ -407,8 +441,13 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const p: Vec3 = [eye[0] + dir[0] * hitT, eye[1] + dir[1] * hitT, eye[2] + dir[2] * hitT];
       const n = gradient(p[0], p[1], p[2]);
       const h = shape.hit(p[0], p[1], p[2]);
-      const base = albedo(h.mat, h.lx, h.ly, h.lz);
-      const color = h.mat.transmit > 0 ? shadeGlass(p, n, h.mat, base, dir) : shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir, 0, h.mat.glow);
+      let color: Vec3;
+      if (h.mat.transmit > 0) color = shadeGlass(p, n, h.mat, albedo(h.mat, h.lx, h.ly, h.lz), dir);
+      else {
+        const f = finishAt(p, n, h);
+        color = shadePoint(p, f.n, f.base, f.metal, f.rough, dir, 0, f.glow);
+      }
+      // The edge test reads the field's normal, not the bumped one: a bump is texture, not a silhouette to supersample.
       return { color, depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat) };
     }
     // Floor or sky.
