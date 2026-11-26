@@ -590,28 +590,35 @@ function namesAt(evaluation: Evaluation, at: Vec3, cellSize: number): { name: st
  * of each surface within a cell and a half of the point, read in the other
  * step's field, the nearest reading kept. Positive is a gap, negative is
  * how deep one reaches into the other; undefined when the steps cannot be
- * placed in the output or neither surface comes near the point.
+ * placed in the output or neither surface comes near the point. A cutter's
+ * inside is air, so its field is read the other way round: pebbles 0.01
+ * inside a recess's wall are 0.01 clear of the dish (round 10).
  */
-export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec3, cellSize: number): { gap: number; into?: [string, string] } | undefined {
+export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec3, cellSize: number): { gap: number; into?: [string, string]; cut?: boolean } | undefined {
   const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
   const value = (n: string) => evaluation.steps.find((st) => st.name === n && isShape3(st.value))?.value as Shape3 | undefined;
   const va = value(a), vb = value(b);
   if (!va || !vb || !roots.length) return undefined;
   const sa = placedUnder(roots, va), sb = placedUnder(roots, vb);
+  const sign = (n: string) => (evaluation.roles.get(n) === "cut" ? -1 : 1);
   let best = Infinity, from: 0 | 1 = 0;
   const r = cellSize * 1.5;
-  for (const [i, s, o] of [[0, sa, sb], [1, sb, sa]] as const)
+  for (const [i, s, o, k] of [[0, sa, sb, sign(b)], [1, sb, sa, sign(a)]] as const)
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
         for (let dz = -1; dz <= 1; dz++) {
           const q = surfacePoint(s, at[0] + dx * r, at[1] + dy * r, at[2] + dz * r);
-          // Only the surface near the edge: a projection that ran off to another face of the step says nothing here.
-          if (Math.hypot(q[0] - at[0], q[1] - at[1], q[2] - at[2]) > cellSize * 3) continue;
-          const v = o.dist(q[0], q[1], q[2]);
+          // Only the surface at the edge: a projection that ran off to another face of the step (a recess's floor two
+          // cells below the wall the edges are on) says nothing about this seam.
+          if (Math.hypot(q[0] - at[0], q[1] - at[1], q[2] - at[2]) > cellSize * 1.5) continue;
+          const v = k * o.dist(q[0], q[1], q[2]);
           if (v < best) { best = v; from = i; }
         }
   if (!Number.isFinite(best) || Math.abs(best) > cellSize * 3) return undefined;
-  return best < 0 ? { gap: best, into: from === 0 ? [a, b] : [b, a] } : { gap: best };
+  if (best >= 0) return { gap: best };
+  // Past a cut face either way round is the part reaching into the solid the cut left: the part is the one named first.
+  if (sign(a) < 0 !== sign(b) < 0) return { gap: best, into: sign(a) < 0 ? [b, a] : [a, b], cut: true };
+  return { gap: best, into: from === 0 ? [a, b] : [b, a] };
 }
 
 /**
@@ -641,7 +648,7 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
     // Two steps meeting: how far apart their surfaces are there, which says which way to move one (round 4).
     const g = names.length === 2 && index < 3 ? surfaceGap(evaluation, names[0].name, names[1].name, cl.at, cellSize) : undefined;
     if (g) gaps++;
-    const gapText = !g ? "" : g.into ? `, '${g.into[0]}' only ${fmt(-g.gap)} into '${g.into[1]}' there (${(-g.gap / cellSize).toFixed(1)} of a cell)` : `, their surfaces ${fmt(g.gap)} apart there (${(g.gap / cellSize).toFixed(1)} of a cell)`;
+    const gapText = !g ? "" : g.into ? `, '${g.into[0]}' only ${fmt(-g.gap)} ${g.cut ? `past the face '${g.into[1]}' cut` : `into '${g.into[1]}'`} there (${(-g.gap / cellSize).toFixed(1)} of a cell)` : `, their surfaces ${fmt(g.gap)} apart there (${(g.gap / cellSize).toFixed(1)} of a cell)`;
     const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}${gapText}`;
     edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name), ...(g ? { gap: g.gap } : {}) });
     if (index >= 3) return "";

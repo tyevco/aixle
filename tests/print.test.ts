@@ -210,5 +210,14 @@ describe("open edges between two parts", () => {
     expect(note).toMatch(/overlap them by a cell or more, or part them by a cell/);
     const sunk = check("a = box(1, 1, 1)\nb = box(1, 1, 1) | move(0.99, 0, 0)\nboth = a + b");
     expect(watertightNote(w([0.495, 0.2, 0.1]), sunk, 0.05)).toMatch(/in 'a', 'b', '[ab]' only 0\.01 into '[ab]' there \(0\.2 of a cell\)/);
+    // A cutter's inside is air: pebbles 0.01 inside a recess's wall are 0.01 clear of the dish (round 10's terrarium).
+    const dish = check("base = cylinder(0.7, 0.3) | move(0, 0.15, 0)\nrecess = cylinder(0.5, 0.2) | move(0, 0.3, 0)\ndish = base - recess\npebbles = cylinder(0.49, 0.1) | move(0, 0.24, 0)\nm = dish + pebbles");
+    const g = surfaceGap(dish, "recess", "pebbles", [0.495, 0.26, 0], 0.0124)!;
+    expect(g.gap).toBeCloseTo(0.01, 3);
+    expect(g.into).toBeUndefined();
+    // At the floor the pebbles sink 0.01 past the recess's floor into the dish: the part is named, then the cut.
+    const floor = surfaceGap(dish, "recess", "pebbles", [0.3, 0.2, 0], 0.0124)!;
+    expect(floor.gap).toBeCloseTo(-0.01, 3);
+    expect(floor.into).toEqual(["pebbles", "recess"]);
   });
 });
