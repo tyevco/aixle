@@ -316,6 +316,9 @@ describe("interpreter", () => {
     const ev = run('stone = prism(8, 0.3, 0.4)\nabove = box(2, 2, 2) | move(0, 1, 0)\ngem = stone & above\nprobe = box(0.1, 0.1, 0.1) | move(0, 0.1, 0)\nassert void(probe, gem)\nshow gem');
     expect(ev.roles.get("above")).toBe("mask");
     expect(ev.roles.get("stone")).toBe("part");
+    // A half-space turned and moved on its way into the cut, facet by facet in a loop, is still the mask.
+    const facets = run('stone = prism(8, 0.3, 0.6)\nbelow = box(2, 2, 2) | move(0, -1, 0)\nfor i in range(4) {\n  stone = stone & (below | rotate(x=25) | move(0, 0.2, 0) | rotate(y=i * 90))\n}\nshow stone');
+    expect(facets.roles.get("below")).toBe("mask");
     expect(ev.asserts[0].where).toMatch(/^solid at \(.*\) in 'gem'$/);
     // Boxes that never meet make a void trivial, and it is said.
     const far = run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(5, 0, 0)\nassert void(b, a)\nshow a');
@@ -325,6 +328,17 @@ describe("interpreter", () => {
     // A failing pieces() names the loose piece.
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
     expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
+  });
+  it("says why an overlap is nothing, and which copy of a ring of probes a void failure is in (round 10)", () => {
+    // A board whose back face lies exactly on the wall's front only touches; one held off stands apart.
+    const ev = run('wall = box(2, 1, 0.2)\nboard = box(0.6, 0.3, 0.05) | move(0, 0, 0.125)\nfar = box(0.6, 0.3, 0.05) | move(0, 0, 0.2)\nassert overlap(board, wall) > 0.002\nassert overlap(far, wall) > 0.002\nshow wall + board + far');
+    expect(ev.asserts.map((a) => a.where)).toEqual([expect.stringMatching(/^they only touch, at \(.*\): sink one into the other by a cell or more$/), expect.stringMatching(/^they do not meet: 0\.075 apart, closest at \(.*\)$/)]);
+    // A ring of six probe rods, the third copy (120 degrees) blocked: the failure names that copy.
+    const hub = run('disc = cylinder(1, 0.25) | move(0, 0.125, 0)\nholes = cylinder(0.07, 1.2) | ring(6, 0.7)\nplug = cylinder(0.07, 0.25) | move(0.7, 0.125, 0) | rotate(y=120)\nhub = disc - holes + plug\nrods = cylinder(0.03, 0.6) | move(0, 0.125, 0) | ring(6, 0.7)\nassert void(rods, hub)\nshow hub');
+    expect(hub.asserts[0].where).toMatch(/, in copy 3 of the 6 in rods$/);
+    // A region that is a union of named probes names the probe.
+    const named = run('slab = box(2, 0.2, 2)\na = box(0.1, 0.1, 0.1) | move(-0.5, 0.5, 0)\nb = box(0.1, 0.1, 0.1) | move(0.5, 0, 0)\nprobes = a + b\nassert void(probes, slab)\nshow slab');
+    expect(named.asserts[0].where).toMatch(/, in probes's part 'b'$/);
   });
   it("attach sinks a part into its target along its anchor's line to its centre", () => {
     const ev = run('post = cylinder(0.1, 1) | move(0, 0.5, 0)\nlamp = sphere(0.2) | attach("bottom", post, "top")\nsunk = sphere(0.2) | attach("bottom", post, "top", sink=0.05)\nshow post + lamp + sunk');

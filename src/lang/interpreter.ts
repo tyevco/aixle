@@ -19,6 +19,8 @@ import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, t
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "slice"]);
+/** The transforms a mask can pass through and stay the half-space it was: `below | rotate(x=25) | move(0, h, 0)`. */
+const MASK_MOVES = new Set(["move", "rotate", "scale", "mirror", "flip"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
@@ -732,8 +734,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (p) {
         const at = `(${p.map(fmt3).join(", ")})`;
         const first = args[0].value, second = args[1].value;
-        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
+        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
         witness = what;
+      }
+      // An overlap of nothing says whether the two touch, stand apart, or overlap by less than the lattice can see
+      // (round 10: a sign board's back face exactly on the wall read 0 with no place, and a rim sunk 0.02 read 0).
+      if (callee === "overlap" && result === 0 && !isEmpty(a.bounds) && !isEmpty(b.bounds)) {
+        const c = clearanceAt(a, b);
+        const tol = Math.max(...boundsSize(a.bounds), ...boundsSize(b.bounds)) * 1e-4;
+        if (c.at) {
+          const at = `(${c.at.map(fmt3).join(", ")})`;
+          witness = c.d > tol ? `they do not meet: ${Number(c.d.toPrecision(3))} apart, closest at ${at}` : c.d >= -tol ? `they only touch, at ${at}: sink one into the other by a cell or more` : `they overlap by ${Number((-c.d).toPrecision(3))} at ${at}, thinner than the lattice measures over their shared box: promise it on a chunk of the part (part & box(...)) or with clearance(a, b) < 0`;
+        }
       }
       // A void whose region is nowhere near the shape holds for no reason (round 10: a probe in the standing frame
       // against a cutter in the flat frame promised nothing); a region just clear of the shape is a guard, and fine.
@@ -893,7 +905,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (!currentStep) return;
     const vol = (s: Shape3) => (isEmpty(s.bounds) ? 0 : boundsSize(s.bounds).reduce((a, b) => a * b, 1));
     const bigger = vol(l) > vol(r) * 1.5 ? le : vol(r) > vol(l) * 1.5 ? re : undefined;
-    if (bigger && bigger.type === "ident") (currentStep.maskDeps ??= new Set()).add(bigger.name);
+    // The mask may be a named half-space turned and moved on the way in (`stone & (below | rotate(x=25) | move(...))`
+    // in a loop of facets, round 10): the name at the head of a chain of rigid transforms is the mask.
+    let e = bigger;
+    while (e && e.type === "call" && e.piped && MASK_MOVES.has(e.callee) && e.args.length && !e.args[0].name) e = e.args[0].value;
+    if (e && e.type === "ident") (currentStep.maskDeps ??= new Set()).add(e.name);
   }
 
   /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
@@ -902,6 +918,16 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (!currentStep) return;
     currentStep.cuts = true;
     (currentStep.cutDeps ??= new Set()).add(name);
+  }
+
+  /** Which copy of a region made of copies (a ring of probe rods) holds a point, or which named part: for a void failure. */
+  function regionPart(region: Shape3, p: Vec3, regionText: string): string {
+    const parts = region.parts;
+    if (!parts || parts.length < 2) return "";
+    const i = parts.findIndex((k) => k.dist(p[0], p[1], p[2]) < 0);
+    if (i < 0) return "";
+    const named = [...steps.values()].find((st) => st.value === parts[i]);
+    return named ? `, in ${regionText}'s part '${named.name}'` : `, in copy ${i + 1} of the ${parts.length} in ${regionText}`;
   }
 
   /**

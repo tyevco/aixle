@@ -188,6 +188,27 @@ describe("pipeline", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("says which named steps the callouts never saw, tags a cut named at open edges, and leaves the caption off when asked", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("plate = box(2, 0.2, 2)\nunder = box(0.4, 0.05, 0.4) | move(0, -0.2, 0)\nslot = box(0.2, 1, 1) | move(0.5, 0.2, 0)\nm = (plate - slot) + under\nshow m", "slot.aix", dir, { grid: 32, size: 96, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, elevation: 40 });
+      expect(r.report).toMatch(/not seen from this view, hidden or every visible face of theirs a smaller step's: under/);
+      const w = { ok: false, note: "Watertight: no.", where: { min: [0, 0, 0], max: [1, 1, 1] }, clusters: [{ at: [0.4, 0.1, 0] as [number, number, number], count: 4, box: { min: [0.4, 0.05, -0.1], max: [0.4, 0.15, 0.1] } }] } as unknown as Parameters<typeof watertightNote>[0];
+      const ev = check("plate = box(2, 0.2, 2)\nslot = box(0.2, 1, 1) | move(0.5, 0.2, 0)\nm = plate - slot\nshow m");
+      const note = watertightNote(w, ev, 0.05);
+      expect(note).toMatch(/'slot' \(cut: the face it cut\)/);
+      expect(note).toMatch(/move the part by half a cell \(0\.025\) along x/);
+      const plain = run('m = box(1)\nset caption 0\nshow m', "cap.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 });
+      expect(plain.files).toContain("beauty.png");
+      const bare = readFileSync(join(dir, "beauty.png"));
+      run('m = box(1)\nshow m', "cap.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 });
+      expect(readFileSync(join(dir, "beauty.png")).equals(bare)).toBe(false);
+      run('m = box(1)\nshow m', "cap.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64, caption: false });
+      expect(readFileSync(join(dir, "beauty.png")).equals(bare)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("titles a sheet with the surface's size held within the bounds", () => {
     expect(clampBounds({ min: [-1.001, -0.0005, -1], max: [1.001, 0.513, 1] }, { min: [-1, 0, -1], max: [1, 0.5, 1] })).toEqual({ min: [-1, 0, -1], max: [1, 0.5, 1] });
     // A mesh smaller than its loose bounds keeps its own extent.

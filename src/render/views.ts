@@ -124,6 +124,8 @@ export interface ViewOptions {
   fitPoints?: Float32Array;
   /** Receives the render target (depth per pixel) and the camera, for a caller that draws over the view. */
   capture?: (target: RenderTarget, cam: Camera) => void;
+  /** Draw glass as a solid instead of on every other pixel: a part with nothing behind it to show. */
+  solidGlass?: boolean;
 }
 
 /** The ghost's note under a view's caption, so a faint slab is read as a clipped neighbour and not a part. */
@@ -138,7 +140,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
     const az = opts.azimuth ?? info.azimuth ?? 35, el = opts.elevation ?? info.elevation ?? 25;
     const cam = perspective(bounds, size, size, az, el, 30, 1, opts.fitPoints ?? mesh.positions);
     const target = createTarget(size, size, INK.viewPersp);
-    renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor });
+    renderMesh(mesh, cam, target, { background: INK.viewPersp, outline: opts.outline, flatColor: opts.flatColor, solidGlass: opts.solidGlass });
     floorGrid(cam, target, bounds, label);
     if (ghost) renderGhost(ghost, cam, target, { margin: opts.ghostMargin });
     if (label) caption(target.canvas, "PERSPECTIVE", `azimuth ${fmt(az)}° elevation ${fmt(el)}°  ${dimsLabel(info.size ?? info.bounds)}`, ghost ? GHOST_NOTE : undefined);
@@ -341,7 +343,11 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
       drawText(canvas, 8, thumb / 2 - 4, "EMPTY", INK.warn, 1);
     } else {
       const mesh = st.mesh ?? surfaceNets(st.shape, { resolution }).mesh;
-      canvas = renderView(mesh, { name: st.name, bounds: st.shape.bounds }, "persp", thumb, { label: false });
+      // A step that is all glass has nothing of its own behind it to show, and its checker hid the shape (round 10: a
+      // faceted gem's thumbnail was a dark checkered blob): drawn solid. A step with other parts behind its glass
+      // keeps the checker, so a terrarium's thumbnail still shows its plants.
+      const allGlass = mesh.materials.length > 0 && mesh.materials.every((m) => m.transmit > 0.3);
+      canvas = renderView(mesh, { name: st.name, bounds: st.shape.bounds }, "persp", thumb, { label: false, solidGlass: allGlass });
       if (triangleCount(mesh) === 0) {
         // Coarse means the thumbnail's grid, not the model, lost it: say so in grey, not in the warning colour.
         if (st.coarse) drawText(canvas, 8, thumb / 2 - 4, "TOO FINE FOR THIS THUMBNAIL", INK.dim, 1);

@@ -100,6 +100,8 @@ export interface RunOptions {
   focus?: string;
   /** Put slices.png's three planes through this named step, framed on it (or `set slice name`). */
   slice?: string;
+  /** false leaves the caption (the shot's name and size) off beauty.png and the camera shots (or `set caption 0`). */
+  caption?: boolean;
 }
 
 export interface RunResult {
@@ -585,6 +587,7 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
   const tally = new Map<string, number>();
   let planar = 0;
+  let planeAxis: number | undefined;
   const all = w.clusters ?? [];
   const spots = all.map((cl, index) => {
     // Named at an edge that is on the model, not at the cluster's mean, which for a ring of edges is inside the part.
@@ -597,20 +600,23 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
     const twice = names.length === 1 && names[0].parents.length >= 2 ? names[0].parents.slice(0, 2) : undefined;
     // One name alone: the step's own surface folds or creases there, or a sample-plane coincidence; a straight
     // tube has no second surface to cross, so it is not called "with itself" (round 6: that read as nonsense).
-    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in '${names[0].name}' twice, as '${twice[0]}' and '${twice[1]}'` : ` in '${names[0].name}' alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => `'${n.name}'`).join(", ")}`;
+    // A cutter named there is the face it cut in its part, which is tagged, or a reader looks for the cutter itself
+    // (round 10: a recess named at a pebble band's edges sent the reader to the base's own shape).
+    const q = (nm: string) => `'${nm}'${evaluation.roles.get(nm) === "cut" ? " (cut: the face it cut)" : ""}`;
+    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in ${q(names[0].name)} twice, as '${twice[0]}' and '${twice[1]}'` : ` in ${q(names[0].name)} alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => q(n.name)).join(", ")}`;
     edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name) });
     if (index >= 3) return "";
     // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
     // plane, which the extractor cannot resolve (measured: a down tube's side and a tyre's equator on grid planes).
     const flat = cl.count >= 3 ? [0, 1, 2].find((k) => cl.box.max[k] - cl.box.min[k] < cellSize * 0.05) : undefined;
-    if (flat !== undefined) planar++;
+    if (flat !== undefined) { planar++; planeAxis ??= flat; }
     const plane = flat !== undefined ? `, all on the plane ${"xyz"[flat]} = ${fmt(cl.at[flat])}` : "";
     return `${cl.count} at (${cl.at.map(fmt).join(", ")})${label}${plane}`;
   });
   const byStep = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, c]) => `'${n}' ${c}`).join(", ");
   // In a pose the sample planes fall where the pose puts the part, so a nudge that clears them at rest need not hold
   // and one that clears them here need not hold at rest (round 8: a lug blamed on a plane in two poses).
-  const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : " Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part or the grid by a fraction of a cell, or change the radius a little.") : "";
+  const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : ` Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part by half a cell (${fmt(cellSize / 2)}) along ${"xyz"[planeAxis ?? 1]}, which puts the face midway between two sample planes, or change the radius a little.`) : "";
   const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
   return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${planeNote}`;
 }
@@ -797,7 +803,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let calloutNote: string | undefined;
   // The step slices.png cut through, when it was asked for one.
   let sliceNote: string | undefined;
-  let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[] } | undefined;
+  let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[]; unseen: string[] } | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[] }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
@@ -1050,8 +1056,12 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const co = time("callouts", () => renderCallouts(viewMesh, named, info, size, viewCell, 20, azimuth, elevation, output));
         write("callouts.png", co.canvas.toPng());
         const label = (l: { name: string; cut?: boolean }) => (l.cut ? `${l.name} (cut)` : l.name);
-        calloutNote = co.labelled.length ? `${co.labelled.map(label).join(", ")}${co.unlabelled.length ? ` (in view but smaller, not labelled: ${co.unlabelled.map(label).join(", ")})` : ""}` : "no named step has a visible surface from this view";
-        calloutData = { labelled: co.labelled.map((l) => ({ name: l.name, cut: l.cut || undefined, visible: l.visible })), unlabelled: co.unlabelled.map(label) };
+        // The candidates no visible face was credited to, named too, so "unlabelled" and "not seen" read apart (round
+        // 10: a hub's through-holes were never labelled and nothing said whether they were seen).
+        const seen = new Set([...co.labelled, ...co.unlabelled].map((l) => l.name));
+        const unseen = named.filter((n) => !seen.has(n.name) && evaluation.roles.get(n.name) !== "mask").map(label);
+        calloutNote = co.labelled.length ? `${co.labelled.map(label).join(", ")}${co.unlabelled.length ? ` (in view but smaller, not labelled: ${co.unlabelled.map(label).join(", ")})` : ""}${unseen.length ? `; not seen from this view, hidden or every visible face of theirs a smaller step's: ${unseen.join(", ")}` : ""}` : "no named step has a visible surface from this view";
+        calloutData = { labelled: co.labelled.map((l) => ({ name: l.name, cut: l.cut || undefined, visible: l.visible })), unlabelled: co.unlabelled.map(label), unseen };
       }
     }
     for (const v of views) time(`view:${v}`, () => write(`${v}.png`, renderView(viewMesh, info, v, size, { azimuth, elevation, ghost: viewGhost, ghostMargin: ghostCell }).toPng()));
@@ -1252,12 +1262,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // A focus shot frames its part but marches the whole model, so a hole under a counterbore still reads as
       // through and the floor's shadow is the model's (round 9: a focused counterbore looked blind).
       const modelBounds = triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
+      // The caption names the shot and its size for whoever checks it; a presentation copy leaves it off (round 10: at
+      // a low camera it overprinted a terrarium's base and label), with `set caption 0` or --no-caption.
+      const captioned = opts.caption ?? evaluation.settings.caption !== 0;
       const shotFocus = shot?.focus ? resolveFocus(shot.focus) : undefined;
       const beautyFrame = shotFocus ? shotFocus.frame : focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
       // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
       // (measured: a focused beauty render fitted every point and framed the whole mug).
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
-        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label }).toPng());
+        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label: captioned ? label : undefined }).toPng());
       time("beauty", () => shoot("beauty.png", beautyFrame, !!(shotFocus || focusName), azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
       // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders.
       const stripFrame = Math.max(96, Math.round(bsize * 0.5));
