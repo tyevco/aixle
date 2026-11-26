@@ -900,9 +900,12 @@ cubic centimetres and grams of PLA. The thinnest wall is measured by a
 ray from every vertex inward to the far side of the solid, through the
 field, so a wall under a cell is still read at its own thickness, and a
 cut's walls (a flute through a vase's side, an engraving's floor) are
-found where no step's feature size knows them; the tip of a corner
-sharper than a right angle is not a wall and is left out, a sliver
-between two cuts is not. The share of the surface on walls under 0.8 mm
+found where no step's feature size knows them. Near the tip of a
+corner the ray leaves through the side face at a slant, and a reading
+counts only where the far side faces back within 30 degrees, so a
+corner is not taken for a wall; a blade, or a feather a cut leaves on a
+tilted plate (faces meeting under 30 degrees), and a sliver between two
+cuts are thin, and count. The share of the surface on walls under 0.8 mm
 (two lines of a 0.4 mm nozzle) is given when there is any. `report.json`
 has all of it under `print`.
 
