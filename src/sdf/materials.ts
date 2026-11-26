@@ -354,19 +354,31 @@ export function bumpHeight(m: Material, x: number, y: number, z: number): number
 }
 
 /**
- * The bump's slope along two directions on the surface, per unit of world
- * distance: `u1` and `u2` are how far the local point moves per world unit
- * along each (the paint frame's image of two world tangents). Central
- * differences a tenth of the feature size apart, so the beauty render (which
- * finds `u` from two nearby hits) and the baker (which finds it from a
- * triangle's corners) measure the same slope.
+ * The bump's slope along two directions on the surface: `u1` and `u2` are
+ * how far the local point moves per world unit along each (the paint frame's
+ * image of two world tangents). The bumps' height and size are both in the
+ * paint frame, so a part scaled after painting keeps its bumps' look, as it
+ * keeps its pattern's: the slope is taken in the frame's own units, central
+ * differences a tenth of the feature size apart along each direction, and
+ * weighted by how much that direction stretches against the frame's mean,
+ * which is exact for a turn and a uniform scale. A step of a tenth of the
+ * feature in world units instead spanned whole bumps on a part scaled down,
+ * and made a part scaled by s bumpier by 1/s (measured: one ball built at
+ * size, ten times big and scaled down, ten times small and scaled up, read
+ * as three finishes). The beauty render (which finds `u` from two nearby
+ * hits) and the baker (from a triangle's corners) measure the same slope.
  */
 export function bumpSlope(m: Material, x: number, y: number, z: number, u1: Vec3, u2: Vec3): [number, number] {
   if (!((m.bump ?? 0) > 0)) return [0, 0];
   const e = bumpScaleOf(m) * 0.1;
-  const s1 = (bumpHeight(m, x + u1[0] * e, y + u1[1] * e, z + u1[2] * e) - bumpHeight(m, x - u1[0] * e, y - u1[1] * e, z - u1[2] * e)) / (2 * e);
-  const s2 = (bumpHeight(m, x + u2[0] * e, y + u2[1] * e, z + u2[2] * e) - bumpHeight(m, x - u2[0] * e, y - u2[1] * e, z - u2[2] * e)) / (2 * e);
-  return [s1, s2];
+  const k1 = Math.hypot(u1[0], u1[1], u1[2]), k2 = Math.hypot(u2[0], u2[1], u2[2]);
+  const k = k1 > 0 && k2 > 0 ? Math.sqrt(k1 * k2) : k1 || k2;
+  const along = (u: Vec3, ku: number): number => {
+    if (!(ku > 0)) return 0;
+    const dx = (u[0] / ku) * e, dy = (u[1] / ku) * e, dz = (u[2] / ku) * e;
+    return ((bumpHeight(m, x + dx, y + dy, z + dz) - bumpHeight(m, x - dx, y - dy, z - dz)) / (2 * e)) * (ku / k);
+  };
+  return [along(u1, k1), along(u2, k2)];
 }
 
 /**

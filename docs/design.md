@@ -436,10 +436,14 @@ length, which is what a handled bar is.
 
 A bump is a height, not geometry: fractal noise in the paint frame,
 shaded by tilting the normal by its slope. The slope is measured along
-two directions on the surface, per unit of world distance, from how far
-the paint frame's point moves along each: the beauty render finds that
-from two nearby hits, the baker from a triangle's corners, and both call
-the same `bumpSlope()`, so they agree. The edge test that decides which
+two directions on the surface, from how far the paint frame's point
+moves along each: the beauty render finds that from two nearby hits,
+the baker from a triangle's corners, and both call the same
+`bumpSlope()`, so they agree. Height and size are both the paint
+frame's, so the slope is taken in the frame's units and a part scaled
+after painting keeps its finish; taken per world unit, one ball built at
+size, built ten times big and scaled down, and built ten times small and
+scaled up read as three different finishes. The edge test that decides which
 beauty pixels get four samples reads the field's normal, not the bumped
 one, or every pixel of a bumped part would be supersampled.
 

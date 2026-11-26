@@ -551,7 +551,9 @@ where a hard crease gathers a lot. `bump` is the height of a fractal
 noise in model units, either way of the surface, and `bump_scale` its
 feature size (ten times the height when not given, which tilts the
 surface about ten degrees; a fifth of it reads as stucco). The bumps are
-laid out in the frame the part is painted in, so they move with it. The
+laid out in the frame the part is painted in, height and size alike, so
+they move, turn and scale with it: a bumped part scaled after painting
+keeps its finish, as a pattern does. The
 `rust` pattern (and the `rust` preset, iron with rust on it) eats
 patches about `scale` across into the base colour, in the oxide colour
 unless `color2` is given; the patches are rough and not metal, and wear

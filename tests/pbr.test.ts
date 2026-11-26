@@ -110,6 +110,23 @@ describe("surface and curvature", () => {
     expect(n).toBeGreaterThan(20);
     expect(rubbed).toBe(n);
   });
+  it("keeps a bump's slope when the part is scaled after painting: its height and its size scale together", () => {
+    // A world unit moves the paint frame's point 1/s for a part scaled by s; the bumps are the same bumps, scaled.
+    const m = customMaterial({ color: [0.8, 0.8, 0.8], bump: 0.01, bumpScale: 0.1 });
+    const at = (k: number) => bumpSlope(m, 0.6, -0.2, 0.1, [k, 0, 0], [0, 0, k]);
+    const one = at(1);
+    expect(Math.hypot(one[0], one[1])).toBeGreaterThan(0.01);
+    for (const s of [0.1, 0.5, 4]) {
+      const scaled = at(1 / s);
+      expect(scaled[0]).toBeCloseTo(one[0], 6);
+      expect(scaled[1]).toBeCloseTo(one[1], 6);
+    }
+    // Turned as well as scaled: the slope along each world direction is the slope along the frame's.
+    const turned = bumpSlope(m, 0.6, -0.2, 0.1, [0, 0, 2], [-2, 0, 0]);
+    const plain = bumpSlope(m, 0.6, -0.2, 0.1, [0, 0, 1], [-1, 0, 0]);
+    expect(turned[0]).toBeCloseTo(plain[0], 6);
+    expect(turned[1]).toBeCloseTo(plain[1], 6);
+  });
   it("takes bump, bump_scale and wear in material(), and says what is wrong", () => {
     const ev = evaluate(parse('m = material("iron", wear=0.4, bump=0.01)\nn = material("#808080", "rust", bump=0.02, bump_scale=0.3)\nshow box(1) | paint(m)'));
     const m = ev.steps.find((s) => s.name === "m")!.value as ReturnType<typeof preset>;
@@ -178,6 +195,17 @@ describe("normal map", () => {
     errors.sort((a, b) => a - b);
     expect(errors[Math.floor(errors.length * 0.95)]).toBeLessThan(2);
     expect(errors[errors.length - 1]).toBeLessThan(5);
+  });
+  it("bakes a bumped part scaled after painting like the same part built at that size", () => {
+    // Built at twice the size and halved, against built at size: the same bumps, so the same tilt off the mesh.
+    const tilt = (shape: Shape3): number => {
+      const tx = decodedTexels(bake(shape, 0.03, 256));
+      return tx.reduce((s, t) => s + deg(t.n[0] * t.mesh[0] + t.n[1] * t.mesh[1] + t.n[2] * t.mesh[2]), 0) / tx.length;
+    };
+    const atSize = tilt(O.paint(P.sphere(0.5), customMaterial({ color: [0.8, 0.8, 0.8], bump: 0.01, bumpScale: 0.1 })));
+    const halved = tilt(O.scale(O.paint(P.sphere(1), customMaterial({ color: [0.8, 0.8, 0.8], bump: 0.02, bumpScale: 0.2 })), 0.5, 0.5, 0.5));
+    expect(atSize).toBeGreaterThan(2);
+    expect(Math.abs(halved / atSize - 1)).toBeLessThan(0.1);
   });
   it("decodes a displace finer than the mesh to the field's gradient", () => {
     const rough = O.displace(P.box(1.2, 1.2, 1.2, 0.1), 0.012, 0.1);
