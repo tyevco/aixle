@@ -112,7 +112,8 @@ export function wallThickness(shape: Shape3, mesh: Mesh, cellSize: number, maxRa
     if (!(thickness > 0)) continue;
     // A wall is two faces back to back: the far side must face along the ray. Near a corner sharper than a right
     // angle (a rim's lip, a chamfer's edge) the ray leaves through the side face at a slant and reads a fraction of
-    // a cell, which is the corner, not a wall; a blade or a spike, whose faces meet at under twice this angle, counts.
+    // a cell, which is the corner, not a wall; a blade, whose faces meet at under this angle (the far face then faces
+    // back within it, measured: a 28-degree wedge reads its edge, a 32-degree one does not), counts.
     const ex = x + gx * hi, ey = y + gy * hi, ez = z + gz * hi;
     const nx = d(ex + h, ey, ez) - d(ex - h, ey, ez), ny = d(ex, ey + h, ez) - d(ex, ey - h, ez), nz = d(ex, ey, ez + h) - d(ex, ey, ez - h);
     const nl = Math.sqrt(nx * nx + ny * ny + nz * nz);

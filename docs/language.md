@@ -884,8 +884,8 @@ cell)`) or how far one reaches into the other (`'pin' only 0.01 into
 when the other is a cutter, whose inside is air), from points of each
 surface within a cell and a half of the edge read in the other's field,
 so the fix is a number: the gap closed to an overlap of a cell, or
-opened to a cell; `report.json` has it as `gap`, negative for an
-overlap. A focused render adds a
+opened to a cell; `report.json` has it as `gap` on the three clusters
+the report prints, negative for an overlap. A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
