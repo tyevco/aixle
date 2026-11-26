@@ -15,7 +15,7 @@ import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
 import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
-import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment"]);
@@ -335,8 +335,23 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         if (k < 0 || k >= target.length) throw new RuntimeError(`index ${i} is outside the list, which has ${target.length} item${target.length === 1 ? "" : "s"}`, e.line);
         return target[k];
       }
+      case "record": {
+        // In the order written; `...p` takes p's fields where it stands, and a later entry replaces an earlier one
+        // in place, so {...p, x: 2} keeps p's order with x changed.
+        const fields = new Map<string, Value>();
+        for (const en of e.entries) {
+          const v = evalExpr(en.value, scope);
+          if (en.spread) {
+            if (!isRecord(v)) throw new RuntimeError(`'...${exprText(en.value)}' takes the fields of a record, and ${exprText(en.value)} is a ${typeName(v)}`, e.line);
+            for (const [k, x] of v.fields) fields.set(k, x);
+          } else fields.set(en.key!, v);
+        }
+        return { kind: "record", fields };
+      }
+      case "field":
+        return field(evalExpr(e.target, scope), e.name, exprText(e.target), e.line);
       case "ident": {
-        if (e.name.includes(".")) return fromModule(e.name, e.line, scope);
+        if (e.name.includes(".")) return dottedValue(e.name, e.line, scope);
         const v = scope.get(e.name);
         if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
         reads?.add(e.name);
@@ -629,6 +644,45 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, jp.angles, axis, jp.move, jp.scale);
   }
 
+  /** One field of a record, or an error naming the fields there are. `what` is the record as written, for the message. */
+  function field(v: Value, key: string, what: string, line: number): Value {
+    if (!isRecord(v)) throw new RuntimeError(`'${what}' is a ${typeName(v)}, not a record, so it has no field '${key}'${Array.isArray(v) ? `; a list's items are read by index, ${what}[0]` : ""}`, line);
+    const f = v.fields.get(key);
+    if (f === undefined) throw new RuntimeError(`'${what}' has no field '${key}'; it has ${[...v.fields.keys()].join(", ") || "no fields"}`, line);
+    return f;
+  }
+
+  /**
+   * `p.x.y` or `lib.name.x`: a used library's name first (a library wins over a record of the same name, as `use`
+   * warns), else a record by name, then a field per dot.
+   */
+  function dottedValue(dotted: string, line: number, scope: Scope): Value {
+    const parts = dotted.split(".");
+    const table = scope.root().modules ?? modules;
+    let v: Value, first: number;
+    if (table.has(parts[0])) { v = fromModule(`${parts[0]}.${parts[1]}`, line, scope); first = 2; }
+    else {
+      const head = scope.get(parts[0]);
+      if (head === undefined) {
+        const known = [...table.keys()];
+        throw new RuntimeError(`'${parts[0]}' is not a used library or a defined record${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${parts[0]}.aix" or use "std/${parts[0]}" first, or define ${parts[0]} = {${parts[1]}: ...}`, line);
+      }
+      v = head;
+      first = 1;
+    }
+    for (let i = first; i < parts.length; i++) v = field(v, parts[i], parts.slice(0, i).join("."), line);
+    // A field holding a step's shape reads that step, so `show parts.lid` uses the lid and not every part the
+    // record holds; anything else reads the record.
+    if (first === 1) reads?.add((isShape3(v) && stepOfValue.get(v)) || parts[0]);
+    return v;
+  }
+
+  /** The step a plain name or a field of a record names (`cfg.cavity` reads cfg), for marking what an assert reads. */
+  function stepNameOf(e: Expr): string | undefined {
+    if (e.type !== "ident") return undefined;
+    return e.name.split(".")[0];
+  }
+
   /** `prefix.name` from a used library: its def or constant, with the message naming what the library has. */
   function fromModule(dotted: string, line: number, scope: Scope): Value {
     const dot = dotted.indexOf(".");
@@ -649,7 +703,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   function call(callee: string, args: Arg[], scope: Scope, line: number): Value {
     if (callee.includes(".")) {
-      const v = fromModule(callee, line, scope);
+      const v = dottedValue(callee, line, scope);
       if (!isUserFn(v)) throw new RuntimeError(`'${callee}' is a ${typeName(v)}, not a function`, line);
       return callUser(v, args, scope, line);
     }
@@ -702,7 +756,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
     if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
-    if (assertDepth > 0) for (const a of args) if (!a.name && a.value.type === "ident") regionNames.add(a.value.name);
+    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm) regionNames.add(nm); }
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
@@ -1007,7 +1061,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       }
       case "for": {
         const iterable = evalExpr(stmt.iterable, scope);
-        if (!Array.isArray(iterable)) throw new RuntimeError(`'for' needs a list (use range(n)), got a ${typeName(iterable)}`, stmt.line);
+        if (!Array.isArray(iterable)) throw new RuntimeError(`'for' needs a list (use range(n)), got a ${typeName(iterable)}${isRecord(iterable) ? "; to run over several records, put them in a list: for leg in [front, back]" : ""}`, stmt.line);
         loopDepth++;
         try {
           for (const item of iterable) {
@@ -1027,9 +1081,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         reads = new Set();
         stmt.values.forEach((e, i) => {
           const v = evalExpr(e, scope);
-          if (!isShape3(v)) throw new RuntimeError(`${stmt.type} needs a 3D shape, got a ${typeName(v)}`, stmt.line);
+          if (!isShape3(v)) throw new RuntimeError(`${stmt.type} needs a 3D shape, got a ${typeName(v)}${isRecord(v) ? ` (fields ${[...v.fields.keys()].join(", ")}); ${stmt.type} its shapes by name, ${stmt.type} ${exprText(e)}.${[...v.fields.keys()][0] ?? "x"}, ...` : ""}`, stmt.line);
           shapes.push(v);
-          names.push(e.type === "ident" ? e.name : stmt.type === "scene" ? `object_${i + 1}` : "model");
+          // A record's field shown by name is called by the step it holds, or as written when it holds no step.
+          const named = e.type === "ident" && e.name.includes(".") ? stepOfValue.get(v) : undefined;
+          names.push(named ?? (e.type === "ident" ? e.name : stmt.type === "scene" ? `object_${i + 1}` : "model"));
         });
         const showReads = reads;
         reads = undefined;

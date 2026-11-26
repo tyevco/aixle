@@ -16,13 +16,31 @@ import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
-import { isShape2, isShape3, typeName } from "./lang/values.js";
+import { isMaterial, isRecord, isShape2, isShape3, isUserFn, typeName, type Value } from "./lang/values.js";
 import { parse } from "./lang/parser.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
 // Two decimals, one above ten, none above a hundred; below 0.1, two significant figures, so a small model's parts
 // (a 0.006 lens on a 0.4-unit drone, round 7) still print as themselves.
 const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.005 ? String(Number(v.toPrecision(2))) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
+
+/**
+ * A value on one line, as `check` and `explain` print it: numbers short, strings quoted, a shape by its size, a
+ * record as {name: value, ...}, so a record of parameters reads as it was written.
+ */
+function valueText(v: Value, depth = 0): string {
+  if (typeof v === "number") return short(v);
+  if (typeof v === "string") return JSON.stringify(v);
+  if (Array.isArray(v)) return depth > 3 ? `a list of ${v.length}` : `[${v.map((x) => valueText(x, depth + 1)).join(", ")}]`;
+  if (isRecord(v)) return depth > 3 ? "a record" : `{${[...v.fields].map(([k, x]) => `${k}: ${valueText(x, depth + 1)}`).join(", ")}}`;
+  if (isShape3(v)) return isEmpty(v.bounds) ? "an empty shape" : `a shape ${dimsLabel(v.bounds)}`;
+  if (isShape2(v)) return isEmpty2(v.bounds) ? "an empty profile" : `a profile ${short(v.bounds.max[0] - v.bounds.min[0])} × ${short(v.bounds.max[1] - v.bounds.min[1])}`;
+  if (isUserFn(v)) return `def ${v.name}`;
+  if (isMaterial(v)) return `material ${v.name}`;
+  return `a ${typeName(v)}`;
+}
+/** valueText cut to a line's worth. */
+const clip = (t: string, n = 100): string => (t.length > n ? `${t.slice(0, n - 3)}...` : t);
 
 /** A library's Markdown: its leading comment, then every top-level def with its signature and the comment above it. */
 function libraryMarkdown(file: string): string {
@@ -138,6 +156,21 @@ function main(argv: string[]): number {
         if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
         if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
         if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
+        // A record on one line when it fits; else a line per field (or per record of a list), a shape field with its
+        // box, as a step would have, so a record of parts reads like the parts.
+        const recordList = Array.isArray(st.value) && st.value.length > 0 && st.value.every(isRecord);
+        if (isRecord(st.value) || recordList) {
+          const inline = valueText(st.value);
+          const entries: [string, Value][] = isRecord(st.value) ? [...st.value.fields].map(([k, x]) => [`${st.name}.${k}`, x]) : (st.value as Value[]).map((x, i) => [`${st.name}[${i}]`, x]);
+          if (inline.length <= 100 && !entries.some(([, x]) => isShape3(x))) { console.log(`${st.name.padEnd(18)} = ${inline}`); continue; }
+          console.log(`${st.name.padEnd(18)} ${isRecord(st.value) ? `a record of ${entries.length}: ${clip([...st.value.fields.keys()].join(", "), 80)}` : `a list of ${entries.length} records`}`);
+          for (const [k, x] of entries.slice(0, 24)) {
+            if (isShape3(x)) console.log(`${`  ${k}`.padEnd(18)} ${isEmpty(x.bounds) ? "empty" : spanBox(x.bounds)}`);
+            else console.log(`${`  ${k}`.padEnd(18)} = ${clip(valueText(x))}`);
+          }
+          if (entries.length > 24) console.log(`  ... ${entries.length - 24} more`);
+          continue;
+        }
         // A 2D profile has a box too, and a part built from one is invisible until it is extruded (round 4 asked).
         if (isShape2(st.value)) {
           const b = st.value.bounds;
@@ -244,7 +277,8 @@ function main(argv: string[]): number {
         let what: string;
         if (typeof v === "number") what = `= ${short(v)}`;
         else if (typeof v === "string") what = `= "${v}"`;
-        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : `a list of ${v.length}`;
+        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : v.length && v.every(isRecord) ? clip(`= ${valueText(v)}`) : `a list of ${v.length}`;
+        else if (isRecord(v)) what = clip(`= ${valueText(v)}`);
         else if (isShape3(v)) {
           const b = v.bounds;
           const paintNote = paintState(v, memo);

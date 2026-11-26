@@ -19,7 +19,7 @@ import { clearance, insideFraction, isVoid, overlapVolume } from "../sdf/measure
 import { countPieces, overhangFraction } from "../mesh/pieces.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { boundsCenter } from "../sdf/types.js";
-import { isMaterial, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
+import { isMaterial, isRecord, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
 
 /** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
 export const CURRENT_ANGLES = new Map<string, [number, number, number]>();
@@ -35,7 +35,12 @@ const mat = (name = "material", doc?: string): Param => ({ name, type: "material
 
 const n = (v: Value): number => v as number;
 /** The numbers in a list, nested lists flattened, so `[hip, knee]` with points as lists is a path (round 4 asked). */
-const nums = (v: Value): number[] => (Array.isArray(v) ? v.flatMap(nums) : [n(v)]);
+const nums = (v: Value): number[] => {
+  if (Array.isArray(v)) return v.flatMap(nums);
+  // A record is not a point, though [p.x, p.y, p.z] is: say so rather than read the record as a number.
+  if (isRecord(v)) throw new Error(`a record in a list of numbers; write out its fields, [p.${[...v.fields.keys()].slice(0, 3).join(", p.")}]`);
+  return [n(v)];
+};
 const s3 = (v: Value): Shape3 => v as Shape3;
 const s2 = (v: Value): Shape2 => v as Shape2;
 

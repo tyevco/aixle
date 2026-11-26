@@ -77,10 +77,43 @@ for c in letters {
 | shape | `box(...)`, `a + b`, `a \| move(...)` | `+` union, `-` difference, `&` intersection |
 | profile (2D) | `circle(...)`, `rect(...)`, `polygon(...)` | same operators; `extrude`, `revolve` make it a shape |
 | material | `"oak"`, `material("#c04020", "stripes")` | `paint` |
+| record | `{w: 0.9, h: 0.45, name: "seat"}`, `{...seat, h: 0.6}` | `seat.w`, `cfg.leg.r`, `legs[0].x`; in lists, as parameters and defaults |
 
 Numbers and shapes share `+` and `-`; the interpreter tells them apart by
 what is on either side. A 2D profile and a 3D shape cannot be combined; the
 error says to extrude or revolve first.
+
+**Records** name the numbers a part is made from, so a call says what each
+one is rather than where it sits in a row of positions:
+
+```
+seat = {w: 0.9, h: 0.45, d: 0.8}
+legs = [{x: 0.38, z: 0.33}, {x: -0.38, z: 0.33}, {x: 0.38, z: -0.33}, {x: -0.38, z: -0.33}]
+def leg(p, h=seat.h) = cylinder(0.04, h) | move(p.x, h / 2, p.z)
+frame = empty()
+for p in legs { frame = frame + leg(p) }
+tall = {...seat, h: 0.6}        # a copy with h changed; seat is as it was
+```
+
+A field holds any value: a number, a string, a list, a shape, a material,
+a def, another record. Reading a field that is not there is an error that
+names the fields there are, and a key written twice in one record is an
+error. A record never changes: `seat.h = 0.6` is an error that says to
+write `seat = {...seat, h: 0.6}`. `...other` takes another record's
+fields where it stands, and a later entry replaces an earlier one in its
+place, so `{...seat, h: 0.6}` keeps the order and `{w: 1, h: 2, ...given}`
+is defaults that `given` overrides. Entries may run over several lines.
+`p.x` and `list[i]` bind tightest of all, after a call or an index too
+(`dims().w`, `legs[0].x`); `p.0` is an error, since an item is read by its
+index. A used library's name wins over a record of the same name, which
+`use` warns about.
+
+A record of shapes is not a shape: `show parts` is an error, `show
+parts.lid` shows that field, and the output is then the step the field
+holds, so a record's other parts are still reported as unused. `check`
+prints a record as it would be written (`seat = {w: 0.9, h: 0.45, d:
+0.8}`), or, when it holds shapes or is too long for a line, a line per
+field with a shape's box, as a step's would be.
 
 ## Calls and pipelines
 
@@ -96,8 +129,8 @@ base + cap | move(0, 1, 0)      # base + (cap moved up)
 ```
 
 Precedence, loosest to tightest: `< > <= >= == !=`, then `+ -`, then
-`&`, then `* / %`, then unary `-`, then `^`, then `|`. Parentheses when
-in doubt. A comparison is a number, 1 or 0, so `assert` can test it and
+`&`, then `* / %`, then unary `-`, then `^`, then `|`, then a field `.x`
+or an index `[i]`. Parentheses when in doubt. A comparison is a number, 1 or 0, so `assert` can test it and
 `min`/`max` can weigh it; `==` on numbers is exact, so compare a measured
 size with `<` and `>` and a tolerance, not `==`.
 
