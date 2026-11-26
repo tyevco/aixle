@@ -56,6 +56,29 @@ describe("aixle fmt over every program in the repo", () => {
     }
     expect(problems).toEqual([]);
   });
+  it("is idempotent on every program re-indented and respaced at random, and keeps its meaning", () => {
+    // The corpus is laid out by people with steady hands; a program with a stray indent or a padded name lines
+    // things up by accident, and a second run of fmt must agree with the first all the same.
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    const problems: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, "utf8");
+      let messy = "", prev = 0;
+      for (const t of tokenize(src).filter((t) => t.type !== "newline" && t.type !== "eof")) {
+        const gap = src.slice(prev, t.start);
+        if (gap.includes("\n")) messy += gap.split("\n").map((s, i) => (i === 0 ? s : " ".repeat(Math.floor(rnd() * 6)) + s.trimStart())).join("\n");
+        else messy += gap.length ? " ".repeat(1 + Math.floor(rnd() * 4)) : "";
+        messy += src.slice(t.start, t.end);
+        prev = t.end;
+      }
+      messy += src.slice(prev);
+      const once = format(messy);
+      if (format(once) !== once) problems.push(`${f}: not idempotent`);
+      if (meaning(once) !== meaning(src)) problems.push(`${f}: the syntax tree changed`);
+    }
+    expect(problems).toEqual([]);
+  });
 });
 
 describe("aixle fmt's layout", () => {
@@ -91,6 +114,25 @@ describe("aixle fmt's layout", () => {
   it("keeps a column of = or of record values that the author lined up, and nothing else", () => {
     expect(format("post_front = a\npost_back  = b\nx  = 1\n\ny   = 2\n")).toBe("post_front = a\npost_back  = b\nx = 1\n\ny = 2\n");
     expect(format("q = {\n  w:   1,\n  hh:  2,\n  d:    3,\n}\n")).toBe("q = {\n  w:   1,\n  hh:  2,\n  d: 3,\n}\n");
+  });
+  it("settles a column on what it prints, so a second run changes nothing", () => {
+    // A stray indent taken off one line of a column: the column stays where the author wrote it.
+    expect(format("width  = 2\n depth = 1\n")).toBe("width  = 2\ndepth  = 1\n");
+    // A table of records on continuation lines keeps the column its values were padded into.
+    expect(format("legs = [{x: 0.38, z:  0.33},\n        {x: -0.38, z: 0.33}]\n")).toBe("legs = [{x: 0.38, z:  0.33},\n        {x: -0.38, z: 0.33}]\n");
+    // A def's head respaced shorter stays in the column the author lined it up in.
+    expect(format("def leg( h ) = cylinder(0.1, h)\nheight       = 2\n")).toBe("def leg(h)   = cylinder(0.1, h)\nheight       = 2\n");
+    // Code that now reaches past the column pushes the whole column right, rather than leaving one line out of it.
+    expect(format("for i in a+b { x = 1 }\ny                = 2\n")).toBe("for i in a + b { x = 1 }\ny                  = 2\n");
+    // A one-line loop's body, and a record's second value lined up with the entry above.
+    expect(format("x                 = 1\nfor i in [1] {  a = 2 }\n")).toBe("x                 = 1\nfor i in [1] { a  = 2 }\n");
+    expect(format("p = {\n  a:            1,\n  b: f( 1 ), c: 2,\n}\n")).toBe("p = {\n  a:            1,\n  b: f(1), c:   2,\n}\n");
+    for (const src of ["width  = 2\n depth = 1\n", "def leg( h ) = cylinder(0.1, h)\nheight       = 2\n", "x                 = 1\nfor i in [1] {  a = 2 }\n", "p = {\n  a:            1,\n  b: f( 1 ), c: 2,\n}\n"])
+      expect(format(format(src))).toBe(format(src));
+  });
+  it("keeps a lone carriage return as it was, so what follows one in a comment stays in the comment", () => {
+    expect(format("a = 1 # x\rb = 2\n")).toBe("a = 1  # x\rb = 2\n");
+    expect(format("a = 1\r\nb = 2\r\n")).toBe("a = 1\nb = 2\n");
   });
   it("keeps one blank line where there were several, none at either end, and every comment in its place", () => {
     const src = "\n\n# header\n\n\n\na = 1   # one\nb = 2# two\n\n\n  # about c\nc = 3\nfor i in [1] {\n  d = i\n\n    # last in the loop\n}\n// the end\n\n\n";

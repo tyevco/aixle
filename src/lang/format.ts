@@ -16,7 +16,10 @@
  *     points are written `[x,y,z, x,y,z]` and a table of numbers is lined up
  *     with it; only the space before a comma is taken away;
  *   - an assignment's `=`, or a record's value after its `:`, that the author
- *     padded into the same column as the line above or below keeps that column.
+ *     padded into the same column as the line above or below keeps that column,
+ *     and so does every line of the column: where the layout would move them
+ *     apart (a line re-indented, the code before one respaced), the column goes
+ *     as far right as the furthest of them.
  *
  * Between lines:
  *
@@ -72,7 +75,8 @@ const commentIn = (seg: string): { text: string; at: number } | undefined => {
 };
 
 export function format(source: string): string {
-  const src = source.replace(/\r\n?/g, "\n");
+  // A lone \r is space to the lexer, and inside a comment it is part of the comment: only a \r\n is a line break.
+  const src = source.replace(/\r\n/g, "\n");
   const { tokens } = parseTokens(src);
   const toks: Token[] = [];
   const startsStatement: boolean[] = [];
@@ -89,114 +93,142 @@ export function format(source: string): string {
     pending = false;
   }
   const columnOf = (offset: number): number => offset - (src.lastIndexOf("\n", offset - 1) + 1);
-  // Where each line lined things up: the column of an assignment's or a def's `=`, and of a value after a record's
-  // `:`, so a run of lines that share one keeps it.
-  const columns = new Map<string, number>();
   const assignEq = (t: Token) => isOp(t, "=") && t.role === undefined;
+
+  // Columns the author lined up: an assignment's or a def's `=`, or a value after a record's `:`, padded into the
+  // column of one on the line above or below. Each run of such lines is one column. It starts where the author
+  // wrote it, moved with its line's indentation, and is then settled on what is printed: wherever its lines landed
+  // apart (one re-indented further than the other, or the code before it respaced), the column goes as far right as
+  // the furthest of them, so a column stays a column and a second run finds it where the first left it.
+  const marks: { i: number; line: number; kind: string; col: number; padded: boolean }[] = [];
   toks.forEach((t, i) => {
-    if (assignEq(t)) columns.set(`=${t.line}`, columnOf(t.start));
-    else if (i > 0 && isOp(toks[i - 1], ":") && t.line === toks[i - 1].line) columns.set(`:${t.line}`, columnOf(t.start));
+    if (i === 0 || t.line !== toks[i - 1].line) return;
+    const kind = assignEq(t) ? "=" : isOp(toks[i - 1], ":") ? ":" : undefined;
+    if (kind) marks.push({ i, line: t.line, kind, col: columnOf(t.start), padded: t.start - toks[i - 1].end > 1 });
   });
-  const linedUp = (kind: string, t: Token): boolean => {
-    const was = columnOf(t.start);
-    return columns.get(`${kind}${t.line - 1}`) === was || columns.get(`${kind}${t.line + 1}`) === was;
-  };
-
-  const out: string[] = [];
-  let line = "";
-  /** Each earlier line of the statement: where its tokens were written and where they are now. */
-  let statementLines: { was: number; now: number }[][] = [];
-  let lineCols: { was: number; now: number }[] = [];
-  let lineIndent = 0;
-  /** How far the current line moved: its indentation now less the column its first token was written at. */
-  let lineShift = 0;
-  let statementIndent = 0;
-  /** The column the statement's first token was written at: a continuation line is never lined up at or before it. */
-  let statementWas = 0;
-  let blockDepth = 0;
-  /** The open brackets, each with its line's indentation now and as written. */
-  const open: { indent: number; was: number }[] = [];
-  // Whether the last thing emitted was a blank line, so a run of them is one.
-  const blank = () => { if (out.length && out[out.length - 1] !== "") out.push(""); };
-
-  /** The lines between two tokens: comments on their own, at `indent`, and blank lines, at most one in a row. */
-  const between = (segments: string[], indent: number) => {
-    let sawBlank = false;
-    for (const seg of segments) {
-      const c = commentIn(seg);
-      if (!c) { sawBlank = true; continue; }
-      if (sawBlank) blank();
-      sawBlank = false;
-      out.push(" ".repeat(indent) + c.text);
+  const parent = marks.map((_, k) => k);
+  const root = (k: number): number => (parent[k] === k ? k : (parent[k] = root(parent[k])));
+  for (let a = 0; a < marks.length; a++)
+    for (let b = a + 1; b < marks.length && marks[b].line <= marks[a].line + 1; b++)
+      if (marks[b].line === marks[a].line + 1 && marks[b].kind === marks[a].kind && marks[b].col === marks[a].col) parent[root(b)] = root(a);
+  const runs = new Map<number, typeof marks>();
+  marks.forEach((m, k) => { const r = root(k); runs.set(r, [...(runs.get(r) ?? []), m]); });
+  const columns = [...runs.values()].filter((run) => run.length > 1 && run.some((m) => m.padded));
+  /** The lined-up tokens, each with the column it was written at; and, once settled, the column it goes to. */
+  const linedUp = new Map<number, number>();
+  for (const run of columns) for (const m of run) linedUp.set(m.i, m.col);
+  const target = new Map<number, number>();
+  let printed = "";
+  for (let pass = 0; pass < 16; pass++) {
+    const placed = new Map<number, number>();
+    printed = layout(placed);
+    let settled = true;
+    for (const run of columns) {
+      const at = Math.max(...run.map((m) => placed.get(m.i)!));
+      if (run.some((m) => placed.get(m.i) !== at)) { settled = false; for (const m of run) target.set(m.i, at); }
     }
-    if (sawBlank) blank();
-  };
-
-  /** End the line being built, with the comment written after its code, if any. */
-  const endLine = (tail: string, tailStart: number) => {
-    const c = commentIn(tail);
-    if (c) {
-      const was = columnOf(tailStart + c.at) + lineShift;
-      const at = was >= line.length + 2 ? was : line.length + 2;
-      line = line + " ".repeat(at - line.length) + c.text;
-    }
-    out.push(line.trimEnd());
-  };
-
-  for (let i = 0; i < toks.length; i++) {
-    const t = toks[i];
-    const gapStart = i === 0 ? 0 : toks[i - 1].end;
-    const gap = src.slice(gapStart, t.start);
-    const text = src.slice(t.start, t.end);
-    if (i > 0 && !gap.includes("\n")) {
-      // A loop body on the brace's line starts its statement there.
-      if (startsStatement[i]) { statementIndent = lineIndent; statementWas = columnOf(t.start); statementLines = []; lineCols = []; }
-      let sp = spacing(toks[i - 1], t, gap);
-      const kind = assignEq(t) ? "=" : isOp(toks[i - 1], ":") ? ":" : undefined;
-      if (kind && gap.length > 1 && linedUp(kind, t)) sp = " ".repeat(Math.max(1, columnOf(t.start) + lineShift - line.length));
-      line += sp;
-      // Where a continuation line can be lined up: under an argument, an item, an entry, a value or the `=` before
-      // it (`spots = a` over `      + b`), not under a comma or an operator.
-      const prev = toks[i - 1];
-      if (isOpener(prev) || isOp(prev, ",") || assignEq(prev) || assignEq(t)) lineCols.push({ was: columnOf(t.start), now: line.length });
-      line += text;
-    } else {
-      const segments = gap.split("\n");
-      if (i > 0) { endLine(segments[0], gapStart); segments.shift(); }
-      segments.pop();
-      const statement = startsStatement[i];
-      if (!statement) statementLines.push(lineCols);
-      let indent: number;
-      if (isBlockClose(t)) indent = Math.max(0, blockDepth - 1) * 2;
-      else if (statement) indent = blockDepth * 2;
-      else if (isCloser(t) && open.length) indent = open[open.length - 1].indent;
-      else {
-        // Two in from the line that opened the bracket (or from the statement) is a hanging indent, kept as one;
-        // anything else stays under the token of an earlier line it was written under, if there is one.
-        const was = columnOf(t.start);
-        const hang = (open.length ? open[open.length - 1].indent : statementIndent) + 2;
-        const hangWas = (open.length ? open[open.length - 1].was : statementWas) + 2;
-        let under: number | undefined;
-        if (was !== hangWas && was > statementWas) for (let k = statementLines.length - 1; k >= 0 && under === undefined; k--) under = statementLines[k].find((c) => c.was === was)?.now;
-        indent = under ?? hang;
-      }
-      // A comment before a closing brace or bracket belongs inside it.
-      const commentIndent = isBlockClose(t) ? blockDepth * 2 : isCloser(t) ? indent + 2 : indent;
-      between(segments, commentIndent);
-      if (statement) { statementIndent = indent; statementWas = columnOf(t.start); statementLines = []; }
-      lineIndent = indent;
-      lineShift = indent - columnOf(t.start);
-      line = " ".repeat(indent) + text;
-      lineCols = [{ was: columnOf(t.start), now: indent }];
-    }
-    if (isBlockOpen(t)) blockDepth++;
-    else if (isBlockClose(t)) blockDepth = Math.max(0, blockDepth - 1);
-    else if (isOpener(t)) open.push({ indent: lineIndent, was: lineIndent - lineShift });
-    else if (isCloser(t)) open.pop();
+    if (settled) break;
   }
-  const rest = src.slice(toks.length ? toks[toks.length - 1].end : 0).split("\n");
-  if (toks.length) { endLine(rest[0], toks[toks.length - 1].end); rest.shift(); }
-  between(rest, 0);
-  while (out.length && out[out.length - 1] === "") out.pop();
-  return out.length ? out.join("\n") + "\n" : "";
+  return printed;
+
+  /** The program laid out, each lined-up token at its column; `placed` gets the column each of them landed at. */
+  function layout(placed: Map<number, number>): string {
+    const out: string[] = [];
+    let line = "";
+    /** Each earlier line of the statement: where its tokens were written and where they are now. */
+    let statementLines: { was: number; now: number }[][] = [];
+    let lineCols: { was: number; now: number }[] = [];
+    let lineIndent = 0;
+    /** How far the current line moved: its indentation now less the column its first token was written at. */
+    let lineShift = 0;
+    let statementIndent = 0;
+    /** The column the statement's first token was written at: a continuation line is never lined up at or before it. */
+    let statementWas = 0;
+    let blockDepth = 0;
+    /** The open brackets, each with its line's indentation now and as written. */
+    const open: { indent: number; was: number }[] = [];
+    // Whether the last thing emitted was a blank line, so a run of them is one.
+    const blank = () => { if (out.length && out[out.length - 1] !== "") out.push(""); };
+
+    /** The lines between two tokens: comments on their own, at `indent`, and blank lines, at most one in a row. */
+    const between = (segments: string[], indent: number) => {
+      let sawBlank = false;
+      for (const seg of segments) {
+        const c = commentIn(seg);
+        if (!c) { sawBlank = true; continue; }
+        if (sawBlank) blank();
+        sawBlank = false;
+        out.push(" ".repeat(indent) + c.text);
+      }
+      if (sawBlank) blank();
+    };
+
+    /** End the line being built, with the comment written after its code, if any. */
+    const endLine = (tail: string, tailStart: number) => {
+      const c = commentIn(tail);
+      if (c) {
+        const was = columnOf(tailStart + c.at) + lineShift;
+        const at = was >= line.length + 2 ? was : line.length + 2;
+        line = line + " ".repeat(at - line.length) + c.text;
+      }
+      out.push(line.trimEnd());
+    };
+
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i];
+      const gapStart = i === 0 ? 0 : toks[i - 1].end;
+      const gap = src.slice(gapStart, t.start);
+      const text = src.slice(t.start, t.end);
+      if (i > 0 && !gap.includes("\n")) {
+        // A loop body on the brace's line starts its statement there.
+        if (startsStatement[i]) { statementIndent = lineIndent; statementWas = columnOf(t.start); statementLines = []; lineCols = []; }
+        const was = linedUp.get(i);
+        const want = was === undefined ? undefined : target.get(i) ?? was + lineShift;
+        line += want === undefined ? spacing(toks[i - 1], t, gap) : " ".repeat(Math.max(1, want - line.length));
+        if (want !== undefined) placed.set(i, line.length);
+        // Where a continuation line can be lined up: under an argument, an item, an entry, a value or the `=` before
+        // it (`spots = a` over `      + b`), not under a comma or an operator.
+        const prev = toks[i - 1];
+        if (isOpener(prev) || isOp(prev, ",") || assignEq(prev) || assignEq(t)) lineCols.push({ was: columnOf(t.start), now: line.length });
+        line += text;
+      } else {
+        const segments = gap.split("\n");
+        if (i > 0) { endLine(segments[0], gapStart); segments.shift(); }
+        segments.pop();
+        const statement = startsStatement[i];
+        if (!statement) statementLines.push(lineCols);
+        let indent: number;
+        if (isBlockClose(t)) indent = Math.max(0, blockDepth - 1) * 2;
+        else if (statement) indent = blockDepth * 2;
+        else if (isCloser(t) && open.length) indent = open[open.length - 1].indent;
+        else {
+          // Two in from the line that opened the bracket (or from the statement) is a hanging indent, kept as one;
+          // anything else stays under the token of an earlier line it was written under, if there is one.
+          const was = columnOf(t.start);
+          const hang = (open.length ? open[open.length - 1].indent : statementIndent) + 2;
+          const hangWas = (open.length ? open[open.length - 1].was : statementWas) + 2;
+          let under: number | undefined;
+          if (was !== hangWas && was > statementWas) for (let k = statementLines.length - 1; k >= 0 && under === undefined; k--) under = statementLines[k].find((c) => c.was === was)?.now;
+          indent = under ?? hang;
+        }
+        // A comment before a closing brace or bracket belongs inside it.
+        const commentIndent = isBlockClose(t) ? blockDepth * 2 : isCloser(t) ? indent + 2 : indent;
+        between(segments, commentIndent);
+        if (statement) { statementIndent = indent; statementWas = columnOf(t.start); statementLines = []; }
+        lineIndent = indent;
+        lineShift = indent - columnOf(t.start);
+        line = " ".repeat(indent) + text;
+        lineCols = [{ was: columnOf(t.start), now: indent }];
+      }
+      if (isBlockOpen(t)) blockDepth++;
+      else if (isBlockClose(t)) blockDepth = Math.max(0, blockDepth - 1);
+      else if (isOpener(t)) open.push({ indent: lineIndent, was: lineIndent - lineShift });
+      else if (isCloser(t)) open.pop();
+    }
+    const rest = src.slice(toks.length ? toks[toks.length - 1].end : 0).split("\n");
+    if (toks.length) { endLine(rest[0], toks[toks.length - 1].end); rest.shift(); }
+    between(rest, 0);
+    while (out.length && out[out.length - 1] === "") out.pop();
+    return out.length ? out.join("\n") + "\n" : "";
+  }
 }

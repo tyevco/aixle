@@ -840,8 +840,10 @@ and every comment stays where it was. The layout:
   the line above was respaced; a closing bracket that starts a line at
   its opener's line;
 - an `=` (or a record's value) padded into a column with the line above
-  or below keeps the column; a trailing comment keeps its column unless
-  the code now reaches it, so a column of them stays a column;
+  or below keeps the column, and every line of the column stays in it
+  (pushed right together when one line's code now reaches past it); a
+  trailing comment keeps its column unless the code now reaches it, so a
+  column of them stays a column;
 - one blank line where there were several, none at the ends.
 
 ## What the tool checks for you
