@@ -743,6 +743,9 @@ describe("smooth profiles", () => {
     expect(solid.dist(0, 0.1, 0)).toBeCloseTo(-0.1, 9);
     expect(solid.dist(0.001, 0.12, 0)).toBeCloseTo(-0.08, 6);
     expect(S.move2(vase, 0.5, 0).revolveDist).toBeUndefined();
+    // So does a boolean (language.md: cut a groove after the revolve): its axis run is a zero again.
+    expect(S.difference2(vase, S.move2(S.circle(0.1), 1.3, 1)).revolveDist).toBeUndefined();
+    expect(S.revolve(S.difference2(vase, S.move2(S.circle(0.1), 1.3, 1))).dist(0, 0.1, 0)).toBeCloseTo(0, 9);
     expect(S.revolve(vase, 0, 180).dist(0, 0.1, 0.001)).toBeCloseTo(vase.dist(0.001, 0.1), 9);
     const r = surfaceNets(solid, { resolution: 64 });
     expect(isWatertight(r.mesh)).toBe(true);

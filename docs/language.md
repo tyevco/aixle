@@ -227,7 +227,10 @@ circle (glass on it renders clean).
   cross-sections show no line up the axis and glass or a liquid revolved
   from one has no surface there (a polygon's edge on the axis still leaves
   that line: draw a liquid as a `curve2`). With `angle` under 360 the axis
-  is an edge of the wedge and is kept.
+  is an edge of the wedge and is kept. Only the `curve2` or `bezier2`
+  itself carries this: a 2D boolean, move or other transform of it is
+  measured with its axis run, as a polygon is, so cut a groove after the
+  revolve (`revolve(p) - torus(...)`), not in the profile.
 - A closed outline carries its thinnest wall (two sides facing each other)
   for the thin-part warning, so a vase drawn as one outline with a wall
   under a cell is named; a straight run on x = 0 is not counted, since the
