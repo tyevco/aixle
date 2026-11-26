@@ -4,6 +4,9 @@ import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
 import * as W from "../src/sdf/sweeps.js";
 import * as C from "../src/sdf/curves.js";
+import * as C2 from "../src/sdf/curves2d.js";
+import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { isWatertight, meshBounds } from "../src/mesh/mesh.js";
 import * as C_ from "../src/sdf/measure.js";
 import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
 import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
@@ -568,6 +571,159 @@ describe("curves", () => {
     const b = ct.bounds;
     for (const p of C.curvePoints(c, 8)) for (let k = 0; k < 3; k++) { expect(p[k]).toBeGreaterThanOrEqual(b.min[k]); expect(p[k]).toBeLessThanOrEqual(b.max[k]); }
     expect(() => C.bezierCurve([[0, 0, 0], [1, 0, 0]])).toThrow(/4, 7, 10/);
+  });
+});
+
+describe("smooth profiles", () => {
+  const k = 0.5523;
+  /** A circle of radius r from four Bezier quarters with the standard handle length, closed on its first anchor. */
+  const bezierCircle = (r: number) => C2.bezier2([r, 0, r, k * r, k * r, r, 0, r, -k * r, r, -r, k * r, -r, 0, -r, -k * r, -k * r, -r, 0, -r, k * r, -r, r, -k * r, r, 0]);
+  const ringOf = (n: number, r = 1) => Array.from({ length: n }, (_, i) => [r * Math.cos((i / n) * 2 * Math.PI), r * Math.sin((i / n) * 2 * Math.PI)]).flat();
+  // A vase's wall as one closed outline: the axis and the foot's edge given twice (corners), the rest smooth.
+  const vasePts = [0, 0, 0, 0, 1, 0, 1, 0, 1.3, 0.5, 1.45, 1.3, 1.25, 2.3, 0.85, 3, 0.8, 3.5, 1.05, 4, 0.98, 4.06, 0.92, 4, 0.68, 3.5, 0.74, 3, 1.12, 2.3, 1.3, 1.3, 1.12, 0.5, 0.85, 0.2, 0, 0.2, 0, 0.2];
+
+  it("a bezier2 circle with handles 0.5523 r is within 0.03% of the radius, negative inside, positive outside", () => {
+    const c = bezierCircle(2);
+    for (let i = 0; i < 360; i++) {
+      const a = (i / 360) * 2 * Math.PI;
+      expect(Math.abs(c.dist(2 * Math.cos(a), 2 * Math.sin(a)))).toBeLessThan(2 * 3e-4);
+      expect(Math.abs(c.dist(1.5 * Math.cos(a), 1.5 * Math.sin(a)) + 0.5)).toBeLessThan(2 * 3e-4);
+      expect(Math.abs(c.dist(3 * Math.cos(a), 3 * Math.sin(a)) - 1)).toBeLessThan(2 * 3e-4);
+    }
+    expect(c.dist(0, 0)).toBeCloseTo(-2, 3);
+    // Tight bounds: the curve's own extent, not its handles'.
+    expect(c.bounds.min[0]).toBeCloseTo(-2, 9);
+    expect(c.bounds.max[1]).toBeCloseTo(2, 9);
+    expect(c.feature).toBeCloseTo(4, 3);
+  });
+  it("a curve2 through points of a circle is within its spline error, which is far under the polygon's", () => {
+    for (const n of [8, 16]) {
+      const pts = ringOf(n);
+      const c = C2.curve2(pts);
+      let dev = 0;
+      for (const [x, y] of C2.chainPoints(C2.chainThrough(pts, true), 200)) dev = Math.max(dev, Math.abs(Math.hypot(x, y) - 1));
+      // Measured: 8.5e-3 through 8 points and 5.5e-4 through 16, against 7.6e-2 and 1.9e-2 for the polygons' sagitta.
+      expect(dev).toBeLessThan(n === 8 ? 9e-3 : 6e-4);
+      for (let i = 0; i < 720; i++) {
+        const a = (i / 720) * 2 * Math.PI;
+        expect(Math.abs(c.dist(Math.cos(a), Math.sin(a)))).toBeLessThanOrEqual(dev + 1e-9);
+      }
+      for (let i = 0; i < n; i++) expect(Math.abs(c.dist(pts[i * 2], pts[i * 2 + 1]))).toBeLessThan(1e-9);
+    }
+  });
+  it("is the exact distance to the curve, signed by which side, with a gradient of length 1 near it", () => {
+    const chain = C2.chainThrough(vasePts, true);
+    const vase = C2.curve2(vasePts);
+    const dense = C2.chainPoints(chain, 2000);
+    const poly = S.polygon(dense.slice(0, -1).flat());
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 300; i++) {
+      const x = -0.5 + rnd() * 2.5, y = -0.5 + rnd() * 5;
+      const d = vase.dist(x, y), p = poly.dist(x, y);
+      // The dense polygon is within its sagitta (well under 1e-6 here) of the curve.
+      expect(Math.abs(d - p)).toBeLessThan(1e-6);
+    }
+    for (let i = 0; i < 400; i++) {
+      const x = -0.2 + rnd() * 1.9, y = -0.2 + rnd() * 4.5;
+      const d = vase.dist(x, y);
+      if (Math.abs(d) > 0.05 || Math.abs(d) < 1e-3) continue;
+      const h = 1e-5;
+      const g = Math.hypot(vase.dist(x + h, y) - vase.dist(x - h, y), vase.dist(x, y + h) - vase.dist(x, y - h)) / (2 * h);
+      expect(g).toBeCloseTo(1, 3);
+    }
+    // The underside runs straight between its two corners.
+    expect(vase.dist(0.5, 0.02)).toBeCloseTo(-0.02, 9);
+    expect(vase.dist(0.5, -0.1)).toBeCloseTo(0.1, 9);
+    expect(vase.dist(0.5, 1)).toBeGreaterThan(0);
+  });
+  it("carries bounds that contain the curve and touch it, and a feature for a wall drawn as an outline", () => {
+    const chain = C2.chainThrough(vasePts, true);
+    const vase = C2.curve2(vasePts);
+    const b = vase.bounds;
+    const pts = C2.chainPoints(chain, 64);
+    for (const [x, y] of pts) {
+      expect(x).toBeGreaterThanOrEqual(b.min[0] - 1e-12);
+      expect(x).toBeLessThanOrEqual(b.max[0] + 1e-12);
+      expect(y).toBeGreaterThanOrEqual(b.min[1] - 1e-12);
+      expect(y).toBeLessThanOrEqual(b.max[1] + 1e-12);
+    }
+    expect(Math.max(...pts.map((p) => p[0]))).toBeCloseTo(b.max[0], 4);
+    expect(b.min[0]).toBe(0);
+    // A band 0.05 thick drawn out along an arc and back along a smaller one: its wall, not its box.
+    const band = [...ringOf(16).slice(0, 18), ...ringOf(16, 0.95).slice(0, 18).reverse().flatMap((_, i, r) => (i % 2 === 0 ? [r[i + 1], r[i]] : []))];
+    expect(C2.curve2(band).feature).toBeCloseTo(0.05, 2);
+    // Sharp tips are corners, not walls: a leaf 0.4 wide reads near its width.
+    expect(C2.curve2([0, 0, 0, 0, 0.5, 0.15, 1, 0.2, 1.5, 0.15, 2, 0, 2, 0, 1.5, -0.15, 1, -0.2, 0.5, -0.15]).feature).toBeGreaterThan(0.3);
+    // A wall carries itself; a profile closed along the axis carries nothing from the axis.
+    expect(C2.curve2([0, 0, 1, 0, 2, 1], 0.08).feature).toBe(0.08);
+    expect(C2.bezier2([0, -1, k, -1, 1, -k, 1, 0, 1, k, k, 1, 0, 1]).feature).toBeUndefined();
+    expect(S.revolve(C2.curve2(vasePts)).feature).toBeCloseTo(vase.feature!, 9);
+  });
+  it("a point given twice is a corner, the run between two corners is straight, and a closing point is only that", () => {
+    const sq = C2.curve2([0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1]);
+    expect(sq.dist(0.5, 0.5)).toBeCloseTo(-0.5, 9);
+    expect(sq.dist(1.5, 0.5)).toBeCloseTo(0.5, 9);
+    expect(sq.dist(1.5, 1.5)).toBeCloseTo(Math.SQRT2 / 2, 9);
+    expect(sq.bounds).toEqual({ min: [0, 0], max: [1, 1] });
+    const open = C2.curve2([1, 0, 0, 1, -1, 0, 0, -1]), closed = C2.curve2([1, 0, 0, 1, -1, 0, 0, -1, 1, 0]);
+    expect(closed.dist(1.1, 0.1)).toBe(open.dist(1.1, 0.1));
+    expect(C2.curve2([1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 1, 0]).dist(1.1, 0.1)).not.toBeCloseTo(open.dist(1.1, 0.1), 3);
+    expect(C2.curve2([1, 0, 1, 0, 0, 1, -1, 0, 0, -1]).dist(1.1, 0.1)).toBeCloseTo(C2.curve2([1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 1, 0]).dist(1.1, 0.1), 12);
+  });
+  it("bezier2 closes with a straight edge back to the first anchor, and says what a malformed list is", () => {
+    // A half disc drawn from the axis round to the axis: the straight edge closes it along x = 0.
+    const d = C2.bezier2([0, -1, k, -1, 1, -k, 1, 0, 1, k, k, 1, 0, 1]);
+    expect(d.dist(0.5, 0)).toBeCloseTo(-0.5, 3);
+    expect(d.dist(-0.1, 0)).toBeCloseTo(0.1, 9);
+    expect(d.bounds.min[0]).toBe(0);
+    // Revolved, it is a sphere of radius 1 to the Bezier circle's error.
+    const ball = S.revolve(d);
+    expect(Math.abs(ball.dist(0, 0, 1))).toBeLessThan(3e-4);
+    expect(Math.abs(ball.dist(0.6, 0.8, 0))).toBeLessThan(3e-4);
+    expect(() => C2.bezier2([0, 0, 1, 0, 1])).toThrow(/x, y pairs, got 5 numbers/);
+    expect(() => C2.bezier2([0, 0, 1, 0, 1, 1, 0, 1, 0, 0])).toThrow(/4, 7, 10, \.\.\. x, y pairs .* got 5 pairs/);
+    expect(() => C2.curve2([0, 0, 1, 0, 1, 0, 0, 0])).toThrow(/at least 3 different points/);
+    expect(() => C2.bezier2([0, 0, 0, 0, 0, 0, 0, 0])).toThrow(/piece 1 has all four points/);
+  });
+  it("a self-crossing outline is filled even-odd, as polygon is", () => {
+    const eight = C2.curve2([0, 0, 1, 0.8, 2, 0, 1, -0.8, 0, 0, -1, 0.8, -2, 0, -1, -0.8]);
+    expect(eight.dist(1, 0)).toBeLessThan(0);
+    expect(eight.dist(-1, 0)).toBeLessThan(0);
+    expect(eight.dist(0, 0.5)).toBeGreaterThan(0);
+    const star: number[] = [];
+    for (let i = 0; i < 5; i++) { const a = ((i * 2) / 5) * 2 * Math.PI + Math.PI / 2; star.push(Math.cos(a), Math.sin(a)); }
+    expect(C2.curve2(star).dist(0, 0)).toBeGreaterThan(0);
+    expect(C2.curve2(star).dist(0, 0.8)).toBeLessThan(0);
+  });
+  it("a wall makes the open curve a band with round ends", () => {
+    const w = C2.curve2([0, 0, 1, 0, 2, 1], 0.2);
+    expect(w.dist(-0.1, 0)).toBeCloseTo(0, 9);
+    expect(w.dist(-0.3, 0)).toBeCloseTo(0.2, 9);
+    expect(w.dist(2, 1)).toBeCloseTo(-0.1, 9);
+    const b = C2.bezier2([0, 0, 1, 0, 2, 0, 3, 0], 0.1);
+    expect(b.dist(1.5, 0.05)).toBeCloseTo(0, 9);
+    expect(b.dist(1.5, 0)).toBeCloseTo(-0.05, 9);
+    expect(b.bounds).toEqual({ min: [-0.05, -0.05], max: [3.05, 0.05] });
+  });
+  it("works wherever a profile does, and a revolve of one is exact and meshes watertight", () => {
+    const vase = C2.curve2(vasePts);
+    const solid = S.revolve(vase);
+    expect(solid.bound).toBeUndefined();
+    expect(solid.dist(0, 0.02, 0.5)).toBeCloseTo(-0.02, 9);
+    const r = surfaceNets(solid, { resolution: 64 });
+    expect(isWatertight(r.mesh)).toBe(true);
+    const mb = meshBounds(r.mesh);
+    expect(mb.max[1]).toBeCloseTo(vase.bounds.max[1], 1);
+    expect(mb.max[0]).toBeCloseTo(vase.bounds.max[0], 1);
+    // Extrude, booleans, offset and loft take it like any profile.
+    const c = C2.curve2(ringOf(12));
+    expect(S.extrude(c, 0.5, "z").dist(0, 0, 0)).toBeCloseTo(-0.25, 6);
+    expect(S.difference2(c, S.circle(0.5)).dist(0, 0)).toBeCloseTo(0.5, 6);
+    expect(S.offset2(c, 0.1).dist(1.1, 0)).toBeCloseTo(0, 6);
+    expect(W.loft(c, S.circle(0.5), 1).dist(0, 0, 0)).toBeLessThan(0);
+    const sw = C.sweepCurve(C2.bezier2([0.1, 0, 0.1, 0.05, 0.05, 0.1, 0, 0.1, -0.05, 0.1, -0.1, 0.05, -0.1, 0, -0.1, -0.05, -0.05, -0.1, 0, -0.1, 0.05, -0.1, 0.1, -0.05, 0.1, 0]), C.bezierCurve([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]));
+    expect(sw.dist(1.5, 0, 0)).toBeCloseTo(-0.1, 2);
   });
 });
 

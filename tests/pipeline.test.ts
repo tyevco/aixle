@@ -418,5 +418,8 @@ describe("glass on a bound", () => {
       "'glass' (line 2) is glass on a field that is a bound, not a distance ('body': a loft, a smooth union, a warp or a non-uniform scale): the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.",
       "'blob' (line 3) is glass on a field that is a bound, not a distance (a loft, a smooth union, a warp or a non-uniform scale): the beauty render bands behind it. Build glass from exact shapes (a rounded box, a cylinder, a revolve) or drop transmit.",
     ]);
+    // A smooth profile is an exact distance, so a bottle revolved from one is glass the march can trust.
+    const bottle = check('wall = curve2([0,0.02, 0.5,0.02, 0.55,1.2, 0.2,1.6, 0.18,2], wall=0.04)\nbottle = revolve(wall) | paint("glass")\nflask = extrude(bezier2([0,0, 0.6,0, 0.6,1, 0,1]), 0.3, "z") | paint("glass")\nshow bottle + flask', "b.aix");
+    expect(glassWarnings(bottle)).toEqual([]);
   });
 });
