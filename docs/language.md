@@ -46,7 +46,7 @@ Loops can rebuild the same name; the step keeps its last value:
 ```
 teeth = empty()
 for i in range(12) {
-  teeth = teeth + (box(0.3, 0.5, 0.2) | move(0, 2, 0) | rotate(z = i * 30))
+  teeth = teeth + (box(0.3, 0.5, 0.2) | move(0, 2, 0) | rotate(z=i * 30))
 }
 ```
 
@@ -105,8 +105,8 @@ place, so `{...seat, h: 0.6}` keeps the order and `{w: 1, h: 2, ...given}`
 is defaults that `given` overrides. Entries may run over several lines.
 `p.x` and `list[i]` bind tightest of all, after a call or an index too
 (`dims().w`, `legs[0].x`); `p.0` is an error, since an item is read by its
-index. A used library's name wins over a record of the same name, which
-`use` warns about.
+index. A used library's name wins over a record of the same name, and
+`check` warns whichever of the two came first.
 
 A record of shapes is not a shape: `show parts` is an error, `show
 parts.lid` shows that field, and the output is then the step the field

@@ -538,6 +538,12 @@ describe("use: libraries", () => {
     expect(() => ev('use "parts/missing.aix"')).toThrow(/cannot read parts\/missing.aix/);
     expect(() => ev('use "parts/hardware.aix"\nuse "parts/nested.aix" as hardware')).toThrow(/already a used library/);
   });
+  it("reads a dotted name as the library's before a record's, and warns when a record takes a library's name", () => {
+    const e = ev('use "parts/hardware.aix"\nhardware = {head_h: 5}\nh = hardware.head_h\nsize = {r: 0.2}\nb = hardware.bolt(size.r)');
+    expect(e.steps.find((s) => s.name === "h")!.value).toBe(0.07);
+    expect(e.warnings).toEqual(["line 2: 'hardware' is a used library, so hardware.head_h reads the library, not this record; give the record another name"]);
+    expect((e.steps.find((s) => s.name === "b")!.value as Shape3).bounds.max[0]).toBeCloseTo(0.23, 6);
+  });
 });
 
 describe("records", () => {

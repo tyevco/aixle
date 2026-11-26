@@ -1004,6 +1004,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
         if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
           value = { ...value, name: stmt.name };
+        // A record named like a used library is never read by field: `hw.x` is the library's (once per name).
+        if (isRecord(value) && (scope.root().modules ?? modules).has(stmt.name) && !shadowed.has(`record:${stmt.name}`)) {
+          shadowed.add(`record:${stmt.name}`);
+          warnings.push(`line ${stmt.line}: '${stmt.name}' is a used library, so ${stmt.name}.${[...value.fields.keys()][0] ?? "x"} reads the library, not this record; give the record another name`);
+        }
         scope.set(stmt.name, value);
         if (topLevel) {
           const prev = steps.get(stmt.name);
