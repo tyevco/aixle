@@ -37,6 +37,16 @@ import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, ren
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
 
+/**
+ * The most triangles the GLB, the OBJ and the viewer page carry unless `set triangles` or `--triangles` says
+ * otherwise: past it the export is decimated, seams and creases kept. Measured on the examples at the command
+ * line's defaults: a GLB is about 30 bytes a triangle, so 200 thousand is about 6 MB and its viewer page 8. Four
+ * of twenty-three examples are over it, at their own grids: the chest (459 thousand; its GLB 13.7 MB to 6.4, its
+ * viewer 18.3 to 8.5), the plate of patterns (282), the tin (260) and the rope (205). Each came down with its
+ * largest distance from the surface at a face centre the full mesh's own, for 0.5 to 1.3 s more in the exports.
+ */
+export const WEB_TRIANGLES = 200000;
+
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
 export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
 
@@ -71,6 +81,8 @@ export interface RunOptions {
   viewer?: boolean;
   /** Bake the materials into a texture atlas of this many pixels square for the exports; 0 disables. Default 1024. */
   texture?: number;
+  /** The most triangles the GLB, OBJ and viewer carry, decimated past it (or `set triangles`); 0 for the full mesh. Default WEB_TRIANGLES. */
+  triangles?: number;
   /** Ray-march the field for beauty.png. Default false: it costs seconds. */
   beauty?: boolean;
   /** Pixels for the beauty render; default `size`. */
@@ -855,6 +867,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let minecraftNote: string | undefined;
   const minecraftEntity = opts.minecraftEntity ?? evaluation.settings.minecraft_entity === 1;
   let robloxNote: string | undefined;
+  // Set when the GLB, OBJ and viewer were decimated to the web cap, for the report.
+  let exportsNote: { triangles: number; cap: number; cell: number; before: number; deviation: number; fullDeviation: number } | undefined;
   // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
   const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
@@ -1075,10 +1089,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Exports come from the node tree at rest: an object per scene entry, a node per joint and per placement.
       const stepNames = new Map<Shape3, string>();
       for (const st of rest.steps) if (isShape3(st.value) && !stepNames.has(st.value)) stepNames.set(st.value, st.name);
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames }));
+      // A web export has a budget like a Roblox one: past it the meshes are decimated before the atlas is baked, and
+      // the report says by how much and how far the result strays from the model.
+      const cap = Math.max(0, Math.round(opts.triangles ?? (typeof evaluation.settings.triangles === "number" ? evaluation.settings.triangles : WEB_TRIANGLES)));
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: cap > 0 ? cap : undefined }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
-      log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
+      log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.decimated ? ` (decimated from ${hierarchy.decimated.before})` : ""}${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts` : ""}, in ${timings.hierarchy} ms`);
+      if (hierarchy.decimated) {
+        const dz = hierarchy.decimated;
+        exportsNote = { triangles: hierarchy.triangles, cap, cell: cellSize, ...dz };
+        // Past a cell, and further than the full mesh already was, the decimation is visible: say so and how to stop it.
+        if (dz.deviation > cellSize && dz.deviation > dz.fullDeviation * 1.05)
+          warnings.push(`The exports are decimated from ${dz.before} to ${hierarchy.triangles} triangles and stray up to ${fmt(dz.deviation)} from the surface at a face centre, ${fmt(dz.deviation / cellSize)} of the ${fmt(cellSize)} cell (the full mesh: ${fmt(dz.fullDeviation)}): raise the cap (set triangles ${Math.min(dz.before, cap * 2)}), or set triangles 0 for the full mesh.`);
+      }
       if (hierarchy.atlas) write("model.png", hierarchy.atlas.toPng());
       const glbAnimations: GlbAnimation[] = clips.map((c) => {
         const rotations: Record<string, [number, number, number, number][]> = {};
@@ -1117,7 +1141,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.triangles });
         write("model.roblox.glb", rb.glb);
         warnings.push(...rb.warnings);
-        robloxNote = rb.note;
+        robloxNote = rb.note + (rbHierarchy.decimated ? `; at most ${fmt(rbHierarchy.decimated.deviation)} from the surface at a face centre, ${fmt(rbHierarchy.decimated.deviation / cellSize)} of a cell` : "");
         log(`roblox: ${rb.note}, in ${timings.roblox} ms`);
       }
     }
@@ -1333,6 +1357,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Bounds | x ${fmt(bounds.min[0])}..${fmt(bounds.max[0])}, y ${fmt(bounds.min[1])}..${fmt(bounds.max[1])}, z ${fmt(bounds.min[2])}..${fmt(bounds.max[2])} (a box; loose after a cut, a rotation or a twist) |`,
       ...(trueBounds ? [`| Surface extent | x ${fmt(trueBounds.min[0])}..${fmt(trueBounds.max[0])}, y ${fmt(trueBounds.min[1])}..${fmt(trueBounds.max[1])}, z ${fmt(trueBounds.min[2])}..${fmt(trueBounds.max[2])} (from the mesh) |`] : []),
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
+      ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${(() => { const w = watertightReport(mesh); return watertightNote(w, evaluation, cellSize, edgeList, !!shownJoints) + (w.ok ? "" : nearlyThin(evaluation, cellSize)); })()} |`,
@@ -1441,6 +1466,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         bounds,
         size: bounds ? boundsSize(bounds) : undefined,
         triangles: mesh ? triangleCount(mesh) : 0,
+        exports: exportsNote ? { triangles: exportsNote.triangles, before: exportsNote.before, cap: exportsNote.cap, deviation: exportsNote.deviation, fullDeviation: exportsNote.fullDeviation } : undefined,
         cellSize,
         grid,
         materials: mesh?.materials.map((m) => m.name) ?? [],

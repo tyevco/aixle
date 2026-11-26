@@ -213,3 +213,20 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
   }
   return { positions: split.positions, normals, local: outLocal, materialIndex: outMat, materials: mesh.materials, indices: split.indices };
 }
+
+/**
+ * The largest |field| at the centres of a mesh's faces, the mesh's positions offset by `origin` into the field's
+ * frame: how far a mesh strays from the surface it was cut from where it strays most, which for a decimated mesh is
+ * in the middle of its widest faces (its vertices are still the mesher's, on the surface). A field that is not an
+ * exact distance (a blend, a twist) gives its own value there, which is near the distance close to the surface.
+ */
+export function faceDeviation(mesh: Mesh, dist: (x: number, y: number, z: number) => number, origin: readonly [number, number, number] = [0, 0, 0]): number {
+  const p = mesh.positions, ix = mesh.indices;
+  let worst = 0;
+  for (let t = 0; t < ix.length; t += 3) {
+    const a = ix[t] * 3, b = ix[t + 1] * 3, c = ix[t + 2] * 3;
+    const d = Math.abs(dist((p[a] + p[b] + p[c]) / 3 + origin[0], (p[a + 1] + p[b + 1] + p[c + 1]) / 3 + origin[1], (p[a + 2] + p[b + 2] + p[c + 2]) / 3 + origin[2]));
+    if (d > worst) worst = d;
+  }
+  return worst;
+}
