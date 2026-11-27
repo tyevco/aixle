@@ -80,7 +80,7 @@ ${animations.length ? `<div id="anim"><button id="all">▶ All</button><button i
 <script type="module">
 const GLB = "${b64}";
 const centre = ${JSON.stringify(centre)}, radius = ${radius}, floorY = ${floorY};
-const SCENE = ${JSON.stringify(scene ?? null)};
+const SCENE = ${JSON.stringify(scene ?? null).replace(/</g, "\\u003c")};
 let THREE, GLTFLoader, OrbitControls, RoomEnvironment;
 try {
   THREE = await import("three");

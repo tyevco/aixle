@@ -14,6 +14,7 @@ import { REST_POSE, type JointPose } from "../src/sdf/types.js";
 import { run } from "../src/pipeline.js";
 import * as pipelineFns from "../src/pipeline.js";
 import { check } from "../src/pipeline.js";
+import { viewerHtml } from "../src/export/viewer.js";
 import { preset } from "../src/sdf/materials.js";
 
 describe("joints", () => {
@@ -578,6 +579,21 @@ describe("the program's lights and scene in the exports", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the viewer's scene", () => {
+  it("keeps a camera named with markup inside its script", () => {
+    // A camera's name is any string the program gives; "</script>" in it ended the page's script, and the viewer died.
+    const name = 'a</script><b>"x';
+    const html = viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], {
+      environment: "studio", sky: [1, 1, 1], ground: [1, 1, 1], floor: [1, 1, 1], ambient: 0.42, cameras: [{ name, eye: [0, 0, 3], target: [0, 0, 0], fov: 30 }], start: true,
+    });
+    const line = /const SCENE = (.*);\n/.exec(html)![1];
+    expect(line).not.toMatch(/<\//);
+    expect(JSON.parse(line).cameras[0].name).toBe(name);
+    // The page's own script is closed once, at its end.
+    expect(html.split("</script>").length - 1).toBe(2);
   });
 });
 
