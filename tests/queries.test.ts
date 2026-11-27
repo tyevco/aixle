@@ -39,3 +39,44 @@ describe("overlap on a near contact (round 11)", () => {
     expect(sunk.value).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("clearance (round 11)", () => {
+  const P_ = () => import("../src/sdf/primitives.js");
+  const O_ = () => import("../src/sdf/ops.js");
+  it("is minus the depth they must be moved apart to touch, the same from either side", async () => {
+    const P = await P_(), O = await O_();
+    // dogfood/round-11/shelf_probe_fail.aix: a board 0.2 thick, a book under it whose top is 0.15 into it (the board's
+    // own field at the book's top says 0.05, the nearer way out of the board being up), and a book sunk 0.03 into
+    // the shelf it stands on.
+    // The reading used to depend on where the board's seeds fell against the book: -0.15, -0.13 or -0.05 along the
+    // shelf, and -0.05845 for the rounded book at x = -1.5.
+    const board = O.move(P.box(7.68, 0.2, 2.94), 0, 9.85, 0.03);
+    for (const x of [-1.89, -1.5, -1.2, -0.7, 0.33])
+      for (const round of [0, 0.02]) {
+        const tall = O.move(P.box(0.42, 3.0, 2.0, round), x, 6.9 + 1.5, 0.35);
+        expect(C_.clearance(tall, board)).toBeCloseTo(-0.15, 4);
+        expect(C_.clearance(board, tall)).toBeCloseTo(-0.15, 4);
+      }
+    const shelf = O.move(P.box(7.68, 0.2, 2.94), 0, 0.7, 0.03);
+    const sunk = O.move(P.box(0.25, 2.3, 1.8), -1.7, 0.8 - 0.03 + 1.15, -0.3);
+    expect(C_.clearance(sunk, shelf)).toBeCloseTo(-0.03, 4);
+    expect(C_.clearance(shelf, sunk)).toBeCloseTo(-0.03, 4);
+  });
+  it("converges on a rounded edge resting on a plane and on a turned corner against a face", async () => {
+    const P = await P_(), O = await O_();
+    // dogfood/round-11/shelf_probe_ground.aix: a box 0.34 x 2.5 x 1.9 rounded 0.02, turned 18 degrees about its
+    // bottom edge, set down by the rounded edge's lift so its lowest line is on the floor.
+    const floor = O.move(P.box(4, 0.2, 3), 0, -0.1, 0);
+    const s = Math.sin(Math.PI / 10), c = Math.cos(Math.PI / 10), lift = 0.02 * (s + c - 1);
+    const book = (x: number) => O.move(O.rotate(O.move(P.box(0.34, 2.5, 1.9, 0.02), 0.17, 1.25, 0), 0, 0, 18), x, -lift, 0);
+    for (const x of [-1, 0.5]) expect(Math.abs(C_.clearance(book(x), floor))).toBeLessThan(1e-4);
+    // At x = 2 the rounded edge's lowest line (0.0128 right of the turned corner) is past the floor's edge, so
+    // the gap is from that edge to the arc, 0.00377: true, not an error.
+    expect(C_.clearance(book(2), floor)).toBeCloseTo(Math.hypot(0.02 * (c - s), 0.02) - 0.02, 4);
+    // dogfood/round-11/shelf_probe_hang2.aix: a box leaning 18 degrees with its top corner on an upright's face.
+    const prev = O.move(P.box(0.3, 2.45, 1.9), 0.15, 1.225, 0);
+    const lean = O.move(O.rotate(O.move(P.box(0.34, 2.5, 1.9), 0.17, 1.25, 0), 0, 0, 18), 0.3 + 2.5 * s, 0, 0);
+    expect(Math.abs(C_.clearance(lean, prev))).toBeLessThan(1e-4);
+    expect(C_.clearance(O.move(lean, 0.01, 0, 0), prev)).toBeCloseTo(0.01, 4);
+  });
+});

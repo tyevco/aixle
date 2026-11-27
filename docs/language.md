@@ -1187,11 +1187,22 @@ where the thinnest wall is and in which step (it meshes too, at the
 program's grid or 64; a shape with no surface in that mesh, empty or
 thinner than a cell everywhere, reads 0 and fails the promise);
 `clearance(a, b)` is
-the smallest gap between two surfaces, negative by how deep they overlap,
-zero when they touch, sampled from the fields at twelve points per side
-of each shape's box and then tightened, so it is exact for parts that
-face each other and can miss a feature narrower than a twelfth of the
-part. Measure parts rather than the whole model: `clearance(handle,
+the smallest gap between two surfaces, zero when they touch, and
+negative when they overlap: minus the depth of the deepest point either
+surface reaches inside the other, measured to the other's surface, which
+for a face sunk into a face or a round part pressed into another is how
+far they must be moved apart to only touch. A book sunk 0.03 into its
+shelf reads -0.03, and a book whose top is 0.15 into the 0.2 board above
+it reads -0.15, not the 0.05 to the board's top face (the nearer way out
+of the board); it is the same either way round, so a threshold on the
+depth means what it says. A part wholly inside another reads how deep its
+surface lies, which is less than the move that would free it. It is
+sampled from the fields at twelve points per side of each shape's box and
+of the box where the two meet, and the best points are then walked down
+each surface, so it is exact for faces that face each other, for a
+rounded edge resting on a plane and for a turned corner against a face,
+and can miss a feature narrower than a twelfth of the part away from
+where they meet. Measure parts rather than the whole model: `clearance(handle,
 body)`, not `clearance(handle, model)` (the handle is in the model, so
 that is zero). `void(region, shape)` is 1 when the region holds no
 solid of the shape: `assert void(cavity, mug)` promises nothing pokes

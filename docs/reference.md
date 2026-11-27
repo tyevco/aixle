@@ -503,7 +503,7 @@ The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring,
 
 ### clearance
 
-The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.
+The smallest gap between two shapes' surfaces, zero when they touch. Negative when they overlap: minus the depth of the deepest point either surface reaches inside the other, measured to the other's surface, which for a face sunk into a face or a round part pressed into another is how far they must be moved apart to only touch (a book whose top is 0.15 into a 0.2 board reads -0.15, though the board's top is only 0.05 above it); the same either way round, and a part wholly inside another reads how deep its surface lies, less than the move that would free it. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box and of the box where the two meet, the best walked down each surface, so a rounded edge resting on a plane reads its true gap), so measure parts rather than a whole scene.
 
     clearance(a, b) -> number
 
