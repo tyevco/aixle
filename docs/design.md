@@ -347,7 +347,8 @@ imports them as objects in the level; the viewer page has them.
 The viewer page has two lightings. Its studio (a grey backdrop, a room
 environment for the metals, a white key) is for judging the maps; its
 scene is the program's: the GLB's own lights, or the beauty render's
-default key when the program declares none, the program's sky drawn
+one key when the program declares none (where `set light_azimuth` and
+`set light_elevation` put it), the program's sky drawn
 behind as the beauty render's backdrop and, scaled by the ambient as the
 beauty render scales it, standing in for the light from all round, a
 floor of the sky's floor colour, and each named camera as a button that

@@ -569,6 +569,12 @@ describe("the program's lights and scene in the exports", () => {
       const s2 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "plain", "viewer.html"), "utf8"))![1]);
       expect(s2.start).toBe(false);
       expect(s2.key.intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425, 2.2), 3);
+      // That key is where the beauty render puts it: `set light_azimuth` and `set light_elevation` move it there too.
+      run('set light_azimuth 90\nset light_elevation 0\nshow box(1, 1, 1) | paint("red")', "box.aix", join(dir, "keyed"), { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      const s3 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "keyed", "viewer.html"), "utf8"))![1]);
+      expect(s3.key.direction[0]).toBeCloseTo(1, 4);
+      expect(s3.key.direction[1]).toBeCloseTo(0, 4);
+      expect(s3.key.direction[2]).toBeCloseTo(0, 4);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

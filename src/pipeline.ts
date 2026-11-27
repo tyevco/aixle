@@ -26,7 +26,7 @@ import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, typ
 import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
 import { viewerHtml, type ViewerScene } from "./export/viewer.js";
-import { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, lightDirection, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { perspective } from "./render/camera.js";
 import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
@@ -1446,6 +1446,13 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
     // The program's scene for the viewer's Scene mode: its sky and ambient as the beauty render takes them, its default
     // key when it declares no light, and its named cameras framed as their beauty shots are.
+    // With no light declared, the beauty render's one key, placed by `set light_azimuth` and `set light_elevation` when
+    // the program sets either, as renderBeauty places it.
+    const keyDirection = (): Vec3 => {
+      const az = typeof evaluation.settings.light_azimuth === "number" ? evaluation.settings.light_azimuth : undefined;
+      const el = typeof evaluation.settings.light_elevation === "number" ? evaluation.settings.light_elevation : undefined;
+      return az === undefined && el === undefined ? DEFAULT_LIGHT_DIRECTION : lightDirection(az ?? -40, el ?? 55);
+    };
     const viewerScene = (lit: Bounds): ViewerScene => {
       const pal = environmentPalette(environment);
       const setAmbient = typeof evaluation.settings.ambient === "number" ? Math.max(0, evaluation.settings.ambient) : 1;
@@ -1460,7 +1467,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         environment: environment ?? "studio",
         sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground, floor: pal.floor,
         ambient: Number((0.42 * setAmbient * pal.ambient).toFixed(4)),
-        ...(evaluation.lights.length ? {} : { key: { direction: DEFAULT_LIGHT_DIRECTION, intensity: Number((2 * Math.PI * Math.pow(0.425, 2.2)).toFixed(4)) } }),
+        ...(evaluation.lights.length ? {} : { key: { direction: keyDirection().map((v) => Number(v.toFixed(5))) as Vec3, intensity: Number((2 * Math.PI * Math.pow(0.425, 2.2)).toFixed(4)) } }),
         cameras,
         start: evaluation.lights.length > 0 || evaluation.settings.environment !== undefined,
         ...(shot ? { camera: shot.name } : {}),

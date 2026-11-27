@@ -30,7 +30,7 @@ export interface ViewerScene {
   floor: Vec3;
   /** The ambient light's strength as the beauty render takes it: its 0.42, times `set ambient`, times the sky's own. */
   ambient: number;
-  /** The beauty render's default key light (a direction towards it, and lux), when the program declares no light. */
+  /** The beauty render's one key light (a direction towards it, and lux), when the program declares no light: the default, or where `set light_azimuth` and `set light_elevation` put it. */
   key?: { direction: Vec3; intensity: number };
   /** The program's named cameras as the beauty render frames them: the eye, the point it looks at, the vertical field of view. */
   cameras: { name: string; eye: Vec3; target: Vec3; fov: number }[];
