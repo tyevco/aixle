@@ -280,14 +280,7 @@ class Scope {
   private vars = new Map<string, Value>();
   /** On a root scope: the libraries its program used, so a library's defs reach the library's own uses. */
   modules?: Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>;
-  /** On a def's call scope with a block body: the names its statements assigned, which are the def's own. */
-  locals?: Set<string>;
   constructor(private readonly parent?: Scope) {}
-  /** Whether `name` is one a def's block body assigned, here or in a scope above: no step, and read by no step. */
-  isLocal(name: string): boolean {
-    if (this.vars.has(name)) return this.locals?.has(name) ?? false;
-    return this.parent?.isLocal(name) ?? false;
-  }
   /** The scope `name` is found in: a def call's own (a parameter, a block's name), a library's root, or the program's. */
   owner(name: string): Scope | undefined {
     return this.vars.has(name) ? this : this.parent?.owner(name);
@@ -416,6 +409,13 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
   /** Whether `name` is one the file assigns below the running line, for the messages that would say "unknown". */
   const comesLater = (name: string, scope: Scope): boolean => scope.root() === global && (firstAt.get(name)?.line ?? 0) > runningLine;
+  /**
+   * Whether `name` (or a dotted name's head) is the program's own, so possibly a step: not a def's parameter or a
+   * block body's name, which are the call's own, and not a library's constant. Only such a name is read, cut,
+   * masked or made a region by what is evaluated (round 11: a block's assert on its parameter b made the program's
+   * unrelated step b a region, and hid that it was unused).
+   */
+  const programName = (name: string, scope: Scope): boolean => scope.owner(name.split(".")[0]) === global;
 
   function evalExpr(e: Expr, scope: Scope): Value {
     switch (e.type) {
@@ -455,7 +455,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         if (v === undefined) throw new RuntimeError(notDefined(e.name, scope, e.line), e.line);
         // Only the program's own names are steps: a def's parameter or block name, or a library's constant, is not the
         // step of the same name (round 11: a library def's parameter b made a caller's step b a part of every book).
-        if (scope.owner(e.name) === global) reads?.add(e.name);
+        if (programName(e.name, scope)) reads?.add(e.name);
         return v;
       }
       case "unary": {
@@ -466,7 +466,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "binary": {
         const l = evalExpr(e.left, scope), r = evalExpr(e.right, scope);
         if (currentStep) for (const v of [l, r]) if (isShape3(v)) { const nm = stepOfValue.get(v); if (nm) (currentStep.keptDeps ??= new Set()).add(nm); }
-        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident" && !scope.isLocal(e.right.name)) noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
+        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident" && programName(e.right.name, scope)) noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
         if (e.op === "&" && isShape3(l) && isShape3(r)) noteMask(l, e.left, r, e.right, scope);
         return binary(e.op, l, r, e.line);
       }
@@ -857,11 +857,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         }
       }
     }
-    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && !scope.isLocal(args[1].value.name)) noteCut(args[1].value.name);
+    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) noteCut(args[1].value.name);
     if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value, scope);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
-    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && !scope.isLocal(args[1].value.name)) { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
-    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm && !scope.isLocal(nm)) regionNames.add(nm); }
+    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
+    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm && programName(nm, scope)) regionNames.add(nm); }
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
@@ -985,7 +985,6 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (!fn.block) return evalExpr(fn.body!, local);
       // A block body: its statements in order in the call's own scope, then the return's value. What they assign
       // is the def's own, as a parameter is: no step, and gone when the call returns.
-      local.locals = new Set();
       for (const st of fn.block.slice(0, -1)) exec(st, local, false, fn);
       const ret = fn.block[fn.block.length - 1];
       if (ret.type !== "return") throw new RuntimeError(`'${fn.name}' has no return`, fn.block[fn.block.length - 1].line);
@@ -1114,7 +1113,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // in a loop of facets, round 10): the name at the head of a chain of rigid transforms is the mask.
     let e = bigger;
     while (e && e.type === "call" && e.piped && MASK_MOVES.has(e.callee) && e.args.length && !e.args[0].name) e = e.args[0].value;
-    if (e && e.type === "ident" && !scope.isLocal(e.name)) (currentStep.maskDeps ??= new Set()).add(e.name);
+    if (e && e.type === "ident" && programName(e.name, scope)) (currentStep.maskDeps ??= new Set()).add(e.name);
   }
 
   /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
@@ -1242,7 +1241,6 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           warnings.push(`line ${stmt.line}: '${stmt.name}' is a used library, so ${stmt.name}.${[...value.fields.keys()][0] ?? "x"} reads the library, not this record; give the record another name`);
         }
         scope.set(stmt.name, value);
-        if (inDef) scope.locals?.add(stmt.name);
         if (topLevel) {
           // A name first assigned inside a loop's body is the loop's own working name (bk, prev, board): it holds the
           // last iteration's value, so it is kept off the steps, the callouts, the unused warning and a library's
@@ -1324,7 +1322,6 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           for (const item of iterable) {
             if (++loops > MAX_LOOP) throw new RuntimeError(`more than ${MAX_LOOP} loop iterations`, stmt.line);
             scope.set(stmt.name, item);
-            if (inDef) scope.locals?.add(stmt.name);
             for (const s of stmt.body) exec(s, scope, topLevel, inDef);
           }
         } finally {

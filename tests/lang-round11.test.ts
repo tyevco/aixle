@@ -178,6 +178,14 @@ describe("a def with a block body (round 11: a library part had no local names a
     expect([...ev.steps.find((st) => st.name === "p")!.deps]).toEqual(["sink"]);
     expect(ev.warnings.join("\n")).toMatch(/'cover' \(line 2\) is not part of the output/);
   });
+  it("never takes a parameter read by an assert or a decal in its body for the program's step of that name", () => {
+    // b is the def's parameter; the program's own b is unused and is warned about, not made a region.
+    for (const body of ["assert clearance(cover, b) > 0.1, \"clears\"\n  return cover", "return decal(cover, b, \"red\")"]) {
+      const ev = run(`b = sphere(0.2) | move(5, 0, 0)\ndef book(b) {\n  cover = box(1)\n  ${body}\n}\nx = book(sphere(0.3) | move(0.5, 0, 0))\nshow x\n`);
+      expect(ev.roles.has("b")).toBe(false);
+      expect(ev.warnings).toEqual(["'b' (line 1) is not part of the output; add it to the model or remove it"]);
+    }
+  });
   it("recurses as an expression-bodied def does: into the depth guard, since nothing can stop it", () => {
     expect(error("def stack(n) {\n  one = box(1, 0.2, 1)\n  rest = stack(n - 1) | move(0, 0.2, 0)\n  return one + rest\n}\nt = stack(3)\n")).toMatch(/^line 3: 'stack' recursed more than 64 deep/);
     expect(error("def stack(n) = box(1) + stack(n - 1)\nt = stack(3)\n")).toMatch(/^line 1: 'stack' recursed more than 64 deep/);
