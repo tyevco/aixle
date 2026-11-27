@@ -16,12 +16,12 @@ import * as W from "../sdf/sweeps.js";
 import { bezierCurve, curveThrough, sweepCurve, tubeCurve, type Curve } from "../sdf/curves.js";
 import { bezier2, curve2 } from "../sdf/curves2d.js";
 import { textProfile, textWidth } from "../sdf/font.js";
-import { clearance, insideFraction, isVoid, overlapVolume } from "../sdf/measure.js";
+import { clearance, insideFraction, isVoid, leanOn, overlapVolume, restOn, type Contact, type NoContact } from "../sdf/measure.js";
 import { countPieces, overhangFraction, standing } from "../mesh/pieces.js";
 import { supportOf, thinnestWall } from "../mesh/print.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
 import { boundsCenter } from "../sdf/types.js";
-import { isMaterial, isRecord, isShape2, isShape3, type Builtin, type Overload, type Param, type Value } from "./values.js";
+import { isMaterial, isRecord, isShape2, isShape3, type Builtin, type CallContext, type Overload, type Param, type Value } from "./values.js";
 
 /** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
 export const CURRENT_ANGLES = new Map<string, [number, number, number]>();
@@ -55,6 +55,39 @@ function def(name: string, group: string, doc: string, ...overloads: Overload[])
 }
 
 const deg = (v: number): number => (v * 180) / Math.PI;
+
+/** A direction or an axis given as [x, y, z]: three numbers, not all zero. */
+function direction(v: Value, what: string): [number, number, number] {
+  if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => typeof x === "number" && Number.isFinite(x))) throw new Error(`${what} is a direction, [x, y, z]: three numbers`);
+  const [x, y, z] = v as number[];
+  const len = Math.hypot(x, y, z);
+  if (!(len > 0)) throw new Error(`${what} is [0, 0, 0], which points nowhere`);
+  return [x / len, y / len, z / len];
+}
+
+/** A direction as the program would write it: [0, -1, 0]. */
+export function vecText(v: readonly number[]): string {
+  return `[${v.map((x) => { const t = String(Number(x.toPrecision(4))); return t === "-0" ? "0" : t; }).join(", ")}]`;
+}
+
+/** A box as check prints a step's: x -1..1  y 0..2  z -1..1. */
+function boxText(b: { min: ArrayLike<number>; max: ArrayLike<number> }): string {
+  const f = (v: number) => { const t = String(Number(v.toPrecision(3))); return t === "-0" ? "0" : t; };
+  return ["x", "y", "z"].map((k, i) => `${k} ${f(b.min[i])}..${f(b.max[i])}`).join("  ");
+}
+
+/** The part's and the target's names as the program wrote them, for a message: `bowl` and `plate`. */
+function partNames(ctx: CallContext | undefined): { part: string; on: string } {
+  const clip = (t: string | undefined, fallback: string) => (t === undefined ? fallback : t.length > 48 ? `${t.slice(0, 45)}...` : t);
+  return { part: clip(ctx?.text?.("part"), "the part"), on: clip(ctx?.text?.("on"), "the target") };
+}
+
+/** What rest() and lean() hand back: the part in contact, said to check; an error naming both when there is none. */
+function contactResult(r: Contact | NoContact, ctx: CallContext | undefined, note: (r: Contact) => Parameters<NonNullable<CallContext["placed"]>>[0], never: () => string, stuck: (depth: number) => string): Shape3 {
+  if (!r.shape) throw new Error(r.inside !== undefined ? stuck(r.inside) : never());
+  ctx?.placed?.(note(r));
+  return r.shape;
+}
 
 export function toMaterial(v: Value): Material {
   if (isMaterial(v)) return v;
@@ -252,6 +285,32 @@ export const BUILTINS: Builtin[] = [
     ov([shape(), axis()], "shape", (a) => O.flip(s3(a[0]), a[1] as O.Axis)),
     ov([shape2(), axis()], "shape2", (a) => S.flip2(s2(a[0]), a[1] as "x" | "y"))),
   def("ground", "Transforms", "Move the shape so the lowest point of its surface rests on y = 0 (the surface, found by rays from below, not the bounding box, which a blend or a cut can leave loose).", ov([shape()], "shape", (a) => O.ground(s3(a[0])))),
+  def("rest", "Transforms", "Move `part` along `dir` (straight down by default) until it touches `on`, then `sink` further: bowl | rest(plate) sets a bowl on its plate, book | rest(shelf) a book on its shelf, book | rest(prev, dir=[-1, 0, 0]) slides it along the shelf against its neighbour, all without the arithmetic. The contact is found from both surfaces' fields, the small parts of each at their own scale (a bowl's tab lands on a hook's lip 0.05 thick), and tightened on clearance(), so a promise of contact holds by construction: afterwards clearance(part, on) is within a millionth of the part's size of 0 (round 11's 33 books: 1.2e-6 at most) and overlap() reads 0. `on` may be several things joined with +: each is read on its own, so a shelf the part slides along does not pass for the neighbour it slides into. A part that starts inside `on` is first backed out against `dir` to the first place it is clear, so a part built at the origin rests on a shelf above it; one sunk a sliver into something (ground() leaves a turned part up to 5e-5 in the floor) is lifted out of it first; one that never touches `on` along `dir` is an error that says where both are. The touch meshes as one piece (pieces() reads 1 for a face on a face at every grid tried); sink=0.02 pushes the part that far on into `on` for a print that must overlap, and a negative sink stops that far short (a gap between books). Anchors move with the part; check prints how far each call moved it. 10 to 50 ms a call for parts like these, about a second for a frog with displaced skin",
+    ov([shape("part"), shape("on", "what it comes to rest on: a shape, or several joined with +"), { name: "dir", type: "list", default: [0, -1, 0], doc: "the direction it moves in, [x, y, z]" }, num("sink", "how far to go on past the touch, into `on` (negative: stop that far short)", 0)], "shape", (a, _r, ctx) => {
+      const dir = direction(a[2], "dir"), sink = n(a[3]);
+      const names = partNames(ctx);
+      return contactResult(restOn(s3(a[0]), s3(a[1]), dir, sink), ctx,
+        (r) => ({ amount: r.amount, along: dir, gap: r.gap, backed: r.backed, lifted: r.lifted, sink }),
+        () => `${names.part} (${boxText(s3(a[0]).bounds)}) never touches ${names.on} (${boxText(s3(a[1]).bounds)}) moving along ${vecText(dir)}: ${names.on} is not in its way. Move the part so ${names.on} is ahead of it along dir, or give the dir that leads there`,
+        (depth) => `${names.part} starts ${Number(depth.toPrecision(2))} inside ${names.on}, and moving it back against dir ${vecText(dir)} does not free it (it is sunk into something it would slide along): leave that out of \`on\`, or move the part clear of it first`);
+    })),
+  def("lean", "Transforms", "Turn `part` about the line through `pivot` along `axis` until it touches `on`: book | lean(prev, pivot=\"heel\", axis=[0, 0, 1]) leans a book standing on its shelf against its neighbour, turned about its bottom edge. The pivot is a point [x, y, z] or the name of one of the part's anchors (a named one, or a free one: bottom, left, ...); a rounded edge stays on what it stands on when the pivot is its rounding's centre (0.02 in from both faces for round=0.02). It turns the right-handed way about `axis`, as rotate() turns about x, y and z: axis=[0, 0, 1] tips +y towards -x, so a book whose heel is its bottom-left edge leans left; axis=[0, 0, -1] turns the other way. Up to 180 degrees: an axis that turns the part away from `on` is an error, or a turn of more than a quarter, which check's line points out. The contact is tightened on clearance() as rest()'s is: clearance(part, on) afterwards is within a millionth of the part's size of 0 (round 11's three leaning books: 1.9e-6 at most, where the hand-worked placement left 0.0065 to 0.0076). A part that starts inside `on` is turned back the other way to the first angle it is clear. Anchors turn with the part; check prints the angle each call turned",
+    ov([shape("part"), shape("on", "what it leans against"), { name: "pivot", type: "any", doc: "the point it turns about: [x, y, z], or the name of one of the part's anchors" }, { name: "axis", type: "list", doc: "the direction of the line it turns about, [x, y, z]; it turns the right-handed way about it" }], "shape", (a, _r, ctx) => {
+      const part = s3(a[0]);
+      const axisV = direction(a[3], "axis");
+      let pivot: [number, number, number];
+      if (typeof a[2] === "string") {
+        const p = O.anchorAt(part, a[2]);
+        if (!p) throw new Error(`the part has no anchor "${a[2]}" to turn about; it has ${Object.keys(O.anchorsOf(part)).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
+        pivot = [p[0], p[1], p[2]];
+      } else if (Array.isArray(a[2]) && a[2].length === 3 && a[2].every((x) => typeof x === "number")) pivot = a[2] as [number, number, number];
+      else throw new Error(`pivot is a point [x, y, z] or the name of one of the part's anchors, "heel"`);
+      const names = partNames(ctx);
+      return contactResult(leanOn(part, s3(a[1]), pivot, axisV), ctx,
+        (r) => ({ amount: r.amount, along: axisV, pivot, gap: r.gap, backed: r.backed, lifted: r.lifted, sink: 0 }),
+        () => `${names.part} (${boxText(part.bounds)}) turned about ${vecText(axisV)} through (${pivot.map((v) => Number(v.toPrecision(4))).join(", ")}) never touches ${names.on} (${boxText(s3(a[1]).bounds)}) in half a turn: it turns the right-handed way about the axis, so axis=${vecText(axisV.map((v) => -v))} turns it the other way`,
+        (depth) => `${names.part} starts ${Number(depth.toPrecision(2))} inside ${names.on}, and turning it back about ${vecText(axisV)} does not free it: leave out of \`on\` what it is sunk into, or move the part clear of it first`);
+    })),
   def("center", "Transforms", "Move the shape so its bounding box is centred on the origin; `axes` picks which of x, y, z.",
     ov([shape(), str("axes", "", "xyz")], "shape", (a) => O.center(s3(a[0]), a[1] as string))),
 

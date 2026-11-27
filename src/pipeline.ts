@@ -31,7 +31,8 @@ import { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContrib
 import { perspective } from "./render/camera.js";
 import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
+import { assertLine, type AssertInfo, type AssertResult, type ContactRecord, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
+import { vecText } from "./lang/builtins.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
@@ -1090,6 +1091,50 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 }
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
+/**
+ * check's lines for the rest() and lean() calls, one per call in the source: `rest (line 14)  bowl onto plate:
+ * moved 0.15 along [0, -1, 0], gap 1e-06`, or for a call a loop or a def made several times, the count and the
+ * range moved. A gap is how far from touching the contact was left, either way (a millionth of the part or less).
+ */
+export function contactLines(contacts: ContactRecord[]): string[] {
+  const groups = new Map<string, ContactRecord[]>();
+  for (const c of contacts) {
+    const key = `${c.file ?? ""}:${c.line}:${c.callee}`;
+    const g = groups.get(key);
+    if (g) g.push(c); else groups.set(key, [c]);
+  }
+  const out: string[] = [];
+  const num = (v: number) => { const t = String(Number(v.toPrecision(4))); return t === "-0" ? "0" : t; };
+  const gapText = (v: number) => (Math.abs(v) < 1e-12 ? "0" : String(Number(v.toPrecision(2))));
+  for (const g of groups.values()) {
+    const c = g[0];
+    const where = `${c.callee} (line ${c.line}${c.file ? ` of ${c.file}` : ""})`;
+    const lo = Math.min(...g.map((x) => x.note.amount)), hi = Math.max(...g.map((x) => x.note.amount));
+    const same = g.every((x) => vecText(x.note.along) === vecText(c.note.along));
+    const amount = g.length === 1 || lo === hi ? num(c.note.amount) : `${num(lo)} to ${num(hi)}`;
+    const verb = c.callee === "rest" ? "moved" : "turned";
+    const unit = c.callee === "rest" ? "" : " degrees";
+    const along = same ? `${c.callee === "rest" ? " along" : " about"} ${vecText(c.note.along)}` : c.callee === "rest" ? " along its dir" : " about its axis";
+    const at = c.callee === "lean" && g.length === 1 && c.note.pivot ? ` through (${c.note.pivot.map(num).join(", ")})` : "";
+    const backed = g.filter((x) => x.note.backed).length;
+    const sinks = [...new Set(g.map((x) => x.note.sink))];
+    const parts = g.length === 1 || g.every((x) => x.part === c.part && x.on === c.on) ? `${c.part} onto ${c.on}` : `${g.length} parts`;
+    const count = g.length > 1 ? `${g.length} calls, ` : "";
+    const gap = Math.max(...g.map((x) => Math.abs(x.note.gap)));
+    let text = `${count}${parts}: ${verb} ${amount}${unit}${along}${at}`;
+    if (backed) text += g.length === 1 ? ` (it started inside ${c.on} and was backed out)` : ` (${backed} started inside and were backed out)`;
+    const lifted = Math.max(...g.map((x) => x.note.lifted));
+    if (lifted > 0) text += `, lifted ${gapText(lifted)} out of ${g.length === 1 ? c.on : "what they stood in"} first`;
+    if (sinks.length === 1 && sinks[0] !== 0) text += `, then sunk ${num(sinks[0])}`;
+    else if (sinks.length > 1) text += `, then sunk ${num(Math.min(...sinks))} to ${num(Math.max(...sinks))}`;
+    text += `; ${g.length > 1 ? "gaps up to" : "gap"} ${gapText(gap)}`;
+    // A turn of more than a quarter is usually the axis's sign: say which way the other is.
+    if (c.callee === "lean" && Math.max(Math.abs(lo), Math.abs(hi)) > 90 && same) text += `; more than a quarter turn: axis=${vecText(c.note.along.map((v) => -v))} turns the other way`;
+    out.push(`${where.padEnd(18)} ${text}`);
+  }
+  return out;
+}
+
 /** Parse and evaluate a program, nothing rendered; `cache` keeps an import's samples between runs (see importResolver). */
 export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache, onAssert?: (phase: "start" | "end", a: AssertInfo) => void): Evaluation {
   return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts, onAssert });
