@@ -327,11 +327,27 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const moduleList: UsedModule[] = [];
   /** Names read while evaluating the current top-level statement. */
   let reads: Set<string> | undefined;
+  // Where each name is first assigned or defined at the top level (a loop's body included), so a name read before
+  // its line can say it comes later (round 11: a probe's show above the lines it named read as a typo).
+  const firstAt = new Map<string, { line: number; def: boolean }>();
+  const noteFirst = (body: Stmt[]) => {
+    for (const st of body) {
+      if ((st.type === "assign" || st.type === "def") && !firstAt.has(st.name)) firstAt.set(st.name, { line: st.line, def: st.type === "def" });
+      if (st.type === "for") { if (!firstAt.has(st.name)) firstAt.set(st.name, { line: st.line, def: false }); noteFirst(st.body); }
+    }
+  };
+  noteFirst(program.body);
+  // The top-level statement running, and the defs it is inside, for that message.
+  let runningLine = 0;
+  const calling: string[] = [];
 
-  function lookup(name: string, line: number): Value {
-    const v = global.get(name);
-    if (v === undefined) throw new RuntimeError(`'${name}' is not defined`, line);
-    return v;
+  /** Why `name` has no value here: not defined at all, or not yet, when the file assigns it further down. */
+  function notDefined(name: string): string {
+    const at = firstAt.get(name);
+    if (!at || at.line <= runningLine) return `'${name}' is not defined`;
+    const what = at.def ? `its def is on line ${at.line}` : `it is assigned on line ${at.line}`;
+    const when = calling.length ? `after line ${runningLine}, which calls ${calling[0]}()` : "after this line";
+    return `'${name}' is not defined yet: ${what}, ${when}; statements run in order, top to bottom`;
   }
 
   function evalExpr(e: Expr, scope: Scope): Value {
@@ -369,7 +385,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "ident": {
         if (e.name.includes(".")) return dottedValue(e.name, e.line, scope);
         const v = scope.get(e.name);
-        if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
+        if (v === undefined) throw new RuntimeError(notDefined(e.name), e.line);
         reads?.add(e.name);
         return v;
       }
@@ -680,6 +696,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     else {
       const head = scope.get(parts[0]);
       if (head === undefined) {
+        if (firstAt.has(parts[0]) && firstAt.get(parts[0])!.line > runningLine) throw new RuntimeError(notDefined(parts[0]), line);
         const known = [...table.keys()];
         throw new RuntimeError(`'${parts[0]}' is not a used library or a defined record${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${parts[0]}.aix" or use "std/${parts[0]}" first, or define ${parts[0]} = {${parts[1]}: ...}`, line);
       }
@@ -740,6 +757,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     if (!builtin) {
       if (user !== undefined) throw new RuntimeError(`'${callee}' is a ${typeName(user)}, not a function`, line);
+      if (firstAt.has(callee) && firstAt.get(callee)!.line > runningLine) throw new RuntimeError(notDefined(callee), line);
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
@@ -860,10 +878,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     });
     for (const a of named) if (!fn.params.some((p) => p.name === a.name)) throw new RuntimeError(`'${fn.name}' has no parameter '${a.name}'`, line);
     depth++;
+    calling.push(fn.name);
     try {
       return evalExpr(fn.body, local);
     } finally {
       depth--;
+      calling.pop();
     }
   }
 
@@ -1079,6 +1099,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {
+    if (topLevel) runningLine = stmt.line;
     switch (stmt.type) {
       case "assign": {
         const collecting = topLevel && reads === undefined;

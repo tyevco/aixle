@@ -1,8 +1,13 @@
 # The Aixle language
 
-A `.aix` file is a list of statements, one per line, read top to bottom.
-Every assignment is a step; steps build on earlier steps by name. The file
-ends by showing one shape, or the last shape assigned is the output.
+A `.aix` file is a list of statements, one per line, run in order, top
+to bottom. Every assignment is a step; steps build on earlier steps by
+name, and a name can be read only below the line that assigns it (or the
+`def` that defines it): `show` goes after the steps it shows, which is
+why a file usually ends with it. Without a `show`, the last shape
+assigned is the output. A name read above its line is an error that says
+where it is assigned: `'lean' is not defined yet: it is assigned on line
+12, after this line`.
 
 [`reference.md`](reference.md) lists every function with its signature.
 This document is the language around them.

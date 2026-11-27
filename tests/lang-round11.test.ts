@@ -79,3 +79,19 @@ describe("check prints a value's small numbers (round 11: a bump of 0.002 printe
     expect(out).toMatch(/\ntiny +=  ?0\.0004\n/);
   });
 });
+
+describe("a name read before the line that assigns it (round 11: show above its steps)", () => {
+  const error = (src: string): string => { try { run(src); } catch (err) { return (err as Error).message; } return "no error"; };
+  it("says the name is assigned further down, and where", () => {
+    expect(error("board = box(4, 0.2, 2)\nshow board + lean\nlean = box(0.3, 2, 1.5) | rotate(z=18)\n")).toBe("line 2: 'lean' is not defined yet: it is assigned on line 3, after this line; statements run in order, top to bottom");
+    expect(error("a = f(1)\ndef f(x) = box(x)\n")).toBe("line 1: 'f' is not defined yet: its def is on line 2, after this line; statements run in order, top to bottom");
+    expect(error("w = c.w\nc = {w: 2}\n")).toBe("line 1: 'c' is not defined yet: it is assigned on line 2, after this line; statements run in order, top to bottom");
+    // A def reading a top-level name that the file assigns after the line calling it.
+    expect(error("def leg(h) = box(gap, h, gap)\nl = leg(1)\ngap = 0.1\n")).toBe("line 1: 'gap' is not defined yet: it is assigned on line 3, after line 2, which calls leg(); statements run in order, top to bottom");
+    // A name in a loop's body read above its assignment there.
+    expect(error("for i in range(2) {\n  b = a + 1\n  a = i\n}\n")).toMatch(/^line 2: 'a' is not defined yet: it is assigned on line 3, after this line/);
+  });
+  it("says only 'not defined' for a name the file never assigns", () => {
+    expect(error("show lean\n")).toBe("line 1: 'lean' is not defined");
+  });
+});
