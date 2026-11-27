@@ -40,10 +40,11 @@
  *     or the end of the file;
  *   - a comment on its own line takes the indentation of the line it
  *     precedes (inside the brackets or the loop when that line closes them);
- *     a comment after code keeps its column, moved with its line's
- *     indentation, so a column of them stays a column, unless the code now
- *     reaches it, when it sits two spaces after the code. A comment's text
- *     is kept as written.
+ *     a comment after code has at least two spaces before it and otherwise
+ *     keeps its column, moved with its line's indentation; comments at one
+ *     column on consecutive lines are a column and move as one, as far right
+ *     as the furthest of them needs, so a column stays a column when one
+ *     line's code reaches into it. A comment's text is kept as written.
  */
 import { parseTokens } from "./parser.js";
 import type { Token } from "./lexer.js";
@@ -124,21 +125,55 @@ export function format(source: string): string {
   const linedUp = new Map<number, number>();
   for (const run of columns) for (const m of run) linedUp.set(m.i, m.col);
   const target = new Map<number, number>();
+
+  // Columns of trailing comments: comments after code on consecutive lines, written at one column. A column moves
+  // as one, as far right as its furthest member needs, so one line whose code now reaches into the two spaces
+  // before its comment pushes the whole column out with it (round 11: fmt moved one comment of a column of five).
+  const trailing: { start: number; line: number; col: number }[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const gap = src.slice(toks[i].end, i + 1 < toks.length ? toks[i + 1].start : src.length);
+    const nl = gap.indexOf("\n");
+    if (nl < 0 && i + 1 < toks.length) continue;
+    const c = commentIn(nl < 0 ? gap : gap.slice(0, nl));
+    if (c) trailing.push({ start: toks[i].end, line: toks[i].line, col: columnOf(toks[i].end + c.at) });
+  }
+  /** The comment column each trailing comment belongs to, by where its line's code ends; only runs of two or more. */
+  const commentRun = new Map<number, number>();
+  for (let k = 0, run = 0; k < trailing.length; k++) {
+    const prev = trailing[k - 1];
+    if (!prev || prev.line + 1 !== trailing[k].line || prev.col !== trailing[k].col) run = k;
+    commentRun.set(trailing[k].start, run);
+  }
+  const runSize = new Map<number, number>();
+  for (const r of commentRun.values()) runSize.set(r, (runSize.get(r) ?? 0) + 1);
+  for (const [start, r] of commentRun) if (runSize.get(r)! < 2) commentRun.delete(start);
+  const commentTarget = new Map<number, number>();
+
   let printed = "";
   for (let pass = 0; pass < 16; pass++) {
     const placed = new Map<number, number>();
-    printed = layout(placed);
+    const wanted = new Map<number, { want: number; at: number }>();
+    printed = layout(placed, wanted);
     let settled = true;
     for (const run of columns) {
       const at = Math.max(...run.map((m) => placed.get(m.i)!));
       if (run.some((m) => placed.get(m.i) !== at)) { settled = false; for (const m of run) target.set(m.i, at); }
     }
+    const runs = new Map<number, { want: number; at: number }[]>();
+    for (const [start, w] of wanted) { const r = commentRun.get(start)!; runs.set(r, [...(runs.get(r) ?? []), w]); }
+    for (const [r, ws] of runs) {
+      const at = Math.max(...ws.map((w) => w.want));
+      if (ws.some((w) => w.at !== at)) { settled = false; commentTarget.set(r, at); }
+    }
     if (settled) break;
   }
   return printed;
 
-  /** The program laid out, each lined-up token at its column; `placed` gets the column each of them landed at. */
-  function layout(placed: Map<number, number>): string {
+  /**
+   * The program laid out, each lined-up token at its column; `placed` gets the column each of them landed at, and
+   * `wanted` the column each trailing comment of a column wanted on its own and the one it was printed at.
+   */
+  function layout(placed: Map<number, number>, wanted: Map<number, { want: number; at: number }>): string {
     const out: string[] = [];
     let line = "";
     /** Each earlier line of the statement: where its tokens were written and where they are now. */
@@ -172,12 +207,18 @@ export function format(source: string): string {
       if (sawBlank) blank();
     };
 
-    /** End the line being built, with the comment written after its code, if any. */
+    /**
+     * End the line being built, with the comment written after its code, if any: at its column, moved with its line,
+     * at least two spaces after the code, and with the rest of its column when it is in one.
+     */
     const endLine = (tail: string, tailStart: number) => {
       const c = commentIn(tail);
       if (c) {
         const was = columnOf(tailStart + c.at) + lineShift;
-        const at = was >= line.length + 2 ? was : line.length + 2;
+        const want = Math.max(was, line.length + 2);
+        const run = commentRun.get(tailStart);
+        const at = run === undefined ? want : Math.max(want, commentTarget.get(run) ?? want);
+        if (run !== undefined) wanted.set(tailStart, { want, at });
         line = line + " ".repeat(at - line.length) + c.text;
       }
       out.push(line.trimEnd());
@@ -250,4 +291,51 @@ export function format(source: string): string {
     while (out.length && out[out.length - 1] === "") out.pop();
     return out.length ? out.join("\n") + "\n" : "";
   }
+}
+
+/**
+ * Where a program differs from its layout, for `aixle fmt --check`: each line fmt would change, as it is and as
+ * fmt writes it, the first `max` of them, and how many there are in all (round 11: "not formatted" with no line
+ * cost a diff by hand). fmt never joins, splits or drops a line with something on it, so the lines with code or a
+ * comment pair off in order, and the blank lines between them are compared as runs.
+ */
+export function formatDiff(source: string, formatted: string, max = 5): { count: number; lines: string[] } {
+  // count: the lines that differ (every line, when they end in \r\n); lines: what to print about them.
+  const crlf = /\r\n/.test(source);
+  const split = (s: string) => { const l = s.split("\n"); if (l[l.length - 1] === "") l.pop(); return l; };
+  const a = split(source.replace(/\r\n/g, "\n")), b = split(formatted);
+  // Each place fmt would change, with how many lines it changes there.
+  const found: { line: number; what: string[]; n: number }[] = [];
+  const filled = (l: string[]) => l.map((t, i) => [t, i] as const).filter(([t]) => t.trim());
+  const fa = filled(a), fb = filled(b);
+  // A run of blank lines before each filled line (and after the last): what it was, and what fmt keeps of it.
+  const blanks = (from: number, to: number, kept: number, end: boolean) => {
+    const run = a.slice(from, to);
+    if (!run.length) return;
+    const why = run.length > kept ? (from === 0 ? `${run.length === 1 ? "a blank line" : `${run.length} blank lines`} at the start of the file; fmt drops ${run.length === 1 ? "it" : "them"}` : end ? `${run.length === 1 ? "a blank line" : `${run.length} blank lines`} at the end of the file; fmt drops ${run.length === 1 ? "it" : "them"}` : `${run.length} blank lines in a row; fmt keeps one`) : run.some((t) => t !== "") ? "a blank line holds spaces; fmt empties it" : undefined;
+    if (why) found.push({ line: from + 1, what: [`line ${from + 1}: ${why}`], n: run.length > kept ? run.length - kept : run.filter((t) => t !== "").length });
+  };
+  for (let k = 0; k < fa.length; k++) {
+    const [was, i] = fa[k];
+    const prevA = k ? fa[k - 1][1] + 1 : 0, prevB = k ? fb[k - 1][1] + 1 : 0;
+    blanks(prevA, i, fb[k] ? fb[k][1] - prevB : 0, false);
+    const now = fb[k]?.[0] ?? "";
+    if (was === now) continue;
+    // A long line is shown from a little before where the two first differ, the same stretch of each.
+    let d = 0;
+    while (d < was.length && was[d] === now[d]) d++;
+    const from = Math.max(...[was.length, now.length]) > 110 ? Math.max(0, d - 40) : 0;
+    const cut = (t: string) => `"${from ? "..." : ""}${t.slice(from, from + 100)}${t.length > from + 100 ? "..." : ""}"`;
+    const w = Math.max(`line ${i + 1} is:`.length, "fmt writes:".length);
+    found.push({ line: i + 1, what: [`${`line ${i + 1} is:`.padEnd(w)} ${cut(was)}`, `${"fmt writes:".padEnd(w)} ${cut(now)}`], n: 1 });
+  }
+  if (fa.length) blanks(fa[fa.length - 1][1] + 1, a.length, 0, true);
+  else blanks(0, a.length, 0, false);
+  if (source.length && !source.endsWith("\n") && a.length) found.push({ line: a.length, what: [`line ${a.length}: no line break after it; fmt ends the file with one`], n: 1 });
+  const notes: string[] = [];
+  if (crlf) notes.push("its lines end in \\r\\n; fmt writes \\n");
+  const count = crlf ? a.length : found.reduce((t, f) => t + f.n, 0);
+  const lines = [...notes, ...found.slice(0, max).flatMap((f) => f.what)];
+  if (found.length > max) lines.push(`... and ${found.length - max} more`);
+  return { count, lines };
 }

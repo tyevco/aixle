@@ -9,7 +9,7 @@
 import type { Vec3 } from "../core/vec.js";
 import { boundsSize, isEmpty, type Bounds, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { project, toView, type Camera } from "./camera.js";
+import { perspective, project, toView, type Camera } from "./camera.js";
 import { Canvas } from "./canvas.js";
 import { drawText, textWidth } from "./font.js";
 import type { RenderTarget } from "./raster.js";
@@ -211,6 +211,51 @@ export function hiddenFraction(mesh: Mesh, within: Bounds, info: ViewInfo, cellS
     seen++;
     const d = target.depth[py * size + px];
     if (Number.isFinite(d) && pr.depth > d + depthTol) hidden++;
+  }
+  return seen ? hidden / seen : 0;
+}
+
+/**
+ * hiddenFraction without the model's mesh, for `check`: the focus alone is meshed coarsely over its frame, and from
+ * each of its vertices that faces the camera (on the model's surface, not buried in another part) a ray is marched
+ * through the whole model's field towards the perspective camera at that azimuth and elevation (framed on the
+ * model's box); the vertex is hidden when the ray meets the surface more than three cells short of it. The share
+ * hidden is what the render's test measures from its depth buffer, the model itself included, so a ring of stones
+ * hides its far side (round 11: a camera on a beater inside a bowl took two beauty runs of minutes each to aim,
+ * since only the render said what it saw). `limit` is how many vertices at most; a march that runs out of steps
+ * counts as not hidden. Pass the same `points` (the focus's coarse mesh) to try several azimuths.
+ */
+export function hiddenFractionRays(model: Shape3, modelBounds: Bounds, points: { positions: Float32Array; normals: Float32Array }, cellSize: number, azimuth: number, elevation: number, limit = 1500): number {
+  if (isEmpty(modelBounds) || !points.positions.length) return 0;
+  const cam = perspective(modelBounds, 160, 160, azimuth, elevation);
+  const e = cam.eye;
+  const tol = Math.max(cellSize * 3, 1e-6), eps = Math.max(cellSize * 0.02, 1e-7);
+  const n = points.positions.length / 3;
+  const stride = Math.max(1, Math.floor(n / limit));
+  let seen = 0, hidden = 0;
+  for (let v = 0; v < n; v += stride) {
+    const x = points.positions[v * 3], y = points.positions[v * 3 + 1], z = points.positions[v * 3 + 2];
+    const dx = x - e[0], dy = y - e[1], dz = z - e[2];
+    // Only the vertices that face the camera: a part's own far side is hidden by the part, not by the model.
+    if (points.normals[v * 3] * dx + points.normals[v * 3 + 1] * dy + points.normals[v * 3 + 2] * dz >= 0) continue;
+    // A surface buried in another part is no surface of the model's (a shaft inside its hub).
+    if (model.dist(x, y, z) < -cellSize) continue;
+    seen++;
+    const len = Math.hypot(dx, dy, dz);
+    const d: Vec3 = [dx / len, dy / len, dz / len];
+    // From where the ray enters the model's box to three cells short of the vertex.
+    let t0 = 0, t1 = len - tol;
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs(d[k]) < 1e-12) continue;
+      const a = (modelBounds.min[k] - e[k]) / d[k], c = (modelBounds.max[k] - e[k]) / d[k];
+      t0 = Math.max(t0, Math.min(a, c));
+    }
+    let t = t0;
+    for (let i = 0; i < 400 && t <= t1; i++) {
+      const f = model.dist(e[0] + d[0] * t, e[1] + d[1] * t, e[2] + d[2] * t);
+      if (f < eps) { hidden++; break; }
+      t += f;
+    }
   }
   return seen ? hidden / seen : 0;
 }

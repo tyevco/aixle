@@ -1,0 +1,5 @@
+# A small library for check --brief's test: two constants and a def.
+a = 1
+b = 2
+def peg(h=1) = cylinder(0.1, h)
+show peg()

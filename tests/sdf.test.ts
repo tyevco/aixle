@@ -994,3 +994,35 @@ describe("letter spacing as a gap", () => {
     expect(textProfile("AIXLE", 1.3, 0.22).gap!).toBeCloseTo(2.8 * (1.3 / 6) - 0.22, 6);
   });
 });
+
+describe("round-11 findings", () => {
+  // A head laid along z, 3 long, with a plate 0.03 thick across it hanging below: the plate's z lies between two of
+  // the 48 rays a side, so the rays from below and from the sides slip past it.
+  const head = () => O.rotate(P.cylinder(0.5, 3), 90, 0, 0);
+  const plate = () => O.move(P.box(3, 2.5, 0.03), 0, -1.25, 0);
+  it("the surface's extent keeps a thin plate the rays slip between, measured on the plate's own box", () => {
+    const rig = O.joint(O.union([head(), plate()]), "tilt", 0, 0, 0);
+    const rays = O.surfaceExtent(rig, 48);
+    // What the rays alone see: the head without its plate (round 11: a joint's surface line left out the beater).
+    expect(rays.min[1]).toBeGreaterThan(-0.6);
+    const deep = O.surfaceExtentDeep(rig);
+    expect(deep.min[1]).toBeCloseTo(-2.5, 2);
+    expect(deep.min[0]).toBeCloseTo(-1.5, 2);
+    expect(deep.max[0]).toBeCloseTo(1.5, 2);
+    // Never past the box, and the head's own extent stands.
+    expect(deep.max[1]).toBeCloseTo(0.5, 2);
+    expect(deep.min[2]).toBeCloseTo(-1.5, 2);
+  });
+  it("places a hard union folded into a larger one where its parts are, so it has a posed extent", () => {
+    // `hinged = head + knuckle` read by `joint(hinged + nose, ...)`: the union of unions is one flat list, so hinged is
+    // no node of the joint's tree, only its parts are.
+    const knuckle = O.move(P.sphere(0.2), 0, 0, -1.5);
+    const hinged = O.union([head(), knuckle]);
+    const nose = O.move(P.sphere(0.3), 0, 0, 1.6);
+    const turned = O.joint(O.union([hinged, nose]), "tilt", 0, 0, -1.5, [-90, 0, 0]);
+    const placed = O.placedShape(turned, hinged)!;
+    expect(placed).toBeDefined();
+    // Turned -90 degrees about x at the back, the head stands up: its far end is 3 above the pivot.
+    expect(O.surfaceExtent(placed, 48).max[1]).toBeCloseTo(3, 1);
+  });
+});

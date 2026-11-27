@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -453,8 +453,9 @@ describe("round-6 findings", () => {
       expect(r.report).toMatch(/\| Asserts \| 1 pass, 1 fail: \(line 2\) fails: width\(m\) < 1 is 2 < 1: narrow \|/);
       const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
       expect(json.asserts).toEqual([
-        { line: 2, text: "width(m) < 1", detail: "2 < 1", message: "narrow", passed: false },
-        { line: 3, text: "tall(m) == 1", detail: "1 == 1", passed: true },
+        // The margin is how far each passed by (negative: failed by), for a reader that wants the nearest to failing.
+        { line: 2, text: "width(m) < 1", detail: "2 < 1", message: "narrow", passed: false, margin: -1 },
+        { line: 3, text: "tall(m) == 1", detail: "1 == 1", passed: true, margin: 0 },
       ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -482,5 +483,36 @@ describe("glass on a bound", () => {
     // A smooth profile is an exact distance, so a bottle revolved from one is glass the march can trust.
     const bottle = check('wall = curve2([0,0.02, 0.5,0.02, 0.55,1.2, 0.2,1.6, 0.18,2], wall=0.04)\nbottle = revolve(wall) | paint("glass")\nflask = extrude(bezier2([0,0, 0.6,0, 0.6,1, 0,1]), 0.3, "z") | paint("glass")\nshow bottle + flask', "b.aix");
     expect(glassWarnings(bottle)).toEqual([]);
+  });
+});
+
+describe("round 11: a promise at rest is judged once", () => {
+  it("keeps the warnings a promise at rest raised on a render shown in a pose", () => {
+    // The pose's evaluation no longer judges the promise at rest, so its warning comes from the rest evaluation.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = 'body = box(1)\nfar = sphere(0.1) | move(0, 5, 0)\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nassert void(far, body)\nshow body + lid';
+      for (const pose of [undefined, "open"]) {
+        const r = run(src, "far.aix", dir, { ...QUICK, grid: 24, poses: false, pose });
+        expect(r.warnings.filter((w) => /holds trivially/.test(w))).toHaveLength(1);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("round 11: check aims a camera", () => {
+  it("says how much of a camera's focus is hidden from its angle, from rays, and warns as the render does when another azimuth shows more", () => {
+    // A lantern behind a wall: from the front (azimuth 0, +z) the wall hides it, from the back nothing does.
+    const src = 'wall = box(3, 2, 0.2) | move(0, 1, 0.6)\nlantern = sphere(0.3) | move(0, 1, -0.4)\ncamera("front", focus="lantern", azimuth=0, elevation=10)\ncamera("back", focus="lantern", azimuth=180, elevation=10)\nshow wall + lantern';
+    const ev = check(src);
+    const sight = cameraSight(ev, cellFor(ev).cellSize);
+    expect(sight.lines).toHaveLength(2);
+    const [front, back] = sight.lines;
+    expect(Number(/^ {2}front: (\d+)% of lantern hidden behind the rest of the model from azimuth 0, elevation 10; 0% from azimuth (\d+)$/.exec(front)?.[1])).toBeGreaterThan(90);
+    expect(back).toBe("  back: 0% of lantern hidden behind the rest of the model from azimuth 180, elevation 10");
+    expect(sight.warnings).toHaveLength(1);
+    expect(sight.warnings[0]).toMatch(/^camera "front" \(line 3\): \d+% of lantern is hidden behind the rest of the model from azimuth 0, elevation 10; from azimuth \d+ it is 0%$/);
   });
 });

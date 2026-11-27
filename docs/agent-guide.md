@@ -22,10 +22,14 @@ the inside is cut open.
    two parts. Paint parts before joining them. End with `show model`.
 3. **`npx aixle check model.aix`.** Fixes syntax and type errors in a
    second, prints each step's size and every warning. Sizes that look wrong
-   here are wrong.
+   here are wrong. Under its cameras' line, each `camera(..., focus=)`
+   says how much of its focus the rest of the model hides from its angle,
+   and which azimuth hides less, so a shot is aimed before any beauty run.
 4. **`npx aixle render model.aix --quick`** while iterating: the sheet
    in a second or two (a rig's pose sheet is drawn too, its strips only by
-   the full render; `--no-poses` while the geometry is still moving). Then
+   the full render; `--no-poses` while the geometry is still moving; the
+   asserts are judged at full cost, and `--no-asserts` leaves them out
+   while placing parts when the run says they took most of it). Then
    the full render: read `out/model/sheet.png`,
    then `slices.png` if anything is hollow or nested, then `steps.png` if a
    part is missing or misplaced, to see which step went wrong,
@@ -51,8 +55,11 @@ the inside is cut open.
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing
-   promise with its numbers, so the next edit cannot silently undo
-   what the pictures once showed.
+   promise with its numbers (a promise in a loop once, with how many
+   times it held and the judgement nearest to failing; the failures last,
+   in full), so the next edit cannot silently undo what the pictures
+   once showed. An assert that is slow, or does not return, is named on
+   the error stream with its time.
 6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
    For a print, say what a unit is and what the printer holds (`set units
@@ -74,7 +81,7 @@ npx aixle render model.aix --quick         the sheet only, small grid, fast; --w
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
-npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises: both for a big rig's loop
+npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises while placing parts (a quick pass that spent most of its time on them says so)
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
 npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
@@ -88,7 +95,7 @@ npx aixle render model.aix --3mf           also model.3mf (written anyway with `
 npx aixle render model.aix --triangles 50000   a lighter GLB, OBJ and viewer, decimated (default cap 200000; 0 keeps every triangle)
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
-npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check fails if it is not
+npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check says formatted, or fails with each line that differs
 ```
 
 An `import()` is sampled once per file and resolution and cached on
@@ -236,7 +243,9 @@ cylinder written out. Sizes printed by `check` and
 shown on the sheet are for the pose being shown: a step built at rest and
 turned by a joint above it keeps its rest box and gets a `posed` line
 saying where it ends up, and a step whose box is a turned box gets a
-`surface` line with the true extent. The exports are at rest
+`surface` line with its surface's own extent (from rays: a union's thin
+parts are measured on their own box, a thin plate inside a cut part can
+slip between them). The exports are at rest
 and carry the joints and animations. Loose pieces and open edges are
 named by the innermost step whose surface passes there, in the pose
 shown, so a lug welded to a boom is blamed as the lug, not the boom.

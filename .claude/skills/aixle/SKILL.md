@@ -33,13 +33,19 @@ Reference: `docs/reference.md` (every function, generated from the code),
    `at(part, "name")` as the end of a `tube`. Paint parts before
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
-   size (profiles and numbers too), every warning, in a second. Sizes
-   that look wrong are wrong. A `surface` line under a step is the true
-   extent of a turned box; with `--pose`, a `posed` line is where a step
-   ends up once the joints above it have turned.
+   size (profiles and numbers too), every warning, in a second, and for
+   each `camera(..., focus=)` how much of its focus the rest of the model
+   hides from its angle (aim a shot here, not with beauty runs). Sizes
+   that look wrong are wrong. A `surface` line under a step is its surface's
+   own extent where the box is the box of a turned box (from rays, a
+   union's thin parts each on its own box; a thin plate inside a cut part
+   can still slip between them); with `--pose`, a `posed` line is where a
+   step ends up once the joints above it have turned.
 4. **`npx aixle render model.aix --quick`** while iterating (the sheet in
    a second or two; on a rig add `--no-poses` until the geometry settles,
-   the strips come with the full render), then read `out/model/sheet.png`. Drop `--quick` for
+   the strips come with the full render; the asserts are judged at full
+   cost, so add `--no-asserts` while placing parts when the run says they
+   took most of it), then read `out/model/sheet.png`. Drop `--quick` for
    the full render: read `slices.png` if anything is hollow or nested
    (`--slice step` puts its planes through one step, framed on it, so a
    stem is cut where it meets the soil),
@@ -53,7 +59,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    around it, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side;
    `npx aixle fmt model.aix --write` lays the program out in the one
-   layout (comments kept, meaning unchanged) before you hand it on.
+   layout (comments kept, meaning unchanged) before you hand it on;
+   `--check` says `formatted`, or shows each line that differs.
    On a program you did not write, `npx aixle explain model.aix` first: the
    tree from the output down, each step with its source line, size,
    material and anchors, so you know which step feeds which before you
@@ -71,7 +78,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    both faces, not on the cutter (empty by construction); `inside` wants
    the solid, not a shell; a probe step only an assert reads is a region
    and is not warned about. `check` then fails, with the numbers and
-   where, when a later edit breaks it. Edit `.aix` files with the Edit
+   where, when a later edit breaks it; a promise inside a loop is one line
+   (how many times it held, the judgement nearest to failing), the
+   failures come last in full, and a slow or stuck assert is named on
+   the error stream. Edit `.aix` files with the Edit
    tool: `sed` trips on their `|` pipes.
 6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then

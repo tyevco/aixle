@@ -27,9 +27,9 @@ import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
-import { hiddenFraction, renderCallouts } from "./render/callouts.js";
+import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
+import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
@@ -122,6 +122,8 @@ export interface RunOptions {
   caption?: boolean;
   /** Where an import's samples are kept between runs (the CLI's is on disk, `--no-cache` for none); none by default. */
   importCache?: ImportCache;
+  /** Called as each assert starts and ends, in every evaluation of the run (the CLI's AssertClock says what is slow). */
+  onAssert?: (phase: "start" | "end", a: AssertInfo) => void;
 }
 
 export interface RunResult {
@@ -817,8 +819,80 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 /** Parse and evaluate a program, nothing rendered; `cache` keeps an import's samples between runs (see importResolver). */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache, onAssert?: (phase: "start" | "end", a: AssertInfo) => void): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts, onAssert });
+}
+
+/**
+ * The warnings the promises at rest raised as they were judged, for an evaluation in a pose that did not judge them
+ * again (a void() whose region is nowhere near its shape is said in every pose, as it was before a pose's evaluation
+ * stopped judging the promises at rest); none for the rest evaluation itself, whose warnings hold them.
+ */
+export function restAssertWarningsFor(shown: Evaluation, rest: Evaluation): string[] {
+  return shown === rest ? [] : [...new Set(rest.restAssertWarnings)].filter((w) => !shown.warnings.includes(w));
+}
+
+/** An assert as a line names it: `assert (line 12) in pose open: clearance(lid, box) > 0.02`, its library first. */
+export function assertLabel(a: AssertInfo): string {
+  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""}: ${a.text}`;
+}
+
+const seconds = (ms: number): string => `${Number((ms / 1000).toPrecision(ms < 10000 ? 2 : 3))} s`;
+
+/**
+ * Times the asserts as they are judged and says which are slow, so a check that seems hung, or a quick render that
+ * takes twenty seconds, says where the time goes (round 11: a shelf's check sat silent for twelve minutes on one
+ * overlap() and took forty runs to bisect; a mixer's quick pass spent 18 of its 20 s on one wall()). A fast run says
+ * nothing. Once the asserts have taken `after` ms between them, each is named as it starts, at most one a second,
+ * so a loop of quick promises does not flood the terminal; one that takes over `slow` ms is named with its time when
+ * it ends. `watch` is told which assert is running (the CLI's watchdog names one that has not returned). `now` is
+ * the clock in milliseconds: performance.now in the CLI, a counter in a test.
+ */
+export class AssertClock {
+  /** Milliseconds spent judging asserts so far. */
+  total = 0;
+  /** Each assert's time by its place, over all its judgements (a loop's, every pose's), for the slowest few. */
+  readonly byPlace = new Map<string, { info: AssertInfo; ms: number; count: number }>();
+  private started = 0;
+  private lastNamed = -Infinity;
+  private named = false;
+  constructor(
+    private readonly now: () => number,
+    private readonly write: (line: string) => void,
+    private readonly opts: { after?: number; slow?: number; watch?: (a: AssertInfo | undefined) => void } = {},
+  ) {}
+  readonly hook = (phase: "start" | "end", a: AssertInfo): void => {
+    const after = this.opts.after ?? 2000, slow = this.opts.slow ?? 1000;
+    const t = this.now();
+    if (phase === "start") {
+      this.started = t;
+      this.opts.watch?.(a);
+      if (this.total > after && t - this.lastNamed >= 1000) {
+        if (!this.named) this.write(`asserts: ${seconds(this.total)} so far; naming one as it starts each second`);
+        this.named = true;
+        this.lastNamed = t;
+        this.write(`judging ${assertLabel(a)}`);
+      }
+      return;
+    }
+    this.opts.watch?.(undefined);
+    const ms = t - this.started;
+    this.total += ms;
+    const key = [a.file ?? "", a.line, a.pose ?? "", a.text].join("\u0000");
+    const e = this.byPlace.get(key);
+    if (e) { e.ms += ms; e.count++; } else this.byPlace.set(key, { info: a, ms, count: 1 });
+    if (ms > slow) this.write(`${assertLabel(a)} took ${seconds(ms)}`);
+  };
+  /** The slowest places, most time first: "line 149, wall(bowl) > 0.04, 15.9 s over 3 judgements". */
+  slowest(n = 3): string[] {
+    return [...this.byPlace.values()].sort((x, y) => y.ms - x.ms).slice(0, n).filter((e) => e.ms >= 100)
+      .map((e) => `${e.info.file ? `${e.info.file} ` : ""}line ${e.info.line}${e.info.pose ? ` in pose ${e.info.pose}` : ""}, ${e.info.text}, ${seconds(e.ms)}${e.count > 1 ? ` over ${e.count} judgements` : ""}`);
+  }
+  /** The closing line once the asserts took more than `after`: how long, and where; undefined for a fast run. */
+  summary(): string | undefined {
+    if (this.total <= (this.opts.after ?? 2000)) return undefined;
+    return `asserts took ${seconds(this.total)}; the slowest: ${this.slowest().join("; ")}`;
+  }
 }
 
 /**
@@ -933,6 +1007,49 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
   return { lines: ["## Print", "", "| | |", "| --- | --- |", head, ...rows, ""], json };
 }
 
+/**
+ * A step or object to frame, as `--focus` and a camera's focus= do: its surface where the output puts it, grown
+ * a little; `name_3` is one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
+ * placed group framed the whole span between its copies).
+ */
+export function resolveFocusOf(evaluation: Evaluation, output: Shape3 | undefined, name: string): { frame: Bounds; shape: Shape3 } | undefined {
+  let st = evaluation.steps.find((x) => x.name === name && isShape3(x.value));
+  let obj = evaluation.objects.find((o) => o.name === name);
+  let fs = st ? (st.value as Shape3) : obj?.shape;
+  const copy = /^(.+)_(\d+)$/.exec(name);
+  if (!fs && copy) {
+    const setStep = evaluation.steps.find((x) => x.name === copy[1] && isShape3(x.value) && (x.value as Shape3).instanced);
+    const setObj = evaluation.objects.find((o) => o.name === copy[1] && o.shape.instanced);
+    const set = setStep ? (setStep.value as Shape3) : setObj?.shape;
+    const pl = set?.instanced?.placements[Number(copy[2]) - 1];
+    if (set && pl) {
+      let sh = set.instanced!.base;
+      if (pl.scale !== 1) sh = scaleShape(sh, pl.scale, pl.scale, pl.scale);
+      if (pl.yaw !== 0) sh = rotateShape(sh, 0, pl.yaw, 0);
+      fs = move(sh, pl.x, pl.y, pl.z);
+      st = setStep;
+      obj = setObj;
+    }
+  }
+  if (!fs || isEmpty(fs.bounds)) return undefined;
+  // A region (a probe an assert reads) or a cutter is not geometry to draw: the focus is the model inside its
+  // frame (round 10: --focus on a counterbore's region drew the region as a solid cylinder).
+  const role = st ? evaluation.roles.get(st.name) : undefined;
+  if (output && st && (role === "region" || role === "cut")) {
+    const fb0 = (placedBounds(output, fs, tightBounds(fs)) ?? tightBounds(fs));
+    const grow0 = Math.max(...boundsSize(fb0)) * 0.08;
+    const frame0: Bounds = { min: [fb0.min[0] - grow0, fb0.min[1] - grow0, fb0.min[2] - grow0], max: [fb0.max[0] + grow0, fb0.max[1] + grow0, fb0.max[2] + grow0] };
+    return { frame: frame0, shape: clipTo(output, frame0) };
+  }
+  // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the
+  // whole machine); carried through the joints and transforms above it, so a bucket inside a turned joint is
+  // framed where the pose put it (measured: --focus in a pose framed the rest position).
+  const own = tightBounds(fs);
+  const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
+  const grow = Math.max(...boundsSize(fb)) * 0.08;
+  return { frame: { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] }, shape: (output && st ? placedShape(output, fs) : undefined) ?? fs };
+}
+
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
   const log = opts.log ?? (() => {});
   const timings: Record<string, number> = {};
@@ -956,23 +1073,28 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const program = parse(source);
   const modules = moduleResolver(sourceName);
   const skipAsserts = opts.asserts === false;
-  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts, slice: opts.slice }));
+  // The asserts' own time, over every evaluation of the run, so a quick pass that spent it on them can say so.
+  const runStart = performance.now();
+  const assertClock = new AssertClock(() => performance.now(), () => {});
+  const onAssert = (phase: "start" | "end", a: AssertInfo) => { opts.onAssert?.(phase, a); assertClock.hook(phase, a); };
+  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts, slice: opts.slice, onAssert }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
-  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts, slice: opts.slice }) : rest;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts, slice: opts.slice, onAssert }) : rest;
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
   // asserts for a pose share it.
-  const evalCache = new Map<string, Evaluation>();
+  // The rest pose is the rest evaluation, so the pose sheet's rest thumbnail does not judge every promise again.
+  const evalCache = new Map<string, Evaluation>([["[]", rest]]);
   const evalAt = (joints: Record<string, JointPose>, poseName?: string): Evaluation => {
     const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
     let ev = evalCache.get(key);
-    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts, slice: opts.slice }); evalCache.set(key, ev); }
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts, slice: opts.slice, onAssert }); evalCache.set(key, ev); }
     return ev;
   };
   // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"
   // on a rig failed in its jump pose) unless one names its pose, which is tested in that pose's evaluation.
   const asserts = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? evalAt(p.joints, pn) : undefined; });
-  const warnings = [...evaluation.warnings, ...asserts.filter((a) => !a.passed).map(assertLine)];
+  const warnings = [...evaluation.warnings, ...restAssertWarningsFor(evaluation, rest), ...asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // Set when the shown pose has lifted the whole model off the floor: standing is then not judged.
@@ -1140,46 +1262,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The focused step as it sits in the output (through the joints and moves above it), for the close-up's split
     // into the part itself and the ghost of everything else the frame holds.
     let focusShape: Shape3 | undefined;
-    // A step or object to frame, as `--focus` and a camera's focus= do: its surface where the output puts it, grown
-    // a little; `name_3` is one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
-    // placed group framed the whole span between its copies).
-    const resolveFocus = (name: string): { frame: Bounds; shape: Shape3 } | undefined => {
-      let st = evaluation.steps.find((x) => x.name === name && isShape3(x.value));
-      let obj = evaluation.objects.find((o) => o.name === name);
-      let fs = st ? (st.value as Shape3) : obj?.shape;
-      const copy = /^(.+)_(\d+)$/.exec(name);
-      if (!fs && copy) {
-        const setStep = evaluation.steps.find((x) => x.name === copy[1] && isShape3(x.value) && (x.value as Shape3).instanced);
-        const setObj = evaluation.objects.find((o) => o.name === copy[1] && o.shape.instanced);
-        const set = setStep ? (setStep.value as Shape3) : setObj?.shape;
-        const pl = set?.instanced?.placements[Number(copy[2]) - 1];
-        if (set && pl) {
-          let sh = set.instanced!.base;
-          if (pl.scale !== 1) sh = scaleShape(sh, pl.scale, pl.scale, pl.scale);
-          if (pl.yaw !== 0) sh = rotateShape(sh, 0, pl.yaw, 0);
-          fs = move(sh, pl.x, pl.y, pl.z);
-          st = setStep;
-          obj = setObj;
-        }
-      }
-      if (!fs || isEmpty(fs.bounds)) return undefined;
-      // A region (a probe an assert reads) or a cutter is not geometry to draw: the focus is the model inside its
-      // frame (round 10: --focus on a counterbore's region drew the region as a solid cylinder).
-      const role = st ? evaluation.roles.get(st.name) : undefined;
-      if (output && st && (role === "region" || role === "cut")) {
-        const fb0 = (placedBounds(output, fs, tightBounds(fs)) ?? tightBounds(fs));
-        const grow0 = Math.max(...boundsSize(fb0)) * 0.08;
-        const frame0: Bounds = { min: [fb0.min[0] - grow0, fb0.min[1] - grow0, fb0.min[2] - grow0], max: [fb0.max[0] + grow0, fb0.max[1] + grow0, fb0.max[2] + grow0] };
-        return { frame: frame0, shape: clipTo(output, frame0) };
-      }
-      // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the
-      // whole machine); carried through the joints and transforms above it, so a bucket inside a turned joint is
-      // framed where the pose put it (measured: --focus in a pose framed the rest position).
-      const own = tightBounds(fs);
-      const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
-      const grow = Math.max(...boundsSize(fb)) * 0.08;
-      return { frame: { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] }, shape: (output && st ? placedShape(output, fs) : undefined) ?? fs };
-    };
+    const resolveFocus = (name: string) => resolveFocusOf(evaluation, output, name);
     if (focusName) {
       const r = resolveFocus(focusName);
       if (r) { focusStep = true; frame = r.frame; focusShape = r.shape; shownName = `${shownName} → ${focusName}`; }
@@ -1791,6 +1874,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       2,
     ),
   );
+  // A quick pass is the placing loop; when the promises took most of it, say so and how to leave them out (round 11:
+  // a mixer's quick pass took 20 s, 18 of them one wall(), with no word that the asserts were the cost).
+  const elapsed = performance.now() - runStart;
+  if (opts.quick && assertClock.total > 1500 && assertClock.total > elapsed / 2)
+    log(`note: the asserts took ${seconds(assertClock.total)} of this ${seconds(elapsed)} quick pass (${assertClock.slowest(2).join("; ")}); --no-asserts while placing parts, and check judges them`);
   return { name, outDir, evaluation, mesh, bounds, files, warnings, report, timings, physics };
 }
 
@@ -1825,6 +1913,40 @@ export function diff(a: { source: string; name: string }, b: { source: string; n
 /** The report's In output column for a step's role. */
 export function roleLabel(role: StepRole | undefined): string {
   return role === "part" ? "yes" : role === "cut" ? "cut" : role === "mask" ? "mask" : role === "region" ? "region" : "no";
+}
+
+/**
+ * What each camera with a focus sees of it, for `check`: the share of the focus hidden behind the rest of the model
+ * from the camera's angle, by rays through the field from the focus's own surface (meshed alone, coarsely, rather
+ * than the whole model at the program's grid), and when that is over 15%, the least of seven other
+ * azimuths 45 degrees apart, with the render's warning when another azimuth would show much more, as the render
+ * gives it after a beauty run (round 11: aiming one camera into a bowl cost two beauty runs of minutes each).
+ */
+export function cameraSight(evaluation: Evaluation, cellSize: number): { lines: string[]; warnings: string[] } {
+  const lines: string[] = [], warnings: string[] = [];
+  const output = evaluation.output;
+  if (!output || isEmpty(output.bounds) || !(cellSize > 0)) return { lines, warnings };
+  const shot = typeof evaluation.settings.camera === "string" ? evaluation.cameras.find((c) => c.name === evaluation.settings.camera) : undefined;
+  const baseAz = shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
+  const baseEl = shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  // The camera framed on the model's box, not its surface's extent, which would cost half a second on a big
+  // model: the eye moves a little, and the shares measured on the mixer did not.
+  const modelBounds = output.bounds;
+  for (const c of evaluation.cameras) {
+    if (!c.focus) continue;
+    const r = resolveFocusOf(evaluation, output, c.focus);
+    if (!r) continue;
+    const az = c.azimuth ?? baseAz, el = c.elevation ?? baseEl;
+    // The focus's own surface, coarsely: the points whose view of the camera is tested.
+    const points = surfaceNets(r.shape, { resolution: 48, bounds: r.frame }).mesh;
+    const hidden = hiddenFractionRays(output, modelBounds, points, cellSize, az, el);
+    let bestAz = az, best = hidden;
+    if (hidden > 0.15) for (let k = 1; k < 8; k++) { const h = hiddenFractionRays(output, modelBounds, points, cellSize, az + k * 45, el, 600); if (h < best) { best = h; bestAz = az + k * 45; } }
+    const other = ((bestAz % 360) + 360) % 360;
+    lines.push(`  ${c.name}: ${Math.round(hidden * 100)}% of ${c.focus} hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}${Math.round(best * 100) < Math.round(hidden * 100) ? `; ${Math.round(best * 100)}% from azimuth ${fmt(other)}` : ""}`);
+    if (hidden > 0.15 && best < hidden - 0.2) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}; from azimuth ${fmt(other)} it is ${Math.round(best * 100)}%`);
+  }
+  return { lines, warnings };
 }
 
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */

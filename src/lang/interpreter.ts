@@ -99,6 +99,11 @@ export interface EvalOptions {
   resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
   /** The step `--slice` cuts through, which is a region when nothing else reads it, as with `set slice name`. */
   slice?: string;
+  /**
+   * Called as each assert starts and ends being judged, so a caller with a clock can say which one is slow or hung
+   * (round 11: a check sat silent for twelve minutes on one overlap()); the language itself keeps no time.
+   */
+  onAssert?: (phase: "start" | "end", a: AssertInfo) => void;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -194,6 +199,12 @@ export interface Evaluation {
   defs: UserFn[];
   settings: Settings;
   warnings: string[];
+  /**
+   * The warnings raised while judging the promises at rest (a void() whose region is nowhere near its shape), also in
+   * `warnings`: an evaluation in a pose does not judge those promises again, so a caller showing it takes these from
+   * the rest evaluation.
+   */
+  restAssertWarnings: string[];
   /** Every assert the program ran, in order, passed or not; a used library's come first with its path. */
   asserts: AssertResult[];
   /** The pictures the program painted with, for the report. */
@@ -229,6 +240,20 @@ export interface AssertResult {
   where?: string;
   /** For an assert in a def's body, judged on every call: the def and the line of the program's statement that called it. */
   call?: { fn: string; line: number };
+  /**
+   * For a comparison of two numbers, how far it passed by (negative: how far it failed by): a - b for `>` and `>=`,
+   * b - a for `<` and `<=`, |a - b| for `!=` and -|a - b| for `==`. Of an assert judged many times, the judgement
+   * with the smallest margin is the one nearest to failing.
+   */
+  margin?: number;
+}
+
+/** What an assert is, for whoever times it: its line and test, its library and pose. */
+export interface AssertInfo {
+  line: number;
+  text: string;
+  file?: string;
+  pose?: string;
 }
 
 /** One line for a failed assert, the same in `check`, the render's warnings and the report. */
@@ -244,9 +269,9 @@ function assertWhere(a: AssertResult): string {
 /** The builtins that move a shape's surface somewhere else: a step read only through one is not where it was built. */
 const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
 
-/** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
 /** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
 const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "stands"]);
+/** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
 const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall", "support", "stands"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
@@ -280,6 +305,49 @@ export function commentCodeWarnings(program: Program): string[] {
 
 /** A library's own name, kept out of its exports: one that starts with an underscore (`_demo_case`). */
 export const isPrivate = (name: string): boolean => name.startsWith("_");
+
+/**
+ * The asserts as `check` prints them. One judged once is a line of its own, as before. One judged many times from
+ * one line (inside a loop) is one line for its passes, how many times it held and the judgement nearest to failing
+ * (the smallest margin, see AssertResult), with that judgement's message, so a loop's six promises over 33 books are
+ * six lines rather than 198 (round 11). Then every failure in full, in line order, together above the count, where a
+ * few failures among many passes cannot be missed.
+ */
+export function assertReport(all: AssertResult[]): string[] {
+  const groups = new Map<string, AssertResult[]>();
+  for (const a of all) {
+    const key = [a.file ?? "", a.line, a.call ? `${a.call.fn}:${a.call.line}` : "", a.pose ?? "", a.text].join("\u0000");
+    const g = groups.get(key);
+    if (g) g.push(a); else groups.set(key, [a]);
+  }
+  const order = (x: AssertResult, y: AssertResult) => (x.file ?? "").localeCompare(y.file ?? "") || x.line - y.line;
+  const out: string[] = [];
+  for (const g of [...groups.values()].sort((x, y) => order(x[0], y[0]))) {
+    const passed = g.filter((a) => a.passed);
+    if (!passed.length) continue;
+    if (g.length === 1) { out.push(assertPassLine(g[0])); continue; }
+    let near = passed[0];
+    for (const a of passed) if (a.margin !== undefined && (near.margin === undefined || a.margin < near.margin)) near = a;
+    // A promise that came out the same every time (pieces(x) == 1) has no nearest: it is that each time.
+    const same = passed.every((a) => a.detail === near.detail);
+    const detail = near.detail ? (same ? ` is ${near.detail} each time` : `, nearest to failing ${near.detail}`) : "";
+    const times = passed.length === g.length ? `${g.length} times` : `${passed.length} of ${g.length} times`;
+    out.push(`${near.file ? `${near.file}: ` : ""}assert (${assertWhere(near)})${near.pose ? ` in pose ${near.pose}` : ""} holds ${times}: ${near.text}${detail}${near.message ? `: ${near.message}` : ""}`);
+  }
+  for (const a of all.filter((x) => !x.passed).sort(order)) out.push(assertLine(a));
+  return out;
+}
+
+/** How far `a op b` passed by: see AssertResult's margin. */
+function marginOf(op: string, a: number, b: number): number | undefined {
+  switch (op) {
+    case ">": case ">=": return a - b;
+    case "<": case "<=": return b - a;
+    case "!=": return Math.abs(a - b);
+    case "==": return -Math.abs(a - b);
+  }
+  return undefined;
+}
 
 const MAX_LOOP = 20000;
 const MAX_DEPTH = 64;
@@ -345,6 +413,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // The shown shape, set once the program has run; a root for placing a measured step.
   let output: Shape3 | undefined;
   const warnings: string[] = [...(program.warnings ?? []), ...commentCodeWarnings(program)];
+  // Those raised while judging a promise at rest, which an evaluation in a pose does not judge again.
+  const restAssertWarnings: string[] = [];
   const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
   // "pose:joint" for every pose value given as one number rather than a triple.
@@ -793,6 +863,65 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return e.name.split(".")[0];
   }
 
+  /**
+   * The steps a call inside an assert reads as regions: the names given to a builtin, and every name handed to a
+   * def (a probe passed to `def fits(p) = ...` is read by the assert as surely as one passed to clearance()).
+   */
+  function markRegionArgs(args: Arg[], toDef: boolean, scope?: Scope): void {
+    for (const a of args) {
+      const nm = a.name && !toDef ? undefined : stepNameOf(a.value);
+      // Judged inside a def, a name is a region only when it is the program's own, not the def's parameter or local.
+      if (nm && (!scope || programName(nm, scope))) regionNames.add(nm);
+    }
+  }
+
+  /** The defs whose bodies assertRegions has read, once each: a def that calls itself is read once. */
+  const regionDefs = new Set<UserFn>();
+
+  /**
+   * The steps an assert's test reads as regions, found in its text rather than by judging it: the names given to a
+   * builtin's call or a def's, and those the def's own body gives a builtin, as a judged assert marks them. For an
+   * assert skipped here (--no-asserts, another pose's, a promise at rest in a posed evaluation), so its probes are
+   * regions all the same (round 11: a probe read through a def was a region only while the asserts were judged).
+   */
+  function assertRegions(e: Expr): void {
+    switch (e.type) {
+      case "call": {
+        const dotted = e.callee.includes(".");
+        const user = dotted ? undefined : global.get(e.callee);
+        const def = user !== undefined && isUserFn(user) ? user : undefined;
+        if (dotted || def || BUILTIN_MAP.has(e.callee)) markRegionArgs(e.args, dotted || !!def);
+        // A def of this program reads the program's steps in its body, as it does when the assert is judged; a
+        // library's def reads its own.
+        if (def && !regionDefs.has(def)) {
+          regionDefs.add(def);
+          if (def.body) assertRegions(def.body);
+          for (const st of def.block ?? []) stmtRegions(st);
+          for (const p of def.params) if (p.default) assertRegions(p.default);
+        }
+        for (const a of e.args) assertRegions(a.value);
+        return;
+      }
+      case "binary": assertRegions(e.left); assertRegions(e.right); return;
+      case "unary": assertRegions(e.arg); return;
+      case "list": for (const it of e.items) assertRegions(it); return;
+      case "index": assertRegions(e.target); assertRegions(e.index); return;
+      case "field": assertRegions(e.target); return;
+      case "record": for (const en of e.entries) assertRegions(en.value); return;
+      default: return;
+    }
+  }
+
+  /** assertRegions over a statement of a block-bodied def: the expressions it evaluates. */
+  function stmtRegions(st: Stmt): void {
+    switch (st.type) {
+      case "assign": case "expr": case "return": assertRegions(st.value); return;
+      case "assert": assertRegions(st.test); return;
+      case "for": assertRegions(st.iterable); for (const b of st.body) stmtRegions(b); return;
+      default: return;
+    }
+  }
+
   /** `prefix.name` from a used library: its def or constant, with the message naming what the library has. */
   function fromModule(dotted: string, line: number, scope: Scope): Value {
     const dot = dotted.indexOf(".");
@@ -816,6 +945,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee.includes(".")) {
       const v = dottedValue(callee, line, scope);
       if (!isUserFn(v)) throw new RuntimeError(`'${callee}' is a ${typeName(v)}, not a function`, line);
+      if (assertDepth > 0) markRegionArgs(args, true, scope);
       return callUser(v, args, scope, line);
     }
     if (callee === "import") return callImport(args, scope, line);
@@ -825,7 +955,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "light") return callLight(args, scope, line);
     if (callee === "camera") return callCamera(args, scope, line);
     const user = scope.get(callee);
-    if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
+    if (user !== undefined && isUserFn(user)) {
+      // A step handed to a def inside an assert is read by the assert, as one handed to a builtin is.
+      if (assertDepth > 0) markRegionArgs(args, true, scope);
+      return callUser(user, args, scope, line);
+    }
     if (callee === "named") return callNamed(args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
     // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
@@ -869,7 +1003,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value, scope);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
     if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
-    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm && programName(nm, scope)) regionNames.add(nm); }
+    if (assertDepth > 0) markRegionArgs(args, false, scope);
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
@@ -1419,7 +1553,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // scope as their closure, so a library def sees its helpers and constants and nothing of the caller's.
         let lib: Evaluation;
         try {
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses });
+          const onAssert = options.onAssert;
+          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
@@ -1494,15 +1629,23 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "assert": {
-        if (options.skipAsserts) return;
+        // A step only asserts read is a region whether or not the asserts are judged here (round 11: --no-asserts
+        // turned three probes back into "not part of the output" warnings).
+        if (options.skipAsserts) { assertRegions(stmt.test); return; }
         // A promise about a pose is tested in that pose's evaluation and only noted in any other.
         // In a def's body the promise is judged on every call, and says which call: the program's line that made it.
         const call = inDef ? { fn: inDef.name, line: runningLine } : undefined;
         const file = inDef?.file;
-        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true, call, file }); return; }
+        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { assertRegions(stmt.test); asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true, call, file }); return; }
+        // A promise about the model at rest is judged at rest, once: an evaluation in a pose (a pose sheet, a frame of
+        // a strip, a pose's promises) judges only that pose's (round 11: a wall() promise ran again in every pose).
+        if ((!stmt.pose || stmt.pose === "rest") && posed) { assertRegions(stmt.test); return; }
         // A comparison is evaluated side by side, so a failure can say what the two numbers were.
         const t = stmt.test;
-        let value: Value, detail: string | undefined;
+        let value: Value, detail: string | undefined, margin: number | undefined;
+        const info: AssertInfo = { line: stmt.line, text: exprText(t), pose: stmt.pose };
+        const warned = warnings.length;
+        options.onAssert?.("start", info);
         assertDepth++;
         witness = undefined;
         try {
@@ -1511,9 +1654,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           value = compare(t.op, a, b, t.line);
           const show = (v: Value) => (typeof v === "number" ? String(Number(v.toPrecision(4))) : typeof v === "string" ? JSON.stringify(v) : typeName(v));
           detail = `${show(a)} ${t.op} ${show(b)}`;
+          if (typeof a === "number" && typeof b === "number") margin = marginOf(t.op, a, b);
         } else value = evalExpr(t, scope);
         } finally {
           assertDepth--;
+          options.onAssert?.("end", info);
         }
         if (typeof value !== "number") throw new RuntimeError(`assert tests a number (a comparison such as width(m) < 5, or 1 and 0), not a ${typeName(value)}`, stmt.line);
         let message: string | undefined;
@@ -1522,7 +1667,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
           message = m;
         }
-        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined, call, file });
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined, call, file, margin });
+        if (!stmt.pose || stmt.pose === "rest") restAssertWarnings.push(...warnings.slice(warned));
         return;
       }
     }
@@ -1613,7 +1759,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images };
 }
 
 export function signature(name: string, ov: Overload): string {

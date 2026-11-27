@@ -441,6 +441,27 @@ mesh (round 10's hub: `check` from 3.9 s to 2.5 s). The cache is keyed
 by the shape object, which never changes once built, so it needs no
 invalidation, and an evaluation in another pose has shapes of its own.
 
+A promise at rest is judged once, in the rest evaluation; an evaluation
+in a pose (a pose sheet, a strip's frame, a pose's own promises) judges
+only the promises that name that pose, and reads the others' probes as
+regions from their text. Round 11's mixer judged a five-second `wall()`
+at rest again for its tilted pose and its rest thumbnail, three times a
+quick pass. Timing is the CLI's, not the language's: `src/lang` stays
+free of clocks so an evaluation is the same every time, and tells a
+caller as each assert starts and ends. The CLI names a slow one on the
+error stream, and a hung one from a worker thread, since the evaluation
+holds the main thread for as long as a query runs: the worker reads the
+assert being judged from a shared buffer and writes straight to the
+error stream after two seconds (round 11's shelf sat silent for twelve
+minutes on an `overlap()` and took forty checks to bisect).
+
+A loop's promises are printed as one line per source line, the
+judgement nearest to failing standing for the rest, and the failures
+after them all: two hundred lines of passes with four failures among
+them in line order were read through grep. The margin is a difference,
+not a ratio, because the thresholds are distances in the model's unit
+and a ratio is meaningless at a threshold of zero.
+
 ### Printing
 
 A slicer reads an STL in millimetres with z up, and Aixle's units are
@@ -731,6 +752,12 @@ formatted program parses to the same tree with every token and comment
 in order, it changes 20 of 6071 lines in 11 files (a named argument
 written `x = 1`, an `=` padded out of line with its neighbours, one
 comment a space from its code), and it takes about 60 ms for all of them.
+Round 11 made a column of trailing comments move as one, at least two
+spaces after the longest line's code, where fmt had moved only the
+comment whose code reached into the two spaces and broken the column;
+over the 135 programs of that round, fmt changes 31 of 7730 lines in 12
+files rather than 21, the ten more being two such columns (round 4's
+market, a copy of round 11's bookcase) moved out by one space whole.
 
 ## Paths
 

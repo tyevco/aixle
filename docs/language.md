@@ -910,7 +910,23 @@ What the lights and the skies can and cannot do, measured in round 9:
   the rest of the model and another azimuth would show much more of
   it, the render warns with the fraction and the better azimuth (a
   stone enclosed in its setting is hidden from every side alike and
-  gets no warning). `dof` scales a
+  gets no warning). `check` runs the same test before any render, in a
+  few tenths of a second a camera: the focus alone is meshed coarsely and a ray is
+  marched from each of its points towards the camera through the field,
+  where the render reads a coarse depth buffer of the model's mesh, so
+  the two shares can differ by a few points, and by fifteen or so on a
+  focus that hides much of itself (a ring of stones round a fire, 57%
+  against the render's 63; a window's interior behind its pane, 46
+  against 30). The render's share also moves with its mesh, where the
+  rays' does not: the mixer's paddle from azimuth 60 is 51% hidden to
+  the render at grid 120 and 64% at grid 200, and 55% to `check`, so a
+  warning one of them gives the other may not. Under its `Cameras:` line,
+  each camera with a focus gets how much of it is hidden from its angle
+  and, past 15%, the least from seven other azimuths 45 degrees apart
+  (`into_bowl: 52% of paddle hidden behind the rest of the model from
+  azimuth 330, elevation 45`), with the render's warning when another
+  azimuth would show much more, so a shot is aimed with `check` and
+  rendered once. `dof` scales a
   blur that grows with a surface's distance from the focus: 0.3 to 0.5
   is a gentle falloff, 1 blurs everything off the focus plane hard.
 - `--azimuth`, `--elevation` and `--zoom` on the command line override
@@ -1127,7 +1143,9 @@ coarse mesh, as the render judges its own, so the two agree.
 
 `aixle render model.aix --quick` renders the sheet only, at a small grid
 (stepped up, to 128 at most, on a model whose parts are mostly thinner
-than the small grid's cell), in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
+than the small grid's cell), in a second or two, and judges the
+program's asserts at their own cost (one that says so took most of the
+time: `--no-asserts` while placing parts); `--watch` re-renders on every save; `aixle diff a.aix
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
 detail thinner than its cell, and the sheet says which steps it dropped.
@@ -1139,8 +1157,18 @@ blobs or gone at a quick cell, so judge a working end at full grid, with
 ## Layout: `aixle fmt`
 
 `aixle fmt model.aix` prints the program in the one layout the tool
-keeps; `--write` rewrites the file, `--check` changes nothing and fails
-naming each file that is not in it. It moves only the space between
+keeps; `--write` rewrites the file (or says it is already formatted),
+`--check` changes nothing and says of each file `formatted`, or fails
+with how many lines differ and the first five of them, each as it is
+and as fmt writes it:
+
+```
+model.aix: not formatted, 1 line differs; aixle fmt --write model.aix
+  line 2 is:  "lid=box(2, 0.2, 2)|move(0, 1, 0)"
+  fmt writes: "lid = box(2, 0.2, 2) | move(0, 1, 0)"
+```
+
+It moves only the space between
 tokens, so it cannot change what a program means: no token is added,
 dropped or respelled (a number stays `0.50`), no line is joined or split,
 and every comment stays where it was. The layout:
@@ -1160,9 +1188,13 @@ and every comment stays where it was. The layout:
   a closing bracket that starts a line at its opener's line;
 - an `=` (or a record's value) padded into a column with the line above
   or below keeps the column, and every line of the column stays in it
-  (pushed right together when one line's code now reaches past it); a
-  trailing comment keeps its column unless the code now reaches it, so a
-  column of them stays a column;
+  (pushed right together when one line's code now reaches past it);
+- a comment after code has at least two spaces before it, and otherwise
+  keeps its column, moved with its line's indentation; comments at one
+  column on consecutive lines are a column and move as one, so when one
+  line's code reaches into the two spaces before its comment, the whole
+  column moves out with it (a blank line or a line without a trailing
+  comment ends a column);
 - one blank line where there were several, none at the ends.
 
 ## What the tool checks for you
@@ -1178,16 +1210,25 @@ as their values (a name first assigned inside a loop is the loop's own
 and is not listed, and an accumulator's number is the last iteration's
 and is not listed either), then the program's `def`s with their parameters;
 `--brief` leaves the sizes out and prints the output, the warnings and
-the asserts alone, for a promise loop on a long program. A step whose tree holds a rotation, a warp or a posed
+the asserts alone, for a promise loop on a long program, with each used
+library named by how many names it exports (`use lib shelf_lib: 24
+names`; the full check lists them). A step whose tree holds a rotation, a warp or a posed
 joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the
 joints above it have turned, since a part built at rest and turned by a
-joint keeps its rest box. A joint step itself is already turned in a
-pose, so its box is the box of the turned box and its `surface` line is
-where it is; it gets no `posed` line of its own. Both lines come from rays marched in from the
-box's faces, so a plate thinner than the rays' spacing can slip between
-them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
+joint keeps its rest box (a step assigned twice is measured as it last
+was, and a union folded into a larger one, `head = shell + knuckle` read
+by `joint(head + nose, ...)`, is placed where its parts are). A joint
+step itself is already turned in a pose, so its box is the box of the
+turned box and its `surface` line is where it is; it gets no `posed`
+line of its own. Both lines come from rays marched in from the box's
+faces, 48 a side. A part of a union thinner than twice their spacing on
+some axis (a beater's 0.06 paddle under a head 3 long) is measured again
+on its own box, where the rays are dense, so it is in the line; a plate
+inside a cut part (the left side of a difference) can still slip between
+the rays, and the render's "Surface extent" row reads the mesh and does
+not. `aixle render`
 also writes the warnings into `report.md` and counts them on the sheet's title bar,
 and beside `turntable.png` writes `turntable.apng`, the same turn as an
 animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).
@@ -1198,12 +1239,16 @@ call of a builtin, a def or a used library's, which is ignored with the
 rest of the comment, so the part stays where it was); a step that is not part
 of the output (a step an assert, a decal or a camera reads is a region
 and is not warned about; `check` tags each step `(cut)`, `(region)` or
-`(not in output)`); an empty output (a difference that removed everything, an
+`(not in output)`; a step only asserts read is a region with
+`--no-asserts` too, and in a pose that does not judge them, as is one
+an assert hands to a `def` or reads inside a def's body); an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
 still catch it, below it they may not; between 1.2 and 2 cells a tube
 or a wall meshes but often not watertight, and the report names such
-parts when the mesh has open edges; a rigging line wants about three
+parts when the mesh has open edges, as `check` does every time, on its
+`no warnings` line when there is nothing else to say, so the note is
+never read past; a rigging line wants about three
 cells across to be clean, measured on a dinghy), including a `shell` wall, a
 `tube`, a `sweep` profile or a `text` stroke inside a thick part (those
 carry their own thickness, since a bounding box cannot see it); a
@@ -1316,11 +1361,39 @@ other joints (`bottom(paw)`, `clearance(wrist, base)`, `at(foot,
 above it, so a foot-on-the-floor promise is `assert abs(at(dog,
 "sole")[1]) < 0.01, pose=walk_a` or `assert bottom(paw_fl) < 0.01,
 pose=walk_a` alike; outside an assert a step's own queries stay in its
-own frame, since geometry is built there. `check` prints every passing
-assert with its numbers too, so how close a promise came is on the
-terminal. A pose that is not defined is a warning and the assert is
-never tested. A used library's asserts run with it and are reported
-with the library's path.
+own frame, since geometry is built there. A promise at rest is judged
+once, at rest: an evaluation in a pose (the pose sheet, a strip's frame,
+a pose's own promises) judges only the promises that name it. `check`
+prints every passing assert with its numbers too, so how close a promise
+came is on the terminal. An assert judged many times from one line, in a
+loop, is one line: how many times it held and the judgement nearest to
+failing, with that judgement's message, `assert (line 104) holds 33
+times: clearance(bk, board) > -0.002, nearest to failing -3.608e-16 >
+-0.002: book 24 is not sunk into its shelf` (or `is 1 == 1 each time`
+when it came out the same each time). Nearest to failing is the smallest
+margin, how far the comparison passed by: `a - b` for `>` and `>=`,
+`b - a` for `<` and `<=`, `|a - b|` for `!=` (and `-|a - b|` for `==`,
+which `report.json` keeps as each assert's `margin`); a test that is no
+comparison has no margin, and its first judgement stands for the rest. The failures
+come after the passes, every one in full with its numbers and its place,
+just above the count, so four failures among two hundred promises are
+the last thing printed and need no grep (and no switch for failures
+alone). A pose that is not defined is a warning and the assert is never
+tested. A used library's asserts run with it and are reported with the
+library's path.
+
+An assert that takes time says so on the error stream, and a fast run
+says nothing: one that takes over a second is named with its time when
+it ends; once the asserts have taken two seconds between them, `check`
+and `render` name one as it starts each second, and `check` ends with
+how long they took and the slowest few lines; one still running two
+seconds after it started is named then, at 10, 30 and 60 seconds and
+each minute after, so a query that does not return shows which promise
+it is (`still judging assert (line 8): overlap(bk, board) < 0.0001 after
+2 s`). A `--quick` render whose asserts took most of its time says so,
+with the slowest, since a `wall()` or a `pieces()` meshes at the
+program's grid in a quick pass too; `--no-asserts` leaves them out while
+placing parts, and `check` judges them.
 
 The queries that make it useful: `pieces(shape, resolution)` is the
 number of separate pieces the shape meshes into at that many cells on
@@ -1466,7 +1539,8 @@ from a part is a *cut*, tagged so on the steps sheet, which draws it as
 the solid it removes; the larger operand of an `&` (a half-space box
 that trims a gem, even turned and moved on its way in, `stone & (below
 | rotate(x=25) | move(0, h, 0))`) is a *mask*, tagged so and never labelled. `check`
-prints the asserts in line order, failures among the passes.
+prints the passing asserts in line order, a loop's once per line, then
+the failures.
 
 ## Limits worth knowing
 

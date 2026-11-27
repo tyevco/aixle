@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/lang/lexer.js";
 import { parse } from "../src/lang/parser.js";
-import { assertLine, evaluate } from "../src/lang/interpreter.js";
+import { assertLine, assertReport, evaluate } from "../src/lang/interpreter.js";
+import { AssertClock } from "../src/pipeline.js";
 import { isShape2, isShape3, type RecordValue } from "../src/lang/values.js";
 import type { Shape3 } from "../src/sdf/types.js";
 
@@ -375,9 +376,10 @@ describe("interpreter", () => {
     expect(rest.asserts.map((a) => [a.line, a.passed, a.pose, a.pending])).toEqual([[3, true, "open", true], [4, true, undefined, undefined], [5, true, "rest", undefined]]);
     expect(rest.warnings.filter((w) => /assert/.test(w))).toEqual([]);
     const open = evaluate(parse(src), { jointPoses: rest.poses[0].joints, poseName: "open" });
-    // Opened, the lid stands up: its own assert fails with the numbers it saw; the unposed one is evaluated here too
-    // (the pipeline takes its verdict from the rest evaluation) and the pose=rest one is pending.
-    expect(open.asserts.map((a) => [a.line, a.passed, a.pending])).toEqual([[3, false, undefined], [4, false, undefined], [5, true, true]]);
+    // Opened, the lid stands up: its own assert fails with the numbers it saw; the unposed one is not judged again
+    // here (its verdict is the rest evaluation's, and round 11's wall() at rest cost seconds in every pose) and the
+    // pose=rest one is pending.
+    expect(open.asserts.map((a) => [a.line, a.passed, a.pending])).toEqual([[3, false, undefined], [5, true, true]]);
     expect(open.asserts[0].detail).toMatch(/^1 < 0\.5$/);
     expect(assertLine(open.asserts[0])).toBe("assert (line 3) in pose open fails: tall(lid) < 0.5 is 1 < 0.5: lies flat");
     // An assert for a pose that does not exist is never tested, and says so.
@@ -674,5 +676,69 @@ describe("records", () => {
     expect(run("def two(x) = x * 2\nlegs = [{f: two}]\nf = legs[0].f\na = f(4)").steps.find((s) => s.name === "a")!.value).toBe(8);
     expect(() => parse("a = (r).f(1)")).toThrow(/'\(r\)\.f\(\.\.\.\)': only a name is called; write r\.f\(\.\.\.\), without the parentheses/);
     expect(ev.defs.map((d) => d.name)).toEqual(["two", "area"]);
+  });
+});
+
+describe("round 11: what check says about its asserts", () => {
+  it("prints an assert judged many times in a loop as one line, with the judgement nearest to failing, and every failure in full last", () => {
+    const src = 'm = box(1)\nfor i in [0, 1, 2, 3] {\n  assert i * 0.1 < 0.25, "book " + i + " fits"\n  assert width(m) == 1, "same each time"\n}\nassert tall(m) > 0.5, "once"';
+    const lines = assertReport(run(src).asserts);
+    expect(lines).toEqual([
+      // The margin of a < b is b - a: 0.2 < 0.25 passes by 0.05, the least of the passes, and its message is book 2's.
+      'assert (line 3) holds 3 of 4 times: i * 0.1 < 0.25, nearest to failing 0.2 < 0.25: book 2 fits',
+      "assert (line 4) holds 4 times: width(m) == 1 is 1 == 1 each time: same each time",
+      "assert (line 6) holds: tall(m) > 0.5 is 1 > 0.5: once",
+      "assert (line 3) fails: i * 0.1 < 0.25 is 0.3 < 0.25: book 3 fits",
+    ]);
+    // The margin as recorded: a - b for >, b - a for <, -|a - b| for ==.
+    const ev = run("assert 3 > 1\nassert 1 < 4\nassert 2 == 2.5\nassert 2 != 5");
+    expect(ev.asserts.map((a) => a.margin)).toEqual([2, 3, -0.5, 3]);
+  });
+  it("keeps a probe only asserts read a region when the asserts are skipped, or are another pose's", () => {
+    const src = 'm = box(1)\nprobe = sphere(0.1) | move(0, 2, 0)\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\nlid_probe = box(0.2) | move(0, 1.2, 0)\nassert clearance(probe, m) > 0.5\nassert clearance(lid, lid_probe) > 0.1, pose=open\npose("open", lid=[-60, 0, 0])\nshow m + lid';
+    for (const ev of [evaluate(parse(src), { skipAsserts: true }), run(src)]) {
+      expect(ev.roles.get("probe")).toBe("region");
+      expect(ev.roles.get("lid_probe")).toBe("region");
+      expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    }
+    // In the pose's evaluation the promise at rest is not judged again, and its probe is a region all the same.
+    const open = evaluate(parse(src), { jointPoses: run(src).poses[0].joints, poseName: "open" });
+    expect(open.asserts.map((a) => [a.line, a.pending ?? false])).toEqual([[6, false]]);
+    expect(open.roles.get("probe")).toBe("region");
+  });
+  it("keeps a probe a region when the assert reads it through a def, judged or not", () => {
+    // One probe named inside a def's body, one handed to a def: both are read only by asserts, so both are regions,
+    // whether the asserts are judged, skipped (--no-asserts) or another pose's.
+    const src = 'm = box(1)\nprobe = sphere(0.1) | move(0, 2, 0)\nprobe2 = sphere(0.1) | move(0, 3, 0)\ndef gap() = clearance(probe, m)\ndef gap_to(p) = clearance(p, m)\nassert gap() > 0.5\nassert gap_to(probe2) > 0.5\nassert gap_to(probe2) > 0.5, pose=open\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nshow m + lid';
+    const judged = run(src);
+    const open = evaluate(parse(src), { jointPoses: judged.poses[0].joints, poseName: "open" });
+    for (const ev of [judged, evaluate(parse(src), { skipAsserts: true }), open]) {
+      expect(ev.roles.get("probe")).toBe("region");
+      expect(ev.roles.get("probe2")).toBe("region");
+      expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    }
+  });
+  it("says which assert is slow, from an injected clock: named as it starts once they have taken two seconds, timed when one takes over one", () => {
+    let t = 0;
+    const said: string[] = [];
+    const watched: (number | undefined)[] = [];
+    const clock = new AssertClock(() => t, (l) => said.push(l), { watch: (a) => watched.push(a?.line) });
+    // Every reading of the clock is 700 ms later, so each assert takes 700 ms.
+    const tick = (phase: "start" | "end", a: Parameters<AssertClock["hook"]>[1]) => { t += 700; clock.hook(phase, a); };
+    evaluate(parse("m = box(1)\nfor i in range(4) { assert width(m) > i * 0.1 }\nassert pieces(m) == 1"), { onAssert: tick });
+    expect(said).toEqual([
+      "asserts: 2.1 s so far; naming one as it starts each second",
+      "judging assert (line 2): width(m) > i * 0.1",
+      "judging assert (line 3): pieces(m) == 1",
+    ]);
+    expect(watched).toEqual([2, undefined, 2, undefined, 2, undefined, 2, undefined, 3, undefined]);
+    expect(clock.summary()).toBe("asserts took 3.5 s; the slowest: line 2, width(m) > i * 0.1, 2.8 s over 4 judgements; line 3, pieces(m) == 1, 0.7 s");
+    // A slow one is timed when it ends; a fast run says nothing at all.
+    let u = 0;
+    const slow: string[] = [];
+    const one = new AssertClock(() => u, (l) => slow.push(l));
+    evaluate(parse("assert 1 < 2"), { onAssert: (p, a) => { u += p === "end" ? 1500 : 0; one.hook(p, a); } });
+    expect(slow).toEqual(["assert (line 1): 1 < 2 took 1.5 s"]);
+    expect(one.summary()).toBeUndefined();
   });
 });

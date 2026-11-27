@@ -62,7 +62,7 @@ npx aixle explain model.aix          # the program as a tree from the output dow
 npx aixle render model.aix           # everything, into out/model/
 npx aixle render model.aix --quick   # the sheet only, in a second or two; add --watch to re-render on save
 npx aixle diff before.aix after.aix  # two versions side by side
-npx aixle fmt model.aix --write      # the one layout, comments kept, meaning unchanged (--check fails on a file not in it)
+npx aixle fmt model.aix --write      # the one layout, comments kept, meaning unchanged (--check: "formatted", or each line that differs and fail)
 npx aixle render model.aix --beauty         # plus beauty.png (a second or a few)
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose

@@ -1,0 +1,9 @@
+# check --brief on a loop of promises: a used library, a wall between 1.2 and 2 cells, one promise judged three times.
+use "brief_lib" as lib
+set grid 64
+cup = cylinder(0.5, 2) | shell(0.05)
+for i in range(3) {
+  peg = lib.peg(1 + i * 0.1) | move(i * 0.3 - 0.3, 0, 0)
+  assert tall(peg) < 1.15, "peg " + i + " is short enough"
+}
+show cup + peg

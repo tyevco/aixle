@@ -47,6 +47,21 @@ describe("asserts", () => {
     expect(failed).toMatch(/assert \(line 4\) fails: pieces\(a \+ b\) == 1 is 2 == 1, the smallest piece is [\d.]+ cubic units at \([-\d., ]+\) in 'b'\n/);
     expect(failed).toMatch(/asserts: 1 pass, 2 fail\n$/);
   });
+  it("check --brief names a library by its count, keeps a near-thin note on the warnings' line, and prints a loop's promise once", { timeout: 60000 }, () => {
+    let out = "";
+    try {
+      cli("check", "tests/fixtures/brief_loop.aix", "--brief");
+    } catch (e) {
+      out = (e as { stdout: string }).stdout;
+      expect((e as { status: number }).status).toBe(1);
+    }
+    // Round 11: a library's 24 names opened every brief check; the full check keeps the list.
+    expect(out).toMatch(/^use lib {12}brief_lib: 3 names \(check without --brief lists them\)\n/);
+    // Round 11: "no warnings" read as the verdict, and the note on the line under it went unread.
+    expect(out).toMatch(/\nno warnings; note: Parts between 1\.2 and 2 cells thick mesh but often not watertight: 'cup' \(1\.6 cells\)/);
+    // One line for the passes of a promise judged three times, then the failure in full, above the count.
+    expect(out).toMatch(/\nassert \(line 7\) holds 2 of 3 times: tall\(peg\) < 1\.15, nearest to failing 1\.1 < 1\.15: peg 1 is short enough\nassert \(line 7\) fails: tall\(peg\) < 1\.15 is 1\.2 < 1\.15: peg 2 is short enough\nasserts: 2 pass, 1 fail\n$/);
+  });
 });
 
 describe("libraries", () => {
@@ -71,14 +86,14 @@ describe("libraries", () => {
 });
 
 describe("aixle fmt", () => {
-  it("prints the program in the one layout, rewrites with --write, and fails --check naming the file", { timeout: 60000 }, () => {
+  it("prints the program in the one layout, rewrites with --write, and fails --check with the lines that differ", { timeout: 60000 }, () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-fmt-"));
     const file = join(dir, "messy.aix");
     writeFileSync(file, "a=box(1,2, 3)|move( 0 , 1, 0 )   # up\nshow a\n");
     const tidy = "a = box(1,2, 3) | move(0, 1, 0)  # up\nshow a\n";
     expect(cli("fmt", file)).toBe(tidy);
-    // An already formatted program passes --check silently.
-    expect(cli("fmt", "--check", "examples/mug.aix")).toBe("");
+    // An already formatted program passes --check with a word, so a pass is not taken for a skipped file (round 11).
+    expect(cli("fmt", "--check", "examples/mug.aix")).toBe("examples/mug.aix: formatted\n");
     let failed = "";
     try {
       cli("fmt", "--check", file, "examples/mug.aix");
@@ -86,10 +101,32 @@ describe("aixle fmt", () => {
       failed = (e as { stdout: string; status: number }).stdout;
       expect((e as { status: number }).status).toBe(1);
     }
-    expect(failed).toBe(`${file}: not formatted; aixle fmt --write ${file}\n`);
+    // The line that differs, as it is and as fmt writes it (round 11: "not formatted" alone cost a diff by hand).
+    expect(failed).toBe(`${file}: not formatted, 1 line differs; aixle fmt --write ${file}\n  line 1 is:  "a=box(1,2, 3)|move( 0 , 1, 0 )   # up"\n  fmt writes: "a = box(1,2, 3) | move(0, 1, 0)  # up"\nexamples/mug.aix: formatted\n`);
     expect(cli("fmt", "--write", file)).toBe(`formatted ${file}\n`);
     expect(readFileSync(file, "utf8")).toBe(tidy);
-    expect(cli("fmt", "--check", file)).toBe("");
+    expect(cli("fmt", "--check", file)).toBe(`${file}: formatted\n`);
+    expect(cli("fmt", "--write", file)).toBe(`${file}: already formatted\n`);
+  });
+});
+
+describe("check in a pose", () => {
+  it("keeps the warnings a promise at rest raised, though the pose does not judge it again", { timeout: 30000 }, () => {
+    // A void() whose probe is nowhere near the shape is warned about as it is judged; judged at rest only, its warning
+    // went missing from check --pose, which prints the posed evaluation's warnings.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-pose-"));
+    const file = join(dir, "far.aix");
+    writeFileSync(file, 'body = box(1)\nfar = sphere(0.1) | move(0, 5, 0)\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nassert void(far, body)\nshow body + lid\n');
+    for (const out of [cli("check", file, "--brief"), cli("check", file, "--brief", "--pose", "open")]) {
+      expect(out).toMatch(/\nwarning: line 5: void\(far, body\) holds trivially: their boxes are 4\.4 apart/);
+      expect(out).not.toMatch(/\nno warnings/);
+    }
+  });
+  it("prints a posed line for a step assigned twice, and for a union a larger union flattened", { timeout: 30000 }, () => {
+    const out = cli("check", "tests/fixtures/posed_lines.aix", "--pose", "up");
+    // Round 11: the mixer's agent missed a posed line under a step assigned twice, while the asserts measured it posed.
+    expect(out).toMatch(/\nshell {14}1 × 0\.6 × 2 .*\n {2}posed shell {6}1 × 2\.03 × 1\.52 {6}x -0\.5\.\.0\.5 {2}y 1\.\.3\.03 {2}z -1\.52\.\.0\n/);
+    expect(out).toMatch(/\nhinged .*\n {2}posed hinged {5}1 × 2\.18 × 1\.52 /);
   });
 });
 
