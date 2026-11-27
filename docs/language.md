@@ -1124,7 +1124,8 @@ cells across to be clean, measured on a dinghy), including a `shell` wall, a
 carry their own thickness, since a bounding box cannot see it; each is
 named once, at the step that brought it in, and known by the part it
 came from rather than by its size, so a bowl's 0.05 band is named
-beside a 0.05 hook; the warning says which call made it, in which def
+beside a 0.05 hook, while the copies one call makes (slats in a loop, a
+def's plate in four chairs) are one part, named once; the warning says which call made it, in which def
 and library file, as `made by box() in def back_panel at shelf_lib.aix
 line 49`, and where it is in the model, a box `within x -1.84..1.84 y
 0..6.9 z -1.5..-1.4`, or for an extruded or revolved `curve2` outline

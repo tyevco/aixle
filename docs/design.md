@@ -497,9 +497,12 @@ it, which is the line to edit.
 A feature is known by where it came from, not by its size: the warning
 walks down from a step through every child that carries the same size
 (a union's thinnest part, a move or a paint of it, a joint's child) to
-the node that introduced it, and two steps that reach the same node are
-one thin part. It used to report a size once, so a bowl's 0.05 band went
-unnamed beside a 0.05 hook named first (round 11). The interpreter
+the node that introduced it, and two steps that reach the same node, or
+nodes the same builtin call made at the same size, are one thin part (a
+loop's slats are a new box each time round, and were each a part of
+their own, so the first was named again under the output). It used to
+report a size once, so a bowl's 0.05 band went unnamed beside a 0.05
+hook named first (round 11). The interpreter
 remembers which builtin call made each shape, and in which def and
 library file, so the warning can name a member a step called inline (a
 0.1 back panel built by `box()` in a library's `back_panel()`, which was

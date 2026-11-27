@@ -240,7 +240,7 @@ export function importResolver(sourceName: string, log: (line: string) => void =
  * thinnest part, a move or a paint of it, a joint's child) and through a
  * transform that scales it, to the node that introduced it (a box's thin
  * side, a shell, a curve2 band, an extruded outline). The last node is the
- * feature's source; two steps with the same source are one thin part.
+ * feature's source; two steps with the same source, or with sources one call made (sourceKey), are one thin part.
  */
 export function featureSource(s: Shape3): Shape3[] {
   const path = [s];
@@ -254,6 +254,21 @@ export function featureSource(s: Shape3): Shape3[] {
     n = next;
   }
   return path;
+}
+
+/**
+ * What makes two thin features one part: the call that made the source (its builtin, line, def and library) and
+ * the feature's size. The slats a loop builds, or the legs a def called four times builds, are each a new node from
+ * one call, and would otherwise each be named, under the step that brought the first one in and again under the
+ * output; a source no call recorded is known by itself.
+ */
+function sourceKey(evaluation: Evaluation, s: Shape3): Shape3 | string {
+  const path = featureSource(s);
+  const node = path[path.length - 1];
+  let origin: ShapeOrigin | undefined;
+  for (let i = path.length - 1; i >= 0 && !origin; i--) origin = evaluation.origins?.get(path[i]);
+  if (!origin || node.feature === undefined) return node;
+  return `${origin.callee}|${origin.line}|${origin.def ?? ""}|${origin.file ?? ""}|${Number(node.feature.toPrecision(6))}`;
 }
 
 /** A library's path as its `use` gave it, as a file name. */
@@ -319,7 +334,7 @@ export function thinParts(evaluation: Evaluation, cellSize: number, grid: number
   const reportedFeatures = new Set<number>();
   // A feature is reported once, at the step that brought it in, and known by where it came from, not by its size:
   // a bowl's 0.05 band went unnamed beside a 0.05 hook that had been named first (round 11).
-  const reportedSources = new Set<Shape3>();
+  const reportedSources = new Set<Shape3 | string>();
   const notedShapes = new Set<Shape3>();
   const geometry = geometrySteps(evaluation);
   for (const st of evaluation.steps) {
@@ -332,7 +347,7 @@ export function thinParts(evaluation: Evaluation, cellSize: number, grid: number
       out.push({ step: st.name, member: m.made, text: `'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell${m.made ? ` (${m.made})` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).` });
       // Its own feature is settled too, or the union above it would repeat the warning under its own name
       // (measured: 'house', forty parts, listed as thin for its mullion).
-      if (st.value.feature !== undefined) { const src = featureSource(st.value); reportedSources.add(src[src.length - 1]); }
+      if (st.value.feature !== undefined) reportedSources.add(sourceKey(evaluation, st.value));
       continue;
     }
     // An import is one step: nothing in its mesh thinner than its sampling cell survived, whatever the render grid.
@@ -374,9 +389,9 @@ export function thinParts(evaluation: Evaluation, cellSize: number, grid: number
     // call that made it and placed in the model.
     const f = st.value.feature;
     if (f === undefined || !(f > 0) || f >= cellSize * thin) continue;
-    const src = featureSource(st.value);
-    if (reportedSources.has(src[src.length - 1])) continue;
-    reportedSources.add(src[src.length - 1]);
+    const key = sourceKey(evaluation, st.value);
+    if (reportedSources.has(key)) continue;
+    reportedSources.add(key);
     const m = thinMember(evaluation, step);
     const said = [m.made ? `made by ${m.made}` : "", m.where ?? ""].filter(Boolean).join(", ");
     out.push({ step: st.name, member: m.short, text: `'${st.name}' (line ${st.line}) has a part (a wall, slat, rod, tube at its thin end, or stroke) only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell${said ? `, ${said}` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).` });
@@ -668,15 +683,15 @@ function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): 
  */
 export function nearlyThin(evaluation: Evaluation, cellSize: number): string {
   const geometry = geometrySteps(evaluation);
-  const seen = new Set<Shape3>();
+  const seen = new Set<Shape3 | string>();
   const names: string[] = [];
   for (const st of evaluation.steps) {
     if (!isShape3(st.value) || !geometry.has(st.name)) continue;
     const f = st.value.feature;
     if (f === undefined || !(f >= cellSize * 1.2) || f >= cellSize * 2) continue;
-    const src = featureSource(st.value);
-    if (seen.has(src[src.length - 1])) continue;
-    seen.add(src[src.length - 1]);
+    const key = sourceKey(evaluation, st.value);
+    if (seen.has(key)) continue;
+    seen.add(key);
     // The member as well as the step: a library's back panel called inline is 'plate' alone otherwise (round 11).
     // Where it is only with what made it, to keep the note short: the step's name finds a part of its own.
     const m = names.length < 6 ? thinMember(evaluation, { name: st.name, line: st.line, value: st.value }) : {};

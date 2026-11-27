@@ -299,6 +299,16 @@ describe("thin parts, named and placed", () => {
     // Two copies of one part are one thin part, named once.
     const twice = thinWarnings(check("rod = cylinder(0.02, 1)\nrods = rod + (rod | move(0.5, 0, 0))\nm = rods + box(1, 1, 1)"), 0.05, 64);
     expect(twice.filter((x) => /0.04 (units thin|thick)/.test(x))).toHaveLength(1);
+    // So are the copies one call makes, each a new node: slats a loop builds are named once, at the slat, and not
+    // again under the output (known by node alone, the first slat was a part of its own and 'm' was warned too).
+    const loop = check("slats = empty()\nfor i in range(0, 5) {\n  slat = box(0.02, 1, 0.3) | move(i * 0.2, 0.5, 0)\n  slats = slats + slat\n}\nm = slats + (box(1.2, 0.1, 0.4) | move(0.4, 1.05, 0))");
+    const lw = thinWarnings(loop, 0.03, 40);
+    expect(lw.filter((x) => /0.02 (units thin|thick)/.test(x))).toHaveLength(1);
+    expect(lw.join()).not.toMatch(/'m'/);
+    // And a def's part in two steps that each call it, in the 1.2-to-2-cell note: one chair named, not each.
+    const chairs = check("def chair(x) = box(0.5, 1, 0.05) | move(x, 0.5, 0)\nc1 = chair(0)\nc2 = chair(1)\nm = c1 + c2 + (box(2, 0.2, 2) | move(0.5, -0.1, 0))");
+    expect(nearlyThin(chairs, 0.035)).toMatch(/'c1' \(1\.4 cells: box\(\) in def chair at line 1/);
+    expect(nearlyThin(chairs, 0.035)).not.toMatch(/'c2'/);
   });
   it("says where a thin wall of an outline is, in the profile's plane and in the model", () => {
     // Two blocks joined by a 0.02 neck along y = 2, x 4..6 in the profile; extruded along x, turned and moved.
