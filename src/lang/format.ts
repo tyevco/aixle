@@ -23,7 +23,8 @@
  *
  * Between lines:
  *
- *   - a statement starts at its block's indentation, two spaces per loop;
+ *   - a statement starts at its block's indentation, two spaces per loop or
+ *     def body in braces;
  *   - a line that continues a statement keeps its break. A closing bracket
  *     that starts it goes at its opener's line. A line written two in from
  *     the line that opened its bracket (or from the statement, with none
@@ -47,7 +48,7 @@
 import { parseTokens } from "./parser.js";
 import type { Token } from "./lexer.js";
 
-const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
+const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert", "return"]);
 
 const isOp = (t: Token, v: string): boolean => t.type === "op" && t.value === v;
 /** The operators a line can start with to carry on the line above, as the lexer reads them. */

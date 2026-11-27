@@ -660,6 +660,40 @@ side-effects. A program is a straight-line construction with loops and
 parametric parts. That is enough for what has been tried, and it keeps every
 step renderable on its own.
 
+A def's body was one expression until round 11, whose bookcase library
+needed a book's width, height and depth a dozen times with no name for
+an intermediate and a case's shelves as a loop, and split itself into a
+helper def per sub-part. A block body (`def book(b) { cover = ...
+return cover + bands }`) is the same straight-line construction one
+level down: assignments, loops and promises in order, then one
+`return`, which must be last, so a def still makes one value from its
+arguments with no early exit and no branch. Its names are the call's
+own, like its parameters, so they never become steps: a library's part
+called thirty times would otherwise fill the steps sheet with its
+cover thirty times, and a caller's step that happened to share a name
+would read as a part of every book. (The same rule fixed an older leak:
+a def's parameter, or a library's constant, read in a call used to be
+recorded as a read of the caller's step of that name.) An `assert` in a
+block is judged per call, as one in a loop is per iteration, and names
+the call's line, since the def's line is the same for every verdict.
+
+A step is a name and the value it ends with, which suits a line run
+once. A loop's working names (the shelf's `bk`, `prev`, `board`) ran
+thirty-three times and ended holding the last book, so `steps.png`
+showed "8. BK", the callouts labelled one flat book `BK` as if it were
+a part, and a stand used as a library exported its loop counter. A name
+first assigned inside a loop's body is therefore the loop's own: the
+interpreter keeps a record of what it read, so a part placed only
+through it is still a part, and nothing else. A name assigned before
+the loop and grown in it is still a step, since its last value is the
+whole of what the loop built. What the shelf wanted instead, a name per
+book, is `named("book_" + n, bk)`: a builtin that registers a step of
+that name holding that iteration's value and returns the value. It fits
+the step model as it is, one name and one value from one line, with the
+reads of its argument as the step's reads and the statement around it
+reading the step, so the sheets, the slices, `--focus` and the
+warnings find book 9 by name with no change of their own.
+
 ## Records
 
 A part with five numbers was a call with five positions, and the next
@@ -909,7 +943,14 @@ at the bottom of every shipped library is its preview and its test
 closures. The shipped `std/` is a folder of ordinary `.aix` files beside
 `src/`; there is no registry, and `aixle doc lib.aix` reads the defs and
 the comments above them, so a library documents itself the way the
-builtins do.
+builtins do. Its constants are printed with their values, since a
+record of defaults is the only place that says which fields a part
+reads. A name that starts with an underscore is not exported: a
+library's plate needs helpers of its own, and without a way to keep
+them, round 11's bookcase offered its `demo_case` and `demo_y` to every
+caller. A leading underscore was chosen over a keyword because it
+needs nothing new in the grammar and reads the same in the library
+and in an error.
 
 ## Anchors
 

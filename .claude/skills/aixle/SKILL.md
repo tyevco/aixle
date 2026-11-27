@@ -23,7 +23,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    a tree or the like, `use "std/hardware"`, `"std/furniture"` or
    `"std/plants"` first (`npx aixle doc std/hardware.aix` says what each
    has and how it is placed) rather than building it; put parts you
-   repeat in a library file of `def`s beside the program and `use` it.
+   repeat in a library file of `def`s beside the program and `use` it
+   (a part with intermediates or a loop is `def part(p) { ... return x
+   }`; a name starting with `_` stays the library's own).
    Build each part at the
    origin, then `rotate`, then `move` into place; where two parts meet,
    `anchor` the meeting points and `attach` one to the other instead of
@@ -113,7 +115,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
 ```
 name = expr                      # a step
 def part(a, b=1) = expr          # a parametric part
+def part(a) { ... return x }     # one with names and loops of its own: a statement per line, return last
 for i in range(6) { ... }        # loops; range(a, b), range(a, b, step), [1, 2.5]
+all = all + named("leg_" + i, leg) # a step per copy a loop makes; a name first assigned in a loop is the loop's own
 seat = {w: 0.9, h: 0.45}         # a record: seat.h, legs[0].x, {...seat, h: 0.6} for a changed copy
 show name                        # the output (default: the last shape)
 assert pieces(m) == 1, "why"     # a promise; check fails with the numbers when it breaks
@@ -223,6 +227,8 @@ show arm
 | a small point light cannot be judged in `lights.png` | it changes a few pixels of the whole picture | the bottom row is what each light adds on its own, brightened |
 | `overlap(a, b)` fails at 0 | they only touch, stand apart, or overlap thinner than the lattice: the failure says which | sink one into the other, or promise a chunk of the part |
 | a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
+| a copy should be left out of a loop, or a value differ by a test | there is no `if`; a comparison is 1 or 0 | a number `(t > 0) * a + (t <= 0) * b`; a shape, a material or a record `[if_false, if_true][t > 0]`; leave a copy out with `[part, empty()][i == k]` (a copy scaled to 0 collapses onto the origin) |
+| one copy a loop made cannot be sliced, focused or found in a warning | a name first assigned in a loop is the loop's own, not a step | `books = books + named("book_" + i, bk)`: a step per copy, `--slice book_9` |
 
 ## Style that renders well
 

@@ -14,8 +14,8 @@ import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { diskCache, type ImportCache } from "./import/cache.js";
-import { assertLine, assertPassLine } from "./lang/interpreter.js";
-import { exprText } from "./lang/ast.js";
+import { assertLine, assertPassLine, isPrivate } from "./lang/interpreter.js";
+import { exprText, type Stmt } from "./lang/ast.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
@@ -30,11 +30,17 @@ import { format } from "./lang/format.js";
 const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.005 ? String(Number(v.toPrecision(2))) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 /**
- * A value on one line, as `check` and `explain` print it: numbers short, strings quoted, a shape by its size, a
- * record as {name: value, ...}, so a record of parameters reads as it was written.
+ * A number as a value: four significant figures, as an assert's sides are printed, so a bump of 0.002 in a record
+ * reads 0.002 and not 0 (round 11); `short` is for sizes and places, where two decimals are the scale of a model.
+ */
+const valueNum = (v: number): string => { const t = String(Number(v.toPrecision(4))); return t === "-0" ? "0" : t; };
+
+/**
+ * A value on one line, as `check` and `explain` print it: numbers to four significant figures, strings quoted, a
+ * shape by its size, a record as {name: value, ...}, so a record of parameters reads as it was written.
  */
 function valueText(v: Value, depth = 0): string {
-  if (typeof v === "number") return short(v);
+  if (typeof v === "number") return valueNum(v);
   if (typeof v === "string") return JSON.stringify(v);
   if (Array.isArray(v)) return depth > 3 ? `a list of ${v.length}` : `[${v.map((x) => valueText(x, depth + 1)).join(", ")}]`;
   if (isRecord(v)) return depth > 3 ? "a record" : `{${[...v.fields].map(([k, x]) => `${k}: ${valueText(x, depth + 1)}`).join(", ")}}`;
@@ -57,13 +63,16 @@ function libraryMarkdown(file: string): string {
   const head: string[] = [];
   for (const l of lines) { if (/^\s*#/.test(l)) head.push(l.replace(/^\s*#\s?/, "")); else break; }
   if (head.length) out.push(head.join("\n"), "");
-  // The constants a user sees: the top-level values that are not shapes (materials, numbers, lists), by running it.
+  // The constants a user sees: the top-level values that are not shapes (materials, numbers, lists), by running it;
+  // a name that starts with _ is the library's own, and is left out with its defs.
   const ev = check(source, file);
-  const exports = ev.steps.filter((st) => !isShape3(st.value) && !isShape2(st.value)).map((st) => st.name);
+  const exports = ev.steps.filter((st) => !isShape3(st.value) && !isShape2(st.value) && !isPrivate(st.name));
+  /** The comment lines straight above a line, as one paragraph. */
+  const above = (line: number): string[] => { const doc: string[] = []; for (let i = line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, "")); return doc; };
   for (const st of program.body) {
-    if (st.type !== "def") continue;
+    if (st.type !== "def" || isPrivate(st.name)) continue;
     const doc: string[] = [];
-    for (let i = st.line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, ""));
+    doc.push(...above(st.line));
     // The default as written on the def's line when it is a plain value, found by the parameter's own name (h, not
     // the h of wh=2); a record or a call is printed from its tree, since the text up to the next comma would cut it.
     const written = (name: string): string | undefined => lines[st.line - 1].match(new RegExp(`(?<![\\w.])${name}\\s*=\\s*([^,)]+)`))?.[1]?.trim();
@@ -72,7 +81,18 @@ function libraryMarkdown(file: string): string {
     out.push(`## ${st.name}(${params.join(", ")})`, "");
     if (doc.length) out.push(doc.join("\n"), "");
   }
-  if (exports.length) out.push(`Constants: ${exports.join(", ")}`, "");
+  // Each constant with its value, since a record's fields are what a caller passes (round 11: a case record's
+  // fields were the documentation, and doc listed only the name); a material as it was written, a long value cut.
+  if (exports.length) {
+    out.push("## Constants", "");
+    for (const st of exports) {
+      const written = program.body.find((b): b is Extract<Stmt, { type: "assign" }> => b.type === "assign" && b.name === st.name && b.line === st.line);
+      const value = isMaterial(st.value) && written ? exprText(written.value) : valueText(st.value);
+      const doc = above(st.line);
+      out.push(`- \`${st.name} = ${clip(value, 100)}\`${doc.length ? `  \n  ${doc.join(" ")}` : ""}`);
+    }
+    out.push("");
+  }
   return out.join("\n");
 }
 
@@ -203,8 +223,8 @@ function main(argv: string[]): number {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
         // A number set inside a loop is the last iteration's, not a size: not listed (round 9: "a = 327" as a step).
         if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
-        if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
-        if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
+        if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${valueNum(st.value)}`); continue; }
+        if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => valueNum(v as number)).join(", ")}]`); continue; }
         // A record on one line when it fits; else a line per field (or per record of a list), a shape field with its
         // box, as a step would have, so a record of parts reads like the parts.
         const recordList = Array.isArray(st.value) && st.value.length > 0 && st.value.every(isRecord);
@@ -345,9 +365,9 @@ function main(argv: string[]): number {
         if (!st) return `${name}: not a step`;
         const v = st.value;
         let what: string;
-        if (typeof v === "number") what = `= ${short(v)}`;
+        if (typeof v === "number") what = `= ${valueNum(v)}`;
         else if (typeof v === "string") what = `= "${v}"`;
-        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : v.length && v.every(isRecord) ? clip(`= ${valueText(v)}`) : `a list of ${v.length}`;
+        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => valueNum(x as number)).join(", ")}]` : v.length && v.every(isRecord) ? clip(`= ${valueText(v)}`) : `a list of ${v.length}`;
         else if (isRecord(v)) what = clip(`= ${valueText(v)}`);
         else if (isShape3(v)) {
           const b = v.bounds;

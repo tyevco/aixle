@@ -12,7 +12,9 @@ the inside is cut open.
    building a bolt, a chair or a tree, `use "std/hardware"`,
    `"std/furniture"` or `"std/plants"` (`aixle doc std/hardware.aix` lists
    what is there) and place the part; keep your own repeated parts in a
-   library file of `def`s next to the program and `use` that. Build each
+   library file of `def`s next to the program and `use` that (a part
+   with intermediates or a loop is `def part(p) { ... return x }`; a
+   name starting with `_` stays the library's own). Build each
    part at the origin, then `rotate`, then `move` into place, or better,
    `anchor` the points where parts meet and `attach` them: `seat |
    attach("bottom", legs, "top")` needs no arithmetic and survives a
@@ -66,7 +68,7 @@ the inside is cut open.
 
 ```
 npx aixle check model.aix                  sizes and warnings, no pictures (--pose NAME: in that pose)
-npx aixle doc std/furniture.aix            what a library offers: each def with its parameters and the comment above it
+npx aixle doc std/furniture.aix            what a library offers: each def with its parameters and the comment above it, each constant with its value
 npx aixle explain model.aix                the program as a tree from the output down: each step's source line, size, material, anchors; read this first on a program you did not write
 npx aixle render model.aix --quick         the sheet only, small grid, fast; --watch re-renders on save
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
@@ -191,6 +193,8 @@ mesh; `--no-cache` samples afresh.
 | a part placed with `attach` is a loose piece at a finer grid | `attach` sets face on face, exactly touching | `attach(..., sink=0.02)` pushes it in, or put the anchor a cell inside the part |
 | text wrapped inside a band reads backwards | `wrap` reads left to right from outside | `flip("x")` the extruded text before the `wrap` for an inscription read from inside |
 | `set pose reach` shows the rest pose | the pose is not named that | the warning lists the poses that exist |
+| a copy should be left out of a loop, or a value differ by a test | there is no `if`; a comparison is 1 or 0 | a number `(t > 0) * a + (t <= 0) * b`; a shape, a material or a record `[if_false, if_true][t > 0]`; leave a copy out with `[part, empty()][i == k]` (a copy scaled to 0 collapses onto the origin) |
+| one copy a loop made cannot be sliced, focused or found in a warning | a name first assigned in a loop is the loop's own, not a step | `books = books + named("book_" + i, bk)`: a step per copy, `--slice book_9` |
 
 When the model is right, `npx aixle render model.aix --beauty` adds
 `beauty.png`, the field ray-marched with shadows, for showing rather than

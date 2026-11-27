@@ -227,11 +227,18 @@ export interface AssertResult {
   pending?: boolean;
   /** Where a void, inside or overlap query found the offending point, and in which step, for a failure. */
   where?: string;
+  /** For an assert in a def's body, judged on every call: the def and the line of the program's statement that called it. */
+  call?: { fn: string; line: number };
 }
 
 /** One line for a failed assert, the same in `check`, the render's warnings and the report. */
 export function assertLine(a: AssertResult): string {
-  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.where ? `, ${a.where}` : ""}${a.message ? `: ${a.message}` : ""}`;
+  return `${a.file ? `${a.file}: ` : ""}assert (${assertWhere(a)})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.where ? `, ${a.where}` : ""}${a.message ? `: ${a.message}` : ""}`;
+}
+
+/** `line 12`, or for an assert in a def's body `line 12, in book() called on line 40`. */
+function assertWhere(a: AssertResult): string {
+  return `line ${a.line}${a.call ? `, in ${a.call.fn}() called on line ${a.call.line}` : ""}`;
 }
 
 /** The builtins that move a shape's surface somewhere else: a step read only through one is not where it was built. */
@@ -244,8 +251,35 @@ const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tal
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
-  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+  return `${a.file ? `${a.file}: ` : ""}assert (${assertWhere(a)})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
 }
+
+/**
+ * A comment after code that holds what reads as the line's next step, `| move(...)` with a builtin, a def of the
+ * program or a used library's name: everything after the `#` is ignored, so the step is not applied, and nothing
+ * else would say so (round 11: a comment pasted mid-line left a knocker's eye at the origin, and every promise held).
+ */
+export function commentCodeWarnings(program: Program): string[] {
+  const defs = new Set<string>(), libs = new Set<string>();
+  for (const st of program.body) {
+    if (st.type === "def") defs.add(st.name);
+    if (st.type === "use") libs.add(st.alias ?? st.path.replace(/\.aix$/, "").replace(/^.*\//, ""));
+  }
+  const out: string[] = [];
+  for (const c of program.trailingComments ?? []) {
+    for (const m of c.text.matchAll(/\|\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\(/g)) {
+      const name = m[1], dot = name.indexOf(".");
+      if (!(dot < 0 ? BUILTIN_MAP.has(name) || defs.has(name) : libs.has(name.slice(0, dot)))) continue;
+      const marker = c.text.startsWith("//") ? "//" : "#";
+      out.push(`line ${c.line}: the comment holds code (| ${name}(...)): everything after ${marker} is ignored, so it is not applied; end the comment before the code, or move the comment to the line above`);
+      break;
+    }
+  }
+  return out;
+}
+
+/** A library's own name, kept out of its exports: one that starts with an underscore (`_demo_case`). */
+export const isPrivate = (name: string): boolean => name.startsWith("_");
 
 const MAX_LOOP = 20000;
 const MAX_DEPTH = 64;
@@ -253,8 +287,12 @@ const MAX_DEPTH = 64;
 class Scope {
   private vars = new Map<string, Value>();
   /** On a root scope: the libraries its program used, so a library's defs reach the library's own uses. */
-  modules?: Map<string, { path: string; exports: Map<string, Value> }>;
+  modules?: Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>;
   constructor(private readonly parent?: Scope) {}
+  /** The scope `name` is found in: a def call's own (a parameter, a block's name), a library's root, or the program's. */
+  owner(name: string): Scope | undefined {
+    return this.vars.has(name) ? this : this.parent?.owner(name);
+  }
   root(): Scope {
     return this.parent ? this.parent.root() : this;
   }
@@ -277,6 +315,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
+  // The names first assigned inside a loop's body: the loop's own, no steps, kept for what they read.
+  const loopSteps = new Map<string, Step>();
   const settings: Settings = {};
   // One mesh per shape and resolution for this evaluation's pieces() and overhang() (and a failing pieces()'s loose
   // piece): measured on round 10's hub, check fell from 3.9 s to 2.5 s when the two queries shared the hub's mesh.
@@ -304,7 +344,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let witness: string | undefined;
   // The shown shape, set once the program has run; a root for placing a measured step.
   let output: Shape3 | undefined;
-  const warnings: string[] = [...(program.warnings ?? [])];
+  const warnings: string[] = [...(program.warnings ?? []), ...commentCodeWarnings(program)];
   const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
   // "pose:joint" for every pose value given as one number rather than a triple.
@@ -316,6 +356,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const cameras: CameraShot[] = [];
   const images: ImageUse[] = [];
   const imageCache = new Map<string, { width: number; height: number; rgba: Uint8Array }>();
+  // How many distinct materials have taken each name, so the second is named_2.
+  const materialNames = new Map<string, number>();
   /** A picture by path, loaded once per evaluation. */
   const loadImage = (path: string, line: number): { width: number; height: number; rgba: Uint8Array } => {
     if (!options.resolveImage) throw new RuntimeError(`image "${path}": pictures cannot be loaded here`, line);
@@ -330,17 +372,58 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let depth = 0;
   let loops = 0;
   /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
-  const modules = new Map<string, { path: string; exports: Map<string, Value> }>();
+  const modules = new Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>();
   global.modules = modules;
   const moduleList: UsedModule[] = [];
   /** Names read while evaluating the current top-level statement. */
   let reads: Set<string> | undefined;
+  // Where each name is first assigned or defined at the top level (a loop's body included), so a name read before
+  // its line can say it comes later (round 11: a probe's show above the lines it named read as a typo).
+  const firstAt = new Map<string, { line: number; def: boolean }>();
+  const noteFirst = (body: Stmt[]) => {
+    for (const st of body) {
+      if ((st.type === "assign" || st.type === "def") && !firstAt.has(st.name)) firstAt.set(st.name, { line: st.line, def: st.type === "def" });
+      if (st.type === "for") { if (!firstAt.has(st.name)) firstAt.set(st.name, { line: st.line, def: false }); noteFirst(st.body); }
+    }
+  };
+  noteFirst(program.body);
+  // The top-level statement running, and the defs it is inside, for that message.
+  let runningLine = 0;
+  const calling: UserFn[] = [];
 
-  function lookup(name: string, line: number): Value {
-    const v = global.get(name);
-    if (v === undefined) throw new RuntimeError(`'${name}' is not defined`, line);
-    return v;
+  /**
+   * Why `name` has no value at `line`: not defined at all, or not yet, when the def's block body or the file assigns
+   * it further down. Only the program's own file is looked in: a library's def does not see the program's names.
+   */
+  function notDefined(name: string, scope: Scope, line: number): string {
+    // A name the block body running assigns below this line.
+    const fn = calling[calling.length - 1];
+    if (fn?.block && scope.root() === ((fn.closure as Scope | undefined) ?? global)) {
+      const later = (body: Stmt[]): number | undefined => {
+        for (const st of body) {
+          if (st.type === "assign" && st.name === name && st.line > line) return st.line;
+          if (st.type === "for") { const l = st.name === name && st.line > line ? st.line : later(st.body); if (l !== undefined) return l; }
+        }
+        return undefined;
+      };
+      const at = later(fn.block);
+      if (at !== undefined) return `'${name}' is not defined yet: it is assigned on line ${at} of ${fn.name}()'s body, after this line; statements run in order, top to bottom`;
+    }
+    const at = firstAt.get(name);
+    if (!at || at.line <= runningLine || scope.root() !== global) return `'${name}' is not defined`;
+    const what = at.def ? `its def is on line ${at.line}` : `it is assigned on line ${at.line}`;
+    const when = calling.length ? `after line ${runningLine}, which calls ${calling[0].name}()` : "after this line";
+    return `'${name}' is not defined yet: ${what}, ${when}; statements run in order, top to bottom`;
   }
+  /** Whether `name` is one the file assigns below the running line, for the messages that would say "unknown". */
+  const comesLater = (name: string, scope: Scope): boolean => scope.root() === global && (firstAt.get(name)?.line ?? 0) > runningLine;
+  /**
+   * Whether `name` (or a dotted name's head) is the program's own, so possibly a step: not a def's parameter or a
+   * block body's name, which are the call's own, and not a library's constant. Only such a name is read, cut,
+   * masked or made a region by what is evaluated (round 11: a block's assert on its parameter b made the program's
+   * unrelated step b a region, and hid that it was unused).
+   */
+  const programName = (name: string, scope: Scope): boolean => scope.owner(name.split(".")[0]) === global;
 
   function evalExpr(e: Expr, scope: Scope): Value {
     switch (e.type) {
@@ -354,7 +437,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const target = evalExpr(e.target, scope);
         const i = evalExpr(e.index, scope);
         if (!Array.isArray(target)) throw new RuntimeError(`[...] indexes a list, not a ${typeName(target)}`, e.line);
-        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number`, e.line);
+        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number, not ${typeof i === "number" ? i : `a ${typeName(i)}`}${typeof i === "number" ? "; a comparison (t > 0) is 1 or 0, which picks the second or the first of two" : ""}`, e.line);
         const k = i < 0 ? target.length + i : i;
         if (k < 0 || k >= target.length) throw new RuntimeError(`index ${i} is outside the list, which has ${target.length} item${target.length === 1 ? "" : "s"}`, e.line);
         return target[k];
@@ -377,8 +460,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "ident": {
         if (e.name.includes(".")) return dottedValue(e.name, e.line, scope);
         const v = scope.get(e.name);
-        if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
-        reads?.add(e.name);
+        if (v === undefined) throw new RuntimeError(notDefined(e.name, scope, e.line), e.line);
+        // Only the program's own names are steps: a def's parameter or block name, or a library's constant, is not the
+        // step of the same name (round 11: a library def's parameter b made a caller's step b a part of every book).
+        if (programName(e.name, scope)) reads?.add(e.name);
         return v;
       }
       case "unary": {
@@ -389,8 +474,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "binary": {
         const l = evalExpr(e.left, scope), r = evalExpr(e.right, scope);
         if (currentStep) for (const v of [l, r]) if (isShape3(v)) { const nm = stepOfValue.get(v); if (nm) (currentStep.keptDeps ??= new Set()).add(nm); }
-        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident") noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
-        if (e.op === "&" && isShape3(l) && isShape3(r)) noteMask(l, e.left, r, e.right);
+        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident" && programName(e.right.name, scope)) noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
+        if (e.op === "&" && isShape3(l) && isShape3(r)) noteMask(l, e.left, r, e.right, scope);
         return binary(e.op, l, r, e.line);
       }
       case "call":
@@ -688,6 +773,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     else {
       const head = scope.get(parts[0]);
       if (head === undefined) {
+        if (comesLater(parts[0], scope)) throw new RuntimeError(notDefined(parts[0], scope, line), line);
         const known = [...table.keys()];
         throw new RuntimeError(`'${parts[0]}' is not a used library or a defined record${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${parts[0]}.aix" or use "std/${parts[0]}" first, or define ${parts[0]} = {${parts[1]}: ...}`, line);
       }
@@ -696,8 +782,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     for (let i = first; i < parts.length; i++) v = field(v, parts[i], parts.slice(0, i).join("."), line);
     // A field holding a step's shape reads that step, so `show parts.lid` uses the lid and not every part the
-    // record holds; anything else reads the record.
-    if (first === 1) reads?.add((isShape3(v) && stepOfValue.get(v)) || parts[0]);
+    // record holds; anything else reads the record, when the record is the program's own.
+    if (first === 1) { const st = isShape3(v) ? stepOfValue.get(v) : undefined; if (st) reads?.add(st); else if (scope.owner(parts[0]) === global) reads?.add(parts[0]); }
     return v;
   }
 
@@ -720,6 +806,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       throw new RuntimeError(`'${prefix}' is not a used library${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${prefix}.aix" or use "std/${prefix}" first`, line);
     }
     const v = mod.exports.get(name);
+    if (v === undefined && mod.own?.has(name)) throw new RuntimeError(`'${mod.path}' keeps '${name}' to itself: a name that starts with _ is a library's own; it offers ${[...mod.exports.keys()].join(", ") || "nothing"}`, line);
     if (v === undefined) throw new RuntimeError(`'${mod.path}' has no '${name}'; it has ${[...mod.exports.keys()].join(", ") || "nothing exported"}`, line);
     reads?.add(dotted);
     return v;
@@ -739,6 +826,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "camera") return callCamera(args, scope, line);
     const user = scope.get(callee);
     if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
+    if (callee === "named") return callNamed(args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
     // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
     // reaches the builtin, and the program says so once (round 4 asked; a name alone, never called, is fine).
@@ -748,6 +836,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     if (!builtin) {
       if (user !== undefined) throw new RuntimeError(`'${callee}' is a ${typeName(user)}, not a function`, line);
+      if (comesLater(callee, scope)) throw new RuntimeError(notDefined(callee, scope, line), line);
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
@@ -776,11 +865,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         }
       }
     }
-    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") noteCut(args[1].value.name);
-    if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value);
+    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) noteCut(args[1].value.name);
+    if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value, scope);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
-    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
-    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm) regionNames.add(nm); }
+    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
+    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm && programName(nm, scope)) regionNames.add(nm); }
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
@@ -890,6 +979,44 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return result;
   }
 
+  /**
+   * `named("book_" + n, bk)`: a step of that name holding this value, for a copy a loop makes, so the steps sheet,
+   * the callouts, the slices, a focus and a warning can point at book 9 itself (round 11: the shelf rebuilt one book
+   * as a probe beside the loop to have a name to slice through). The step reads what the value's expression read,
+   * and the statement around the call reads the step.
+   */
+  function callNamed(args: Arg[], scope: Scope, line: number): Value {
+    const builtin = BUILTIN_MAP.get("named")!;
+    const outerReads = reads, outerStep = currentStep;
+    const here: Step = { name: "", value: 0, line, deps: new Set() };
+    reads = here.deps;
+    currentStep = here;
+    let values: { name?: string; value: Value }[];
+    // The step is made of its value; what the name reads (the n of "book_" + n, a counter) is not an ingredient.
+    const nameArg = args.find((a) => a.name === "name") ?? args.find((a) => !a.name);
+    try {
+      values = args.map((a) => {
+        reads = a === nameArg ? new Set() : here.deps;
+        return { name: a.name, value: evalExpr(a.value, scope) };
+      });
+    } finally { reads = outerReads; currentStep = outerStep; }
+    const value = callBuiltin(builtin, values, line);
+    const name = (values.find((v) => v.name === "name") ?? values.find((v) => !v.name))!.value as string;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new RuntimeError(`named(): "${name}" is not a name; a step's name is letters, digits and _, as "book_" + n makes`, line);
+    const prev = steps.get(name);
+    if (prev) throw new RuntimeError(`named("${name}"): '${name}' is already a step (line ${prev.line}); each named() makes a step of its own, so build the name from the loop's index, named("${name}_" + i, ...)`, line);
+    if (BUILTIN_MAP.has(name)) throw new RuntimeError(`named("${name}"): ${name} is a builtin; give the step another name`, line);
+    if (global.has(name) || loopSteps.has(name)) throw new RuntimeError(`named("${name}"): '${name}' is already a name in the program (a def, a constant or a loop's name); give the step another`, line);
+    here.name = name;
+    here.value = value;
+    here.deps.delete(name);
+    steps.set(name, here);
+    global.set(name, value);
+    if (isShape3(value)) { stepOfValue.set(value, name); lastShape = { name }; }
+    reads?.add(name);
+    return value;
+  }
+
   function callUser(fn: UserFn, args: Arg[], scope: Scope, line: number): Value {
     if (depth >= MAX_DEPTH) throw new RuntimeError(`'${fn.name}' recursed more than ${MAX_DEPTH} deep`, line);
     const local = new Scope((fn.closure as Scope | undefined) ?? global);
@@ -905,10 +1032,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     });
     for (const a of named) if (!fn.params.some((p) => p.name === a.name)) throw new RuntimeError(`'${fn.name}' has no parameter '${a.name}'`, line);
     depth++;
+    calling.push(fn);
     try {
-      return evalExpr(fn.body, local);
+      if (!fn.block) return evalExpr(fn.body!, local);
+      // A block body: its statements in order in the call's own scope, then the return's value. What they assign
+      // is the def's own, as a parameter is: no step, and gone when the call returns.
+      for (const st of fn.block.slice(0, -1)) exec(st, local, false, fn);
+      const ret = fn.block[fn.block.length - 1];
+      if (ret.type !== "return") throw new RuntimeError(`'${fn.name}' has no return`, fn.block[fn.block.length - 1].line);
+      return evalExpr(ret.value, local);
     } finally {
       depth--;
+      calling.pop();
     }
   }
 
@@ -1022,7 +1157,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   /** Of two shapes intersected, the larger by box is the mask: named so for the step being computed. */
-  function noteMask(l: Shape3, le: Expr, r: Shape3, re: Expr): void {
+  function noteMask(l: Shape3, le: Expr, r: Shape3, re: Expr, scope: Scope): void {
     if (!currentStep) return;
     const vol = (s: Shape3) => (isEmpty(s.bounds) ? 0 : boundsSize(s.bounds).reduce((a, b) => a * b, 1));
     const bigger = vol(l) > vol(r) * 1.5 ? le : vol(r) > vol(l) * 1.5 ? re : undefined;
@@ -1030,7 +1165,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // in a loop of facets, round 10): the name at the head of a chain of rigid transforms is the mask.
     let e = bigger;
     while (e && e.type === "call" && e.piped && MASK_MOVES.has(e.callee) && e.args.length && !e.args[0].name) e = e.args[0].value;
-    if (e && e.type === "ident") (currentStep.maskDeps ??= new Set()).add(e.name);
+    if (e && e.type === "ident" && programName(e.name, scope)) (currentStep.maskDeps ??= new Set()).add(e.name);
   }
 
   /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
@@ -1193,8 +1328,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
   }
 
-  function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {
+  /** One statement; `inDef` is the def whose block body it is in, for an assert's call and a name that is the def's own. */
+  function exec(stmt: Stmt, scope: Scope, topLevel: boolean, inDef?: UserFn): void {
+    if (topLevel) runningLine = stmt.line;
     switch (stmt.type) {
+      case "return":
+        throw new RuntimeError(`return ends a def's block body`, stmt.line);
       case "assign": {
         const collecting = topLevel && reads === undefined;
         if (collecting) reads = new Set();
@@ -1210,9 +1349,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const keptDeps = topLevel ? here.keptDeps : undefined;
         const maskDeps = topLevel ? here.maskDeps : undefined;
         // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
-        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
-        if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
-          value = { ...value, name: stmt.name };
+        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked); in a loop every iteration's does, the
+        // second distinct one under the name as body_2, the third body_3 (round 11: a plank per seed took the name
+        // on the first iteration only, and the GLB shipped five called custom).
+        if ((topLevel || inDef) && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#"))) {
+          const k = (materialNames.get(stmt.name) ?? 0) + 1;
+          materialNames.set(stmt.name, k);
+          value = { ...value, name: k === 1 ? stmt.name : `${stmt.name}_${k}` };
+        }
         // A record named like a used library is never read by field: `hw.x` is the library's (once per name).
         if (isRecord(value) && (scope.root().modules ?? modules).has(stmt.name) && !shadowed.has(`record:${stmt.name}`)) {
           shadowed.add(`record:${stmt.name}`);
@@ -1220,7 +1364,15 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         }
         scope.set(stmt.name, value);
         if (topLevel) {
-          const prev = steps.get(stmt.name);
+          // A name first assigned inside a loop's body is the loop's own working name (bk, prev, board): it holds the
+          // last iteration's value, so it is kept off the steps, the callouts, the unused warning and a library's
+          // exports, and kept apart only so the steps it reads are still known to be read (round 11: a shelf's
+          // "8. BK" thumbnail and callout; a stand's loop counter exported). A name assigned before the loop and
+          // updated in it, an accumulator, stays a step; named() gives one iteration's value a step of its own.
+          const loopOwn = loopDepth > 0 && !steps.has(stmt.name);
+          if (!loopOwn) loopSteps.delete(stmt.name);
+          const table = loopOwn ? loopSteps : steps;
+          const prev = table.get(stmt.name);
           const deps = new Set(prev?.deps ?? []);
           for (const r of reads ?? []) if (r !== stmt.name) deps.add(r);
           if (prev) {
@@ -1233,15 +1385,22 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
             if (maskDeps) prev.maskDeps = new Set([...(prev.maskDeps ?? []), ...maskDeps]);
             if (loopDepth > 0) prev.inLoop = true;
           } else {
-            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
+            table.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
           }
-          if (isShape3(value)) { lastShape = { name: stmt.name }; stepOfValue.set(value, stmt.name); }
+          if (isShape3(value)) {
+            // The output of a program with no show is still the last shape assigned, a loop's own name too, as the
+            // guide says: a loop of parts with no show outputs its last copy, not nothing, and a step above the loop
+            // is warned about as not part of it rather than shown in its place.
+            lastShape = { name: stmt.name };
+            // A step's name for a value wins over a loop's own name for the same one (prev = bk after named(..., bk)).
+            if (!loopOwn || !steps.has(stepOfValue.get(value) ?? "")) stepOfValue.set(value, stmt.name);
+          }
         }
         if (collecting) reads = undefined;
         return;
       }
       case "def":
-        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, closure: global });
+        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, block: stmt.block, closure: global });
         return;
       case "use": {
         if (!topLevel) throw new RuntimeError(`use belongs at the top of the program, not inside a loop`, stmt.line);
@@ -1266,10 +1425,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         }
         for (const [name, v] of Object.entries(options.jointPoses ?? {})) { CURRENT_ANGLES.set(name, v.angles); CURRENT_POSES.set(name, v); }
         const exports = new Map<string, Value>();
-        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
-        for (const d of lib.defs) exports.set(d.name, d);
+        // A name that starts with _ is the library's own (its plate's helpers, a def's helper): not exported, not
+        // listed by check's use line or by aixle doc (round 11: demo_case and demo_y were offered to every caller).
+        const own = new Set<string>();
+        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) { if (isPrivate(st.name)) own.add(st.name); else exports.set(st.name, st.value); }
+        // A def's body runs where it is called, so an assert in it says which library's line it is.
+        for (const d of lib.defs) { d.file ??= stmt.path; if (isPrivate(d.name)) own.add(d.name); else exports.set(d.name, d); }
         for (const a of lib.asserts) asserts.push({ ...a, file: a.file ?? stmt.path });
-        modules.set(prefix, { path: stmt.path, exports });
+        modules.set(prefix, { path: stmt.path, exports, own });
         moduleList.push({ prefix, path: stmt.path, names: [...exports.keys()] });
         return;
       }
@@ -1281,7 +1444,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           for (const item of iterable) {
             if (++loops > MAX_LOOP) throw new RuntimeError(`more than ${MAX_LOOP} loop iterations`, stmt.line);
             scope.set(stmt.name, item);
-            for (const s of stmt.body) exec(s, scope, topLevel);
+            for (const s of stmt.body) exec(s, scope, topLevel, inDef);
           }
         } finally {
           loopDepth--;
@@ -1326,13 +1489,17 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       }
       case "expr": {
         const v = evalExpr(stmt.value, scope);
-        if (isShape3(v) || isShape2(v)) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
+        const kept = stmt.value.type === "call" && stmt.value.callee === "named";
+        if ((isShape3(v) || isShape2(v)) && !kept) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
         return;
       }
       case "assert": {
         if (options.skipAsserts) return;
         // A promise about a pose is tested in that pose's evaluation and only noted in any other.
-        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true }); return; }
+        // In a def's body the promise is judged on every call, and says which call: the program's line that made it.
+        const call = inDef ? { fn: inDef.name, line: runningLine } : undefined;
+        const file = inDef?.file;
+        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true, call, file }); return; }
         // A comparison is evaluated side by side, so a failure can say what the two numbers were.
         const t = stmt.test;
         let value: Value, detail: string | undefined;
@@ -1355,7 +1522,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
           message = m;
         }
-        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined });
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined, call, file });
         return;
       }
     }
@@ -1374,7 +1541,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     objects = shown.scene ? shown.names.map((name, i) => ({ name, shape: shown!.shapes[i] })) : [{ name: outputName, shape: output }];
     for (const d of showDeps) roots.add(d);
   } else if (lastShape) {
-    output = steps.get(lastShape.name)!.value as Shape3;
+    output = (steps.get(lastShape.name) ?? loopSteps.get(lastShape.name))!.value as Shape3;
     outputName = lastShape.name;
     objects = [{ name: outputName, shape: output }];
     roots.add(lastShape.name);
@@ -1423,7 +1590,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const visit = (nme: string, role: StepRole) => {
     if (rank(roles.get(nme)) >= rank(role)) return;
     roles.set(nme, role);
-    const st = steps.get(nme);
+    // Through a loop's own names too: a part placed only by bk = part | move(...) is still a part.
+    const st = steps.get(nme) ?? loopSteps.get(nme);
     if (st) for (const d of st.deps) visit(d, role === "region" ? role : st.cutDeps?.has(d) ? "cut" : st.maskDeps?.has(d) ? "mask" : decalRegions.has(d) ? "region" : role);
   };
   for (const r of roots) visit(r, "part");
@@ -1432,7 +1600,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const stepList = [...steps.values()];
   // A step is displaced when every step that reads it moves it, and nothing shows it as it is.
   const readers = new Map<string, Step[]>();
-  for (const st of stepList) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
+  for (const st of [...stepList, ...loopSteps.values()]) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
   const displaced = new Set<string>();
   for (const st of stepList) {
     if (!isShape3(st.value) || roots.has(st.name)) continue;

@@ -1,8 +1,13 @@
 # The Aixle language
 
-A `.aix` file is a list of statements, one per line, read top to bottom.
-Every assignment is a step; steps build on earlier steps by name. The file
-ends by showing one shape, or the last shape assigned is the output.
+A `.aix` file is a list of statements, one per line, run in order, top
+to bottom. Every assignment is a step; steps build on earlier steps by
+name, and a name can be read only below the line that assigns it (or the
+`def` that defines it): `show` goes after the steps it shows, which is
+why a file usually ends with it. Without a `show`, the last shape
+assigned is the output. A name read above its line is an error that says
+where it is assigned: `'lean' is not defined yet: it is assigned on line
+12, after this line`.
 
 [`reference.md`](reference.md) lists every function with its signature.
 This document is the language around them.
@@ -25,6 +30,7 @@ This document is the language around them.
 ```
 name = expr                 # a step
 def name(a, b=2) = expr     # a parametric part; call it like a builtin
+def name(a) { ... return expr }   # a part with names and loops of its own
 for i in range(5) { ... }   # repeat the block; i is 0..4
 show a, b                   # output these (several are unioned)
 set grid 200                # a render setting from inside the file
@@ -32,16 +38,54 @@ assert width(m) < 5, "fits"  # a promise the model makes; check reports a failur
 # a comment, or // a comment
 ```
 
-A `def` body is one expression; it can span lines. A statement continues
-onto the next line when the line ends with an operator or `=`, or the next
-line starts with `+ - * / | &`; a blank line always ends a statement.
-Inside parentheses line breaks never matter.
+A `def` body is one expression, which can span lines, or a block in
+braces. A statement continues onto the next line when the line ends with
+an operator or `=`, or the next line starts with `+ - * / | &`; a blank
+line always ends a statement. Inside parentheses line breaks never
+matter.
 
 ```
 def chair() =
   box(0.9, 0.08, 0.9) | move(0, 0.9, 0)
   + (leg(0.9) | move(-0.38, 0, -0.38) | grid(2, 2, 0.76, 0.76))
 ```
+
+A block body is for a part that needs its own intermediates or a loop:
+a book's cover and its bands all read `b.w`, `b.h` and `b.d`, and its
+bands are a `for` (as a case's shelves would be):
+
+```
+def book(b) {
+  cover = box(b.w, b.h, b.d) | paint(b.color)
+  bands = empty()
+  for i in range(2) {
+    bands = bands + (box(b.w + 0.01, 0.06, 0.02) | move(0, 0.3 + i * 0.4, b.d / 2))
+  }
+  assert width(cover) < 1, "a book is thinner than a unit"
+  return cover + bands
+}
+```
+
+The block holds assignments, `for` loops and `assert`s, and ends with
+`return` and the value the def makes; `show`, `scene`, `set`, `use` and
+`def` belong at the top level, and a line that computes a value and
+assigns it to nothing is an error, as is a body whose last line is not
+the `return` (`def book (line 3): its body ends on a value with no
+return; write return cover + bands`) or a `return` inside a loop. The
+names it assigns are the def's own, as its parameters are: they are not
+steps (no thumbnail, no callout, no size in `check`), they are gone when
+the call returns, and a step elsewhere with the same name is a different
+thing. Otherwise a block sees what an expression body sees: its
+parameters, and the file's (or the library's) defs and constants. An
+`assert` in a block is judged on every call, and `check` says which call
+each verdict is for: `assert (line 9, in book() called on line 40)
+holds: ...`, the call's line being the program's statement that made it
+(in a library's def the assert's own line is the library's, and the
+line says so: `shelf_lib: assert (line 9, ...)`). A material assigned
+to a name in a block takes that name (see Materials). A def calls
+itself as any def does, up to the depth guard; with no conditional, a
+def that calls itself always reaches it. `aixle fmt` puts the body two
+in, as a loop's.
 
 Loops can rebuild the same name; the step keeps its last value:
 
@@ -52,12 +96,40 @@ for i in range(12) {
 }
 ```
 
+A name assigned before the loop and updated in it (`teeth` above, a
+counter, a list grown with `+ [...]`) is a step, an accumulator. A name
+first assigned inside the loop's body (a book `bk`, the `prev` book it
+leans on, the row's `board`) is the loop's own working name: it holds
+the last iteration's value, which is no part of the model by itself, so
+it is not a step. It gets no thumbnail on `steps.png`, no label on
+`callouts.png`, no size in `check`, no unused warning, and a library
+does not export it; it can still be read below the loop, where it holds
+that last value (assign it to a name there, `last = bk`, to make that a
+step). To give each copy a loop makes a step of its own, name it:
+
+```
+books = empty()
+for i in range(len(rows)) {
+  bk = book(rows[i]) | move(x, y, 0)
+  books = books + named("book_" + i, bk)
+}
+```
+
+`named(name, value)` registers a step called `book_0`, `book_1`, ...
+holding that iteration's value and returns the value, so each copy has
+its thumbnail, its callout, a name for `set slice book_9`, `--slice`,
+`--focus`, `camera(focus=)` and the warnings, and can be read by that
+name below the loop (`assert clearance(book_9, shelf) < 0.005`). A name
+is letters, digits and `_`, and names one step: naming the same one
+twice, or a name the program already has, is an error.
+
 `for` iterates a list: `range(n)`, `range(a, b)`, `range(a, b, step)`, or a
 literal like `[0.5, 1, 2]`.
 
 `for` also runs over any list, including one of strings, and a name
 assigned inside the loop keeps its value between iterations, so a counter
-is `i = i + 1`; `len(list)` is its length.
+is `i = i + 1` (set before the loop, so it is a step); `len(list)` is its
+length.
 
 ```
 letters = ["C", "H", "A", "M", "P"]
@@ -68,6 +140,34 @@ for c in letters {
   i = i + 1
 }
 ```
+
+There is no `if`: a program is a straight-line construction (see
+`design.md`), and a choice is made with a comparison, which is a number,
+1 or 0. A number is chosen by weighting each choice with its test,
+`(t > 0) * a + (t <= 0) * b`. Any value, a shape, a material, a record
+or a string, is chosen by indexing a list of two with the test,
+`[if_false, if_true][t > 0]`: a comparison is 1 or 0, so it picks the
+second or the first. `empty()` is the shape for nothing, so a loop
+leaves one copy out with `[part, empty()][i == k]`, where a copy scaled
+to zero would collapse onto the origin and stretch the box down to it:
+
+```
+lean = 18
+gap = (lean > 0) * 0.002 + (lean <= 0) * 0.06     # a number
+cover = ["navy", "maroon"][lean > 0]              # a material
+book = [box(0.3, 2.2, 1.6), box(0.3, 2.2, 1.6) | rotate(z=lean)][lean != 0] | paint(cover)
+studs = empty()
+for i in range(6) {
+  stud = sphere(0.025) | move(-0.45 + i * 0.18, 1.15, 0.07)
+  studs = studs + [stud, empty()][i == 4]          # none behind the knocker
+}
+show book + studs
+```
+
+Both items of the list are built, whichever is picked, so a choice
+between two expensive parts costs both. An index that is not a whole
+number is an error that says what it got, and one outside the list says
+how many items there are.
 
 ## Values
 
@@ -117,7 +217,10 @@ parts.lid` shows that field, and the output is then the step the field
 holds, so a record's other parts are still reported as unused. `check`
 prints a record as it would be written (`seat = {w: 0.9, h: 0.45, d:
 0.8}`), or, when it holds shapes or is too long for a line, a line per
-field with a shape's box, as a step's would be.
+field with a shape's box, as a step's would be. A value's numbers (a
+number step, a list's, a record's) are printed to four significant
+figures, as an assert's sides are, so `{bump: 0.002}` reads as written;
+sizes and places keep two decimals.
 
 ## Calls and pipelines
 
@@ -397,7 +500,10 @@ f` picks the name, and `std/` is the set shipped with the tool:
 `std/plants` (a potted plant, a bush, a tree, grass). A path is relative
 to the program using it, `.aix` may be left off, and `aixle doc
 std/furniture.aix` prints what a library offers: each def with its
-parameters and defaults and the comment above it. Every shipped part is
+parameters and defaults and the comment above it, then each constant
+with its value (a record as written, so `case_default = {w: 8, d: 3, t:
+0.2}` says what a case record holds; a material as written; a long value
+cut short) and the comment above it. Every shipped part is
 built at the origin standing on y = 0, facing +z, so it is placed with
 `move` or `attach` like anything else:
 
@@ -418,7 +524,15 @@ costs the caller nothing); its materials and numbers are exported with
 its defs. To write one, put `def`s in a file with a comment line above
 each, a comment block at the top saying the conventions (where the
 origin is, which way is front, what the units are), and a `show` of a
-plate of every part so `aixle render` on the file is its test. `check`
+plate of every part so `aixle render` on the file is its test. A part
+that needs intermediates or a loop is a def with a block body (see
+Statements), so a library is one def per part rather than a helper per
+sub-part. A name that starts with an underscore is the library's own:
+`_demo_case = {...case_default, w: 4}` for the plate, `def _band(b)` for
+a helper its parts call. It works inside the library as any name does,
+and is not exported: `aixle doc` and `check`'s `use` line leave it out,
+and a program that reads `lib._demo_case` is told the library keeps it
+to itself. In a program run on its own an underscore means nothing. `check`
 lists what a program uses and `explain` ends with it. A part's slats,
 rods and walls carry their thickness into the scene, so `check` warns
 when a used part has a member thinner than the scene's cell (a bench's
@@ -435,7 +549,8 @@ copy): the render is the union, the export is one mesh with a node per
 copy, so a forest costs one tree. A placed copy has its yaw and nothing
 else: no joint of its own, no pose. Copies that must move on their own
 (a Ferris wheel's gondolas, each hanging level) are a `def` called once
-per copy with a named step each, `gondola_1 = car(1, "gondola_1")`,
+per copy with a named step each, `gondola_1 = car(1, "gondola_1")`, or
+in a loop `wheel = wheel + named("gondola_" + i, car(i, "gondola_" + i))`,
 where the joint's name is built from the index: `"gondola_" + i` joins
 a string and a number (`str(i)` is the number as text). A placed set keeps its copies' nodes
 wherever it sits: joined to a board with `+`, inside a joint's part, or
@@ -693,6 +808,25 @@ robot = body + eyes
 
 A pattern is anchored to the frame where `paint` was applied, so it moves
 with the part: paint, then `move`.
+
+A material made by `material(...)` takes the name it is assigned to, and
+that is its name in the report's Materials row, the GLB, the OBJ's groups
+and the 3MF: `body = material("#e9b125", "noise")` is `body`, not
+`custom` or `#e9b125`. A material made afresh in a loop takes it on
+every iteration, and since each is a material of its own (a plank per
+seed, so the six do not share one grain), the second is named `oak_plank_2`,
+the third `oak_plank_3`, in the order the loop made them:
+
+```
+planks = empty()
+for i in range(6) {
+  oak_plank = material("#8e6438", "wood", color2="#4c2f17", scale=0.08, seed=i)
+  planks = planks + (box(0.18, 2, 0.07) | paint(oak_plank) | move(i * 0.18, 1, 0))
+}
+```
+
+Passing a named material on (`n = body`, a record's field, a def's
+parameter) keeps its name.
 
 ## Lights, cameras and environments
 
@@ -1040,8 +1174,9 @@ prints every step's size and the warnings: shapes as their
 box, 2D profiles as their box in the plane (text on an arc adds the
 radii its lettering spans from the origin, `on the arc r 0.255..0.385`,
 which is the number to hold against a boss's rim), numbers and lists of numbers
-as their values (a number set inside a loop is the last iteration's and
-is not listed), then the program's `def`s with their parameters;
+as their values (a name first assigned inside a loop is the loop's own
+and is not listed, and an accumulator's number is the last iteration's
+and is not listed either), then the program's `def`s with their parameters;
 `--brief` leaves the sizes out and prints the output, the warnings and
 the asserts alone, for a promise loop on a long program. A step whose tree holds a rotation, a warp or a posed
 joint gets a second `surface` line when the surface's own extent is
@@ -1056,7 +1191,11 @@ them; the render's "Surface extent" row reads the mesh and does not. `aixle rend
 also writes the warnings into `report.md` and counts them on the sheet's title bar,
 and beside `turntable.png` writes `turntable.apng`, the same turn as an
 animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).
-Warnings cover: a shape computed but never assigned; a step that is not part
+Warnings cover: a shape computed but never assigned; a comment after code
+that holds what reads as the line's next step (`eye = torus(0.05, 0.015)
+| rotate(z=90)   # clears the ring | move(pivot[0], ...)`: a `|` and a
+call of a builtin, a def or a used library's, which is ignored with the
+rest of the comment, so the part stays where it was); a step that is not part
 of the output (a step an assert, a decal or a camera reads is a region
 and is not warned about; `check` tags each step `(cut)`, `(region)` or
 `(not in output)`); an empty output (a difference that removed everything, an
@@ -1349,8 +1488,9 @@ prints the asserts in line order, failures among the passes.
 - `--focus` on a placed set frames its first copy, in world orientation
   (`--focus chairs_4` for another); a part that exists only through
   `array`, `ring` or `mirror` cannot be focused on by itself (its step's box is the original, at the origin,
-  or the whole set); give one copy a name of its own next to the set, or
-  use `place()` for the copies and `--focus name_3`. A def called inline
+  or the whole set); give one copy a name of its own next to the set,
+  make the copies in a loop and name each with `named("leg_" + i, leg)`,
+  or use `place()` for the copies and `--focus name_3`. A def called inline
   (`plate = pawn() + rook()`) is a step with no name of its own: name
   the parts you will want to focus on or see blamed.
 - The sheet, the views, the pose sheets and the animation strips draw
@@ -1412,7 +1552,8 @@ prints the asserts in line order, failures among the passes.
   lifts the fill, or a `decal` gives the inner walls a lighter colour.
 - A preset with overrides (`material("glass", transmit=0.95)`) is listed
   in the report as the preset's name with a star, `glass*`, unless it is
-  assigned to a name, which it then takes.
+  assigned to a name, which it then takes (in a loop, `name_2`, `name_3`
+  for the later ones; see Materials).
 - A cross-section draws the surface's outline a cell or so behind the cut
   plane as a thin line, so a plate just behind the plane shows as a dashed
   line across an opening that is open. Move the slice (`set slice_x`),

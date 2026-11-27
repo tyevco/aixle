@@ -65,7 +65,14 @@ function continues(tokens: Token[], source: string, at: number): boolean {
   return LEADING.has(source[j]) && source.slice(j, j + 2) !== "//";
 }
 
-export function tokenize(source: string): Token[] {
+/** A comment after code on its line, as written from its `#` or `//`: what `check` reads for code pasted into one. */
+export interface TrailingComment {
+  line: number;
+  text: string;
+}
+
+/** The tokens; `trailing`, when given, gets every comment that follows code on its line. */
+export function tokenize(source: string, trailing?: TrailingComment[]): Token[] {
   const tokens: Token[] = [];
   let i = 0, line = 1, depth = 0;
   const push = (type: TokenType, value: string, start = i, end = i + value.length) => tokens.push({ type, value, line, start, end });
@@ -79,7 +86,10 @@ export function tokenize(source: string): Token[] {
     }
     if (ch === " " || ch === "\t" || ch === "\r") { i++; continue; }
     if (ch === "#" || (ch === "/" && source[i + 1] === "/")) {
+      const from = i;
       while (i < source.length && source[i] !== "\n") i++;
+      const last = tokens[tokens.length - 1];
+      if (trailing && last && last.line === line && last.type !== "newline") trailing.push({ line, text: source.slice(from, i).trimEnd() });
       continue;
     }
     if (ch === '"' || ch === "'") {
