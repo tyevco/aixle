@@ -7,26 +7,44 @@ import type { Vec3 } from "../core/vec.js";
  * lattice over the region's box, each sample slid onto the surface (round 8: a tag region beside the wrong part
  * painted nothing and nothing said so). A sample outside the region is first slid onto the region's own surface:
  * a region of two bands 0.06 tall and 1.6 apart has a box whose 13 lattice planes fall 0.14 apart, none of them
- * inside a band, and was said to paint nothing while it painted both (round 11, 32 times on one bookcase).
+ * inside a band, and was said to paint nothing while it painted both (round 11, 32 times on one bookcase). That
+ * slide moves along the shape's normal, which keeps to a band's face where the band crosses a flat spine square on
+ * but leaves it where the surface curves away under the band (two thin bands round a ball were still said to paint
+ * nothing), so the few points that came nearest the region are then walked along the shape's surface down the
+ * region's field, as clearance() walks its best points: the surface reaches into the region if they get there.
+ * Bounded: a lattice and four walks of a fixed number of steps.
  */
 export function regionTouches(shape: Shape3, region: Shape3, n = 12): boolean {
   if (isEmpty(shape.bounds) || isEmpty(region.bounds)) return false;
   for (let k = 0; k < 3; k++) if (region.bounds.max[k] < shape.bounds.min[k] || region.bounds.min[k] > shape.bounds.max[k]) return false;
   const bb = region.bounds, size = boundsSize(bb);
-  const tol = Math.max(size[0], size[1], size[2], 1e-6) * 0.02;
-  const edge = Math.max(size[0], size[1], size[2], 1e-6) * 1e-6;
-  const touches = (x: number, y: number, z: number) => {
-    const q = surfacePoint(shape, x, y, z);
-    return Math.abs(shape.dist(q[0], q[1], q[2])) <= tol && region.dist(q[0], q[1], q[2]) <= edge;
-  };
+  const longest = Math.max(size[0], size[1], size[2], 1e-6);
+  const tol = longest * 0.02;
+  const edge = longest * 1e-6;
+  const onShape = (q: Vec3) => Math.abs(shape.dist(q[0], q[1], q[2])) <= tol;
+  const seeds: { d: number; p: Vec3 }[] = [];
   for (let pass = 0; pass < 2; pass++)
     for (let i = 0; i <= n; i++)
       for (let j = 0; j <= n; j++)
         for (let k = 0; k <= n; k++) {
           const x = bb.min[0] + (size[0] * i) / n, y = bb.min[1] + (size[1] * j) / n, z = bb.min[2] + (size[2] * k) / n;
           const inside = region.dist(x, y, z) <= 0;
-          if (pass === 0 ? inside && touches(x, y, z) : !inside && touches(...surfacePoint(region, x, y, z))) return true;
+          if (inside !== (pass === 0)) continue;
+          const q = pass === 0 ? surfacePoint(shape, x, y, z) : surfacePoint(shape, ...surfacePoint(region, x, y, z));
+          if (!onShape(q)) continue;
+          const d = region.dist(q[0], q[1], q[2]);
+          if (d <= edge) return true;
+          if (pass === 1 && (seeds.length < 4 || d < seeds[3].d)) {
+            seeds.push({ d, p: q });
+            seeds.sort((a, b) => a.d - b.d);
+            seeds.length = Math.min(seeds.length, 4);
+          }
         }
+  const scale = Math.max(longest, ...boundsSize(shape.bounds));
+  for (const s of seeds) {
+    const r = descend(shape, region, s.p, s.d, longest / n, scale);
+    if (r.d <= edge && onShape(r.p)) return true;
+  }
   return false;
 }
 

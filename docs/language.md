@@ -605,9 +605,11 @@ no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
 a jar; `region` is any shape, and it must cross the surface (a sphere
 centred on the skin, a box through it): a region that touches none of
 the shape's surface paints nothing, and `check` warns. The test samples
-the region's box and the region's own surface, so a region of several
-thin pieces far apart (two bands across a spine, `band_a + band_b`) is
-found on the surface piece by piece. A picture is a
+the region's box and the region's own surface, and walks the nearest of
+those points along the shape's surface into the region, so a region of
+several thin pieces far apart (two bands across a spine, `band_a +
+band_b`, or two thin rings round a ball) is found on the surface piece
+by piece. A picture is a
 PNG beside the program: `decal(jar, label_box, image="label.png")` fits
 it to the region's box across the box's shortest side (u along x where
 it can, v down), and its transparent texels leave the base material, so

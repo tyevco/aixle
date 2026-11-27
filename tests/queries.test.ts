@@ -119,6 +119,17 @@ describe("the decal region test (round 11)", () => {
     // The same bands 0.2 in front of the spine paint nothing, and are said to.
     expect(warned('m = decal(base, (box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2 + 0.2)) + (box(b.w + 0.1, 0.06, 0.2) | move(0, -0.8, b.d / 2 + 0.2)), "gold")')).toHaveLength(1);
   });
+  it("finds thin bands round a curved surface, where a slide along the surface's normal leaves the band", () => {
+    // Two bands 0.02 thick across a ball, at mid height and near the poles, where the ball's surface crosses them at
+    // 60 and at 18 degrees: a point slid from a band's face onto the ball moves along the ball's normal, off the band.
+    const warned = (src: string) => run(`set grid 64\nball = sphere(1) | paint("navy")\n${src}\nshow m`).warnings.filter((w) => /paints nothing/.test(w));
+    const bands = (y: number) => `m = decal(ball, (box(2.2, 0.02, 2.2) | move(0, ${y}, 0)) + (box(2.2, 0.02, 2.2) | move(0, -${y}, 0)), "gold")`;
+    expect(warned(bands(0.5))).toEqual([]);
+    expect(warned(bands(0.95))).toEqual([]);
+    // Bands just past the poles, and bands wholly inside the ball, paint nothing and are said to.
+    expect(warned(bands(1.02))).toHaveLength(1);
+    expect(warned('m = decal(ball, (box(1, 0.02, 1) | move(0, 0.5, 0)) + (box(1, 0.02, 1) | move(0, -0.5, 0)), "gold")')).toHaveLength(1);
+  });
 });
 
 describe("failing pieces() and wall() name the step (round 11)", () => {
