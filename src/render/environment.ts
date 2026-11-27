@@ -768,6 +768,12 @@ export const LATLONG_W = 128, LATLONG_H = 64;
  * (i, j) at data[(j * 128 + i) * 3], with atan2(z, x) = ((i + 0.5) / 128 − 0.5) · 2π and y = sin(((j + 0.5) / 64 −
  * 0.5) · π), so row 0 is the nadir. Beside it, what the page's procedural backdrop needs: the palette's display
  * colours and the sun or moon.
+ *
+ * And the light a surface takes diffusely, as the beauty render takes it: the radiance of DIFFUSE (no cards) as nine
+ * SH coefficients per channel, in three.js's order and basis (SphericalHarmonics3, for a LightProbe). three.js lights
+ * diffuse from its environment map too, where the cards are; measured in the studio, they would raise a surface's
+ * sky light 1.8 to 3 times (a 0.8 grey's shaded side from 128 to 178 levels), so a page matching beauty.png lights
+ * diffuse from these and takes only reflections from the map.
  */
 export function environmentLatLong(s: SkyTables): {
   width: number;
@@ -775,6 +781,8 @@ export function environmentLatLong(s: SkyTables): {
   data: Float32Array;
   /** E for `set ambient 1`: three.js's scene.environmentIntensity is this times the program's ambient. */
   ambient: number;
+  /** DIFFUSE's radiance as SH: coefficient k of channel c at [k * 3 + c], three.js's SphericalHarmonics3 order. */
+  diffuseSH: Float32Array;
   backdrop: { sky: Vec3; horizon?: Vec3; ground: Vec3; below: Vec3; disc?: { dir: Vec3; radius: number; core: Vec3; glow: Vec3; glowWidth: number; wide: Vec3; wideWidth: number }; stars: boolean };
 } {
   const W = LATLONG_W, H = LATLONG_H, SS = 4;
@@ -802,6 +810,8 @@ export function environmentLatLong(s: SkyTables): {
     height: H,
     data,
     ambient: pal.ambient,
+    // The tables hold irradiance over π (the radiance times the cosine lobe's band factors, over π); back to radiance.
+    diffuseSH: Float32Array.from(s.sh, (v, i) => v / [1, 2 / 3, 2 / 3, 2 / 3, 0.25, 0.25, 0.25, 0.25, 0.25][Math.floor(i / 3)]),
     backdrop: {
       sky: [...pal.sky],
       ...(pal.horizon ? { horizon: [...pal.horizon] as Vec3 } : {}),

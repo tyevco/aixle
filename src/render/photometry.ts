@@ -102,19 +102,22 @@ export const TONEMAP_GLSL = [
 ].join("\n");
 
 /**
- * The kernel's per-pixel flags byte. SHINY: a reflective surface (the edge pass also compares brightness next to
- * one). GLOW: the surface glows. MODEL and FLOOR: what the pixel sees (neither is the sky); only MODEL pixels bloom.
+ * The kernel's per-pixel flags byte, laid out as the visibility filter (denoise.ts) reads it, with the same names and
+ * values: what the pixel sees in the low two bits (KIND_SKY, KIND_MODEL, KIND_FLOOR), FLAG_EDGE for a pixel the edge
+ * pass sampled four times; then the kernel's own: FLAG_SHINY, a reflective surface (the edge pass also compares
+ * brightness next to one), and FLAG_GLOW, a surface that glows. Only model pixels bloom.
  */
-export const FLAG_SHINY = 1, FLAG_GLOW = 2, FLAG_MODEL = 4, FLAG_FLOOR = 8;
+export const KIND_MASK = 0x03, KIND_SKY = 0, KIND_MODEL = 1, KIND_FLOOR = 2, FLAG_EDGE = 0x04, FLAG_SHINY = 0x08, FLAG_GLOW = 0x10;
 /** The radiance above which a model pixel spills light into its neighbours (a lit white surface is KEY). */
 export const BLOOM_THRESHOLD = 1.25;
 
 /**
  * Bloom, on the linear image before the tone map, in place: what a model pixel has above BLOOM_THRESHOLD in each
  * channel is gathered at a quarter of the size, blurred by two Gaussians (1% and 3.5% of the picture, weights 0.1
- * and 0.08), and added back to every pixel, bilinearly. Only the model blooms (pixels with FLAG_MODEL): a sunset's
+ * and 0.08), and added back to every pixel, bilinearly. Only the model blooms: a sunset's
  * bright band is backdrop, and bloomed it washed the sky. A glow and a mirror's sun spill a little light round
- * themselves; a lit part keeps its edges. `hdr` is 3 floats a pixel, `flags` one byte. Fixed order throughout.
+ * themselves; a lit part keeps its edges. `hdr` is 3 floats a pixel, `flags` one byte a pixel (KIND_MODEL in its
+ * kind bits marks the model). Fixed order throughout.
  */
 export function bloom(hdr: Float32Array | Float64Array, flags: Uint8Array, size: number): void {
   const q = 4;
@@ -124,7 +127,7 @@ export function bloom(hdr: Float32Array | Float64Array, flags: Uint8Array, size:
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
       const i = y * size + x;
-      if (!(flags[i] & FLAG_MODEL)) continue;
+      if ((flags[i] & KIND_MASK) !== KIND_MODEL) continue;
       const o = (Math.floor(y / q) * w + Math.floor(x / q)) * 3;
       for (let c = 0; c < 3; c++) {
         const v = hdr[i * 3 + c] - BLOOM_THRESHOLD;

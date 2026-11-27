@@ -3,7 +3,7 @@ import {
   BACKDROP, buildEnvironment, buildSky, DEFAULT_LIGHT_DIRECTION, DIFFUSE, ENVIRONMENTS, environmentLatLong, environmentPalette, FILTERED, horizonRadiance,
   irradiance, keyDirection, lightDirection, MIRROR, prefiltered, prefilterLevels, projectSh, REFLECT, skyAt, softboxAt, type Environment, type SkyMode, type SkySampler, type SkyTables,
 } from "../src/render/environment.js";
-import { beer, bloom, BLOOM_THRESHOLD, decode, encode, FLAG_MODEL, KEY, lightAngle, pointRadius, tonemap, TONEMAP_GLSL, TONE_START, toLinear, toSrgb, untone } from "../src/render/photometry.js";
+import { beer, bloom, BLOOM_THRESHOLD, decode, encode, FLAG_EDGE, FLAG_SHINY, KIND_FLOOR, KIND_MODEL, KEY, lightAngle, pointRadius, tonemap, TONEMAP_GLSL, TONE_START, toLinear, toSrgb, untone } from "../src/render/photometry.js";
 import type { Vec3 } from "../src/core/vec.js";
 
 /** three.js's NeutralToneMapping (r162 on), as its shader chunk writes it, with exposure 1. */
@@ -163,12 +163,16 @@ describe("photometry: the constants", () => {
     expect(hdr).toEqual(before);
     // A bright model pixel does, and only by what it has above the threshold.
     const c = 40 * size + 40;
-    flags[c] = FLAG_MODEL;
+    flags[c] = KIND_MODEL | FLAG_SHINY | FLAG_EDGE;
+    // A floor pixel just as bright does not.
+    flags[20 * size + 20] = KIND_FLOOR;
+    hdr[(20 * size + 20) * 3] = 50;
     hdr[c * 3] = BLOOM_THRESHOLD + 8; hdr[c * 3 + 1] = 0.5; hdr[c * 3 + 2] = 0.5;
     bloom(hdr, flags, size);
     expect(hdr[(40 * size + 43) * 3]).toBeGreaterThan(0.5);
     expect(hdr[(40 * size + 43) * 3 + 1]).toBe(0.5);
     expect(hdr[(5 * size + 5) * 3]).toBeLessThan(0.5 + 1e-3);
+    expect(hdr[(20 * size + 23) * 3]).toBe(0.5);
   });
 });
 
@@ -432,6 +436,32 @@ describe("environments: building and caching", () => {
     }
   });
 
+  it("posts to a worker whole: a structured clone looks up the same light, and shared tables stay shared", () => {
+    const lights = [{ dir: lightDirection(-40, 55), size: 1, color: [1, 1, 1] as Vec3, power: 1 }];
+    for (const shared of [false, true]) {
+      const s = buildEnvironment("studio", { cameraAzimuth: 35, lights, shared });
+      const c = structuredClone(s);
+      if (shared) {
+        // The same memory: a write through the clone is seen by the original (and put back).
+        const before = s.levels[2][0];
+        c.levels[2][0] = 12345;
+        expect(s.levels[2][0]).toBe(12345);
+        c.levels[2][0] = before;
+      }
+      for (let i = 0; i < 50; i++) {
+        const d: Vec3 = dirOf(i * 37, -80 + i * 3.2);
+        for (const mode of [DIFFUSE, FILTERED, BACKDROP, REFLECT, MIRROR] as SkyMode[]) expect(look(c, d, mode)).toEqual(look(s, d, mode));
+        const a = [0, 0, 0], b = [0, 0, 0];
+        prefiltered(s, d[0], d[1], d[2], 0.37, 1, a, 0);
+        prefiltered(c, d[0], d[1], d[2], 0.37, 1, b, 0);
+        expect(b).toEqual(a);
+        irradiance(s, d[0], d[1], d[2], a, 0);
+        irradiance(c, d[0], d[1], d[2], b, 0);
+        expect(b).toEqual(a);
+      }
+    }
+  });
+
   it("logs each sky's build time, at most 170 ms", () => {
     const times: string[] = [];
     for (const env of ENVIRONMENTS) {
@@ -468,6 +498,16 @@ describe("environments: the viewer's map", () => {
     for (const d of [dirOf(215, 30), dirOf(215, -40), dirOf(100, 10)]) expect(maxDiff(texel(d), look(s, d, FILTERED))).toBeLessThan(0.03);
     expect(texel(dirOf(35, 81.5))[1]).toBeGreaterThan(2);
     expect(texel(dirOf(35, 30))[1]).toBeLessThan(texel(dirOf(215, 30))[1] * 0.3);
+    // three.js's LightProbe (shGetIrradianceAt, then a Lambert BRDF's 1/π) from diffuseSH is the beauty render's irradiance.
+    const threeIrradiance = (sh: Float32Array, x: number, y: number, z: number, c: number): number =>
+      (sh[c] * 0.886227 + sh[3 + c] * 2 * 0.511664 * y + sh[6 + c] * 2 * 0.511664 * z + sh[9 + c] * 2 * 0.511664 * x +
+        sh[12 + c] * 2 * 0.429043 * x * y + sh[15 + c] * 2 * 0.429043 * y * z + sh[18 + c] * (0.743125 * z * z - 0.247708) +
+        sh[21 + c] * 2 * 0.429043 * x * z + sh[24 + c] * 0.429043 * (x * x - y * y)) / Math.PI;
+    for (const n of [dirOf(35, 0), dirOf(110, -10), dirOf(215, 40), [0, 1, 0] as Vec3, [0, -1, 0] as Vec3]) {
+      const ours = [0, 0, 0];
+      irradiance(s, n[0], n[1], n[2], ours, 0);
+      for (let c = 0; c < 3; c++) expect(threeIrradiance(m.diffuseSH, n[0], n[1], n[2], c)).toBeCloseTo(ours[c], 4);
+    }
     const sunset = environmentLatLong(buildSky("sunset", 35, DEFAULT_LIGHT_DIRECTION));
     expect(sunset.backdrop.disc?.radius).toBeCloseTo(0.022, 9);
     expect(azimuthOf(sunset.backdrop.disc!.dir)).toBeCloseTo(KEY_AZ, 6);
