@@ -290,8 +290,8 @@ function coneMeetsBox(x0: number, y0: number, z0: number, x1: number, y1: number
  * used.
  */
 export class BvhTracer {
-  /** The ray register: origin x, y, z, unit direction x, y, z, tmin, tmax. */
-  readonly ray = new Float64Array(8);
+  /** The ray register: origin x, y, z, unit direction x, y, z, tmin, tmax; [8] a cone's half-angle tangent (coneClearRay). */
+  readonly ray = new Float64Array(9);
   /** The last closest hit: its distance and the barycentric weights of its triangle's second and third vertices. */
   readonly hit = new Float64Array(3);
   /** The last closest hit's triangle: the mesh's index (-1 for none), and its place in leaf order (for its glass flag). */
@@ -434,14 +434,15 @@ export class BvhTracer {
 
   /**
    * True when no triangle can meet the cone of rays from the ray register's origin about its unit direction, of half
-   * angle atan(`tanA`), over ray lengths [tmin, tmax]: every ray of the cone is then clear. Conservative (a
+   * angle atan(ray[8]), over ray lengths [tmin, tmax]: every ray of the cone is then clear. Conservative (a
    * triangle's box, grown by the cone's radius where the box ends along the axis, against the axis), so a false
-   * answer only means "trace the rays".
+   * answer only means "trace the rays". The tangent comes in the register too: as an argument it was a heap number
+   * made on every area-light call.
    */
-  coneClearRay(tanA: number): boolean {
+  coneClearRay(): boolean {
     this.rays++;
     const R = this.ray;
-    const ox = R[0], oy = R[1], oz = R[2], ax = R[3], ay = R[4], az = R[5];
+    const ox = R[0], oy = R[1], oz = R[2], ax = R[3], ay = R[4], az = R[5], tanA = R[8];
     // A ray of the cone at length t lies at least t cos(alpha) along the axis.
     const s0 = R[6] / Math.sqrt(1 + tanA * tanA), s1 = R[7];
     const aax = ax < 0 ? -ax : ax, aay = ay < 0 ? -ay : ay, aaz = az < 0 ? -az : az;

@@ -484,8 +484,8 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
     // The early out: when no triangle can meet the cone of every ray the disc could send beyond NEAR, all of them are
     // clear, and the answer is exactly what eight rays would give.
     if (earlyOut) {
-      TR[0] = px; TR[1] = py; TR[2] = pz; TR[3] = lx; TR[4] = ly; TR[5] = lz; TR[6] = from; TR[7] = far;
-      if (tracer.coneClearRay(tanA * (1 + 1e-9) + 1e-12)) { stats.earlyOut++; vis[0] *= res; vis[1] *= res; vis[2] *= res; return; }
+      TR[0] = px; TR[1] = py; TR[2] = pz; TR[3] = lx; TR[4] = ly; TR[5] = lz; TR[6] = from; TR[7] = far; TR[8] = tanA * (1 + 1e-9) + 1e-12;
+      if (tracer.coneClearRay()) { stats.earlyOut++; vis[0] *= res; vis[1] *= res; vis[2] *= res; return; }
     }
     // A frame about the centre direction (Duff et al.'s, branch-free but for the sign).
     const sg = lz >= 0 ? 1 : -1, ia = -1 / (sg + lz), ib = lx * ly * ia;

@@ -205,8 +205,8 @@ describe("bvh", () => {
     expect(limited(() => tr.closestRay(ALL))).toBe(-1);
     tr.ray.set([0, 0, 0, 0, 0.6, 0.8, 0, 10]);
     expect(limited(() => tr.occludedRay(OPAQUE))).toBe(false);
-    tr.ray.set([0, 0, 0, 0, 0.6, 0.8, 0, 10]);
-    expect(limited(() => tr.coneClearRay(0.1))).toBe(true);
+    tr.ray.set([0, 0, 0, 0, 0.6, 0.8, 0, 10, 0.1]);
+    expect(limited(() => tr.coneClearRay())).toBe(true);
     const shape = sphere(0.5);
     const rays = createRays(shape, empty, bvh, 0.01, shape.bounds, 2);
     const L = lightDirection(-40, 55);
@@ -229,7 +229,7 @@ describe("bvh", () => {
     expect(Array.from(s.triId)).toEqual(Array.from(a.triId));
   });
 
-  it("allocates nothing over 100,000 traversals", () => {
+  it("allocates nothing over 100,000 traversals (closest, any-hit and the cone test)", () => {
     v8.setFlagsFromString("--expose-gc");
     const gc = vm.runInNewContext("gc") as () => void;
     const { mesh } = meshes[2];
@@ -245,7 +245,10 @@ describe("bvh", () => {
       for (let k = 0; k < n; k++) {
         const o = (k & 4095) * 6;
         ray[0] = R[o]; ray[1] = R[o + 1]; ray[2] = R[o + 2]; ray[3] = R[o + 3]; ray[4] = R[o + 4]; ray[5] = R[o + 5]; ray[6] = 0; ray[7] = 10;
-        if (k & 1 ? tr.occludedRay(OPAQUE) : tr.closestRay(ALL) >= 0) hits++;
+        // The cone test too, with a tangent computed per call as areaVisibility's is (as an argument it was boxed).
+        ray[8] = 0.05 + R[o + 3] * R[o + 3] * 0.1;
+        const q = k % 3;
+        if (q === 0 ? tr.closestRay(ALL) >= 0 : q === 1 ? tr.occludedRay(OPAQUE) : !tr.coneClearRay()) hits++;
       }
       return hits;
     };
