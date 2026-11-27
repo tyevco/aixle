@@ -34,7 +34,7 @@ describe("beauty captions", () => {
       // beauty.png is another picture, and its caption says so rather than read as beauty_hero.png's (round 11: a door
       // rendered at --azimuth 22 over set camera hero read as lights.png ignoring the camera).
       const src = 'm = sphere(1) | move(0, 1, 0)\ncamera("hero", azimuth=-20)\nset camera hero\nshow m';
-      const opts = { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 } as const;
+      const opts = { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 };
       labels.length = 0;
       run(src, "ball.aix", dir, opts);
       expect(labels).toEqual(["m, camera hero  2 × 2 × 2"]);
