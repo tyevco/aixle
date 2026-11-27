@@ -264,6 +264,8 @@ export function importResolver(sourceName: string, log: (line: string) => void =
     const field = fieldFromSamples(samples);
     const shape = primitive(field.dist, field.bounds, 8);
     shape.sampledAt = field.cell;
+    // Trilinear samples of a distance: each axis's slope is at most 1, so the field's is at most sqrt(3).
+    shape.lipschitz = Math.sqrt(3);
     memo.set(key, shape);
     return shape;
   };

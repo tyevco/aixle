@@ -155,6 +155,17 @@ export interface Shape3 {
   loose?: boolean;
   /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
   bound?: boolean;
+  /**
+   * How far this step's own field can stretch its child's, for the mesher's narrow band (fieldBound in ops.ts):
+   * |f(p) - f(q)| <= lipschitz x the child's factor x |p - q|. Set where a warp is not an isometry (a twist, a
+   * twisted or tapered sweep) and by an import's trilinear samples; Infinity where no bound is worked out (bend,
+   * wrap), which has the mesher sample every lattice point. Undefined is 1: a distance, or a bound on one.
+   */
+  lipschitz?: number;
+  /** How much more than lipschitz x the distance this step's own field can read, in its units: displace's noise, which stops short of the far field and so jumps there. */
+  slack?: number;
+  /** Set by scale: the factor its values are its child's times, which scales a slack below it. */
+  valueScale?: number;
   /** Set by a smooth union, difference or intersection: its blend radius k, so a report can say an edge lies in its fillet. */
   blend?: number;
   /** Set by displace: the noise's feature size. Relief like this is finer than the mesh can follow, so the atlas baker writes it into a normal map. */

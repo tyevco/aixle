@@ -471,7 +471,14 @@ A scratch prototype on Aixle's lattice, reusing its QEF, measured the topology:
 
 **Cost.** Moderate: about 250 lines in surfaceNets.ts, 30 in mesh.ts and 100 in pipeline.ts, plus tests and docs. Two regula-falsi steps per crossing, in place of linear interpolation (Kobbelt et al., SIGGRAPH 2001), halved the mug's face-centre stray (0.023 to 0.013 cells) at no measured cost. If they are wanted, they can land with this regeneration.
 
-### 15. A narrow band: sample only near the surface
+### 15. A narrow band: sample only near the surface: built
+
+Built as proposed, with a guard the proposal did not have: a skipped block
+that a sampled neighbour disagrees with in sign is sampled after all. All
+72 programs mesh to the same bytes, the main extraction of all of them
+takes 115 s against 235 s, and `bend` and `wrap`, whose stretch has no
+bound worked out yet, sample densely as before. design.md, "A narrow band",
+has the rest. What follows is the proposal as it was written.
 
 **Why.** Most of a heavy render is field evaluation, and most of that is spent far from the surface. On the rope's full render (40 s of CPU), 75% of the time is in src/sdf, and the sweep's pieces alone take 45%. Lattice samples are 55 to 87% of the mesher's field calls, yet only 3 to 10% of them lie within a cell of the surface (27% on round 11's shelf, whose books are packed close).
 

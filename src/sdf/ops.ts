@@ -253,6 +253,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     cost: s.cost,
     inner: [s],
     bound: sx !== sy || sy !== sz || undefined,
+    valueScale: m,
     transform: true,
     unwarp: (x, y, z) => [x / sx, y / sy, z / sz],
     warp: (x, y, z) => [x * sx, y * sy, z * sz],
@@ -326,10 +327,17 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
   const d = s.dist, h = s.hit;
   const b = s.bounds;
   let bounds = b;
+  let reach = 0;
   if (!isEmpty(b)) {
     const r = Math.max(...boundsCorners(b).map((c) => length2(c[0], c[2])));
     bounds = { min: [-r, b.min[1], -r], max: [r, b.max[1], r] };
+    reach = r;
   }
+  // The turn shears a point's distance to the child's surface: from a point to a surface point at radius at most
+  // `reach`, a rise of h turns the surface point k h round, so the child's frame sees the matrix [[1, m], [0, 1]]
+  // with m = k reach, whose largest stretch is (m + sqrt(m^2 + 4)) / 2.
+  const m = Math.abs(k) * reach;
+  const lipschitz = (m + Math.sqrt(m * m + 4)) / 2;
   const warp = (x: number, y: number, z: number): Vec3 => {
     const a = -k * y, c = Math.cos(a), sn = Math.sin(a);
     return [c * x - sn * z, y, sn * x + c * z];
@@ -345,6 +353,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     warp: (x, y, z) => { const a = k * y, c = Math.cos(a), sn = Math.sin(a); return [c * x - sn * z, y, sn * x + c * z]; },
     loose: true,
     bound: true,
+    lipschitz,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -409,6 +418,8 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     warp,
     loose: true,
     bound: true,
+    // Near the circle's centre the unbending stretches without limit, and across the angle's cut it jumps.
+    lipschitz: Infinity,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -457,6 +468,8 @@ export function wrap(s: Shape3, r: number): Shape3 {
     warp,
     loose: true,
     bound: true,
+    // As bend: unbounded near the axis, and a jump across the angle's cut behind the shape.
+    lipschitz: Infinity,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -484,6 +497,9 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     cost: s.cost + 8,
     inner: [s],
     bound: true,
+    // The noise is up to `amp` and is dropped past 3 amp, a jump: the surface moves by up to amp, and the field reads
+    // at most (1 + the child's factor) amp more than its factor times the distance (fieldBound scales it).
+    slack: 2 * a,
     relief: size,
     feature: s.feature,
     gap: s.gap,
@@ -517,6 +533,43 @@ export function ring(s: Shape3, count: number, radius = 0, axis: Axis = "y"): Sh
     copies.push(rotate(pushed, axis === "x" ? a : 0, axis === "y" ? a : 0, axis === "z" ? a : 0));
   }
   return union(copies);
+}
+
+// --- the field's bound ---------------------------------------------------------
+
+/** How far a field can read more than the distance to its surface: |f(p)| <= lipschitz x distance + slack. */
+export interface FieldBound {
+  lipschitz: number;
+  slack: number;
+}
+
+const FIELD_BOUNDS = new WeakMap<Shape3, FieldBound>();
+
+/**
+ * The field's bound for the whole tree, for the mesher's narrow band: the largest stretch of any path through
+ * the tree (each step's own `lipschitz` times the largest of its children's: a union, a difference or a smooth
+ * blend of fields takes the largest; a rigid move, a turn or a uniform scale keeps it), and the slack a displace
+ * adds, scaled by the scales above it. Booleans and blends of fields that bound the distance still bound it, so
+ * only the steps that set a factor raise it. Memoised per shape; nothing here evaluates the field.
+ */
+export function fieldBound(s: Shape3): FieldBound {
+  const known = FIELD_BOUNDS.get(s);
+  if (known) return known;
+  let lipschitz = 1, slack = 0;
+  const kids: Shape3[] = [...(s.inner ?? s.parts ?? [])];
+  if (s.joint) kids.push(s.joint.child);
+  if (s.instanced) kids.push(s.instanced.base);
+  for (const c of kids) {
+    const b = fieldBound(c);
+    if (b.lipschitz > lipschitz) lipschitz = b.lipschitz;
+    if (b.slack > slack) slack = b.slack;
+  }
+  const out: FieldBound = {
+    lipschitz: lipschitz * (s.lipschitz ?? 1),
+    slack: slack * (s.valueScale ?? 1) + (s.slack ? s.slack * lipschitz : 0),
+  };
+  FIELD_BOUNDS.set(s, out);
+  return out;
 }
 
 // --- placement helpers -------------------------------------------------------

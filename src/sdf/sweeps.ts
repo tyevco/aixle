@@ -321,7 +321,19 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
   }, bounds, n * profile.cost);
   out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
   out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
+  if (!plain) out.lipschitz = turnedLipschitz(twistRate, taperRate, reach);
   return out;
+}
+
+/**
+ * How far a profile turned and scaled along a path can stretch its distance: along the path the turn moves the
+ * profile's nearest point, at most `reach` from the path, by twistRate x reach per unit, and the scale by taperRate
+ * x reach; across the path the profile's field is a distance. The shear that gives is at most
+ * (m + sqrt(m^2 + 4)) / 2 with m the two rates' combined push, as for twist().
+ */
+export function turnedLipschitz(twistRate: number, taperRate: number, reach: number): number {
+  const m = Math.hypot(twistRate, taperRate) * reach;
+  return (m + Math.sqrt(m * m + 4)) / 2;
 }
 
 /** Points of a helix of radius `r`, rising `h` over `turns` turns around y, `perTurn` points each turn. */

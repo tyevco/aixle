@@ -98,6 +98,56 @@ flat face; a surface bent more than that per cell keeps the gradient,
 which is smoother there. The copies share a position, so the watertight
 and pieces checks weld them back by position before counting.
 
+## A narrow band: sampling only near the surface
+
+Most of a heavy render is field evaluation, and most of the lattice is far
+from the surface: within a cell of it lie 3 to 10% of the points on the
+examples (27% on round 11's bookcase, its books packed close), yet the
+lattice was 55 to 87% of the mesher's field calls. The lattice is now
+filled by blocks of 32 points a side. A block's centre is read first; if
+it reads |d| > L (r + cell) + slack, with r the block's half-diagonal, no
+point of the block and no neighbour a lattice edge reaches from it is
+within a cell of the surface, so all of them have the centre's sign and
+the block takes the centre's value unevaluated. Otherwise the block is
+halved, down to two points a side, which are sampled. Both ends of every
+lattice edge that crosses the surface are therefore sampled exactly, so the
+mesh is the dense lattice's to the byte, and every committed render stays
+what it was (a test meshes each kind of field both ways and compares).
+
+L and slack are the field's bound (`fieldBound` in ops.ts): how much more
+than the distance the field can read. A distance, or a bound on one,
+gives L = 1, and booleans, blends, moves, turns and scales keep it. A step
+whose field stretches its child's says so with `lipschitz`: a twist by the
+largest stretch of the shear it applies to a surface point at its
+radius, (m + sqrt(m^2 + 4)) / 2 with m = k r; a twisted or tapered sweep
+the same with its rates; an import sqrt(3), from its trilinear samples.
+`displace` drops its noise past three amplitudes, a jump, so it carries a
+slack of twice its amplitude instead, scaled by any scale above it. The
+band multiplies L by 1.5 more, for the primitives whose fields are
+approximations not proven to bound the distance (an ellipsoid, a loft's
+blend, an outline's scan): without the named factors a twisted rope left
+one skipped point within a cell of the surface and a displaced tree 26, and
+at 1.5 none did on any program. `bend` and `wrap` have no bound worked
+out (near the circle's centre their unbending stretches without limit, and
+across the angle's cut it jumps), so a model with either is sampled
+everywhere, as before. A guard catches a field that reads more than its
+bound says: a skipped block that a sampled neighbour across its faces
+disagrees with in sign is sampled after all, until none does, which
+follows a surface into every block it crosses from anywhere sampled; on the
+repo's programs it never fires.
+
+Measured on the main extraction of all 72 programs in examples, dogfood
+and std at each one's own grid: the same mesh to the byte for every one,
+no block sampled after all, and 235 s of extraction down to 115 s. The
+band sampled 11 to 66% of the lattice on most (87 to 90% on a multitool
+and a sign whose parts fill their box, and all of it on the five that
+bend or wrap), and took the mixer from 20 s to 9 s, the terrace from 19 s
+to 6 s, the rope from 11 s to 5 s and the stairs from 3.5 s to 1 s. A
+cheap field gains little (the mug's lattice costs under half a
+microsecond a point either way). Every caller of the mesher gets it: the main mesh, the
+step thumbnails, the export, the poses, `pieces()`, `wall()`, `overhang()`
+and `support()`.
+
 ## One mesh, rendered and exported; one field, for the beauty render
 
 The checking views draw the extracted mesh, not the field. That was a
