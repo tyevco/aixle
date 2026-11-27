@@ -411,7 +411,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const target = evalExpr(e.target, scope);
         const i = evalExpr(e.index, scope);
         if (!Array.isArray(target)) throw new RuntimeError(`[...] indexes a list, not a ${typeName(target)}`, e.line);
-        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number`, e.line);
+        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number, not ${typeof i === "number" ? i : `a ${typeName(i)}`}${typeof i === "number" ? "; a comparison (t > 0) is 1 or 0, which picks the second or the first of two" : ""}`, e.line);
         const k = i < 0 ? target.length + i : i;
         if (k < 0 || k >= target.length) throw new RuntimeError(`index ${i} is outside the list, which has ${target.length} item${target.length === 1 ? "" : "s"}`, e.line);
         return target[k];

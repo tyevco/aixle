@@ -318,3 +318,34 @@ describe("a library's own names and its constants in aixle doc (round 11: the pl
     expect(doc).not.toMatch(/_helper|_demo/);
   });
 });
+
+describe("choosing without an if (round 11: no conditional, and a copy scaled to nothing)", () => {
+  it("chooses a number by weights, and a shape, a material or a record by indexing two with a comparison", () => {
+    const ev = run([
+      "t = -0.3",
+      "w = (t > 0) * 2 + (t <= 0) * 3",
+      "lid = [box(1), sphere(0.5) | move(5, 0, 0)][t > 0]",
+      "m = [material(\"oak\"), material(\"iron\")][t > 0] ",
+      "h = [{w: 1, h: 2}, {w: 3, h: 4}][t > 0].h",
+      "studs = empty()",
+      "for i in range(5) {",
+      "  studs = studs + [sphere(0.1) | move(i + 2, 3, 0), empty()][i == 2]",
+      "}",
+      "show lid | paint(m)",
+    ].join("\n"));
+    const get = (n: string) => ev.steps.find((st) => st.name === n)!.value;
+    expect(get("w")).toBe(3);
+    expect((get("lid") as { bounds: { max: number[] } }).bounds.max[0]).toBeCloseTo(0.5, 6);
+    expect((get("m") as { name: string }).name).toBe("m");
+    expect(get("h")).toBe(2);
+    // empty() leaves the copy out and the box where the copies are, not stretched to the origin.
+    const b = (get("studs") as { bounds: { min: number[]; max: number[] } }).bounds;
+    expect([b.min[0], b.max[0], b.min[1]]).toEqual([1.9, 6.1, 2.9]);
+  });
+  it("says what a bad index was", () => {
+    const error = (src: string): string => { try { run(src); } catch (err) { return (err as Error).message; } return "no error"; };
+    expect(error("a = [box(1), sphere(1)][2]\n")).toBe("line 1: index 2 is outside the list, which has 2 items");
+    expect(error("t = 0.5\na = [box(1), sphere(1)][t]\n")).toBe("line 2: a list index must be a whole number, not 0.5; a comparison (t > 0) is 1 or 0, which picks the second or the first of two");
+    expect(error("a = [box(1), sphere(1)][box(1)]\n")).toBe("line 1: a list index must be a whole number, not a shape");
+  });
+});

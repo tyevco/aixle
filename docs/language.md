@@ -141,6 +141,34 @@ for c in letters {
 }
 ```
 
+There is no `if`: a program is a straight-line construction (see
+`design.md`), and a choice is made with a comparison, which is a number,
+1 or 0. A number is chosen by weighting each choice with its test,
+`(t > 0) * a + (t <= 0) * b`. Any value, a shape, a material, a record
+or a string, is chosen by indexing a list of two with the test,
+`[if_false, if_true][t > 0]`: a comparison is 1 or 0, so it picks the
+second or the first. `empty()` is the shape for nothing, so a loop
+leaves one copy out with `[part, empty()][i == k]`, where a copy scaled
+to zero would collapse onto the origin and stretch the box down to it:
+
+```
+lean = 18
+gap = (lean > 0) * 0.002 + (lean <= 0) * 0.06     # a number
+cover = ["navy", "maroon"][lean > 0]              # a material
+book = [box(0.3, 2.2, 1.6), box(0.3, 2.2, 1.6) | rotate(z=lean)][lean != 0] | paint(cover)
+studs = empty()
+for i in range(6) {
+  stud = sphere(0.025) | move(-0.45 + i * 0.18, 1.15, 0.07)
+  studs = studs + [stud, empty()][i == 4]          # none behind the knocker
+}
+show book + studs
+```
+
+Both items of the list are built, whichever is picked, so a choice
+between two expensive parts costs both. An index that is not a whole
+number is an error that says what it got, and one outside the list says
+how many items there are.
+
 ## Values
 
 | Kind | Made by | Combines with |
