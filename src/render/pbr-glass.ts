@@ -9,13 +9,14 @@
  * drink, the far wall and the floor behind are what it shows. Where the exit is past the critical angle the ray
  * reflects inside and marches again, up to four times, and only then gives up on the sky behind, tinted: falling back
  * to the sky at the first such exit drew the white triangles in a tumbler's base. Every stretch inside absorbs by
- * Beer's law, σ = 10(1 − c)/reach per channel (photometry.beer), the law the shadows through glass use too.
+ * Beer's law, σ = BEER(1 − c)/reach per channel (photometry.ts), the law the shadows through glass use too.
  *
  * A glass that does not let all its light through (transmit < 1) mixes with the surface shaded as a smooth
  * dielectric of its colour, as the old renderer did; the lights' highlights are analytic, each with one occlusion
  * ray, and a directional light's is left to the traced reflection, which sees its softbox.
  *
- * Glass seen through glass is shaded to a chain of two in full quality and one in draft; past it, the sky behind,
+ * Glass seen through glass is shaded to a chain of two in full quality (the tumbler's drink, inside its glass, shows
+ * no contour bands at two, so the chain is not cut to one) and one in draft; past it, the sky behind,
  * tinted by the glass's colour.
  */
 import type { Material } from "../sdf/types.js";

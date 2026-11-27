@@ -14,15 +14,15 @@
  *   rays a pixel, filtered by denoise.ts on visibility alone);
  * - the environment (environment.ts): its SH irradiance for diffuse; for the reflection, by roughness, one traced ray
  *   (a mirror, under 0.12), four traced GGX rays in a fixed pattern (a glossy metal, under 0.35), one traced ray
- *   blended into the prefiltered sky (other glossy surfaces, under 0.55), or the prefiltered sky alone; the misses
- *   and the sky dimmed by specular occlusion, Lagarde's from the field's ambient occlusion times a cavity term, so
+ *   blended into the prefiltered sky (other glossy surfaces, under 0.55), or the prefiltered sky alone; the sky dimmed
+ *   by specular occlusion, Lagarde's from the field's ambient occlusion, and everything reflected by a cavity term, so
  *   lettering cut into polished metal stays readable;
  * - a glow gives off its own colour and lights nothing else.
  *
  * Glass is pbr-glass.ts. The floor is solved so that the open floor near the model shows the palette's floor colour
  * under the sky and every directional light, lit by each light at full strength with the area light's shadows near
- * the model, darkened under the model by the field's occlusion and a wider contact term, and faded far off into the
- * sky's horizon. It reflects nothing (a sheen on it drew a ghost of the model).
+ * the model, darkened under it by the field's occlusion and a wider contact term (the sky's light and the lights'
+ * alike), and faded far off into the sky's horizon. It reflects nothing (a sheen on it drew a ghost of the model).
  *
  * Primary visibility is the field's, primed by the mesh's depth, as the classic renderer had it. Secondary rays march
  * the field for three cells and then let the mesh's BVH skip empty space, every hit confirmed on the field (rays.ts).
