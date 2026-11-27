@@ -111,3 +111,74 @@ export function referenceMarkdown(): string {
   out.push("", "## Patterns", "", `For \`material(color, pattern, ...)\`: ${PATTERNS.join(", ")}.`, "");
   return out.join("\n");
 }
+
+/** The reference's entries by name: each `### name` section with the `## group` it sits in, as the reference prints it. */
+function referenceEntries(): Map<string, { group: string; lines: string[] }> {
+  const entries = new Map<string, { group: string; lines: string[] }>();
+  let group = "";
+  let current: string[] | undefined;
+  for (const line of referenceMarkdown().split("\n")) {
+    if (line.startsWith("## ")) { group = line.slice(3); current = undefined; continue; }
+    if (line.startsWith("### ")) { current = [line]; entries.set(line.slice(4), { group, lines: current }); continue; }
+    current?.push(line);
+  }
+  return entries;
+}
+
+/** The material presets' table, its two header lines and a row per preset, from the reference. */
+function presetRows(): { head: string[]; rows: Map<string, string> } {
+  const lines = referenceMarkdown().split("\n");
+  const at = lines.indexOf("| Name | Pattern | Feature size | Colours | Notes |");
+  const rows = new Map<string, string>();
+  for (let i = at + 2; i < lines.length && lines[i].startsWith("| "); i++) rows.set(lines[i].slice(2, lines[i].indexOf(" |", 2)), lines[i]);
+  return { head: lines.slice(at, at + 2), rows };
+}
+
+/**
+ * One entry of the reference, as `aixle doc NAME` prints it: a builtin's description, its signatures (the usage a
+ * failed call prints) and its parameters under the group it is in; a section the reference writes by hand (import,
+ * use, joint, pose, animation, light, camera, set environment); or a material preset's row of the presets table.
+ * Undefined for a name the reference does not have.
+ */
+export function referenceEntry(name: string): string | undefined {
+  const entries = referenceEntries();
+  const key = entries.has(name) ? name : [...entries.keys()].find((k) => k.toLowerCase() === name.toLowerCase() || k === `set ${name}`);
+  if (key !== undefined) {
+    const { group, lines } = entries.get(key)!;
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    return [`## ${group}`, "", ...lines, ""].join("\n");
+  }
+  const { head, rows } = presetRows();
+  const row = rows.get(name) ?? rows.get(name.toLowerCase());
+  if (row) return ["## Material presets", "", `### ${row.slice(2, row.indexOf(" |", 2))}`, "", "A material preset: use it by name in `paint()`.", "", ...head, row, ""].join("\n");
+  return undefined;
+}
+
+/** Edit distance with a swap of neighbours counted as one edit, so `cylnider` is one from `cylinder`. */
+function editDistance(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  return d[a.length][b.length];
+}
+
+/**
+ * The names the reference has entries for that are nearest a name it has none for: those that hold it or that it
+ * holds (`round` for `rounded`, `extrude` for `extru`), then those a few edits away, the fewest first.
+ */
+export function nearestNames(name: string, count = 5): string[] {
+  const q = name.toLowerCase();
+  const names = [...referenceEntries().keys(), ...presetRows().rows.keys()];
+  const scored = names
+    .map((n) => {
+      const l = n.toLowerCase();
+      const holds = q.length >= 3 && (l.includes(q) || q.includes(l));
+      return { n, holds, d: editDistance(q, l) };
+    })
+    .filter((s) => s.holds || s.d <= Math.max(2, Math.ceil(q.length / 3)));
+  scored.sort((a, b) => (a.holds === b.holds ? a.d - b.d || (a.n < b.n ? -1 : 1) : a.holds ? -1 : 1));
+  return scored.slice(0, count).map((s) => s.n);
+}

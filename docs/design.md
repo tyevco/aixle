@@ -886,7 +886,14 @@ degrees everywhere, `|` for "then", and errors that say the line, the
 function, the parameter and the usage. Overloads on the first argument's
 kind (a shape or a profile) keep one vocabulary for 2D and 3D. The builtin
 table is the reference: the interpreter binds from it and `aixle doc`
-prints it, so documentation cannot drift from behaviour.
+prints it, so documentation cannot drift from behaviour. `aixle doc
+sweep` prints the one entry, cut from that same text, where the whole
+reference is some 930 lines (an argument that was not a library used
+to be ignored and all of it printed); a name it does not have gets the
+names that hold it or are a few edits from it (`cylnder`: cylinder),
+on the failure. Retrieved documentation helps a model write code for a
+library it does not know (DocPrompting, ICLR 2023), though Aixle's
+fits in its context whole.
 
 Deliberately absent: conditionals, recursion beyond a depth guard,
 side-effects. A program is a straight-line construction with loops and

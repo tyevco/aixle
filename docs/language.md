@@ -10,7 +10,10 @@ where it is assigned: `'lean' is not defined yet: it is assigned on line
 12, after this line`.
 
 [`reference.md`](reference.md) lists every function with its signature.
-This document is the language around them.
+`aixle doc sweep` prints one of its entries (the description, every
+signature, the parameters; `aixle doc oak` a preset's row), and for a
+name it does not know, `aixle doc sweap`, the names nearest it and a
+failure. This document is the language around them.
 
 ## Coordinates and units
 

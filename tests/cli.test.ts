@@ -66,6 +66,27 @@ describe("asserts", () => {
 
 describe("libraries", () => {
   // Five CLI launches under tsx: a few seconds each on a CI runner, so this test gets its own timeout.
+  it("prints one entry of the reference by name, and the nearest names for one it lacks", { timeout: 60000 }, () => {
+    const sweep = cli("doc", "sweep");
+    expect(sweep).toMatch(/^## Paths\n\n### sweep\n\nA 2D profile carried along a path/);
+    expect(sweep).toMatch(/\n    sweep\(profile, points, smooth=0, twist=0, taper=1\) -> shape\n    sweep\(profile, curve, twist=0, taper=1\) -> shape\n/);
+    expect(sweep).toMatch(/\n- `points`: a flat list/);
+    expect(sweep).not.toMatch(/### tube|# Aixle reference/);
+    // A section the reference writes by hand, a setting by its name, a preset's row, and several at once.
+    expect(cli("doc", "joint")).toMatch(/^## Poses and animation\n\n### joint\n\nMake a part turn about a pivot/);
+    expect(cli("doc", "environment")).toMatch(/^## Lights, cameras and environments\n\n### set environment\n/);
+    expect(cli("doc", "oak")).toMatch(/### oak\n[\s\S]*\n\| oak \| wood \|/);
+    const two = cli("doc", "box", "Sphere");
+    expect(two).toMatch(/### box\n[\s\S]*\n## 3D primitives\n\n### sphere\n/);
+    // A misspelt name fails, with the names it is nearest, and the names found are still printed.
+    let err = "", out = "", status = 0;
+    try { execFileSync("npx", ["tsx", "src/cli.ts", "doc", "cylnder", "tube"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (e) { const x = e as { stderr: string; stdout: string; status: number }; err = x.stderr; out = x.stdout; status = x.status; }
+    expect(status).toBe(1);
+    expect(err).toMatch(/no entry named 'cylnder' in the reference; the nearest: cylinder/);
+    expect(out).toMatch(/^## Paths\n\n### tube\n/);
+    // With no name it is the whole reference, as committed.
+    expect(cli("doc")).toBe(readFileSync("docs/reference.md", "utf8"));
+  });
   it("documents a library from its defs and comments, and check lists what a program uses", { timeout: 60000 }, () => {
     const doc = cli("doc", "std/hardware.aix");
     expect(doc).toMatch(/^# hardware\n\nstd\/hardware: bolts, nuts/);

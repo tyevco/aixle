@@ -3,12 +3,12 @@
  *   aixle render <file.aix> [--out DIR] [--grid N] [--size N] [--no-steps] [--no-slices] [--no-turntable] [--no-export]
  *   aixle check  <file.aix>
  *   aixle fmt    <file.aix>... [--write | --check]
- *   aixle doc    [--write FILE]
+ *   aixle doc    [NAME... | lib.aix] [--write FILE]
  */
 import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, surfaceBottom, surfaceExtent, surfaceExtentDeep } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import { referenceMarkdown } from "./doc.js";
+import { nearestNames, referenceEntry, referenceMarkdown } from "./doc.js";
 import { AssertClock, assertLabel, assertsRow, BEAUTY_ONLY, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, contactLines, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
@@ -128,6 +128,7 @@ function usage(): never {
       "  aixle fmt    <file.aix>         the program in the one layout, to stdout (comments kept, meaning unchanged)",
       "  aixle fmt    <file.aix>... --write | --check   rewrite them in place, or check them: each line fmt would change, as it is and as fmt writes it, and fail",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
+      "  aixle doc    NAME [NAME...]    one entry of it: a builtin's description, signatures and parameters (or a preset's row); the nearest names for one it lacks",
       "  aixle doc    <lib.aix>          a library's defs and their comments, for a program that would use it",
     ].join("\n"),
   );
@@ -252,13 +253,29 @@ function main(argv: string[]): number {
   if (cmd === "doc") {
     // `aixle doc lib.aix` documents a library the way the reference documents builtins: each def with its
     // parameters and defaults, and the comment lines above it, so a caller places its parts without reading it.
+    // `aixle doc sweep` prints that one entry, where the whole reference is some 900 lines (an argument not ending in
+    // .aix used to be ignored, and all of it printed); a name the reference lacks gets its nearest names and a failure.
     const lib = positional[0];
-    const md = lib && lib.endsWith(".aix") ? libraryMarkdown(lib) : referenceMarkdown();
+    let md: string;
+    let missing = 0;
+    if (!lib) md = referenceMarkdown();
+    else if (lib.endsWith(".aix")) md = libraryMarkdown(lib);
+    else {
+      const found: string[] = [];
+      for (const name of positional) {
+        const entry = referenceEntry(name);
+        if (entry) { found.push(entry); continue; }
+        missing++;
+        const near = nearestNames(name);
+        console.error(`aixle doc: no entry named '${name}' in the reference${near.length ? `; the nearest: ${near.join(", ")}` : ""} (aixle doc alone prints the whole reference)`);
+      }
+      md = found.join("\n");
+    }
     if (typeof opts.write === "string") {
       writeFileSync(opts.write, md);
       console.log(`wrote ${opts.write}`);
     } else process.stdout.write(md);
-    return 0;
+    return missing ? 1 : 0;
   }
   const file = positional[0];
   if (!file) usage();
