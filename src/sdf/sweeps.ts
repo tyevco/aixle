@@ -161,6 +161,8 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
       }
       return best;
     }, bounds, n);
+    // The least of exact capsule distances, in a box grown by the radius (Shape3.boxFloor).
+    straight.boxFloor = true;
     straight.feature = 2 * r;
     return straight;
   }
@@ -196,6 +198,8 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
     }
     return best;
   }, bounds, n * 2);
+  // Quilez's round cone is exact for radii that are not negative, and the box is grown by the larger of them.
+  if (taper >= 0) out.boxFloor = true;
   out.feature = 2 * r * Math.min(1, taper);
   return out;
 }

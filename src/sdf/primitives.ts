@@ -20,12 +20,18 @@ export function primitive(dist: DistFn3, bounds: Bounds, cost = 1): Shape3 {
 
 const symmetric = (hx: number, hy: number, hz: number): Bounds => ({ min: [-hx, -hy, -hz], max: [hx, hy, hz] });
 
+/** A primitive whose field is the exact distance, so it reads at least its box distance outside its box (Shape3.boxFloor). */
+const floored = (s: Shape3, when = true): Shape3 => {
+  if (when) s.boxFloor = true;
+  return s;
+};
+
 export function empty(): Shape3 {
   return primitive(() => FAR, EMPTY_BOUNDS, 0);
 }
 
 export function sphere(r: number): Shape3 {
-  return primitive((x, y, z) => length3(x, y, z) - r, symmetric(r, r, r));
+  return floored(primitive((x, y, z) => length3(x, y, z) - r, symmetric(r, r, r)));
 }
 
 /** A box `w` wide (x), `h` tall (y), `d` deep (z), edges rounded by `round`. */
@@ -36,6 +42,9 @@ export function box(w: number, h: number, d: number, round = 0): Shape3 {
     const ox = Math.max(qx, 0), oy = Math.max(qy, 0), oz = Math.max(qz, 0);
     return length3(ox, oy, oz) + Math.min(Math.max(qx, Math.max(qy, qz)), 0) - round;
   }, symmetric(w / 2, h / 2, d / 2));
+  // Exact while the rounding fits: a radius past half a side bulges out of the box, and a negative one reads under
+  // the box's distance at its corners.
+  floored(out, round >= 0 && round <= Math.min(w, h, d) / 2);
   // A box's thinnest side is a feature it carries into any union, so a slat inside a library's bench is judged
   // against the cell like a wall is (round 6: a bench's 0.03 slats under a 0.039 cell drew no warning and left a
   // loose sliver). Only when clearly flat: a cube is not a wall.
@@ -51,6 +60,7 @@ export function cylinder(r: number, h: number, round = 0): Shape3 {
     const dx = length2(x, z) - rr, dy = Math.abs(y) - hh;
     return Math.min(Math.max(dx, dy), 0) + length2(Math.max(dx, 0), Math.max(dy, 0)) - round;
   }, symmetric(r, h / 2, r));
+  floored(out, round >= 0 && round <= Math.min(r, h / 2));
   // A disc much thinner than it is wide is a plate, a rod much longer than it is wide is a tube; see box.
   const thin = Math.min(2 * r, h), thick = Math.max(2 * r, h);
   if (thin > 0 && thin < thick * 0.25) out.feature = thin;
@@ -71,7 +81,10 @@ export function cone(r1: number, r2: number, h: number): Shape3 {
     const cbx = qx - k1x + k2x * t, cby = qy - k1y + k2y * t;
     const s = cbx < 0 && cay < 0 ? -1 : 1;
     return s * Math.sqrt(Math.min(cax * cax + cay * cay, cbx * cbx + cby * cby));
-  }, symmetric(Math.max(r1, r2), hh, Math.max(r1, r2)));  // A spike much longer than it is wide is a rod, a flat frustum a disc; judged by its wider end, like a tapered tube.
+  }, symmetric(Math.max(r1, r2), hh, Math.max(r1, r2)));
+  // Exact, but for the flat disc of equal radii, where the side's parameter is 0 / 0 and every value NaN.
+  floored(out, r1 !== r2 || h !== 0);
+  // A spike much longer than it is wide is a rod, a flat frustum a disc; judged by its wider end, like a tapered tube.
   const thin = Math.min(2 * Math.max(r1, r2), h), thick = Math.max(2 * Math.max(r1, r2), h);
   if (thin > 0 && thin < thick * 0.25) out.feature = thin;
   return out;
@@ -80,15 +93,15 @@ export function cone(r1: number, r2: number, h: number): Shape3 {
 /** A capsule of radius `r` and total height `h` (caps included) along y. */
 export function capsule(r: number, h: number): Shape3 {
   const seg = Math.max(h / 2 - r, 0);
-  return primitive((x, y, z) => {
+  return floored(primitive((x, y, z) => {
     const cy = Math.max(-seg, Math.min(seg, y));
     return length3(x, y - cy, z) - r;
-  }, symmetric(r, seg + r, r));
+  }, symmetric(r, seg + r, r)));
 }
 
 /** A torus lying flat: ring radius `R` around y, tube radius `r`. */
 export function torus(R: number, r: number): Shape3 {
-  return primitive((x, y, z) => length2(length2(x, z) - R, y) - r, symmetric(R + r, r, R + r));
+  return floored(primitive((x, y, z) => length2(length2(x, z) - R, y) - r, symmetric(R + r, r, R + r)));
 }
 
 export function ellipsoid(rx: number, ry: number, rz: number): Shape3 {
@@ -100,7 +113,7 @@ export function ellipsoid(rx: number, ry: number, rz: number): Shape3 {
 }
 
 export function octahedron(s: number): Shape3 {
-  return primitive((x, y, z) => {
+  return floored(primitive((x, y, z) => {
     const px = Math.abs(x), py = Math.abs(y), pz = Math.abs(z);
     const m = px + py + pz - s;
     let qx: number, qy: number, qz: number;
@@ -110,7 +123,7 @@ export function octahedron(s: number): Shape3 {
     else return m * 0.57735027;
     const k = Math.max(0, Math.min(s, 0.5 * (qz - qy + s)));
     return length3(qx, qy - s + k, qz - k);
-  }, symmetric(s, s, s));
+  }, symmetric(s, s, s)));
 }
 
 /** A regular `sides`-gon of circumradius `r`, extruded to height `h` along y, one flat facing +z. */
@@ -121,7 +134,7 @@ export function prism(sides: number, r: number, h: number): Shape3 {
   // polygon's angular sector, so use the exact fold: rotate into one sector.
   const sector = Math.PI / n;
   const apothem = r * Math.cos(sector);
-  return primitive((x, y, z) => {
+  return floored(primitive((x, y, z) => {
     let a = Math.atan2(x, z);
     a = ((a % (2 * sector)) + 2 * sector + sector) % (2 * sector) - sector;
     const rr = length2(x, z);
@@ -132,7 +145,7 @@ export function prism(sides: number, r: number, h: number): Shape3 {
     const d2 = ez > 0 ? length2(ex, ez) : ez;
     const dy = Math.abs(y) - hh;
     return Math.min(Math.max(d2, dy), 0) + length2(Math.max(d2, 0), Math.max(dy, 0));
-  }, symmetric(r, hh, r));
+  }, symmetric(r, hh, r)));
 }
 
 /** A plane-bounded slab of the whole space above y = 0, clipped to `size` so it has bounds. */

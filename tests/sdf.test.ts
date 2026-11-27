@@ -9,8 +9,9 @@ import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { isWatertight, meshBounds } from "../src/mesh/mesh.js";
 import * as C_ from "../src/sdf/measure.js";
 import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
-import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
+import { boundsCorners, boundsSize, isEmpty, type Shape3 } from "../src/sdf/types.js";
 import { buildSpatialIndex, cellsFor } from "../src/sdf/spatial.js";
+import { meshField } from "../src/mesh/meshSdf.js";
 import { albedo, customMaterial, materialFromString, preset } from "../src/sdf/materials.js";
 
 describe("primitives", () => {
@@ -455,10 +456,10 @@ describe("fewer evaluations, the same bits", () => {
   it("keeps the floor only through what keeps it", () => {
     const c = S.circle(0.3), e = S.ellipse(0.1, 0.3);
     expect([c, S.rect(1, 0.5), S.rect(1, 0.5, 0.2), S.polygon([0, 0, 1, 0, 0, 1]), S.ngon(6, 1), S.star(5, 1, 0.4)].every((p) => p.boxFloor)).toBe(true);
-    expect([S.union2([c, S.move2(c, 1, 0)]), S.union2([c, S.move2(c, 1, 0)], 0.2), S.difference2(S.rect(1, 1), e), S.rotate2(S.rect(1, 0.2), 30), S.scale2(c, 2, 2), S.flip2(S.move2(c, 1, 0), "x"), S.offset2(S.rect(1, 0.2), 0.1), S.shell2(c, 0.05)].every((p) => p.boxFloor)).toBe(true);
-    expect([e, S.rect(0.2, 1, 0.3), S.intersect2(S.rect(1, 1), c), S.scale2(c, 2, 1), S.union2([c, e]), S.difference2(e, c), S.move2(e, 1, 0)].some((p) => p.boxFloor)).toBe(false);
+    expect([S.union2([c, S.move2(c, 1, 0)]), S.difference2(S.rect(1, 1), e), S.rotate2(S.rect(1, 0.2), 30), S.scale2(c, 2, 2), S.flip2(S.move2(c, 1, 0), "x"), S.offset2(S.rect(1, 0.2), 0.1), S.shell2(c, 0.05)].every((p) => p.boxFloor)).toBe(true);
+    expect([e, S.rect(0.2, 1, 0.3), S.intersect2(S.rect(1, 1), c), S.scale2(c, 2, 1), S.union2([c, e]), S.difference2(e, c), S.move2(e, 1, 0), S.union2([c, S.move2(c, 1, 0)], 0.2)].some((p) => p.boxFloor)).toBe(false);
     // Each floored profile reads at least its box distance outside its box.
-    for (const p of [c, S.rect(1, 0.5, 0.2), S.star(5, 1, 0.4), S.union2([c, S.move2(c, 1, 0)], 0.2), S.rotate2(S.rect(1, 0.2), 30), S.offset2(S.rect(1, 0.2), 0.1)])
+    for (const p of [c, S.rect(1, 0.5, 0.2), S.star(5, 1, 0.4), S.union2([c, S.move2(c, 1, 0)]), S.rotate2(S.rect(1, 0.2), 30), S.offset2(S.rect(1, 0.2), 0.1), textProfile("Ag", 0.5, 0.1, 0, 2)])
       for (let k = 0; k < 2000; k++) {
         const x = rnd() * 8 - 4, y = rnd() * 8 - 4;
         const dx = Math.max(p.bounds.min[0] - x, 0, x - p.bounds.max[0]), dy = Math.max(p.bounds.min[1] - y, 0, y - p.bounds.max[1]);
@@ -478,6 +479,91 @@ describe("fewer evaluations, the same bits", () => {
         expect(Object.is(cut.dist(x, y, z), -Math.min(-board.dist(x, y, z), cutter.dist(x, y, z)))).toBe(true);
       }
     }
+  });
+});
+
+describe("fewer evaluations: where a box is no floor", () => {
+  /** How many points of an n-cubed lattice over lo..hi read other than max(base, -cutter), the difference before the cull. */
+  const differing = (base: Shape3, cutter: Shape3, lo: number[], hi: number[], n = 40): number => {
+    const cut = O.difference(base, cutter);
+    let differ = 0;
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++)
+        for (let k = 0; k <= n; k++) {
+          const x = lo[0] + ((hi[0] - lo[0]) * i) / n, y = lo[1] + ((hi[1] - lo[1]) * j) / n, z = lo[2] + ((hi[2] - lo[2]) * k) / n;
+          if (!Object.is(cut.dist(x, y, z), -Math.min(-base.dist(x, y, z), cutter.dist(x, y, z)))) differ++;
+        }
+    return differ;
+  };
+  it("reads max(base, -cutter) to the bit for every cutter whose field can read under its box distance", () => {
+    // An open sheet, imported: past its last crossing a line is counted inside, so it reads negative above its box.
+    const sheet = meshField({ positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]), indices: new Uint32Array([0, 1, 2, 0, 2, 3]) }, 16);
+    const cases: [string, Shape3, Shape3, number[], number[]][] = [
+      // Quilez's ellipsoid is not a distance: by a flat one's rim it reads 0.155 where its box is 0.224 away.
+      ["two flat ellipsoid dimples", P.box(10, 1, 10), O.union([O.move(P.ellipsoid(1, 0.1, 1), -2, 0.5, 0), O.move(P.ellipsoid(1, 0.1, 1), 2, 0.5, 0)]), [-5, -0.5, -2], [5, 0.5, 2]],
+      // Past a mitre plane a piece reads hypot(profile, cap), and the cap is the distance to a tilted plane.
+      ["a groove round a right angle", P.box(40, 40, 4), W.sweep(S.circle(0.5), [[0, 0, 0], [1, 0, 0], [1, 1, 0]]), [-20, -20, -2], [20, 20, 2]],
+      ["an extruded ellipse", P.box(20, 1, 20), S.extrude(S.union2([S.ellipse(2, 0.3), S.circle(0.2)]), 2), [-10, -0.5, -10], [10, 0.5, 10]],
+      ["a halfspace's planes", P.box(20, 20, 20), O.union([P.halfspace(2), O.move(P.sphere(1), 5, 5, 5)]), [-10, -10, -10], [10, 10, 10]],
+      // A pose's non-uniform scale is inside the joint, where the tree's walk does not see it.
+      ["a joint scaled 3:1:1", P.box(20, 20, 20), O.joint(O.union([P.sphere(1), O.move(P.sphere(0.5), 0, 1, 0)]), "j", 0, 0, 0, [0, 0, 0], undefined, [0, 0, 0], [3, 1, 1]), [-10, -10, -10], [10, 10, 10]],
+      ["an open imported mesh", O.move(P.box(4, 4, 1.15), 0.5, 0.5, -0.425), P.primitive(sheet.dist, sheet.bounds, 8), [-0.5, -0.5, -0.2], [1.5, 1.5, 0.2]],
+    ];
+    for (const [what, base, cutter, lo, hi] of cases) expect(differing(base, cutter, lo, hi), what).toBe(0);
+  });
+  it("still skips a cutter that keeps the floor: lettering, tubes, rounded boxes, a revolved polygon", () => {
+    const board = P.box(4, 1, 0.4);
+    const cutters = [
+      O.move(S.extrude(textProfile("AIXLE", 0.5), 0.3, "z"), -1.2, -0.2, 0.2),
+      W.tube([[-1, 0, 0], [0, 0.3, 0], [1, 0, 0]], 0.05, 0.5),
+      O.union([P.box(0.5, 0.2, 0.3, 0.1), O.move(P.cylinder(0.2, 0.5, 0.1), 1, 0, 0)]),
+      O.union([S.revolve(S.polygon([0, 0, 0.3, 0, 0.2, 0.4, 0, 0.4])), O.move(P.torus(0.3, 0.05), 1, 0, 0)]),
+      C.tubeCurve(C.curveThrough([[-1.5, 0, 0], [-0.5, 0.4, 0.1], [0.5, -0.4, 0], [1.5, 0, -0.1]]), 0.06, 0.5, "flat"),
+    ];
+    for (const cutter of cutters) {
+      let calls = 0;
+      const counted: Shape3 = { ...cutter, dist: (x, y, z) => { calls++; return cutter.dist(x, y, z); } };
+      const cut = O.difference(board, counted);
+      // Outside the board and well outside the cutter's box: the board's value, and the cutter is not asked.
+      expect(cut.dist(5, 3, 2)).toBe(board.dist(5, 3, 2));
+      expect(calls).toBe(0);
+      expect(differing(board, cutter, [-3, -1, -0.5], [3, 1, 0.5], 30)).toBe(0);
+    }
+    // And one that is not trusted is asked.
+    let calls = 0;
+    const e = O.union([P.ellipsoid(0.3, 0.1, 0.3), P.sphere(0.1)]);
+    O.difference(board, { ...e, dist: (x, y, z) => { calls++; return e.dist(x, y, z); } }).dist(5, 3, 2);
+    expect(calls).toBe(1);
+  });
+  it("does not take a smooth union of profiles to keep the floor: blended in a chain it reads up to k under the least", () => {
+    const bars = S.union2([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => S.move2(S.rect(2, 0.02), 0, i * 0.001)), 0.5);
+    expect(bars.boxFloor).toBeFalsy();
+    // Its sweep is the plain minimum of its pieces, as before the bound.
+    for (const path of [[[0, 0, 0], [0, 0, 1], [0.3, 0, 2]], [[0, 0, 0], [0, 0, 1], [0, 0.3, 2]], [[0, 0, 0], [0, 0, 1], [1, 0, 1.4]]] as [number, number, number][][]) {
+      const sp = W.sweepPieces(bars, path)!;
+      const now = W.sweep(bars, path).dist;
+      const lo = sp.bounds.min, hi = sp.bounds.max;
+      let differ = 0;
+      for (let i = 0; i <= 50; i++)
+        for (let j = 0; j <= 50; j++)
+          for (let k = 0; k <= 50; k++) {
+            const x = lo[0] + (hi[0] - lo[0]) * ((i / 50) * 3 - 1), y = lo[1] + (hi[1] - lo[1]) * ((j / 50) * 3 - 1), z = lo[2] + (hi[2] - lo[2]) * ((k / 50) * 3 - 1);
+            let best = 1e6;
+            for (let p = 0; p < sp.n; p++) { const bd = sp.boxDist(p, x, y, z); if (bd > 0 && bd >= best) continue; const d = sp.piece(p, x, y, z); if (d < best) best = d; }
+            if (!Object.is(now(x, y, z), best)) differ++;
+          }
+      expect(differ).toBe(0);
+    }
+  });
+  it("breaks a tie of 0 and -0 as min() does, by the order of the cell's list", () => {
+    const n = 16;
+    const bmin = new Float64Array(n * 3).fill(-1), bmax = new Float64Array(n * 3).fill(1);
+    const index = buildSpatialIndex(n, bmin, bmax, { min: [-2, -2, -2], max: [2, 2, 2] }, cellsFor(n));
+    // Every piece reads zero at the point, the last one -0, and the last one has the least bound.
+    const piece = (i: number) => (i === n - 1 ? -0 : 0);
+    const bound = (i: number) => -1 - i;
+    const boxDist = () => 0;
+    for (const p of [[0, 0, 0], [0.5, -0.5, 0.25], [-0.9, 0.9, -0.9]]) expect(Object.is(index.minNearest(p[0], p[1], p[2], piece, bound, boxDist, 1e6), index.min(p[0], p[1], p[2], piece, boxDist, 1e6))).toBe(true);
   });
 });
 

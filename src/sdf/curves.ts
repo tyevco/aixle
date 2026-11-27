@@ -344,6 +344,9 @@ export function tubeCurve(curve: Curve, r: number, taper = 1, cap: "round" | "fl
     }
     return d;
   }, boundsGrow(curve.bounds, reach), curve.segments * COST_PER_SEGMENT);
+  // The search's point is on the curve (Newton's t is clamped to the segment), which lies in its control points' box,
+  // and the radius is never past the reach the box is grown by: at least the box's distance outside it (Shape3.boxFloor).
+  out.boxFloor = true;
   out.feature = 2 * r * Math.min(1, taper);
   // A curve bent tighter than the tube is thick crosses itself on the inside of the bend: a crease no sheet shows
   // and open edges the report can only place "in the step alone" (round 6: a chair's backrest hoop, whose agent

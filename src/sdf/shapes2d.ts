@@ -182,9 +182,9 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
     return d;
   }, bounds, live.reduce((c, s) => c + s.cost, 0));
   if (k <= 0) out.parts = live;
-  // The least of fields that keep their boxes' floor keeps the union box's; a blend reads at most k/4 under it and
-  // its box is grown by k/2.
-  if (live.every((s) => s.boxFloor)) out.boxFloor = true;
+  // The least of fields that keep their boxes' floor keeps the union box's. A blend does not: chained over the parts
+  // it reads up to k under the least of them (ten bars blended at 0.5 read 0.36 under), past the k/2 the box grows.
+  if (k <= 0 && live.every((s) => s.boxFloor)) out.boxFloor = true;
   for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) { out.feature = s.feature; out.featureAt = s.featureAt; }
   for (const s of live) if (s.gap !== undefined && (out.gap === undefined || s.gap < out.gap)) { out.gap = s.gap; out.gapWhat = s.gapWhat; }
   return out;
@@ -301,6 +301,9 @@ export function extrude(profile: Shape2, h: number, axis: ExtrudeAxis = "y"): Sh
         ? (x: number, y: number, z: number) => inner(d(x, y), z)
         : (x: number, y: number, z: number) => inner(d(-z, y), x);
   const out = primitive(dist, bounds, profile.cost);
+  // Outside the slab or the profile's box the value is hypot of the two parts, each at least its box distance when
+  // the profile reads at least its own (Shape3.boxFloor).
+  if (profile.boxFloor) out.boxFloor = true;
   out.feature = profile.feature;
   if (profile.featureAt) {
     // The profile's point at mid-thickness, laid as the extrusion lays the profile.
@@ -328,6 +331,9 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     // An outline's runs on the axis are inside the solid once it is spun, so they are no surface (see Shape2.revolveDist).
     const da = offset === 0 && profile.revolveDist ? profile.revolveDist : d;
     const full = primitive((x, y, z) => da(length2(x, z) - offset, y), bounds, profile.cost);
+    // The radius past the profile's reach is at least the distance to the square round the circle it spins in; an
+    // outline's run on the axis left out of revolveDist only makes the distance larger.
+    if (profile.boxFloor) full.boxFloor = true;
     full.feature = profile.feature;
     // The profile's point, on the side the profile is drawn on (+x); a full revolve has it all the way round.
     if (profile.featureAt) { full.featureAt = [profile.featureAt[0] + offset, profile.featureAt[1], 0]; full.featureProfile = { profile, at: profile.featureAt }; }
@@ -352,6 +358,8 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     const d2 = d(inPlane - offset, y);
     return d2 > 0 ? length2(d2, off) : off > 0 ? off : d2;
   }, bounds, profile.cost);
+  // Past an end face the value is the distance to the profile's box laid on that face, which lies in the box.
+  if (profile.boxFloor) out.boxFloor = true;
   out.feature = profile.feature;
   // A wedge starts at +z: the profile's point at its first face.
   if (profile.featureAt) { out.featureAt = [0, profile.featureAt[1], profile.featureAt[0] + offset]; out.featureProfile = { profile, at: profile.featureAt }; }

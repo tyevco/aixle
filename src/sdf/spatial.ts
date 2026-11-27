@@ -192,16 +192,19 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
         bounds[s - s0] = b;
         if (b < least) { least = b; first = s; }
       }
+      // min() keeps the first of equal values in the list's order, which decides 0 against -0; so does this, out of
+      // order, by keeping the slot that gave the best and letting an equal value from an earlier slot take it.
+      let at = s1;
       if (first >= 0) {
         const d = piece(items[first], x, y, z);
-        if (d < best) best = d;
+        if (d < best) { best = d; at = first; }
       }
       for (let s = s0; s < s1; s++) {
         if (s === first) continue;
         const b = bounds[s - s0];
         if (b > 0 && b >= best) continue;
         const d = piece(items[s], x, y, z);
-        if (d < best) best = d;
+        if (d < best || (d === best && s < at)) { best = d; at = s; }
       }
       return beyond(c, x, y, z, piece, boxDist, bound, best);
     },

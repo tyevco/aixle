@@ -156,6 +156,15 @@ export interface Shape3 {
   /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
   bound?: boolean;
   /**
+   * Set on a leaf (a shape with no inner or parts) whose field is known to read at least its distance from its box
+   * everywhere outside the box, as a distance does: the exact primitives, a tube, and an extrusion or a revolve of a
+   * profile with Shape2.boxFloor. A difference skips such a cutter outside its box (boxFloored in ops.ts). Not an
+   * ellipsoid, whose field is an approximation that reads 0.155 by a flat one's rim where its box is 0.224 away; a
+   * halfspace's planes; a sweep, whose pieces read the distance to a tilted mitre plane past it; nor an import,
+   * whose open mesh reads inside above its box. A leaf without it is never trusted to.
+   */
+  boxFloor?: boolean;
+  /**
    * How far this step's own field can stretch its child's, for the mesher's narrow band (fieldBound in ops.ts):
    * |f(p) - f(q)| <= lipschitz x the child's factor x |p - q|. Set where a warp is not an isometry (a twist, a
    * twisted or tapered sweep) and by an import's trilinear samples; Infinity where no bound is worked out (bend,

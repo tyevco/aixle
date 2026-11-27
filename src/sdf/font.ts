@@ -287,6 +287,9 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     }
     return Math.sqrt(best) - half;
   }, bounds, n);
+  // The distance to the strokes, each inside the box of its ends grown by half the weight, so at least the box's
+  // distance outside it (Shape2.boxFloor): an engraving's lettering is a cutter a difference may skip.
+  out.boxFloor = true;
   out.feature = weight;
   if (arcSpan) out.arcSpan = arcSpan;
   // The narrowest counter: about 2 grid units between stroke centres for a lowercase e or a, 2.8 for capitals and

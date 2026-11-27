@@ -147,20 +147,25 @@ const CUT_CULL_COST = 2;
 
 /**
  * Whether a field is known to read at least its box distance everywhere outside its box: the floor union()'s cull
- * rests on, and difference()'s. A distance does, and so do the hard unions and differences, moves, turns, uniform
- * scales, offsets and shells of fields that do. A field marked as only a bound on the distance (`bound`: a twist, a
- * bend or a wrap, a non-uniform scale, a displacement, a loft, a blend) is not trusted to (measured: a wrapped
- * inscription read under its box distance at 6 lattice points of round 10's ring), nor is an intersection, whose box
- * is the overlap of its operands' boxes while its field is only the larger of their fields. Memoised per shape.
+ * rests on, and difference()'s. A leaf is trusted only when it says so (Shape3.boxFloor: the exact primitives, tubes,
+ * extrusions and revolves of profiles that keep the floor), since an ellipsoid, a halfspace, a sweep past a mitre and
+ * an open import all read under their boxes (measured: an import's open sheet flipped the sign at 3173 of 68921
+ * lattice points under the cull). Above the leaves the hard unions and differences, moves, turns, uniform scales,
+ * offsets, shells, paints and anchors of trusted fields keep it. A field marked as only a bound on the distance
+ * (`bound`: a twist, a bend or a wrap, a non-uniform scale, a displacement, a loft, a blend) is not trusted (a wrapped
+ * inscription read under its box distance at 6 lattice points of round 10's ring), nor an intersection, whose box is
+ * the overlap of its operands' boxes while its field is only the larger of their fields, nor a joint a pose scales
+ * unevenly, whose scale sits inside it where `inner` does not lead. Memoised per shape.
  */
 const FLOORED = new WeakMap<Shape3, boolean>();
 const INTERSECTIONS = new WeakSet<Shape3>();
 function boxFloored(s: Shape3): boolean {
   const known = FLOORED.get(s);
   if (known !== undefined) return known;
-  let ok = !s.bound && !INTERSECTIONS.has(s);
-  if (ok) for (const c of s.inner ?? s.parts ?? []) if (!boxFloored(c)) { ok = false; break; }
-  if (ok && s.joint) ok = boxFloored(s.joint.child);
+  const kids = s.inner ?? s.parts ?? [];
+  let ok = !s.bound && !INTERSECTIONS.has(s) && (kids.length > 0 || s.joint !== undefined || s.instanced !== undefined || s.boxFloor === true);
+  if (ok) for (const c of kids) if (!boxFloored(c)) { ok = false; break; }
+  if (ok && s.joint) ok = s.joint.scale[0] === s.joint.scale[1] && s.joint.scale[1] === s.joint.scale[2] && boxFloored(s.joint.child);
   if (ok && s.instanced) ok = boxFloored(s.instanced.base);
   FLOORED.set(s, ok);
   return ok;
