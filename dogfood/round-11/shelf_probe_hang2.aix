@@ -1,0 +1,9 @@
+# Probe: overlap() does not return for a box leaning 18 degrees with its top
+# corner on the face of an upright box (also with both boxes round=0.02,
+# which leaves 0.005 between them); 0.005 apart without rounding, it returns
+# 0 in 0.4 s.
+prev = box(0.30, 2.45, 1.9) | move(0.15, 1.225, 0)
+lean = box(0.34, 2.5, 1.9) | move(0.17, 1.25, 0) | rotate(z=18) | move(0.30 + 2.5 * sin(18), 0, 0)
+show prev + lean
+assert clearance(lean, prev) > -0.001, "apart"
+assert overlap(lean, prev) < 0.0001, "no overlap"

@@ -1,0 +1,8 @@
+# Probe: overlap() does not return. A box grounded and set on a board whose
+# top face is 0.8 only up to floating point (0.8 - 0.2 / 2 + 0.1). Without
+# the ground(), or with the board moved to y = 0.7 written as a literal, it
+# returns 0 in 0.4 s.
+board = box(7.68, 0.2, 2.94) | move(0, 0.8 - 0.2 / 2, 0.03)
+bk = box(0.35, 2.55, 1.7) | move(0, 2.55 / 2, 0) | ground() | move(-2, 0.8, 0.3)
+show board + bk
+assert overlap(bk, board) < 0.0001, "resting"

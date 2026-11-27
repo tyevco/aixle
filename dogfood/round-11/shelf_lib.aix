@@ -1,0 +1,103 @@
+# shelf_lib: a parametric bookcase, the books on it and the bookends that
+# hold them. One unit is 10 cm (a decimetre); y is up and the front is +z.
+# Every part's parameters are one record, so a call says what each number is:
+#   a case     {w, d, t, plinth, back}   outer width and depth, board
+#                                        thickness, kick-board height, back
+#                                        panel thickness
+#   a spacing  {count, gap}              book-bearing shelves, clear height
+#                                        above each
+#   a book     {w, h, d, color, tilt}    thickness along x, height, depth
+#                                        front to back, cover colour, lean in
+#                                        degrees (+ left, - right, 90 flat)
+#   a bookend  {w, h, d, mat}            foot length, height, depth, material
+# The case is built in place: centred on x = 0 and z = 0, standing on y = 0.
+# A book and a bookend are built at the origin standing on y = 0, spine or
+# face to +z; their comments say which edge the origin is on.
+
+case_default = {w: 8, d: 3, t: 0.2, plinth: 0.6, back: 0.1}
+spacing_default = {count: 3, gap: 2.85}
+book_default = {w: 0.35, h: 2.2, d: 1.7, color: "navy", tilt: 0}
+bookend_default = {w: 0.7, h: 1.7, d: 1.5, mat: "marble"}
+
+# How far a board or a panel is set into the part it meets, so they join.
+sink = 0.04
+side_wood = material("oak", scale=0.3)
+board_wood = material("oak", scale=0.3, axis="x")
+page_paper = "#efe6cf"
+
+# The outer height of a case with these shelves: plinth, a board under each gap, the gaps, and the top.
+def case_height(c, s) = c.plinth + (s.count + 1) * c.t + s.count * s.gap
+
+# The y of the top face of shelf i: 0 is the bottom board, s.count the top of the case.
+def shelf_top(c, s, i) = c.plinth + c.t + i * (s.gap + c.t)
+
+# Board i in place (0 is the bottom board, s.count the top), grain along x, set into both sides and the back.
+def shelf_board(c, s, i) =
+  box(c.w - 2 * c.t + 2 * sink, c.t, c.d - c.back + sink)
+  | paint(board_wood)
+  | move(0, shelf_top(c, s, i) - c.t / 2, (c.back - sink) / 2)
+
+# Both side panels in place, full height and depth, grain up.
+def sides(c, s) =
+  box(c.t, case_height(c, s), c.d)
+  | paint(side_wood)
+  | move(c.w / 2 - c.t / 2, case_height(c, s) / 2, 0)
+  | mirror("x")
+
+# The back panel in place, between the sides from the floor to the top, set into both sides.
+def back_panel(c, s) =
+  box(c.w - 2 * c.t + 2 * sink, case_height(c, s), c.back)
+  | paint(side_wood)
+  | move(0, case_height(c, s) / 2, -c.d / 2 + c.back / 2)
+
+# The kick board under the bottom shelf, set 0.1 back from the front edge.
+def kick(c) =
+  box(c.w - 2 * c.t + 2 * sink, c.plinth + sink, c.t)
+  | paint(board_wood)
+  | move(0, (c.plinth + sink) / 2, c.d / 2 - 0.1 - c.t / 2)
+
+# The whole case: sides, back, kick board and s.count + 1 boards (the last is the top).
+def case(c, s) =
+  sides(c, s) + back_panel(c, s) + kick(c)
+  + (shelf_board(c, s, 0) | array(s.count + 1, 0, s.gap + c.t, 0))
+
+# The page block's surface on the top, bottom and fore-edge, inset 0.03 from each cover; centred like the cover.
+def page_region(b) = box(b.w - 0.06, b.h + 0.2, b.d + 0.06) | move(0, 0, -0.07)
+
+# Two gold bands across the spine, near the head and the foot.
+def band_region(b) =
+  (box(b.w + 0.1, 0.06, 0.2) | move(0, b.h * 0.36, b.d / 2))
+  + (box(b.w + 0.1, 0.06, 0.2) | move(0, -b.h * 0.36, b.d / 2))
+
+# A closed book centred on the origin: cover colour, pages showing at the edges, banded spine to +z.
+def cover(b) =
+  decal(decal(box(b.w, b.h, b.d, round=0.02) | paint(b.color), page_region(b), page_paper), band_region(b), "gold")
+
+# A book standing on y = 0, spine to +z, centred in z. Its origin is the edge it stands on: the bottom-left
+# edge (x = 0 its left cover) when upright or leaning left (tilt > 0), the bottom-right edge when leaning
+# right (tilt < 0). tilt 90 lays it on its left cover, its top towards -x, so it spans x = -h..0.
+def book(b) = stand({...book_default, ...b})
+
+# The work of book(), on a record with every field filled in.
+def stand(b) =
+  cover(b)
+  | move(b.w / 2 - b.w * (b.tilt < 0), b.h / 2, 0)
+  | rotate(z=b.tilt)
+  | ground()
+
+# A bookend: a quarter-round block w long and h tall, d deep, standing on y = 0 and centred in z. Its flat
+# face is on x = 0 facing -x, so it holds books on its left; flip("x") holds books on its right.
+def bookend(e) =
+  extrude(ellipse(e.w, e.h) & (rect(e.w, e.h) | move(e.w / 2, e.h / 2)), e.d, "z")
+  | paint(e.mat)
+
+# The plate: a two-shelf case 4 wide with an upright, a leaning and a flat book on its bottom shelf, and a bookend.
+demo_case = {...case_default, w: 4}
+demo_spacing = {count: 2, gap: 2.85}
+demo_y = shelf_top(demo_case, demo_spacing, 0)
+demo_end = bookend(bookend_default) | flip("x") | move(-1.05, demo_y, 0)
+demo_upright = book({color: "maroon"}) | move(-0.99, demo_y, 0)
+demo_lean = book({color: "teal", tilt: 20}) | move(0.172, demo_y, 0)
+demo_flat = book({color: "olive", tilt: 90}) | move(1, shelf_top(demo_case, demo_spacing, 1), 0)
+plate = case(demo_case, demo_spacing) + demo_upright + demo_lean + demo_flat + demo_end
+show plate

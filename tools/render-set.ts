@@ -14,8 +14,8 @@ import { run } from "../src/pipeline.js";
 export interface RenderSetOptions {
   /** Only these names (file names without .aix); empty for all. */
   only?: string[];
-  /** Skip files whose name ends with this (probes are kept next to the models but not rendered). */
-  skipSuffix?: string;
+  /** Skip files whose name matches this (probes are kept next to the models but not rendered). */
+  skip?: RegExp;
   /** Write the sheet and the beauty render only, not slices and steps. */
   sheetAndBeautyOnly?: boolean;
 }
@@ -35,7 +35,7 @@ function programs(dir: string, prefix = ""): string[] {
 export function renderSet(srcDir: string, outDir: string, label: string, opts: RenderSetOptions = {}): void {
   mkdirSync(outDir, { recursive: true });
   const files = programs(srcDir)
-    .filter((f) => !opts.skipSuffix || !f.endsWith(opts.skipSuffix))
+    .filter((f) => !opts.skip || !opts.skip.test(f))
     .filter((f) => !opts.only?.length || opts.only.includes(f.replace(/^.*\//, "").replace(/\.aix$/, "")) || opts.only.includes(f.replace(/\.aix$/, "").replace(/\//g, "_")));
   for (const file of files) {
     // A program in a subfolder keeps the folder in its render's name, so round-2/frog and round-3/frog do not collide.
