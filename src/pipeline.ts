@@ -376,6 +376,9 @@ export function thinParts(evaluation: Evaluation, cellSize: number, grid: number
     const ss = boundsSize(st.value.bounds);
     const t = Math.min(ss[0], ss[1], ss[2]);
     if (t > 0 && t < cellSize * thin) {
+      // Thin only because a part already named is (two copies of a rod side by side): one thin part, named once.
+      const f0 = st.value.feature;
+      if (f0 !== undefined && Math.abs(f0 - t) <= 1e-9 * Math.max(1, t) && reportedSources.has(sourceKey(evaluation, st.value))) continue;
       const m = thinMember(evaluation, step);
       out.push({ step: st.name, member: m.made, text: `'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell${m.made ? ` (${m.made})` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).` });
       // Its own feature is settled too, or the union above it would repeat the warning under its own name
@@ -451,7 +454,11 @@ export function geometrySteps(evaluation: Evaluation): Set<string> {
     if (n.instanced) walk(n.instanced.base);
   };
   for (const r of roots) walk(r);
-  for (const st of evaluation.steps) if (isShape3(st.value) && reachable.has(st.value)) out.add(st.name);
+  // A hard union read by a larger one is folded into its list, so the step is no node of the tree, only its parts
+  // are: it is geometry when they all are (round 11: slats gathered in a loop, `m = slats + top`, lost their thin
+  // warning to the whole model once the loop's own `slat` was no step).
+  const folded = (v: Shape3) => !!v.parts?.length && v.parts.every((p) => reachable.has(p));
+  for (const st of evaluation.steps) if (isShape3(st.value) && (reachable.has(st.value) || folded(st.value))) out.add(st.name);
   return out;
 }
 

@@ -306,11 +306,12 @@ describe("thin parts, named and placed", () => {
     // Two copies of one part are one thin part, named once.
     const twice = thinWarnings(check("rod = cylinder(0.02, 1)\nrods = rod + (rod | move(0.5, 0, 0))\nm = rods + box(1, 1, 1)"), 0.05, 64);
     expect(twice.filter((x) => /0.04 (units thin|thick)/.test(x))).toHaveLength(1);
-    // So are the copies one call makes, each a new node: slats a loop builds are named once, at the slat, and not
-    // again under the output (known by node alone, the first slat was a part of its own and 'm' was warned too).
+    // So are the copies one call makes, each a new node: slats a loop builds are named once, at the step that
+    // gathers them (the loop's own `slat` is no step), and not again under the output, which folds that union in.
     const loop = check("slats = empty()\nfor i in range(0, 5) {\n  slat = box(0.02, 1, 0.3) | move(i * 0.2, 0.5, 0)\n  slats = slats + slat\n}\nm = slats + (box(1.2, 0.1, 0.4) | move(0.4, 1.05, 0))");
     const lw = thinWarnings(loop, 0.03, 40);
     expect(lw.filter((x) => /0.02 (units thin|thick)/.test(x))).toHaveLength(1);
+    expect(lw.join()).toMatch(/^'slats' \(line 1\) has a part .* only 0.02 thick, .*made by box\(\) at line 3/);
     expect(lw.join()).not.toMatch(/'m'/);
     // And a def's part in two steps that each call it, in the 1.2-to-2-cell note: one chair named, not each.
     const chairs = check("def chair(x) = box(0.5, 1, 0.05) | move(x, 0.5, 0)\nc1 = chair(0)\nc2 = chair(1)\nm = c1 + c2 + (box(2, 0.2, 2) | move(0.5, -0.1, 0))");
