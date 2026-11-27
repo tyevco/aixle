@@ -77,14 +77,21 @@ const PRESET_LIST: Material[] = [
   ...Object.entries(NAMED_COLORS)
     .filter(([n]) => n !== "clay" && n !== "grey")
     .map(([n, c]) => make(n, { color: c })),
-  make("gold", { color: hex("#e2b13c"), metal: 1, rough: 0.3 }),
-  make("silver", { color: hex("#d4d6da"), metal: 1, rough: 0.25 }),
-  make("copper", { color: hex("#c67a4a"), metal: 1, rough: 0.35 }),
-  make("bronze", { color: hex("#a5772f"), metal: 1, rough: 0.4 }),
-  make("steel", { color: hex("#8e949c"), metal: 1, rough: 0.45 }),
-  make("iron", { color: hex("#5c5e62"), metal: 1, rough: 0.6 }),
-  make("brass", { color: hex("#c9a54a"), metal: 1, rough: 0.35 }),
-  make("chrome", { color: hex("#e8eaee"), metal: 1, rough: 0.1 }),
+  // A metal's colour is its reflectance at normal incidence (F0), as glTF means it: measured values, linear, written
+  // in sRGB. Gold is Lagarde's ("Feeding a physically based shading model", 2011: linear 1.000, 0.766, 0.336);
+  // silver, copper, iron, brass (C260 cartridge brass) and chrome (chromium) are Real-Time Rendering 4th ed., table
+  // 9.2; steel is stainless steel from physicallybased.info (refractiveindex.info's data: 0.669, 0.639, 0.598). No
+  // table measures bronze: it is the mean of the copper and brass rows, the alloys either side of it (0.933, 0.708,
+  // 0.481). A metal reads by what it reflects, so a measured F0 is pale: the beauty render's environment gives it its
+  // colour, and the GLB means the same.
+  make("gold", { color: hex("#ffe39d"), metal: 1, rough: 0.3 }),
+  make("silver", { color: hex("#fcfaf5"), metal: 1, rough: 0.25 }),
+  make("copper", { color: hex("#fad1c2"), metal: 1, rough: 0.35 }),
+  make("bronze", { color: hex("#f7dbb8"), metal: 1, rough: 0.4 }),
+  make("steel", { color: hex("#d6d1cb"), metal: 1, rough: 0.45 }),
+  make("iron", { color: hex("#c6c6c8"), metal: 1, rough: 0.6 }),
+  make("brass", { color: hex("#f5e4ae"), metal: 1, rough: 0.35 }),
+  make("chrome", { color: hex("#c4c5c4"), metal: 1, rough: 0.1 }),
   make("wood", { color: hex("#b07d4a"), color2: hex("#7a4f2a"), pattern: "wood", scale: 0.25, rough: 0.7 }),
   make("oak", { color: hex("#c69a63"), color2: hex("#8f6539"), pattern: "wood", scale: 0.3, rough: 0.7 }),
   make("walnut", { color: hex("#6b4327"), color2: hex("#3e2414"), pattern: "wood", scale: 0.22, rough: 0.6 }),
@@ -114,7 +121,7 @@ const PRESET_LIST: Material[] = [
   make("snow", { color: hex("#f8f9fb"), color2: hex("#dfe6ef"), pattern: "noise", scale: 0.3, rough: 0.9 }),
   make("lava", { color: hex("#f06a1a"), color2: hex("#3a1a10"), pattern: "marble", scale: 0.8, rough: 0.6 }),
   // Iron with patches of rust: the patches are rough and not metal, so it bakes a metallic-roughness map.
-  make("rust", { color: hex("#5c5e62"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
+  make("rust", { color: hex("#c6c6c8"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
 ];
 
 export const PRESETS: ReadonlyMap<string, Material> = new Map(PRESET_LIST.map((m) => [m.name, m]));

@@ -125,11 +125,22 @@ export const STUDIO = {
   /** The walls on the camera's side, above the horizon, reaching their darkness `wallsRise` of dy up. */
   walls: 0.92,
   wallsRise: 0.02,
+  /** How far round the walls reach: from none to full darkness as a look's horizontal part along the camera's way runs from the first to the second. */
+  wallsAcross: [-0.3, 0.35],
   /** The ceiling: the gradient at the zenith, as a share of the sky colour (reached from dy = 0.4 up). */
   zenith: 0.2,
   /** The flag on the floor on the camera's side, below the horizon, reaching its darkness `flagRise` of −dy down. */
-  flag: 0.6,
+  flag: 0.8,
   flagRise: 0.02,
+  flagAcross: [-0.15, 0.3],
+  /**
+   * The flag lifted on the key's side, by this share, as a look's horizontal part towards the key runs from 0 to
+   * `flagKeyTo`: the floor the key lights is bright, and a metal turned to the camera and the key (a medal's face, which
+   * reflects the floor at the camera's side towards the key) reflects it; a shaded side faces away from the key and
+   * still sees the flag.
+   */
+  flagKey: 1,
+  flagKeyTo: 0.6,
   /**
    * The model's shadow on the floor: the ground away from the key darkened by `strength`, as the look's horizontal
    * part along the key's way (horizontal, away from it) runs from `from` to `to`, reached `rise` of −dy down (the far
@@ -194,6 +205,8 @@ export interface SkyTables {
   fz: number;
   walls: number;
   wallsRise: number;
+  wallsAcross0: number;
+  wallsAcross1: number;
   /** The ground's darkening opposite the key (the model's shadow), its profile, and the key's horizontal way, away from it. */
   shadow: number;
   shadowFrom: number;
@@ -205,6 +218,10 @@ export interface SkyTables {
   zenith: number;
   flag: number;
   flagRise: number;
+  flagAcross0: number;
+  flagAcross1: number;
+  flagKey: number;
+  flagKeyTo: number;
   /** The backdrop above the horizon by dy, GRAD_N + 1 entries of linear RGB. */
   grad: Float64Array;
   /** The backdrop below the horizon (linear RGB). */
@@ -334,7 +351,7 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   cardArr.set(cards);
   const discArr = f64(disc.length, shared);
   discArr.set(disc);
-  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
+  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
 }
 
 /** Each light's softbox: direction, the squared chord (2 − 2cos) where its edge starts and ends, and its radiance. */
@@ -608,7 +625,7 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     if (lit) {
       let m = 1;
       if (s.zenith !== 1 && dy > 0.4) m += (s.zenith - 1) * ((dy - 0.4) / 0.6);
-      if (s.walls > 0) m *= 1 - s.walls * smooth(-0.3, 0.35, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
+      if (s.walls > 0) m *= 1 - s.walls * smooth(s.wallsAcross0, s.wallsAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
       r *= m; g *= m; b *= m;
     }
   } else if (!lit) {
@@ -618,7 +635,9 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     const u = smooth(0, HORIZON_BLEND, -dy);
     r = G[0] + (s.below[0] - G[0]) * u; g = G[1] + (s.below[1] - G[1]) * u; b = G[2] + (s.below[2] - G[2]) * u;
     if (s.flag > 0) {
-      const m = 1 - s.flag * smooth(-0.15, 0.3, dx * s.fx + dz * s.fz) * smooth(0, s.flagRise, -dy);
+      let k = s.flag * smooth(s.flagAcross0, s.flagAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.flagRise, -dy);
+      if (s.flagKey > 0) k *= 1 - s.flagKey * smooth(0, s.flagKeyTo, -(dx * s.sx + dz * s.sz));
+      const m = 1 - k;
       r *= m; g *= m; b *= m;
     }
     if (s.shadow > 0) {

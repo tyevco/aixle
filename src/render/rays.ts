@@ -18,6 +18,7 @@
 import type { Mesh } from "../mesh/mesh.js";
 import { boundsGrow, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
 import { ALL, BvhTracer, GLASS, OPAQUE, type BvhData } from "./bvh.js";
+import { BEER } from "./photometry.js";
 
 /** Cells every secondary ray marches the field before the BVH takes over. */
 export const NEAR_CELLS = 3;
@@ -179,7 +180,7 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
   const vis = new Float64Array(3);
   const abs = new Float64Array(3);
   const stats: RayStats = { closest: 0, nearHits: 0, bvhHits: 0, confirmed: 0, trusted: 0, nearSteps: 0, windowSteps: 0, occlusion: 0, area: 0, areaRays: 0, earlyOut: 0, farRays: 0, glassSegments: 0, inside: 0, insideSteps: 0, hits: 0 };
-  const sigmaOf = (m: Material, c: number): number => (m.transmit > 0 ? (10 * (1 - m.color[c])) / reach : 8 / reach);
+  const sigmaOf = (m: Material, c: number): number => (m.transmit > 0 ? (BEER * (1 - m.color[c])) / reach : 8 / reach);
 
   // Registers. RY: the ray of closest() and occlusion(), and areaVisibility()'s centre ray: origin, direction, unused,
   // tMax. FR: one far shadow ray: origin, direction, from, to. IR: an inside march's origin and direction, then its
@@ -275,13 +276,22 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
     return 0;
   }
 
-  /** insideMarch() on IR: 1 with IR[6] the exit's distance and `abs` filled, 0 when the solid is not left. */
+  /**
+   * insideMarch() on IR: 1 with IR[6] the exit's distance and `abs` filled, 0 when the solid is not left.
+   *
+   * The absorption is integrated stretch by stretch: hit() is asked every three cells, and where two samples differ
+   * the boundary between them is found by bisection, so each material's sigma counts for the length the ray spends in
+   * it. Averaging the samples instead counted a stretch by how many samples happened to fall in it, a whole sample more
+   * or less from one ray to the next: a tumbler's base, where the ray crosses the glass floor into the drink, drew a
+   * stripe every few rows.
+   */
   function insideCore(entry: Material): number {
     stats.inside++;
     const ox = IR[0], oy = IR[1], oz = IR[2], dx = IR[3], dy = IR[4], dz = IR[5];
     let t = cell * 0.25;
-    let sr = 0, sg = 0, sb = 0, n = 0;
-    let prevT = 0, nextHit = 0;
+    // The sigma of the stretch being crossed, where it began, and sigma times length so far.
+    let cr = 0, cg = 0, cb = 0, seg = 0, ar = 0, ag = 0, ab = 0, have = false;
+    let prevT = 0, nextHit = 0, lastHit = 0;
     const tEnd = reach * 2;
     for (let i = 0; i < 400 && t < tEnd; i++) {
       const x = ox + dx * t, y = oy + dy * t, z = oz + dz * t;
@@ -291,11 +301,22 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
         // A zero the field touches without crossing (two coincident faces of a union; a revolved outline's axis did
         // before round 11): still inside a cell on, so it is no exit (the tumbler's drink drew contour bands from it).
         if (-dist(x + dx * cell, y + dy * cell, z + dz * cell) > hitEps) { prevT = t; t += cell; continue; }
+        // Nor is a sliver of outside thinner than two cells that the ray runs along (a liquid's floor a hundredth
+        // above its glass's, as the tumbler's is): inside a cell away on either side of it, across it.
+        {
+          const e = cell * 0.5;
+          let gx = dist(x + e, y, z) - dist(x - e, y, z), gy = dist(x, y + e, z) - dist(x, y - e, z), gz = dist(x, y, z + e) - dist(x, y, z - e);
+          const gl = Math.sqrt(gx * gx + gy * gy + gz * gz);
+          if (gl > 0) {
+            gx *= cell / gl; gy *= cell / gl; gz *= cell / gl;
+            if (-dist(x + gx, y + gy, z + gz) > hitEps && -dist(x - gx, y - gy, z - gz) > hitEps) { prevT = t; t += cell; continue; }
+          }
+        }
         // The exit, refined between the last inside sample and this one, so a coarse step does not move it.
         let a = prevT, b = t;
         for (let k = 0; k < 5; k++) { const m = (a + b) / 2; if (-dist(ox + dx * m, oy + dy * m, oz + dz * m) < hitEps) b = m; else a = m; }
-        if (n === 0) { sr = sigmaOf(entry, 0); sg = sigmaOf(entry, 1); sb = sigmaOf(entry, 2); n = 1; }
-        abs[0] = (sr / n) * b; abs[1] = (sg / n) * b; abs[2] = (sb / n) * b;
+        if (!have) { cr = sigmaOf(entry, 0); cg = sigmaOf(entry, 1); cb = sigmaOf(entry, 2); }
+        abs[0] = ar + cr * (b - seg); abs[1] = ag + cg * (b - seg); abs[2] = ab + cb * (b - seg);
         IR[6] = b;
         return 1;
       }
@@ -303,7 +324,22 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       if (t >= nextHit) {
         stats.hits++;
         const m = shape.hit(x, y, z).mat;
-        sr += sigmaOf(m, 0); sg += sigmaOf(m, 1); sb += sigmaOf(m, 2); n++;
+        const s0 = sigmaOf(m, 0), s1 = sigmaOf(m, 1), s2 = sigmaOf(m, 2);
+        if (!have) { cr = s0; cg = s1; cb = s2; have = true; }
+        else if (s0 !== cr || s1 !== cg || s2 !== cb) {
+          // Where the stretch ended, between the last sample (in it) and this one (past it).
+          let a = lastHit, b = t;
+          for (let k = 0; k < 4; k++) {
+            const mid = (a + b) / 2;
+            stats.hits++;
+            const q = shape.hit(ox + dx * mid, oy + dy * mid, oz + dz * mid).mat;
+            if (sigmaOf(q, 0) === cr && sigmaOf(q, 1) === cg && sigmaOf(q, 2) === cb) a = mid; else b = mid;
+          }
+          const tb = (a + b) / 2;
+          ar += cr * (tb - seg); ag += cg * (tb - seg); ab += cb * (tb - seg);
+          seg = tb; cr = s0; cg = s1; cb = s2;
+        }
+        lastHit = t;
         nextHit = t + cell * 3;
       }
       prevT = t;

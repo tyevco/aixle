@@ -50,7 +50,7 @@ export interface GlassCore {
   /** Shade the surface at depth as an opaque smooth dielectric of the glass's colour, without tracing, into COL at depth. */
   shadeOpaque(depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, r: number, g: number, b: number, rough: number, dx: number, dy: number, dz: number): void;
   /** Add each light's GGX highlight on a smooth dielectric, times k, with one occlusion ray each, into COL at depth; directional lights are left out when `traced`. */
-  highlights(depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k: number, traced: boolean): void;
+  highlights(depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k: number, traced: boolean, reuse: boolean): void;
 }
 
 /** The glass shader over a kernel's core: shade(depth, hit point, the field's normal there, the material, the ray, its linear colour) into COL at depth. */
@@ -126,6 +126,6 @@ export function createGlass(core: GlassCore): (depth: number, px: number, py: nu
     } else for (let k = 0; k < W; k++) GO[o + k] = 0;
     for (let k = 0; k < W; k++) COL[o + k] = (GT[o + k] * (1 - fres) + GR[o + k] * fres) * tr + GO[o + k] * (1 - tr);
     // The lights' highlights on the glass, which the mix above scaled by its transmission.
-    core.highlights(depth, px, py, pz, nx, ny, nz, dx, dy, dz, m.rough, tr, traced);
+    core.highlights(depth, px, py, pz, nx, ny, nz, dx, dy, dz, m.rough, tr, traced, tr < 1);
   };
 }

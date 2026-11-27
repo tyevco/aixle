@@ -230,6 +230,8 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const N3 = new Float64Array(3), TMP = new Float64Array(3), AOK = new Float64Array(2), TM = new Float64Array(3);
   // The direct light of the last area-lit point (a primary surface or the floor) per light, and its visibility.
   const DL = new Float64Array(NL * 3), VL = new Float64Array(NL);
+  // Per depth and light, the visibility a secondary shade traced (3 channels), and whether it traced one.
+  const LVIS = new Float64Array(MAXD * NL * 3), LVOK = new Uint8Array(MAXD * NL);
   // The pixel and subsample being drawn, which place the area light's rays.
   let pixX = 0, pixY = 0, pixS = 0;
   let glassChain = 0;
@@ -254,17 +256,30 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     AOK[0] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
   };
 
-  /** The darkening under a part standing on the floor: occlusion over a larger reach than the surface's, up to 19% of the model's diagonal. */
-  const contact = (px: number, pz: number): number => {
-    let occ = 0, wsum = 0;
+  /**
+   * The darkening under a part standing on the floor: occlusion over a larger reach than the surface's, up to 19% of
+   * the model's diagonal. `hd` is the floor point's distance from the model's box across the floor: a tap no higher
+   * than that is clear of the model, so it is not asked.
+   */
+  const CONTACT_WSUM = 1 + 1 / 2 + 1 / 3 + 1 / 4;
+  const contact = (px: number, pz: number, hd: number): number => {
+    let occ = 0;
     for (let i = 1; i <= 4; i++) {
       const h = modelSize * 0.012 * i * i;
+      if (h <= hd) continue;
       const d = dist(px, floorY + h, pz);
       occ += Math.max(0, h - d) / h / i;
-      wsum += 1 / i;
     }
-    return 1 - 0.75 * Math.min(1, occ / wsum);
+    return 1 - 0.75 * Math.min(1, occ / CONTACT_WSUM);
   };
+  /** How far a floor point lies from the model's box across the floor: no tap above it lower than this can meet the model. */
+  const mx0 = model.min[0], mx1 = model.max[0], mz0 = model.min[2], mz1 = model.max[2];
+  const across = (x: number, z: number): number => {
+    const ax = mx0 - x > 0 ? mx0 - x : x - mx1 > 0 ? x - mx1 : 0, az = mz0 - z > 0 ? mz0 - z : z - mz1 > 0 ? z - mz1 : 0;
+    return Math.sqrt(ax * ax + az * az);
+  };
+  /** The tallest of the field's occlusion taps: a floor point farther than this from the model's box is open. */
+  const AO_REACH = cell * (1.5 * 25 * 0.4 + 1);
 
   /**
    * The surface at a hit into SURF at depth: linear base colour, metal, rough, glow and the normal (tilted by a bump).
@@ -391,6 +406,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     for (let i = 0; i < NL; i++) {
       const q = i * LS;
       if (area) { DL[i * 3] = 0; DL[i * 3 + 1] = 0; DL[i * 3 + 2] = 0; VL[i] = 1; }
+      LVOK[depth * NL + i] = 0;
       if (!LP[q + 15]) continue;
       const att = lightAt(i, px, py, pz);
       const lx = L3[0], ly = L3[1], lz = L3[2], far = L3[3];
@@ -421,6 +437,10 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
         occlusionTo(i, lpx, lpy, lpz);
         const so = o + LP[q + 13];
         COL[so] += tr * rays.vis[0]; COL[so + 1] += tg * rays.vis[1]; COL[so + 2] += tb * rays.vis[2];
+        // Kept for glass's highlights at this point, which need the same ray.
+        const lv = (depth * NL + i) * 3;
+        LVIS[lv] = rays.vis[0]; LVIS[lv + 1] = rays.vis[1]; LVIS[lv + 2] = rays.vis[2];
+        LVOK[depth * NL + i] = 1;
       }
     }
 
@@ -482,8 +502,12 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     if (glow > 0) { COL[o] += br * glow * GLOW; COL[o + 1] += bg * glow * GLOW; COL[o + 2] += bb * glow * GLOW; }
   };
 
-  /** Each light's GGX highlight on a smooth dielectric (glass), times k, with one occlusion ray, into COL at depth; directional lights left to a traced reflection. */
-  const highlights = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k0: number, traced: boolean): void => {
+  /**
+   * Each light's GGX highlight on a smooth dielectric (glass), times k, with one occlusion ray, into COL at depth;
+   * directional lights left to a traced reflection. With `reuse`, the glass's own surface was just shaded at this
+   * point and depth, and a light's ray it traced is taken rather than traced again.
+   */
+  const highlights = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k0: number, traced: boolean, reuse: boolean): void => {
     const o = depth * W;
     const alpha = Math.max(0.03, rough) ** 2, a2 = alpha * alpha;
     const nv = Math.max(1e-3, -(nx * dx + ny * dy + nz * dz));
@@ -504,9 +528,14 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       const D = aL2 / (Math.PI * dd * dd);
       const vis = 0.5 / (nl * Math.sqrt(nv * nv * (1 - a2) + a2) + nv * Math.sqrt(nl * nl * (1 - a2) + a2));
       const F = 0.04 + 0.96 * Math.pow(1 - vh, 5);
-      occlusionTo(i, px + nx * cell, py + ny * cell, pz + nz * cell);
       const kk = F * D * vis * Math.PI * nl * att * k0;
       const so = o + LP[q + 13];
+      if (reuse && LVOK[depth * NL + i]) {
+        const lv = (depth * NL + i) * 3;
+        COL[so] += LP[q + 10] * kk * LVIS[lv]; COL[so + 1] += LP[q + 11] * kk * LVIS[lv + 1]; COL[so + 2] += LP[q + 12] * kk * LVIS[lv + 2];
+        continue;
+      }
+      occlusionTo(i, px + nx * cell, py + ny * cell, pz + nz * cell);
       COL[so] += LP[q + 10] * kk * rays.vis[0]; COL[so + 1] += LP[q + 11] * kk * rays.vis[1]; COL[so + 2] += LP[q + 12] * kk * rays.vis[2];
     }
   };
@@ -532,14 +561,21 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     const near = away >= reach ? 0 : away <= reach * 0.66 ? 1 : (reach - away) / (reach * 0.34);
     let ao = 1;
     if (near > 0) {
-      occlusion(fx, floorY, fz, 0, 1, 0);
-      ao = 1 + (AOK[0] * (withContact ? contact(fx, fz) : 1) - 1) * near;
+      const hd = across(fx, fz);
+      const k = (hd < AO_REACH ? (occlusion(fx, floorY, fz, 0, 1, 0), AOK[0]) : 1) * (withContact ? contact(fx, fz, hd) : 1);
+      ao = 1 + (k - 1) * near;
     }
     // The flag: the floor on the camera's side, beyond the bottom of the frame, is dark, as the sky's ground there is.
     let fl = 1;
     if (SKY.flag > 0) {
-      const sd = (fx - centre[0]) * SKY.fx + (fz - centre[2]) * SKY.fz;
-      if (sd > flagFrom) fl = 1 - SKY.flag * smoothstep(flagFrom, flagFrom + modelSize * 0.35, sd);
+      const cx = fx - centre[0], cz = fz - centre[2];
+      const sd = cx * SKY.fx + cz * SKY.fz;
+      if (sd > flagFrom) {
+        let k = SKY.flag * smoothstep(flagFrom, flagFrom + modelSize * 0.35, sd);
+        // Lifted on the key's side, as the sky's flag is.
+        if (SKY.flagKey > 0) { const cl = Math.sqrt(cx * cx + cz * cz) || 1; k *= 1 - SKY.flagKey * smoothstep(0, SKY.flagKeyTo, -(cx * SKY.sx + cz * SKY.sz) / cl); }
+        fl = 1 - k;
+      }
     }
     const ar = albR * fl, ag = albG * fl, ab = albB * fl;
     COL[o] = ar * UP[0] * ao; COL[o + 1] = ag * UP[1] * ao; COL[o + 2] = ab * UP[2] * ao;
@@ -554,7 +590,11 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       const ly = L3[1];
       if (ly <= 0) { if (area) VL[i] = 0; continue; }
       if (LP[q + 6]) att *= near;
-      const k = ly * att;
+      // Under a part standing on the floor the lights take its occlusion and the contact term too: the area rays see
+      // the light's disc past the part, but not the darkening a base makes where it meets the floor (without it the
+      // floor under the lantern's base was 45% brighter than the old renderer's; with it, it is darker than the open
+      // floor round it by the old renderer's share, 0.67 against 0.68).
+      const k = ly * att * ao;
       const tr = ar * LP[q + 10] * k, tg = ag * LP[q + 11] * k, tb = ab * LP[q + 12] * k;
       if (area) {
         if (near > 0) {
@@ -571,6 +611,15 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       }
     }
   };
+
+  /**
+   * How far the floor at a distance `away` from the model's box has faded into the sky at the horizon: not at all
+   * within the reach the lights are traced to, fully three reaches beyond it. Measured from the model, not the eye: a
+   * fade by the distance from the camera (the old renderer's) took a third of a shadow's depth away right beside the
+   * model, where the floor is a third of the way to the reach of four the fade ran to.
+   */
+  const farFade = (away: number): number => (away <= reach ? 0 : away >= reach * 4 ? 1 : (away - reach) / (reach * 3));
+  const HZ = new Float64Array(W);
 
   /**
    * Follow a ray from o along d and put what it sees in COL at depth: the model (shaded), the floor, or the sky (a
@@ -609,7 +658,15 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       if (tf > 0) {
         if (geometryOnly) return false;
         const fx = ox + dx * tf, fz = oz + dz * tf;
-        floorAt(depth, fx, fz, boundsDistance(model, fx, floorY, fz), false, false);
+        const away = boundsDistance(model, fx, floorY, fz);
+        floorAt(depth, fx, fz, away, false, false);
+        // Far off it fades into the sky at the horizon as this ray would see it there, as the camera's floor does.
+        const fade = farFade(away);
+        if (fade > 0) {
+          const hl = Math.sqrt(dx * dx + dz * dz) || 1;
+          skyInto(dx / hl, 0, dz / hl, see, HZ, 0);
+          for (let k = 0; k < W; k++) COL[o + k] += (HZ[k] - COL[o + k]) * fade;
+        }
         return true;
       }
     }
@@ -681,9 +738,10 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     if (dy < -1e-6) {
       const t = (floorY - ey) / dy;
       const fx = ex + dx * t, fz = ez + dz * t;
-      floorAt(0, fx, fz, boundsDistance(model, fx, floorY, fz), true, true);
+      const away = boundsDistance(model, fx, floorY, fz);
+      floorAt(0, fx, fz, away, true, true);
       // The far floor fades into the sky just above the horizon, so the two meet without a seam.
-      const fade = Math.min(1, t / (reach * 4));
+      const fade = farFade(away);
       if (fade > 0) {
         horizonRadiance(SKY, dx, dz, TMP, 0);
         for (let k = 0; k < W; k++) COL[k] *= 1 - fade;
