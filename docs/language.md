@@ -1059,7 +1059,11 @@ them; the render's "Surface extent" row reads the mesh and does not. `aixle rend
 also writes the warnings into `report.md` and counts them on the sheet's title bar,
 and beside `turntable.png` writes `turntable.apng`, the same turn as an
 animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).
-Warnings cover: a shape computed but never assigned; a step that is not part
+Warnings cover: a shape computed but never assigned; a comment after code
+that holds what reads as the line's next step (`eye = torus(0.05, 0.015)
+| rotate(z=90)   # clears the ring | move(pivot[0], ...)`: a `|` and a
+call of a builtin, a def or a used library's, which is ignored with the
+rest of the comment, so the part stays where it was); a step that is not part
 of the output (a step an assert, a decal or a camera reads is a region
 and is not warned about; `check` tags each step `(cut)`, `(region)` or
 `(not in output)`); an empty output (a difference that removed everything, an

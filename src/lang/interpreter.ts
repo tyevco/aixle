@@ -239,6 +239,30 @@ export function assertPassLine(a: AssertResult): string {
   return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
 }
 
+/**
+ * A comment after code that holds what reads as the line's next step, `| move(...)` with a builtin, a def of the
+ * program or a used library's name: everything after the `#` is ignored, so the step is not applied, and nothing
+ * else would say so (round 11: a comment pasted mid-line left a knocker's eye at the origin, and every promise held).
+ */
+export function commentCodeWarnings(program: Program): string[] {
+  const defs = new Set<string>(), libs = new Set<string>();
+  for (const st of program.body) {
+    if (st.type === "def") defs.add(st.name);
+    if (st.type === "use") libs.add(st.alias ?? st.path.replace(/\.aix$/, "").replace(/^.*\//, ""));
+  }
+  const out: string[] = [];
+  for (const c of program.trailingComments ?? []) {
+    for (const m of c.text.matchAll(/\|\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\(/g)) {
+      const name = m[1], dot = name.indexOf(".");
+      if (!(dot < 0 ? BUILTIN_MAP.has(name) || defs.has(name) : libs.has(name.slice(0, dot)))) continue;
+      const marker = c.text.startsWith("//") ? "//" : "#";
+      out.push(`line ${c.line}: the comment holds code (| ${name}(...)): everything after ${marker} is ignored, so it is not applied; end the comment before the code, or move the comment to the line above`);
+      break;
+    }
+  }
+  return out;
+}
+
 const MAX_LOOP = 20000;
 const MAX_DEPTH = 64;
 
@@ -296,7 +320,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let witness: string | undefined;
   // The shown shape, set once the program has run; a root for placing a measured step.
   let output: Shape3 | undefined;
-  const warnings: string[] = [...(program.warnings ?? [])];
+  const warnings: string[] = [...(program.warnings ?? []), ...commentCodeWarnings(program)];
   const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
   // "pose:joint" for every pose value given as one number rather than a triple.

@@ -51,6 +51,8 @@ export interface Program {
   body: Stmt[];
   /** Things the parser noticed that are legal but probably not meant; the interpreter reports them with its own. */
   warnings?: string[];
+  /** Every comment written after code on its line, for the interpreter to read for code pasted into one. */
+  trailingComments?: { line: number; text: string }[];
 }
 
 /**

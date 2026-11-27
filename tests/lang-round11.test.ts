@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exprText, type Expr, type Stmt } from "../src/lang/ast.js";
 import { parse } from "../src/lang/parser.js";
-import { evaluate } from "../src/lang/interpreter.js";
+import { commentCodeWarnings, evaluate } from "../src/lang/interpreter.js";
 
 const run = (src: string) => evaluate(parse(src));
 /** The CLI from source, its output whether it passes or fails. */
@@ -93,5 +93,24 @@ describe("a name read before the line that assigns it (round 11: show above its 
   });
   it("says only 'not defined' for a name the file never assigns", () => {
     expect(error("show lean\n")).toBe("line 1: 'lean' is not defined");
+  });
+});
+
+describe("a comment that holds code (round 11: a move pasted after a #)", () => {
+  it("warns when a trailing comment holds | and a call of a builtin, a def or a used library's", () => {
+    const w = run("pivot = [0.28, 1.27, 0.1]\neye = torus(0.05, 0.015) | rotate(z=90)   # its hole clears the ring | move(pivot[0], pivot[1], pivot[2])\n").warnings;
+    expect(w).toContain("line 2: the comment holds code (| move(...)): everything after # is ignored, so it is not applied; end the comment before the code, or move the comment to the line above");
+    const def = commentCodeWarnings(parse("def seat(w) = box(w)\na = box(1)  // then | seat(2)\n"));
+    expect(def).toEqual(["line 2: the comment holds code (| seat(...)): everything after // is ignored, so it is not applied; end the comment before the code, or move the comment to the line above"]);
+    expect(commentCodeWarnings(parse("use \"std/hardware\" as hw\na = box(1)  # | hw.nut(0.1)\n"))).toHaveLength(1);
+  });
+  it("says nothing of a comment on its own line, a | before a word that is no call, or a name the program does not know", () => {
+    expect(commentCodeWarnings(parse("# a = box(1) | move(0, 1, 0)\na = box(1)\n"))).toEqual([]);
+    expect(commentCodeWarnings(parse("a = box(1)  # the lid | the base\n"))).toEqual([]);
+    expect(commentCodeWarnings(parse("a = box(1)  # | lift(2) by hand\n"))).toEqual([]);
+  });
+  it("fires on no program in the repo but the door's probe of this very slip", () => {
+    const hits = programs().filter((f) => commentCodeWarnings(parse(readFileSync(f, "utf8"))).length > 0);
+    expect(hits).toEqual(["dogfood/round-11/door_probe_eye.aix"]);
   });
 });

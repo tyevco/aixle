@@ -22,7 +22,7 @@
  *   record    := '{' (NAME ':' expr | '...' expr) (',' ...)* ','? '}'
  */
 import { COMPARE_OPS, exprText, type Arg, type CompareOp, type Expr, type Program, type RecordEntry, type Stmt } from "./ast.js";
-import { SyntaxError, tokenize, type Token } from "./lexer.js";
+import { SyntaxError, tokenize, type Token, type TrailingComment } from "./lexer.js";
 
 const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
 
@@ -428,7 +428,9 @@ function describe(t: Token): string {
 }
 
 export function parse(source: string): Program {
-  return new Parser(tokenize(source)).parseProgram();
+  const trailing: TrailingComment[] = [];
+  const program = new Parser(tokenize(source, trailing)).parseProgram();
+  return { ...program, trailingComments: trailing };
 }
 
 /** The program and its tokens, each with the role the parser gave it: what `aixle fmt` lays out. */
