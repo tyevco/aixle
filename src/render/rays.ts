@@ -215,8 +215,10 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
   }
 
   /**
-   * The field's zero along `reg`'s ray within [WN[0], WN[1]) by closest()'s march: 0 for none, 1 found, 2 found at
-   * the first sample with the field already negative there (the window began inside a solid); WN[2] its distance.
+   * The field's zero along `reg`'s ray within [WN[0], WN[1]) by closest()'s march: 1 found, 2 found at the first
+   * sample with the field already negative there (the window began inside a solid), with WN[2] its distance; 0 the
+   * window marched clear to its end; 3 the march gave up before its end (a ray running along a surface), with WN[2]
+   * as far as it showed the ray clear.
    */
   function windowMarch(reg: Float64Array): number {
     const ox = reg[0], oy = reg[1], oz = reg[2], dx = reg[3], dy = reg[4], dz = reg[5];
@@ -228,7 +230,8 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       if (d < hitEps) { WN[2] = t; return i === 0 && d < 0 ? 2 : 1; }
       t += d * 0.9 > hitEps ? d * 0.9 : hitEps;
     }
-    return 0;
+    WN[2] = t;
+    return t < t1 ? 3 : 0;
   }
 
   /** closest() on RY: how it was answered (0 a miss), and ST[3] the distance. */
@@ -247,19 +250,27 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       t += d * 0.9 > hitEps ? d * 0.9 : hitEps;
     }
     if (t >= tEnd) return 0;
-    // Beyond it, the mesh says where; the field says exactly, over a window of three cells either side. The march
-    // has shown [0, t) clear, but the mesh of a surface just past t may lie a little short of it, so the mesh is
-    // asked from two cells back; a triangle it finds inside the cleared stretch whose window holds no zero is the
-    // mesh's alone, and the mesh is asked again from t.
+    // Beyond it, the mesh says where; the field says exactly, over a window of three cells either side. The field
+    // has shown the ray clear up to `cleared`, but the mesh of a surface just past it may lie a little short of it,
+    // so the mesh is asked from two cells back. A triangle whose window the field marches clear to its end is the
+    // mesh's alone (a thin part's mesh is fatter than the part: on the lantern 110 of 120 such hits were rays that
+    // pass a bar's field by a tenth of a cell, and the field met nothing there): the window joins the cleared stretch
+    // and the mesh is asked again past it, so the ray goes on to what the field has behind. Only a window whose
+    // march gave up (a ray running along a surface) takes the mesh's distance on trust.
     TR[0] = ox; TR[1] = oy; TR[2] = oz; TR[3] = dx; TR[4] = dy; TR[5] = dz; TR[7] = tEnd;
-    for (let pass = 0; pass < 2; pass++) {
-      TR[6] = pass ? t : t - cell * 2;
+    let cleared = t;
+    for (let pass = 0; pass < 8; pass++) {
+      TR[6] = cleared - cell * 2;
       if (tracer.closestRay(ALL) < 0) return 0;
       stats.bvhHits++;
       const tm = TH[0];
-      WN[0] = tm - cell * 3 > t ? tm - cell * 3 : t; WN[1] = tm + cell * 3;
-      if (windowMarch(RY) > 0) { stats.confirmed++; ST[3] = WN[2]; return 2; }
-      if (tm >= t) { stats.trusted++; ST[3] = tm; return 3; }
+      WN[0] = tm - cell * 3 > cleared ? tm - cell * 3 : cleared; WN[1] = tm + cell * 3;
+      const w = windowMarch(RY);
+      if (w === 1 || w === 2) { stats.confirmed++; ST[3] = WN[2]; return 2; }
+      if (w === 3 && tm >= cleared) { stats.trusted++; ST[3] = tm; return 3; }
+      // Clear as far as the march went: at least a cell past the last, since the mesh was asked from two back.
+      cleared = WN[2];
+      if (cleared >= tEnd) return 0;
     }
     return 0;
   }
@@ -412,7 +423,7 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       // from where the near march left off.
       WN[0] = tm - cell * 3 > t ? tm - cell * 3 : t; WN[1] = tm + cell * 3;
       const w = windowMarch(FR);
-      if (w === 0) { t = tm + cell; continue; }
+      if (w === 0 || w === 3) { t = tm + cell; continue; }
       if (w === 2) {
         if (crossed > 0 || t !== start || dist(FR[0] + FR[3] * start, FR[1] + FR[4] * start, FR[2] + FR[5] * start) >= 0) { t = tm + cell; continue; }
         WN[2] = start;

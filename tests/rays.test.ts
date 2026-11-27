@@ -372,6 +372,30 @@ describe("rays against the field", () => {
   }
 });
 
+describe("closest", () => {
+  it("goes past a mesh surface the field does not have, to what the field has behind it", () => {
+    // A thin part's mesh can be fatter than its field (on the lantern, 110 of 120 mesh hits with no zero in their
+    // window were rays passing a bar by a tenth of a cell). Here the mesh is a ball of 0.55 and the field one of 0.45,
+    // with a wall behind both: a ray between the two radii meets the mesh's ball but the field's wall.
+    const wall = move(box(3, 3, 0.2), 0, 0, 1.5);
+    const field = union([sphere(0.45), wall]);
+    const nets = surfaceNets(union([sphere(0.55), wall]), { resolution: 64 });
+    const cell = nets.cellSize;
+    const rays = createRays(field, nets.mesh, buildBvh(nets.mesh), cell, field.bounds, 6);
+    for (const x of [0.47, 0.5, 0.53]) {
+      const ref = rays.fieldClosest(x, 0.01, -1.4, 0, 0, 1, 6);
+      expect(ref).toBeCloseTo(2.8, 2);
+      const t = rays.closest(x, 0.01, -1.4, 0, 0, 1, 6);
+      // Before: the mesh's ball, at about 1.2, taken on trust.
+      expect(rays.how, `x ${x}`).toBe(2);
+      expect(Math.abs(t - ref) / cell, `x ${x}`).toBeLessThan(0.05);
+    }
+    // A ray the field's ball does meet is still answered there.
+    const t = rays.closest(0.2, 0.01, -1.4, 0, 0, 1, 6);
+    expect(Math.abs(t - rays.fieldClosest(0.2, 0.01, -1.4, 0, 0, 1, 6)) / cell).toBeLessThan(0.05);
+  });
+});
+
 // ---- area lights ----
 
 /** The floor behind a unit cube lit from +z at 45 degrees: visibility down the middle of the shadow's far edge. */
