@@ -117,7 +117,7 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
 
 ### curve2
 
-A closed smooth profile through x, y pairs: the curve curve() draws, closed back to the first point, with the exact distance to it, so a revolve or an extrude has no facets at any grid. A point given twice in a row is a sharp corner, and the run between two corners is straight: give a revolve's points on the axis and the edge of a foot twice. The list may end on its first point again, which only closes it. `wall` > 0 leaves the curve open and makes the profile the band that wide centred on it, ends rounded: a vase's wall drawn as one line, revolved.
+A closed smooth profile through x, y pairs, closed back to the first point, with the exact distance to it, so a revolve or an extrude has no facets at any grid. A point given twice in a row is a sharp corner, and the run between two corners is straight: give a revolve's points on the axis and the edge of a foot twice. The list may end on its first point again, which only closes it. The tangent at a point comes from its two neighbours, each side's handle as long as that side's chord allows (a centripetal Catmull-Rom spline: the curve curve() draws when the points are evenly spaced), so a short piece beside a long one cannot loop; a run meant to be straight still ends in a corner. `wall` > 0 leaves the curve open and makes the profile the band that wide centred on it, ends rounded: a vase's wall drawn as one line, revolved.
 
     curve2(points, wall=0) -> shape2
 

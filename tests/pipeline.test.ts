@@ -235,6 +235,9 @@ describe("reference", () => {
     }
     expect(md).toMatch(/cylinder\(r, h, round=0\) -> shape/);
     expect(md).toMatch(/\| wood \| wood \|/);
+    // curve2 takes centripetal tangents, so on uneven points it is not the curve curve() draws (round 11's stand).
+    expect(md).not.toMatch(/curve2[\s\S]{0,200}the curve curve\(\) draws, closed/);
+    expect(md).toMatch(/### curve2\n\n[^\n]*centripetal Catmull-Rom/);
   });
 });
 
