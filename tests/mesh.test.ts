@@ -13,6 +13,9 @@ import { splitCreases } from "../src/mesh/creases.js";
 import { decimate } from "../src/mesh/decimate.js";
 import { weldIndices } from "../src/mesh/mesh.js";
 import { materialFromString } from "../src/sdf/materials.js";
+import * as S from "../src/sdf/sweeps.js";
+import { rect } from "../src/sdf/shapes2d.js";
+import type { Shape3 } from "../src/sdf/types.js";
 
 describe("surface nets", () => {
   const sphere = surfaceNets(P.sphere(1), { resolution: 48 });
@@ -369,5 +372,87 @@ describe("decimation", () => {
     }
     // Unchanged when already under budget.
     expect(decimate(m, 1e9)).toBe(m);
+  });
+});
+
+describe("the narrow band", () => {
+  // The same mesh to the byte from the band as from the dense lattice, for fewer field calls.
+  const same = (a: ArrayLike<number>, b: ArrayLike<number>): boolean => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  };
+  const both = (s: Shape3, resolution = 48) => {
+    const dense = surfaceNets(s, { resolution, narrow: false });
+    const band = surfaceNets(s, { resolution });
+    return { dense, band };
+  };
+  const expectSame = (s: Shape3, resolution = 48) => {
+    const { dense, band } = both(s, resolution);
+    for (const k of ["positions", "indices", "normals", "local", "materialIndex"] as const) expect(same(dense.mesh[k], band.mesh[k]), k).toBe(true);
+    expect(band.samples).toBe(dense.samples);
+    return { dense, band };
+  };
+  const bar = () => O.move(P.box(0.3, 2, 0.6), 0.2, 1, 0);
+  const cases: [string, () => Shape3][] = [
+    ["a box", () => P.box(1, 0.5, 0.8)],
+    ["spheres apart and touching", () => O.union([P.sphere(0.5), O.move(P.sphere(0.4), 0.9, 0, 0), O.move(P.sphere(0.3), -1.5, 0.4, 0)])],
+    ["a cut and a smooth blend", () => O.difference(O.union([P.box(1, 1, 1), O.move(P.sphere(0.4), 0.6, 0.6, 0)], 0.1), P.cylinder(0.25, 2))],
+    ["a twisted bar", () => O.twist(bar(), 90)],
+    ["a displaced ball, scaled", () => O.scale(O.displace(P.sphere(1), 0.08, 0.3, 2), 1.5, 1, 1)],
+    ["a twisted, tapered sweep", () => S.sweep(rect(0.3, 0.12), S.toPoints(S.helixPath(0.8, 1.5, 2), "path"), 720, 0.5)],
+  ];
+  for (const [what, make] of cases)
+    it(`meshes ${what} as the dense lattice does, sampling less of it`, () => {
+      // At 96 cells, where the band starts to pay; below that most of the lattice is near the surface anyway.
+      const { dense, band } = expectSame(make(), 96);
+      expect(band.resampled).toBe(0);
+      expect(band.evaluated).toBeLessThan(dense.evaluated * 0.8);
+    });
+
+  it("bounds a twist's and a turned sweep's stretch, and every pair of points keeps to it", () => {
+    // Deterministic pairs a cell or so apart through the lattice: the field never changes faster than its factor.
+    const check = (s: Shape3) => {
+      const L = O.fieldBound(s).lipschitz;
+      const b = s.bounds;
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+      let worst = 0;
+      for (let n = 0; n < 4000; n++) {
+        const p = [0, 1, 2].map((k) => b.min[k] - 0.5 + (b.max[k] - b.min[k] + 1) * rnd());
+        const q = p.map((v) => v + (rnd() - 0.5) * 0.2);
+        const dp = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+        worst = Math.max(worst, Math.abs(s.dist(p[0], p[1], p[2]) - s.dist(q[0], q[1], q[2])) / dp);
+      }
+      return { L, worst };
+    };
+    const tw = check(O.twist(bar(), 90));
+    expect(tw.L).toBeGreaterThan(1);
+    expect(tw.worst).toBeLessThanOrEqual(tw.L * 1.0001);
+    const sw = check(S.sweep(rect(0.3, 0.12), S.toPoints(S.helixPath(0.8, 1.5, 2), "path"), 720, 0.5));
+    expect(sw.L).toBeGreaterThan(1);
+    expect(sw.worst).toBeLessThanOrEqual(sw.L * 1.0001);
+    // A plain move, turn or union keeps a distance a distance; a bend has no bound worked out, and is sampled densely.
+    expect(O.fieldBound(O.union([O.rotate(P.box(1, 1, 1), 10, 20, 30), O.move(P.sphere(1), 2, 0, 0)])).lipschitz).toBe(1);
+    const bent = O.bend(bar(), 30);
+    expect(O.fieldBound(bent).lipschitz).toBe(Infinity);
+    const { dense, band } = expectSame(bent);
+    expect(band.evaluated).toBe(dense.evaluated);
+  });
+
+  it("carries displace's slack, scaled by the scales above it", () => {
+    const d = O.displace(P.sphere(1), 0.05, 0.3);
+    expect(O.fieldBound(d).slack).toBeCloseTo(0.1, 12);
+    expect(O.fieldBound(O.scale(d, 2, 2, 2)).slack).toBeCloseTo(0.2, 12);
+    expect(O.fieldBound(O.move(O.scale(d, 3, 1, 1), 1, 0, 0)).slack).toBeCloseTo(0.1, 12);
+  });
+
+  it("samples a skipped block after all when a field reads more than its bound says, and still meshes it right", () => {
+    // A ball whose field reads four times the distance and says nothing of it: blocks with the surface in them are
+    // skipped, and the guard finds each from its neighbours across the surface.
+    const ball = P.sphere(1);
+    const lying = P.primitive((x, y, z) => 4 * ball.dist(x, y, z), ball.bounds);
+    const { band } = expectSame(lying, 64);
+    expect(band.resampled).toBeGreaterThan(0);
   });
 });

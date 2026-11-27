@@ -26,8 +26,15 @@
  * `resolution` is the number of cells along the longest side; the cell is
  * cubic. Detail thinner than a cell is lost, so a report line says what the
  * cell size was.
+ *
+ * Only a thin shell of the lattice is near the surface (3 to 10% of the
+ * points within a cell of it, on the examples), so the lattice is filled by
+ * blocks and a block the field shows to be far from the surface takes its
+ * centre's value without being sampled (fillNarrow). The mesh is the same to
+ * the byte; the field calls are a fraction.
  */
 import { boundsGrow, boundsSize, isEmpty, type Material, type Shape3, type Bounds } from "../sdf/types.js";
+import { fieldBound } from "../sdf/ops.js";
 import type { Mesh } from "./mesh.js";
 import { splitCreases } from "./creases.js";
 
@@ -43,6 +50,8 @@ export interface NetsOptions {
   crease?: number;
   /** Extract over this box instead of the shape's bounds: a tighter box found from a coarse pass, or a close-up region. */
   bounds?: Bounds;
+  /** Sample only near the surface (the narrow band, fillNarrow), which gives the same mesh for fewer field calls. Default true; false samples every lattice point. */
+  narrow?: boolean;
 }
 
 export interface NetsResult {
@@ -50,8 +59,12 @@ export interface NetsResult {
   cellSize: number;
   dims: [number, number, number];
   samples: number;
-  /** Samples that were NaN: a sign of a zero blend radius or scale somewhere. */
+  /** Samples that were NaN: a sign of a zero blend radius or scale somewhere. Counted among the samples taken. */
   nanSamples: number;
+  /** Field calls made filling the lattice: every point when dense, the points near the surface and the block centres in the band. */
+  evaluated: number;
+  /** Blocks the band skipped and then sampled after all, because a sampled neighbour disagreed with their sign: a field that stretched more than its bound said. */
+  resampled: number;
 }
 
 export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
@@ -68,6 +81,8 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
     dims: [0, 0, 0],
     samples: 0,
     nanSamples: 0,
+    evaluated: 0,
+    resampled: 0,
   });
   const box = opts.bounds ?? shape.bounds;
   if (isEmpty(box)) return empty();
@@ -88,19 +103,9 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
   const sx = nx + 1, sy = ny + 1, sz = nz + 1;
   const field = new Float32Array(sx * sy * sz);
   const dist = shape.dist;
-  let idx = 0;
-  let nanSamples = 0;
-  for (let k = 0; k < sz; k++) {
-    const z = oz + k * cell;
-    for (let j = 0; j < sy; j++) {
-      const y = oy + j * cell;
-      for (let i = 0; i < sx; i++) {
-        const v = dist(ox + i * cell, y, z);
-        if (v !== v) nanSamples++;
-        field[idx++] = v;
-      }
-    }
-  }
+  const band = opts.narrow === false ? undefined : narrowBand(shape);
+  const filled = band ? fillNarrow(dist, field, sx, sy, sz, ox, oy, oz, cell, band) : fillDense(dist, field, sx, sy, sz, ox, oy, oz, cell, 0, sx - 1, 0, sy - 1, 0, sz - 1);
+  const nanSamples = filled.nan;
   const at = (i: number, j: number, k: number): number => field[(k * sy + j) * sx + i];
 
   const sharp = opts.sharp !== false;
@@ -322,5 +327,125 @@ export function surfaceNets(shape: Shape3, opts: NetsOptions): NetsResult {
     dims: [nx, ny, nz],
     samples: field.length,
     nanSamples,
+    evaluated: filled.evaluated,
+    resampled: filled.resampled,
   };
+}
+
+/** What filling the lattice cost: field calls, NaN samples among them, and blocks the band skipped then sampled after all. */
+interface Filled {
+  evaluated: number;
+  nan: number;
+  resampled: number;
+}
+
+/**
+ * The factor the band divides a block centre's reading by, and the slack it takes off first: the tree's own bound
+ * (fieldBound) times 1.5, a margin for the primitives whose fields are approximations not proven to bound the
+ * distance (an ellipsoid, a loft's blend, an outline's scan). Undefined where the tree has no bound (a bend, a
+ * wrap): the lattice is then sampled everywhere, as it always was.
+ */
+function narrowBand(shape: Shape3): { lipschitz: number; slack: number } | undefined {
+  const b = fieldBound(shape);
+  if (!Number.isFinite(b.lipschitz) || !Number.isFinite(b.slack)) return undefined;
+  return { lipschitz: b.lipschitz * 1.5, slack: b.slack };
+}
+
+function fillDense(
+  dist: Shape3["dist"], field: Float32Array, sx: number, sy: number, sz: number, ox: number, oy: number, oz: number, cell: number,
+  i0: number, i1: number, j0: number, j1: number, k0: number, k1: number,
+): Filled {
+  let nan = 0;
+  for (let k = k0; k <= k1; k++) {
+    const z = oz + k * cell;
+    for (let j = j0; j <= j1; j++) {
+      const y = oy + j * cell;
+      let idx = (k * sy + j) * sx + i0;
+      for (let i = i0; i <= i1; i++) {
+        const v = dist(ox + i * cell, y, z);
+        if (v !== v) nan++;
+        field[idx++] = v;
+      }
+    }
+  }
+  return { evaluated: (i1 - i0 + 1) * (j1 - j0 + 1) * (k1 - k0 + 1), nan, resampled: 0 };
+}
+
+/**
+ * The lattice filled near the surface only. Blocks of 32 points a side are read at their centre; a block whose
+ * centre reads |d| > L (r + cell) + slack, r its half-diagonal, holds no point within a cell of the surface, so
+ * every point in it, and every neighbour a lattice edge reaches from it, has the centre's sign: its points take the
+ * centre's value unevaluated. Other blocks are halved, down to 2 points a side sampled densely. Both ends of every
+ * lattice edge that crosses the surface are therefore sampled exactly, and the mesh is the dense lattice's to the
+ * byte. As a guard against a field that stretches more than its bound says, a skipped block whose sign a sampled
+ * neighbour across its faces disagrees with is sampled after all, until none does; a surface crossing into a
+ * skipped block from anywhere sampled is found that way.
+ */
+function fillNarrow(
+  dist: Shape3["dist"], field: Float32Array, sx: number, sy: number, sz: number, ox: number, oy: number, oz: number, cell: number,
+  band: { lipschitz: number; slack: number },
+): Filled {
+  const out: Filled = { evaluated: 0, nan: 0, resampled: 0 };
+  const skipped: number[] = [];
+  const dense = (i0: number, i1: number, j0: number, j1: number, k0: number, k1: number): void => {
+    const f = fillDense(dist, field, sx, sy, sz, ox, oy, oz, cell, i0, i1, j0, j1, k0, k1);
+    out.evaluated += f.evaluated;
+    out.nan += f.nan;
+  };
+  const visit = (i0: number, j0: number, k0: number, size: number): void => {
+    const i1 = Math.min(i0 + size - 1, sx - 1), j1 = Math.min(j0 + size - 1, sy - 1), k1 = Math.min(k0 + size - 1, sz - 1);
+    // A half of a block at the lattice's far edge can lie wholly past it.
+    if (i0 > i1 || j0 > j1 || k0 > k1) return;
+    if (size <= 2) { dense(i0, i1, j0, j1, k0, k1); return; }
+    const v = dist(ox + ((i0 + i1) / 2) * cell, oy + ((j0 + j1) / 2) * cell, oz + ((k0 + k1) / 2) * cell);
+    out.evaluated++;
+    const r = (cell * Math.sqrt((i1 - i0) * (i1 - i0) + (j1 - j0) * (j1 - j0) + (k1 - k0) * (k1 - k0))) / 2;
+    if (v === v && Math.abs(v) - band.slack > band.lipschitz * (r + cell)) {
+      const f = Math.fround(v);
+      for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) field.fill(f, (k * sy + j) * sx + i0, (k * sy + j) * sx + i1 + 1);
+      skipped.push(i0, i1, j0, j1, k0, k1, v < 0 ? 1 : 0);
+      return;
+    }
+    const h = size >> 1;
+    for (let dk = 0; dk < 2; dk++) for (let dj = 0; dj < 2; dj++) for (let di = 0; di < 2; di++) visit(i0 + di * h, j0 + dj * h, k0 + dk * h, h);
+  };
+  const B = 32;
+  for (let k = 0; k < sz; k += B) for (let j = 0; j < sy; j += B) for (let i = 0; i < sx; i += B) visit(i, j, k, B);
+
+  // The guard: a skipped block's faces against the points just outside them.
+  const live = new Uint8Array(skipped.length / 7).fill(1);
+  const neg = (i: number, j: number, k: number): boolean => field[(k * sy + j) * sx + i] < 0;
+  const disagrees = (b: number): boolean => {
+    const o = b * 7;
+    const i0 = skipped[o], i1 = skipped[o + 1], j0 = skipped[o + 2], j1 = skipped[o + 3], k0 = skipped[o + 4], k1 = skipped[o + 5];
+    const s = skipped[o + 6] === 1;
+    for (let k = k0; k <= k1; k++)
+      for (let j = j0; j <= j1; j++) {
+        if (i0 > 0 && neg(i0 - 1, j, k) !== s) return true;
+        if (i1 < sx - 1 && neg(i1 + 1, j, k) !== s) return true;
+      }
+    for (let k = k0; k <= k1; k++)
+      for (let i = i0; i <= i1; i++) {
+        if (j0 > 0 && neg(i, j0 - 1, k) !== s) return true;
+        if (j1 < sy - 1 && neg(i, j1 + 1, k) !== s) return true;
+      }
+    for (let j = j0; j <= j1; j++)
+      for (let i = i0; i <= i1; i++) {
+        if (k0 > 0 && neg(i, j, k0 - 1) !== s) return true;
+        if (k1 < sz - 1 && neg(i, j, k1 + 1) !== s) return true;
+      }
+    return false;
+  };
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (let b = 0; b < live.length; b++) {
+      if (!live[b] || !disagrees(b)) continue;
+      const o = b * 7;
+      live[b] = 0;
+      dense(skipped[o], skipped[o + 1], skipped[o + 2], skipped[o + 3], skipped[o + 4], skipped[o + 5]);
+      out.resampled++;
+      changed = true;
+    }
+  }
+  return out;
 }

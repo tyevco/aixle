@@ -14,6 +14,7 @@
  */
 import { cross, length2, normalize, type Vec3 } from "../core/vec.js";
 import { primitive } from "./primitives.js";
+import { turnedLipschitz } from "./sweeps.js";
 import { boundsGrow, EMPTY_BOUNDS, isEmpty2, type Bounds, type Shape2, type Shape3 } from "./types.js";
 
 export interface Curve {
@@ -390,5 +391,6 @@ export function sweepCurve(profile: Shape2, curve: Curve, twist = 0, taper = 1):
   }, boundsGrow(curve.bounds, reach), curve.segments * COST_PER_SEGMENT + profile.cost);
   out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
   out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
+  if (twistRate !== 0 || taperRate !== 0) out.lipschitz = turnedLipschitz(twistRate, taperRate, reach);
   return out;
 }
