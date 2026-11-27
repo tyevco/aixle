@@ -461,7 +461,7 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). With none given, the model's own cell: the shown model's longest side over the program's `set grid`, so a part is meshed as the report meshes it and costs no more than the model's mesh, but never under 64 cells across the part nor over the grid itself (64 cells across the part without a `set grid`); pieces(), overhang() and wall() share that rule. For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
 
     pieces(shape, resolution=64) -> number
 
@@ -469,7 +469,7 @@ How many separate pieces the shape meshes into at `resolution` cells on its long
 
 ### overhang
 
-The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment, the same mesh pieces() reads.
+The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (by default the model's own cell, as pieces() takes it): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment, the same mesh pieces() reads.
 
     overhang(shape, resolution=64) -> number
 
@@ -477,7 +477,7 @@ The fraction of the shape's surface that faces down more than 45° (the faces re
 
 ### wall
 
-The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (the program's `set grid` when none is given, 64 without one), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it; a part with no surface in the mesh at all (empty, or thinner than a cell everywhere) reads 0, so the promise fails rather than holding of nothing. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and the innermost steps whose faces bound it on each side, as the report's row does (thinnest at (...) in 'word', through to (...) in 'slot').
+The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (by default the model's own cell, as pieces() takes it), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it; a part with no surface in the mesh at all (empty, or thinner than a cell everywhere) reads 0, so the promise fails rather than holding of nothing. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and the innermost steps whose faces bound it on each side, as the report's row does (thinnest at (...) in 'word', through to (...) in 'slot').
 
     wall(shape, resolution=64) -> number
 

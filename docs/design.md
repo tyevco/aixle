@@ -400,10 +400,33 @@ failing the check, counted by `render` as a warning. The two queries that
 make it useful are measured the way the report measures: `pieces` meshes
 the shape at a grid and counts as the Pieces row does, so `pieces(m) ==
 1` means what the render says; `clearance` samples each shape's field
-from a lattice over its box, projects the samples onto its surface, reads
-them in the other field, and tightens the best pair by alternating
-projections, so two parts that face each other get their exact gap and
-an overlap comes back negative by its depth.
+from a lattice over its box and over the box where the two meet,
+projects the samples onto each surface, reads them in the other field,
+and walks the best point on each surface downhill: first by alternating
+projections, which close the gap between two faces that face each other
+in a step, then along the surface against the other field's gradient,
+which alternating projections only creep along when the surfaces are
+nearly tangent (a rounded edge resting on a plane read 0.0007 for 0).
+Two parts that face each other get their exact gap, and an overlap comes
+back negative by the deepest point either surface reaches inside the
+other, the distance to move them apart for a face sunk into a face. That
+quantity is chosen over the field reading at one surface alone because
+it is the same from both sides: a book's top 0.15 into a 0.2 board is
+only 0.05 from the board's top, and a promise on the depth should not
+depend on which part is named first or where the lattice fell.
+
+The queries that mesh take their default cell from the model, not from
+the part: the program's grid laid across a part's own longest side
+meshes a small part finer than the model is ever meshed, at a cost that
+grows with the cube of the ratio, and counts its pieces at a cell the
+report never sees (round 11: a bowl at a 0.012 cell where the mixer
+meshes at 0.019, 5.3 s of a 6.2 s check). The model's cell keeps a part
+at the report's resolution; the floor of 64 cells across the part keeps
+a small part measurable. Every refining query is bounded whatever the
+geometry: the overlap lattice keeps to a sample budget by bisection
+rather than by assuming each side's count scales with the cell (round
+11: a box 1e-16 tall asked for seven billion samples), and each descent
+runs a fixed number of steps.
 
 A failed promise is only useful if it says where, so each query carries
 a witness: a void the point and the step of the measured shape holding

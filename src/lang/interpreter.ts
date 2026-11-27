@@ -15,7 +15,7 @@ import { thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
+import { boundsSize, boundsUnion, EMPTY_BOUNDS, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
 import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
@@ -232,6 +232,8 @@ export function assertLine(a: AssertResult): string {
 const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
 
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
+/** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
+const MESHED_QUERIES = new Set(["pieces", "overhang", "wall"]);
 const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
@@ -783,9 +785,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const roots = [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()];
       for (const v of values) if (isShape3(v.value)) v.value = placedUnder(roots, v.value);
     }
-    // pieces() counts at the program's grid unless told otherwise, so a promise made at rest and the report's Pieces
-    // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
-    if ((callee === "pieces" || callee === "overhang" || callee === "wall") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
+    // The meshed queries mesh at the model's own cell unless told otherwise, so a promise made at rest and the report
+    // see the same cells (round 8: the default 64 flipped a pieces() promise the report at grid 220 did not), and a
+    // part costs no more than the model's mesh (round 11: the program's grid laid across a bowl 2.4 wide meshed it at
+    // a 0.012 cell where the whole mixer meshes at 0.019, and one wall(bowl) took 5.3 s of a 6.2 s check).
+    if (MESHED_QUERIES.has(callee) && values.length === 1 && isShape3(values[0].value)) values.push({ name: "resolution", value: defaultResolution(values[0].value) });
     const result = callBuiltin(builtin, values, line);
     if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
@@ -1125,6 +1129,24 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (out.length === 2) break;
     }
     return out.map((o) => o.name);
+  }
+
+  /**
+   * The cells across a part's longest side that give it the model's own cell: the model's longest side over the
+   * program's `set grid`, the model being the shown shape (or, for an assert above the `show`, everything built so
+   * far), and never under 64 cells across the part, so a small part is still measured, nor over the grid itself.
+   * Without `set grid`, 64 cells across the part, as before.
+   */
+  function defaultResolution(part: Shape3): number {
+    const grid = settings.grid;
+    if (typeof grid !== "number" || !(grid > 0)) return 64;
+    let box = EMPTY_BOUNDS;
+    if (shown) for (const s of shown.shapes) box = boundsUnion(box, s.bounds);
+    else for (const st of steps.values()) if (isShape3(st.value) && !isEmpty(st.value.bounds)) box = boundsUnion(box, st.value.bounds);
+    const model = isEmpty(box) ? 0 : Math.max(...boundsSize(box));
+    const side = isEmpty(part.bounds) ? 0 : Math.max(...boundsSize(part.bounds));
+    if (!(model > 0) || !(side > 0)) return grid;
+    return Math.min(grid, Math.max(Math.min(64, grid), Math.ceil((grid * side) / model)));
   }
 
   /** "cubic units", or the declared unit's cube when the program sets units (mm³ for a print in millimetres). */

@@ -1175,11 +1175,20 @@ with the library's path.
 
 The queries that make it useful: `pieces(shape, resolution)` is the
 number of separate pieces the shape meshes into at that many cells on
-its longest side, the program's `set grid` when none is given (64
-without one), as the report's Pieces row counts them (it meshes the
+its longest side, as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
-chair's floating back once passed); `overhang(shape, resolution)` is
+chair's floating back once passed). With no resolution given, the
+queries that mesh (`pieces`, `overhang`, `wall`)
+mesh at the model's own cell, the shown model's longest side over `set
+grid`, so a part is meshed as the report meshes it and costs no more
+than the model's own mesh: the mixer's bowl, 2.68 of a model 3.66 long at
+`set grid 200`, is meshed at 147 cells, where laying the grid across the
+bowl's own side meshed it at 200 and one `wall(bowl)` took 5.3 s of a
+6.2 s check. A small part still gets at least 64 cells across it, and
+none gets more than the grid; an assert above the `show` takes the model
+to be everything built so far; without `set grid` it is 64 cells across
+the part, as before. `overhang(shape, resolution)` is
 the fraction of the surface that faces down more than 45° with the
 floor faces left out, the report's Overhangs row, for `assert
 overhang(part) < 0.05` on something to be printed without support (it

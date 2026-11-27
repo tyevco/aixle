@@ -140,3 +140,15 @@ describe("failing pieces() and wall() name the step (round 11)", () => {
     expect(cut.asserts[0].where).toMatch(/'word'.*'slot'|'slot'.*'word'/);
   });
 });
+
+describe("the meshed queries' default cell (round 11)", () => {
+  it("is the model's own cell, at least 64 across the part, so a part costs what the model's mesh does", () => {
+    // Two boxes 0.008 apart in a model 4 long at grid 200: the model's 0.02 cell fuses them, as the report's mesh does;
+    // the grid laid across the part's own 1.0 (a 0.005 cell) parted them, and meshed the part four times finer.
+    const ev = run('set grid 200\nfloor = box(4, 0.1, 1) | move(0, -0.05, 0)\npart = (box(0.496, 0.3, 0.3) | move(-0.252, 0.5, 0)) + (box(0.496, 0.3, 0.3) | move(0.252, 0.5, 0))\nshow floor + part\nassert pieces(part) == pieces(part, 64)\nassert pieces(part) == 1\nassert pieces(part, 200) == 2\nassert overhang(floor + part) == overhang(floor + part, 200)\nassert wall(part) == wall(part, 64)');
+    expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual([[true, "1 == 1"], [true, "1 == 1"], [true, "2 == 2"], [true, expect.any(String)], [true, expect.any(String)]]);
+    // The mixer's bowl, 2.68 of a model 3.66 long at grid 200: 147 cells, not 200.
+    const bowl = run('set grid 200\nbase = box(3.66, 0.4, 2) | move(0, 0.2, 0)\nbowl = cylinder(1.34, 1.5) - (cylinder(1.3, 1.5) | move(0, 0.05, 0))\nshow base + (bowl | move(0, 1.2, 0))\nassert wall(bowl) == wall(bowl, 147)');
+    expect(bowl.asserts[0].passed).toBe(true);
+  });
+});
