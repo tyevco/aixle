@@ -531,6 +531,14 @@ the titles and spans. The point light now reaches half the model's
 longest side, the others follow the model, and none of them moved an
 existing render. What stays in units on purpose is what the program
 says in units: a preset's pattern size, `text`'s size, a bump's height.
+What stays in units not on purpose is the report's and the warnings'
+number format, three decimals and anything under 0.0005 as 0: the 4.6
+cm mug in metres reads "cell 0 units", "Volume 0" and a gap "0 wide, of
+the 0 cell". Printing tiny numbers in full is not the cure, since the
+same format hides float noise in a centre of mass (0 for -0.0000274 on
+the mug at 1 times); it wants the model's size passed to the format,
+and until then the guide says to draw a part that small in centimetres
+or millimetres.
 
 ## Glass, a light with a size, depth of field
 

@@ -19,11 +19,14 @@ Reference: `docs/reference.md` (every function, generated from the code),
 1. **Plan in words.** What is it, how big, which way is its front (+z),
    what are its parts. Draw in its real unit: millimetres for a print
    (`set units mm`; a 117 mm stand is 117 units), metres or centimetres
-   for furniture, a room or a game prop. Nothing in the mesh, the checks
-   or the pictures depends on the size (the grid is cells along the
+   for furniture, a room or a game prop. Nothing in the mesh, what the
+   checks find or the pictures depends on the size (the grid is cells along the
    longest side); what does is the defaults given in units, a material
    preset's pattern (wood grain 0.25) and `text`'s size 1, so in
-   millimetres give `scale=` and `size=`.
+   millimetres give `scale=` and `size=`. The report and the warnings
+   print a number under 0.0005 as 0, so a part under about 10 cm reads
+   its volume, and under 6 cm its cell, as 0 in metres: draw it in
+   centimetres or millimetres.
 2. **Write `model.aix`**, one part per named line. For a bolt, a chair,
    a tree or the like, `use "std/hardware"`, `"std/furniture"` or
    `"std/plants"` first (`npx aixle doc std/hardware.aix` says what each
@@ -105,7 +108,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
 - Title bar: size as `w × h × d`, triangle count, cell size. A model 10
   tall that should be 1 is wrong before anything else is.
 - Front is from +z, right from +x, top from above with the back at the top.
-  Grids are whole units; darker lines pass through the origin. The
+  Grid lines are the step each view's caption names (`grid 0.25`);
+  darker lines pass through the origin. The
   perspective view's red, green, blue lines are +x, +y, +z.
 - A red frame in `steps.png` is a shape that never reached the output;
   "too fine for this thumbnail" is a tiny part the thumbnail's grid could

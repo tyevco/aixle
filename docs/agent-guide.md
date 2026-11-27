@@ -100,8 +100,8 @@ mesh; `--no-cache` samples afresh.
 - The title bar has the size as `w × h × d` and the cell size. If the model
   is 10 units tall and you meant 1, fix the numbers before anything else.
 - **Front** is from +z, **right** from +x, **top** from above with the back
-  at the top of the image. The grid is in whole units; the darker lines
-  pass through the origin.
+  at the top of the image. The grid lines are the step each view's
+  caption names (`grid 0.25`); the darker lines pass through the origin.
 - The perspective view's floor grid is at y = 0 (or under the model if it
   goes lower); the red, green and blue lines are +x, +y, +z at the origin.
 - A part visible in the steps sheet with a red frame is not in the output:
@@ -250,17 +250,21 @@ shown, so a lug welded to a boom is blamed as the lug, not the boom.
   surface itself, so a blend or a cut that leaves the bounding box loose
   does not lift the model; a base already on y = 0 does not need it.
 - Draw in the real unit, millimetres for a print (a 117 mm stand is 117
-  units, with `set units mm`). Nothing in the mesh, the checks or the
-  pictures depends on the model's absolute size: measured, a mug built at
-  1, 100, 0.01 and 0.001 times gave the same mesh and the same sheet and
-  beauty render, but for the numbers in the captions. What does depend on
+  units, with `set units mm`). Nothing in the mesh, what the checks find
+  or the pictures depends on the model's absolute size: measured, a mug
+  built at 1, 100, 0.01 and 0.001 times gave the same mesh and the same
+  sheet and beauty render, but for the numbers in the captions. What does depend on
   the unit is the few defaults given in units: a material preset's
   pattern size (wood grain 0.25 apart, granite speckle 0.05; the
   reference lists each) and `text`'s size of 1, so a model in
   millimetres gives `scale=` and `size=` (`material("wood", scale=25)`
-  on a 120 mm box, `text("PERCH", 9)`). The grid is cells along the
-  longest side, so what loses detail is a big scene with small parts, at
-  any unit: raise the grid, or `--focus` the part.
+  on a 120 mm box, `text("PERCH", 9)`). The report and the warnings
+  print three decimals, a number under 0.0005 as 0, so a part drawn in
+  metres reads its volume and mass as 0 under about 10 to 20 cm, and its
+  cell and thin sizes as 0 under about 6 cm: draw a part that small in
+  centimetres or millimetres. The grid is cells along the longest side,
+  so what loses detail is a big scene with small parts, at any unit:
+  raise the grid, or `--focus` the part.
 - Name steps for what they are (`lid`, `left_arm`, `stair_3`), since the
   names are what the steps sheet and the report show you, and a part's
   sizes too: `seat = {w: 0.9, h: 0.45}` read as `seat.h` says what each

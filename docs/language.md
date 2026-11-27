@@ -12,21 +12,28 @@ This document is the language around them.
 - Right-handed, **y up**. `x` to the right, `z` towards the viewer in the
   front view. `ground()` rests a shape on `y = 0`.
 - Units are unitless; pick one (metres, centimetres, "one unit is a brick")
-  and stay with it. The renders draw grids in whole units. For a print,
+  and stay with it. The renders' grid lines are a round step in units,
+  which each view's caption names (`grid 0.25`). For a print,
   `set units mm` (or `cm`, `dm`, `m`, `in`, `ft`) says which, and the
   exports and the report's Print section use it (see Settings); a model
   is judged as a print only then.
-- Draw in the real unit: nothing in the mesh, the checks, the warnings or
-  the pictures depends on the model's absolute size, since the grid is
-  cells along its longest side and every tolerance follows the cell
-  (measured: a mug with a lettered label, a worn rusty handle and a
-  wooden saucer, built at 1, 100, 0.01 and 0.001 times, meshed to the
-  same 119068 triangles and drew the same sheet and beauty render but
-  for the numbers in the captions). What does depend on it is the few
-  defaults given in units: a material preset's pattern size (below) and
-  `text`'s `size` of 1, so a model in millimetres gives `scale=` and
-  `size=`. A point light's reach without `range=` is half the model's
-  longest side, at any size.
+- Draw in the real unit: nothing in the mesh, what the checks and the
+  warnings find, or the pictures depends on the model's absolute size,
+  since the grid is cells along its longest side and every tolerance
+  follows the cell (measured: a mug with a lettered label, a worn rusty
+  handle and a wooden saucer, built at 1, 100, 0.01 and 0.001 times,
+  meshed to the same 119068 triangles and drew the same sheet and beauty
+  render but for the numbers in the captions). What does depend on it
+  is the few defaults given in units: a material preset's pattern size
+  (below) and `text`'s `size` of 1, so a model in millimetres gives
+  `scale=` and `size=`. A point light's reach without `range=` is half the model's
+  longest side, at any size. The one number that still reads the unit is
+  the report's and the warnings' own: they print three decimals and a
+  number under 0.0005 as 0, so a model drawn in metres reads its cell and
+  its thin parts' sizes as 0 when it is under about 6 cm long (at the
+  default grid), and its volume and mass as 0 under about 10 to 20 cm
+  (`check`'s grid line and the sheet's title keep their figures). Draw a
+  part that small in centimetres or millimetres.
 - **Angles are degrees**, in `rotate`, `twist`, `bend` and in `sin`/`cos`.
 - Every primitive is centred on the origin. Anything with an axis
   (cylinder, cone, capsule, prism, capsule) stands along y; a torus lies
@@ -1397,7 +1404,8 @@ prints the asserts in line order, failures among the passes.
   and the render warns: rotate or scale the part before the joint.
 - Two thin parts that must stay separate (a clock's two hands, a lid
   and its rim) cannot overlap by a cell as the contact rule says: leave
-  a gap of a cell or two between them and bridge it with a hub or a
+  a gap of a cell and a half to two between them (a cell is not enough
+  for curved faces; see the contact rule) and bridge it with a hub or a
   post, or they mesh as one part with open edges where they touch.
 - The key light comes from above (elevation 55 by default) and does not
   reach far into an opening: an interior behind a door or a window is
