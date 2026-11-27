@@ -1210,8 +1210,8 @@ steps whose faces bound it on each side, each tested where the shape
 puts it, so a bowl's wall built at the origin and moved into the bowl is
 named rather than the bowl: `thinnest at (2.02, 18.27, 30.06) in 'word',
 through to (2.02, 18.18, 29.88) in 'slot'` is an engraving's floor
-against a slot's face. It meshes too, at the
-program's grid or 64; a shape with no surface in that mesh, empty or
+against a slot's face. It meshes too, at the model's own cell as
+`pieces` does; a shape with no surface in that mesh, empty or
 thinner than a cell everywhere, reads 0 and fails the promise;
 `support(shape, resolution)` is the support volume under the shape's
 overhangs, as the Print section's Supports row estimates it, in cubic
