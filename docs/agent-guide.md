@@ -137,8 +137,9 @@ mesh; `--no-cache` samples afresh.
   so judge a working end at full grid.
 - With joints, `poses.png` shows every pose and `anim_<name>.png` frames
   through each animation, coarsely; to judge one pose properly, `--pose
-  name` renders the whole sheet in it, and `check --pose name` prints the
-  posed sizes.
+  name` renders the whole sheet in it, meshed at the rest pose's cell
+  (the title says `as at rest`), so a part the pose does not move reads
+  as it does at rest, and `check --pose name` prints the posed sizes.
 
 ## Common mistakes and their fixes
 

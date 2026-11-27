@@ -274,9 +274,10 @@ function main(argv: string[]): number {
       if (ev.output && pose && !isEmpty(ev.output.bounds)) { const e = surfaceExtent(ev.output, 48); console.log(`output: ${ev.outputName} ${isEmpty(e) ? dimsLabel(ev.output.bounds) : `${dimsLabel(e)} (the surface in pose ${pose.name}; its box is ${dimsLabel(ev.output.bounds)})`}`); }
       else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
-      const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
+      // A pose is meshed at the rest pose's cell, so its thin parts are judged there too.
+      const { grid, cellSize } = cellFor(pose ? rest : ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
       let bedWarning: string | undefined;
-      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units`);
+      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units${pose ? `, the rest pose's, which a render of pose ${pose.name} keeps` : ""}`);
       // A program that says it is a print (set units, set bed) gets its size in millimetres and the bed's verdict,
       // from the surface's extent (rays, no mesh); the thinnest wall and the supports are the render's report.
       if ((ev.settings.units !== undefined || ev.settings.bed !== undefined) && ev.output && !isEmpty(ev.output.bounds)) {

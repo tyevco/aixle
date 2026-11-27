@@ -486,7 +486,18 @@ reach` prints every step's size in it. The report and the STL describe
 the model as shown, posed if a pose is set; the GLB and the OBJ are
 always at rest, with the joints as nodes. The
 thumbnails on `poses.png` are meshed coarsely, so judge a pose that
-matters at full size with `set pose`; with `set focus name` (or
+matters at full size with `set pose`. A shown pose is meshed at the
+rest pose's cell, not with the grid laid across the posed model: a
+joint turned up leaves the box of a turned box (a mixer's tilted head
+took the box from 3.68 to 5.5 tall against a 5.22 surface), and at the
+same grid the whole model, the parts the pose does not move included,
+was meshed a third coarser, its bowl's wall from 2.6 cells to 1.8, and
+the posed report read 31 open edges against the rest render's one (4
+at the rest cell). So the same part
+reads the same at rest and posed; the sheet's title says `cell 0.0189
+as at rest` and the report's Grid row how many cells that is along the
+posed model's longest side, and `check --pose` prints the rest cell.
+With `set focus name` (or
 `--focus`) the pose sheet and the strips are close-ups of that step
 where each pose puts it, at the frame's own cell, with the rest of the
 model faint around it, so a crank or a gimbal a few pixels wide on the

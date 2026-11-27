@@ -190,6 +190,8 @@ function floorGrid(cam: Camera, target: RenderTarget, bounds: Bounds, label = tr
 export interface SheetInfo extends ViewInfo {
   triangles: number;
   cellSize: number;
+  /** Said after the cell in the title: "as at rest" when a pose is meshed at the rest pose's cell. */
+  cellNote?: string;
   warnings: number;
   /** What a model unit is, from `set units` (mm, cm, m, in): the title gives the size in it rather than "units". */
   units?: string;
@@ -200,7 +202,7 @@ export function renderSheet(mesh: Mesh, info: SheetInfo, size: number, ghost?: M
   const gutter = 4, bar = 30;
   const sheet = new Canvas(size * 2 + gutter * 3, size * 2 + gutter * 3 + bar, INK.page);
   sheet.fill(0, 0, sheet.width, bar, INK.bar);
-  const title = `${info.name.toUpperCase()}   ${dimsLabel(info.size ?? info.bounds)} ${info.units ?? "units"}   ${info.triangles} tris   cell ${fmtCell(info.cellSize)}`;
+  const title = `${info.name.toUpperCase()}   ${dimsLabel(info.size ?? info.bounds)} ${info.units ?? "units"}   ${info.triangles} tris   cell ${fmtCell(info.cellSize)}${info.cellNote ? ` ${info.cellNote}` : ""}`;
   const w = info.warnings > 0 ? `${info.warnings} warning${info.warnings === 1 ? "" : "s"} in report.md` : "";
   // The title at 2x, the warning right-aligned; when they would collide (a small sheet), both at 1x.
   const scale = textWidth(title, 2) + textWidth(w, 2) + 30 <= sheet.width ? 2 : 1;

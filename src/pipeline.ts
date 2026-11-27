@@ -1019,6 +1019,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Where each declared camera's shot was written, when the beauty render ran: beauty.png for the shot it shows.
   let shotFiles: Map<string, string> | undefined;
   let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[]; unseen: string[] } | undefined;
+  // The rest pose's cell, when a pose is shown and meshed at it rather than with the grid across the posed box.
+  let poseCell: number | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
@@ -1029,13 +1031,15 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // A quick pass on a model made of thin parts (a clock with a pane, hands, a rod and mouldings) drops half its
   // steps at the quick grid and shows nothing worth judging (measured: 20 of 41 steps). It steps the grid up, to
   // 128 at most, until fewer than a quarter of the geometry steps are thinner than the cell; still a few seconds.
-  if (opts.quick && output && !isEmpty(output.bounds)) {
-    const geometry = geometrySteps(evaluation).size || 1;
-    const longest = Math.max(...boundsSize(output.bounds));
+  // A pose is judged at rest here too, since it is meshed at the rest pose's cell (below).
+  const stepEv = shownJoints && rest.output && !isEmpty(rest.output.bounds) ? rest : evaluation;
+  if (opts.quick && stepEv.output && !isEmpty(stepEv.output.bounds)) {
+    const geometry = geometrySteps(stepEv).size || 1;
+    const longest = Math.max(...boundsSize(stepEv.output.bounds));
     for (const g of [grid, 96, 128]) {
       if (g < grid) continue;
       grid = g;
-      if (thinWarnings(evaluation, longest / g, g).length <= geometry / 4) break;
+      if (thinWarnings(stepEv, longest / g, g).length <= geometry / 4) break;
     }
   }
   // Joints and poses: the sheet shows `set pose` (rest by default); exports are always at rest.
@@ -1104,7 +1108,21 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The box sets the cell size, and a rotated joint or a blend leaves it loose (measured: a posed excavator's box
     // was twice its surface, costing a third of the resolution), so find the surface's extent coarsely first.
     const extractBox = time("extent", () => tightBounds(output));
-    let nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: extractBox }));
+    // A pose is meshed at the rest pose's cell, not with the grid laid across the posed box: a joint turned up leaves
+    // the box of a turned box, and the mixer's tilted head meshed the whole model a third coarser at the same grid,
+    // the bowl's wall, which the pose does not move, from 2.6 cells to 1.8 and 31 open edges (round 11). The rest
+    // cell is the rest render's: the grid across the rest surface's extent.
+    let resolutionFor = (_b: Bounds) => grid;
+    if (shownJoints && rest.output && !isEmpty(rest.output.bounds)) {
+      const restLongest = Math.max(...boundsSize(time("extent:rest", () => tightBounds(rest.output!))));
+      if (restLongest > 0) {
+        poseCell = restLongest / grid;
+        // The grid scaled by the posed side over the rest one (exactly the grid when they match), never past the
+        // extractor's 512 cells a side, or the lattice would stop short of the box.
+        resolutionFor = (b) => Math.min(500, grid * (Math.max(...boundsSize(b)) / restLongest));
+      }
+    }
+    let nets = time("mesh", () => surfaceNets(output, { resolution: resolutionFor(extractBox), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: extractBox }));
     // The safety net: if the mesh reaches a face of a tightened box, something was cut off there (a part thinner than
     // the rays' spacing), so extract again over the whole bounds rather than ship a clipped model.
     if (extractBox !== output.bounds && triangleCount(nets.mesh) > 0) {
@@ -1113,7 +1131,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       const clipped = [0, 1, 2].some((k) => (extractBox.min[k] > output.bounds.min[k] + near && mb.min[k] < extractBox.min[k] + near) || (extractBox.max[k] < output.bounds.max[k] - near && mb.max[k] > extractBox.max[k] - near));
       if (clipped) {
         log(`extent: the surface reaches the tightened box, so extracting over the full bounds instead`);
-        nets = time("mesh", () => surfaceNets(output, { resolution: grid, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
+        nets = time("mesh", () => surfaceNets(output, { resolution: resolutionFor(output.bounds), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
       }
     }
     mesh = nets.mesh;
@@ -1256,7 +1274,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // surface: a coarse cell's vertices stray past a face (round 10: a quick sheet titled a 0.5-tall flange 0.52,
     // its engraving's vertices standing proud of the boss), and the frame keeps the mesh's own extent.
     const shownSize = !focusStep && trueBounds ? clampBounds(trueBounds, bounds) : undefined;
-    const info = { name: shownName, bounds: frame, size: shownSize, triangles: triangleCount(viewMesh), cellSize: viewCell, warnings: warnings.length, azimuth, elevation, units: shownUnits.assumed ? undefined : shownUnits.units };
+    const info = { name: shownName, bounds: frame, size: shownSize, triangles: triangleCount(viewMesh), cellSize: viewCell, cellNote: poseCell !== undefined && viewCell === cellSize ? "as at rest" : undefined, warnings: warnings.length, azimuth, elevation, units: shownUnits.assumed ? undefined : shownUnits.units };
     time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size, viewGhost, ghostCell).toPng()));
     // The perspective view with the largest visible steps named, a leader line each: what maps a picture back to
     // the program (roadmap 9: "the thing at the top left is lantern_ring" as a fact). Not on a quick pass.
@@ -1700,7 +1718,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
-      `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
+      `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units${poseCell !== undefined ? ` (the rest pose's cell, kept for pose ${shownPose}: ${Math.round(Math.max(...boundsSize(trueBounds ?? bounds)) / cellSize)} cells along its longest side)` : ""} |`,
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,

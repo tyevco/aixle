@@ -549,6 +549,20 @@ describe("round-11 renders", () => {
     expect(existsSync(join(dir, "notes.txt"))).toBe(true);
   });
 
+  it("meshes a shown pose at the rest pose's cell, and says so in the report", () => {
+    // Round 11: the mixer's tilted head left the posed model's box loose (y to 5.5 against a 5.22 surface), and the
+    // whole model was meshed a third coarser at the same grid, the bowl it does not move included.
+    const dir = tmp();
+    const src = 'base = box(2, 0.3, 2) | move(0, 0.15, 0)\nlid = joint(box(2, 0.1, 2) | move(1, 0.05, 0), "hinge", -1, 0.3, 0, axis=[0, 0, 1])\npose("open", hinge=50)\nshow base + lid';
+    const cell = () => JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).cellSize as number;
+    const rest = run(src, "lid.aix", dir, { ...QUICK, grid: 32 });
+    const restCell = cell();
+    const posed = run(src, "lid.aix", dir, { ...QUICK, grid: 32, pose: "open" });
+    expect(cell()).toBeCloseTo(restCell, 9);
+    expect(posed.report).toMatch(/\| Grid \| \d+ cells on the longest side, cell [\d.]+ units \(the rest pose's cell, kept for pose open: \d+ cells along its longest side\) \|/);
+    expect(rest.report).not.toMatch(/the rest pose's cell/);
+  });
+
   it("draws named steps with the output for a picture, each its own object in a scene, and names an unknown one", () => {
     const dir = tmp();
     const src = "stand = box(2, 0.2, 1) | move(0, 0.1, 0)\nprobe = box(0.5, 0.5, 0.5) | move(0, 0.45, 0)\nshow stand\nassert clearance(probe, stand) > -1";

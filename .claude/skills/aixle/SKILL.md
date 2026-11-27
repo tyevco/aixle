@@ -172,7 +172,8 @@ nest the forearm's joint inside the upper arm's part, write poses, then
 read `poses.png` and `anim_<name>.png`: a part that swings about the
 wrong point has the wrong pivot. `check` prints the joints as a tree
 with their pivots, so check the nesting there first. To judge one pose properly render it
-at full size with `--pose name` (or `set pose name`); `check --pose name`
+at full size with `--pose name` (or `set pose name`), meshed at the rest
+pose's cell so an unmoved part reads as it does at rest; `check --pose name`
 prints the posed sizes; `--focus part` makes the pose sheet and strips
 close-ups of that part. A pose value may be `xform(rotate=, move=,
 scale=)` for a hop or a squash, and an animation takes `times=[...]`
