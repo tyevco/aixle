@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKDROP, buildEnvironment, buildSky, DEFAULT_LIGHT_DIRECTION, DIFFUSE, ENVIRONMENTS, environmentLatLong, environmentPalette, FILTERED, horizonRadiance,
-  irradiance, keyDirection, lightDirection, MIRROR, prefiltered, prefilterLevels, projectSh, REFLECT, skyAt, softboxAt, type Environment, type SkyMode, type SkySampler, type SkyTables,
+  irradiance, keyDirection, lightDirection, MIRROR, PREFILTER, prefiltered, prefilterLevels, projectSh, REFLECT, skyAt, softboxAt, STUDIO, type Environment, type SkyMode, type SkySampler,
+  type SkyTables,
 } from "../src/render/environment.js";
 import { beer, bloom, BLOOM_THRESHOLD, decode, encode, FLAG_EDGE, FLAG_SHINY, KIND_FLOOR, KIND_MODEL, KEY, lightAngle, pointRadius, tonemap, TONEMAP_GLSL, TONE_START, toLinear, toSrgb, untone } from "../src/render/photometry.js";
 import type { Vec3 } from "../src/core/vec.js";
@@ -200,6 +201,27 @@ describe("environments: the backdrop", () => {
     }
   });
 
+  it("is HEAD's backdrop all round the sky away from the sun's and the moon's glow, not only opposite them", () => {
+    // The glows end 90° from the sun; the moon's is faint past 70°. Every azimuth, so a structure or a glow that
+    // leaked into the backdrop on one side would show; the darker of two looks, so a star does not count.
+    for (const env of ["sunset", "night"] as Environment[]) {
+      const s = buildSky(env, 35, DEFAULT_LIGHT_DIRECTION);
+      const away = Math.cos(((env === "sunset" ? 90 : 70) * Math.PI) / 180);
+      let worst = 0, read = 0;
+      for (let a = 0; a < 8; a++)
+        for (let k = 0; k < 33; k++) {
+          const az = a * 45, el = -90 + (180 * k) / 32;
+          const d = dirOf(az, el);
+          if (d[0] * s.disc[0] + d[1] * s.disc[1] + d[2] * s.disc[2] > away) continue;
+          const x = look(s, d, BACKDROP), y = look(s, dirOf(az + 0.35, el), BACKDROP);
+          worst = Math.max(worst, maxDiff(levels(x[2] <= y[2] ? x : y), headBackdrop(env, d).map((v) => v * 255)));
+          read++;
+        }
+      expect(worst, env).toBeLessThan(2);
+      expect(read, env).toBeGreaterThanOrEqual(100);
+    }
+  });
+
   it("the sun's and the moon's glow end 90° from them without a step", () => {
     for (const env of ["sunset", "night"] as Environment[]) {
       const s = buildSky(env, 35, DEFAULT_LIGHT_DIRECTION);
@@ -231,6 +253,8 @@ describe("environments: the backdrop", () => {
         const flat = dirOf(az, 0);
         horizonRadiance(s, flat[0] * 3, flat[2] * 3, h, 0);
         expect(maxDiff(levels(h), levels(look(s, flat, BACKDROP))), `${env} ${az}`).toBeLessThan(1);
+        // And the sky the camera sees just above the horizon is what the far floor fades into: no seam where they meet.
+        expect(maxDiff(levels(h), levels(look(s, dirOf(az, 0.01), BACKDROP))), `${env} ${az} just above`).toBeLessThan(1);
         for (const mode of [DIFFUSE, FILTERED, REFLECT, MIRROR] as SkyMode[]) {
           const up = look(s, dirOf(az, 0.01), mode), down = look(s, dirOf(az, -0.01), mode);
           expect(maxDiff(levels(up), levels(down)), `${env} mode ${mode} at ${az}`).toBeLessThan(1);
@@ -330,6 +354,31 @@ describe("environments: the studio's structure", () => {
     expect(look(t, dirOf(camAz + 90 - side, -40), DIFFUSE)[1]).toBeCloseTo(awayFromKey, 9);
   });
 
+  it("rigs its cards as a photographer would, from the camera: the fill on its right and low, the rim strip behind on its left", () => {
+    for (const camAz of [35, -120]) {
+      const s = buildSky("studio", camAz, DEFAULT_LIGHT_DIRECTION);
+      // The camera's frame: to its right (as the picture's right), up, and towards it.
+      const a = (camAz * Math.PI) / 180;
+      const at = (r: number, y: number, f: number): Vec3 => {
+        const d: Vec3 = [r * Math.cos(a) + f * Math.sin(a), y, -r * Math.sin(a) + f * Math.cos(a)];
+        const l = Math.hypot(...d);
+        return [d[0] / l, d[1] / l, d[2] / l];
+      };
+      const card = (d: Vec3): number => look(s, d, FILTERED)[1] - look(s, d, DIFFUSE)[1];
+      const [fill, strip, rim] = STUDIO.cards;
+      expect(card(at(fill.at[0], fill.at[1], fill.at[2])), `fill at ${camAz}`).toBeCloseTo(fill.radiance[1], 6);
+      expect(card(at(-fill.at[0], fill.at[1], fill.at[2])), `no fill on the left at ${camAz}`).toBe(0);
+      expect(card(at(rim.at[0], rim.at[1], rim.at[2])), `rim at ${camAz}`).toBeCloseTo(rim.radiance[1], 6);
+      expect(card(at(-rim.at[0], rim.at[1], rim.at[2])), `no rim on the right at ${camAz}`).toBe(0);
+      expect(card(at(strip.at[0], strip.at[1], strip.at[2])), `strip at ${camAz}`).toBeCloseTo(strip.radiance[1], 6);
+      // The camera's right is the picture's right: a chrome ball seen from the camera shows the fill on its right.
+      const fwd: Vec3 = [-Math.sin(a), 0, -Math.cos(a)], up: Vec3 = [0, 1, 0];
+      const right: Vec3 = [fwd[1] * up[2] - fwd[2] * up[1], fwd[2] * up[0] - fwd[0] * up[2], fwd[0] * up[1] - fwd[1] * up[0]];
+      const f = at(fill.at[0], fill.at[1], fill.at[2]);
+      expect(f[0] * right[0] + f[2] * right[2]).toBeGreaterThan(0.5);
+    }
+  });
+
   it("a mirror sees each directional light as a softbox that gives the light's own irradiance", () => {
     const lights = [
       { dir: lightDirection(-40, 55), size: 1, color: [1, 1, 1] as Vec3, power: 1 },
@@ -395,6 +444,102 @@ describe("environments: image-based light", () => {
     }
   });
 
+  it("SH irradiance is the cosine lobe's convolution of the sky, pointing the right way, in every band", () => {
+    // A sky with known band 1 and band 2 content per channel: R = 1 + 0.6x, G = 0.5 + y², B = 1 + 0.3xz + 0.4z. Over
+    // π, a cosine lobe keeps band 0, takes band 1 by 2/3 and band 2 by 1/4, so the radiance a white Lambert surface
+    // sends back is R = 1 + 0.4nx, G = 0.75 + 0.25ny², B = 1 + 0.075nx·nz + 0.8nz/3, exactly (all within SH9).
+    const sky: SkySampler = (x, y, z, out) => { out[0] = 1 + 0.6 * x; out[1] = 0.5 + y * y; out[2] = 1 + 0.3 * x * z + 0.4 * z; };
+    const sh = projectSh(sky);
+    const o = [0, 0, 0];
+    let worst = 0;
+    for (let i = 0; i < 500; i++) {
+      const y = 1 - (2 * (i + 0.5)) / 500, r = Math.sqrt(1 - y * y), ph = i * 2.399963;
+      const n: Vec3 = [Math.cos(ph) * r, y, Math.sin(ph) * r];
+      irradiance({ sh }, n[0], n[1], n[2], o, 0);
+      worst = Math.max(worst, maxDiff(o, [1 + 0.4 * n[0], 0.75 + 0.25 * n[1] * n[1], 1 + 0.075 * n[0] * n[2] + (0.8 / 3) * n[2]]));
+    }
+    expect(worst).toBeLessThan(2e-3);
+  });
+
+  it("the prefiltered maps point the right way: a linear sky comes back as its mean and its slope along the look", () => {
+    // For a sky a + B·d, a lobe symmetric about n gives a + κ(B·n), κ the lobe's mean n·l (n = v, weighted by D(h) n·l,
+    // as the importance sampling weights it). A map read mirrored, upside down or turned would not.
+    const A: Vec3 = [1, 1, 1], B: Vec3[] = [[0.6, 0.1, -0.3], [-0.2, 0.5, 0.4], [0.3, -0.4, 0.5]];
+    const sky: SkySampler = (x, y, z, out) => { for (let c = 0; c < 3; c++) out[c] = A[c] + B[c][0] * x + B[c][1] * y + B[c][2] * z; };
+    const maps = prefilterLevels(sky);
+    const kappa = (rough: number): number => {
+      const a2 = rough ** 4;
+      let s = 0, w = 0;
+      for (let k = 0; k < 20000; k++) {
+        const th = ((k + 0.5) / 20000) * (Math.PI / 2), nh = Math.cos(th / 2), dd = nh * nh * (a2 - 1) + 1;
+        const wt = (a2 / (Math.PI * dd * dd)) * Math.cos(th) * Math.sin(th);
+        s += wt * Math.cos(th); w += wt;
+      }
+      return s / w;
+    };
+    for (const P of PREFILTER) {
+      const k = kappa(P.rough), p = [0, 0, 0];
+      let worst = 0;
+      for (let i = 0; i < 400; i++) {
+        const y = 1 - (2 * (i + 0.5)) / 400, r = Math.sqrt(1 - y * y), ph = i * 2.399963;
+        const n: Vec3 = [Math.cos(ph) * r, y, Math.sin(ph) * r];
+        p[0] = p[1] = p[2] = 0;
+        prefiltered({ levels: maps }, n[0], n[1], n[2], P.rough, 1, p, 0);
+        worst = Math.max(worst, maxDiff(p, [0, 1, 2].map((c) => A[c] + k * (B[c][0] * n[0] + B[c][1] * n[1] + B[c][2] * n[2]))));
+      }
+      expect(worst, `rough ${P.rough}`).toBeLessThan(0.035);
+    }
+  });
+
+  it("the prefiltered maps find a small bright source at every roughness (each sample reads the mip its share of the lobe asks for)", () => {
+    // A dim sky with a 0.06-rad disc 250 times as bright, against the lobe's integral over the disc, done finely. Plain
+    // samples, or a mip too sharp for them, find such a source by luck: measured, the error grows to 70–150% of the
+    // disc's share at roughness 0.6–1; read from the right mips it stays within about a third.
+    const C: Vec3 = dirOf(40, 28.6), R = 0.06, cosR = Math.cos(R), BG = 0.2, PEAK = 50;
+    const sky: SkySampler = (x, y, z, out) => { const v = x * C[0] + y * C[1] + z * C[2] > cosR ? PEAK : BG; out[0] = v; out[1] = v; out[2] = v; };
+    const maps = prefilterLevels(sky);
+    const U: Vec3 = (() => { const t: Vec3 = [-C[0] * C[1], 1 - C[1] * C[1], -C[2] * C[1]], l = Math.hypot(...t); return [t[0] / l, t[1] / l, t[2] / l]; })();
+    const V: Vec3 = [C[1] * U[2] - C[2] * U[1], C[2] * U[0] - C[0] * U[2], C[0] * U[1] - C[1] * U[0]];
+    const weight = (n: Vec3, l: Vec3, a2: number): number => {
+      const nl = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
+      if (nl <= 0) return 0;
+      const hx = n[0] + l[0], hy = n[1] + l[1], hz = n[2] + l[2], nh = (hx * n[0] + hy * n[1] + hz * n[2]) / Math.hypot(hx, hy, hz);
+      const dd = nh * nh * (a2 - 1) + 1;
+      return (a2 / (Math.PI * dd * dd)) * nl;
+    };
+    const reference = (n: Vec3, rough: number): number => {
+      const a2 = rough ** 4;
+      let all = 0, disc = 0;
+      for (let k = 0; k < 4000; k++) {
+        const th = ((k + 0.5) / 4000) * (Math.PI / 2), nh = Math.cos(th / 2), dd = nh * nh * (a2 - 1) + 1;
+        all += (a2 / (Math.PI * dd * dd)) * Math.cos(th) * 2 * Math.PI * Math.sin(th) * (Math.PI / 8000);
+      }
+      for (let i = 0; i < 40; i++) {
+        const r = ((i + 0.5) / 40) * R, sr = Math.sin(r), cr = Math.cos(r);
+        for (let j = 0; j < 80; j++) {
+          const p = ((j + 0.5) / 80) * 2 * Math.PI, cp = Math.cos(p), sp = Math.sin(p);
+          const l: Vec3 = [C[0] * cr + (U[0] * cp + V[0] * sp) * sr, C[1] * cr + (U[1] * cp + V[1] * sp) * sr, C[2] * cr + (U[2] * cp + V[2] * sp) * sr];
+          disc += weight(n, l, a2) * sr * (R / 40) * ((2 * Math.PI) / 80);
+        }
+      }
+      return BG + ((PEAK - BG) * disc) / all;
+    };
+    const p = [0, 0, 0];
+    for (const P of PREFILTER) {
+      let err = 0, share = 0;
+      for (let k = 0; k < 40; k++) {
+        const ang = (k / 39) * 1.2, rot = k * 2.399963, cr = Math.cos(rot), sr = Math.sin(rot);
+        const n: Vec3 = [0, 1, 2].map((c) => C[c] * Math.cos(ang) + (U[c] * cr + V[c] * sr) * Math.sin(ang)) as Vec3;
+        p[0] = 0;
+        prefiltered({ levels: maps }, n[0], n[1], n[2], P.rough, 1, p, 0);
+        const want = reference(n, P.rough);
+        err += Math.abs(p[0] - want);
+        share += want - BG;
+      }
+      expect(err / share, `rough ${P.rough}`).toBeLessThan(P.rough < 0.8 ? 0.25 : P.rough < 1 ? 0.3 : 0.5);
+    }
+  });
+
   it("irradiance follows the sky: the studio lights a face turned from the camera more than one turned to it", () => {
     const s = buildSky("studio", 35, DEFAULT_LIGHT_DIRECTION);
     const a = [0, 0, 0], b = [0, 0, 0], up = [0, 0, 0], down = [0, 0, 0];
@@ -434,6 +579,23 @@ describe("environments: building and caching", () => {
       // A sky depends only on what it uses: sunset and night not on the camera, studio and overcast not on the key.
       buildEnvironment(env, { cameraAzimuth: 80, key: lightDirection(-10, 30), lights, cache });
       expect(cache.env.size, env).toBe(env === "overcast" ? 1 : 2);
+    }
+  });
+
+  it("keys the cache at full precision: a camera or a key a hair apart is a different sky, never a near one's tables", () => {
+    const k = lightDirection(30, 50);
+    const nudged: Vec3 = [k[0] + 1e-9, k[1], k[2]];
+    for (const env of ["studio", "sunset", "night"] as Environment[]) {
+      const cache = { env: new Map<string, unknown>() };
+      const a = buildEnvironment(env, { cameraAzimuth: 35, key: k, cache });
+      const b = buildEnvironment(env, { cameraAzimuth: 35, key: nudged, cache });
+      expect(cache.env.size, env).toBe(2);
+      expect(b.sh, env).not.toBe(a.sh);
+      expect(b.key, env).not.toEqual(a.key);
+      if (env === "studio") {
+        buildEnvironment(env, { cameraAzimuth: 35 + 1e-12, key: k, cache });
+        expect(cache.env.size).toBe(3);
+      }
     }
   });
 
