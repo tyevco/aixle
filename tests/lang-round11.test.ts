@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exprText, type Expr, type Stmt } from "../src/lang/ast.js";
 import { parse } from "../src/lang/parser.js";
 import { commentCodeWarnings, evaluate } from "../src/lang/interpreter.js";
+import { run as render } from "../src/pipeline.js";
 
 const run = (src: string) => evaluate(parse(src));
 /** The CLI from source, its output whether it passes or fails. */
@@ -112,5 +113,26 @@ describe("a comment that holds code (round 11: a move pasted after a #)", () => 
   it("fires on no program in the repo but the door's probe of this very slip", () => {
     const hits = programs().filter((f) => commentCodeWarnings(parse(readFileSync(f, "utf8"))).length > 0);
     expect(hits).toEqual(["dogfood/round-11/door_probe_eye.aix"]);
+  });
+});
+
+describe("a material named in a loop (round 11: the name taken on the first iteration only)", () => {
+  it("names every iteration's material, the second distinct one name_2, in the report and the GLB", () => {
+    const out = mkdtempSync(join(tmpdir(), "aixle-round11-mat-"));
+    try {
+      const src = "stone = material(\"#77716a\", \"brick\")\nwall = box(4, 2, 0.2) | paint(stone) | move(1, 0, -0.3)\nplanks = empty()\nfor i in range(3) {\n  oak_plank = material(\"#8e6438\", \"wood\", seed=i)\n  planks = planks + (box(0.9, 2, 0.2) | paint(oak_plank) | move(i, 0, 0))\n}\nshow wall + planks\n";
+      render(src, "planks.aix", out, { grid: 24, size: 64, views: [], steps: false, slices: false, turntable: false, callouts: false, obj: false, viewer: false, texture: 64 });
+      const json = JSON.parse(readFileSync(join(out, "report.json"), "utf8"));
+      expect([...json.materials].sort()).toEqual(["oak_plank", "oak_plank_2", "oak_plank_3", "stone"]);
+      const glb = readFileSync(join(out, "model.glb"));
+      const gltf = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString("utf8"));
+      expect(gltf.materials.map((m: { name: string }) => m.name).sort()).toEqual(["oak_plank", "oak_plank_2", "oak_plank_3", "stone"]);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+  it("names the material once outside a loop, and leaves a named one passed on as it was", () => {
+    const ev = run("m = material(\"red\", \"stripes\")\nn = m\nb = box(1) | paint(n)\n");
+    expect((ev.steps.find((s) => s.name === "n")!.value as { name: string }).name).toBe("m");
   });
 });

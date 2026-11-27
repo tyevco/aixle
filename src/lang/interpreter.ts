@@ -332,6 +332,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const cameras: CameraShot[] = [];
   const images: ImageUse[] = [];
   const imageCache = new Map<string, { width: number; height: number; rgba: Uint8Array }>();
+  // How many distinct materials have taken each name, so the second is named_2.
+  const materialNames = new Map<string, number>();
   /** A picture by path, loaded once per evaluation. */
   const loadImage = (path: string, line: number): { width: number; height: number; rgba: Uint8Array } => {
     if (!options.resolveImage) throw new RuntimeError(`image "${path}": pictures cannot be loaded here`, line);
@@ -1140,9 +1142,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const keptDeps = topLevel ? here.keptDeps : undefined;
         const maskDeps = topLevel ? here.maskDeps : undefined;
         // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
-        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
-        if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
-          value = { ...value, name: stmt.name };
+        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked); in a loop every iteration's does, the
+        // second distinct one under the name as body_2, the third body_3 (round 11: a plank per seed took the name
+        // on the first iteration only, and the GLB shipped five called custom).
+        if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#"))) {
+          const k = (materialNames.get(stmt.name) ?? 0) + 1;
+          materialNames.set(stmt.name, k);
+          value = { ...value, name: k === 1 ? stmt.name : `${stmt.name}_${k}` };
+        }
         // A record named like a used library is never read by field: `hw.x` is the library's (once per name).
         if (isRecord(value) && (scope.root().modules ?? modules).has(stmt.name) && !shadowed.has(`record:${stmt.name}`)) {
           shadowed.add(`record:${stmt.name}`);

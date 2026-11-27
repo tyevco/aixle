@@ -697,6 +697,25 @@ robot = body + eyes
 A pattern is anchored to the frame where `paint` was applied, so it moves
 with the part: paint, then `move`.
 
+A material made by `material(...)` takes the name it is assigned to, and
+that is its name in the report's Materials row, the GLB, the OBJ's groups
+and the 3MF: `body = material("#e9b125", "noise")` is `body`, not
+`custom` or `#e9b125`. A material made afresh in a loop takes it on
+every iteration, and since each is a material of its own (a plank per
+seed, so the six do not share one grain), the second is named `oak_plank_2`,
+the third `oak_plank_3`, in the order the loop made them:
+
+```
+planks = empty()
+for i in range(6) {
+  oak_plank = material("#8e6438", "wood", color2="#4c2f17", scale=0.08, seed=i)
+  planks = planks + (box(0.18, 2, 0.07) | paint(oak_plank) | move(i * 0.18, 1, 0))
+}
+```
+
+Passing a named material on (`n = body`, a record's field, a def's
+parameter) keeps its name.
+
 ## Lights, cameras and environments
 
 The beauty render has one key light unless the program declares its
@@ -1338,7 +1357,8 @@ prints the asserts in line order, failures among the passes.
   lifts the fill, or a `decal` gives the inner walls a lighter colour.
 - A preset with overrides (`material("glass", transmit=0.95)`) is listed
   in the report as the preset's name with a star, `glass*`, unless it is
-  assigned to a name, which it then takes.
+  assigned to a name, which it then takes (in a loop, `name_2`, `name_3`
+  for the later ones; see Materials).
 - A cross-section draws the surface's outline a cell or so behind the cut
   plane as a thin line, so a plate just behind the plane shows as a dashed
   line across an opening that is open. Move the slice (`set slice_x`),
