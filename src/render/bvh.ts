@@ -448,6 +448,9 @@ export class BvhTracer {
     const ix = 1 / ax, iy = 1 / ay, iz = 1 / az;
     const S = this.stack, B = this.B, F = this.F, C = this.C, T = this.T;
     let sp = 0, visited = 0;
+    // A mesh with no triangles (a shape thinner than a cell still gets a beauty render) has a root that is neither a
+    // leaf (no triangles) nor an inner node: walking it would push its own index for ever.
+    if (this.FL[0] === 0) return true;
     S[sp++] = 0;
     while (sp > 0) {
       const node = S[--sp];

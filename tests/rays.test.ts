@@ -194,6 +194,28 @@ describe("bvh", () => {
     expect(buildBvh(meshes[0].mesh).anyGlass).toBe(false);
   });
 
+  it("answers every query on a mesh with no triangles, and returns", () => {
+    // A shape thinner than a cell meshes to nothing and still gets a beauty render. A walk that does not return would
+    // hang the test file, so each query runs under a time limit.
+    const empty: Mesh = { positions: new Float32Array(0), normals: new Float32Array(0), local: new Float32Array(0), materialIndex: new Uint16Array(0), materials: [materialFromString("iron")!], indices: new Uint32Array(0) };
+    const bvh = buildBvh(empty);
+    const tr = new BvhTracer(bvh);
+    const limited = <T,>(f: () => T): T => vm.runInNewContext("f()", { f }, { timeout: 2000 }) as T;
+    tr.ray.set([0, 0, 0, 0, 0.6, 0.8, 0, 10]);
+    expect(limited(() => tr.closestRay(ALL))).toBe(-1);
+    tr.ray.set([0, 0, 0, 0, 0.6, 0.8, 0, 10]);
+    expect(limited(() => tr.occludedRay(OPAQUE))).toBe(false);
+    tr.ray.set([0, 0, 0, 0, 0.6, 0.8, 0, 10]);
+    expect(limited(() => tr.coneClearRay(0.1))).toBe(true);
+    const shape = sphere(0.5);
+    const rays = createRays(shape, empty, bvh, 0.01, shape.bounds, 2);
+    const L = lightDirection(-40, 55);
+    const light: RayLight = { point: false, x: L[0], y: L[1], z: L[2], radius: 1 / 18, index: 0 };
+    // A floor point well away from the box, so only the BVH (and its early out) is asked.
+    expect(limited(() => rays.areaVisibility(3, 0.01, 3, light, 1, 2))).toBe(1);
+    expect(limited(() => rays.occlusion(3, 0.01, 3, L[0], L[1], L[2], Infinity, 0))).toBe(1);
+  });
+
   it("is built once per mesh in a run's cache, in shared memory when asked", () => {
     const { mesh } = meshes[0];
     // As the pool package's per-run BeautyCache carries it, beside its other tables.
