@@ -57,10 +57,12 @@ the inside is cut open.
    a thinner rod reaching past both faces, never on the cutter, which is
    empty by construction; `inside` wants the solid, not a shell; a
    failing `void`, `inside` or `overlap` says where and in which step;
-   `assert overhang(part) < 0.05`, `assert wall(model) > 0.8` and
-   `assert support(part) < 50` (cubic millimetres with `set units mm`)
-   for a print, `assert stands(model) > 0.1` for a model that must
-   stand), and for a rig a promise
+   `assert overhang(part) < 0.05`, `assert wall(model) > 0.8`,
+   `assert support(part) < 50` (cubic millimetres with `set units mm`,
+   bridges up to 16 mm left out) and `assert islands(part) == 0` (no
+   point hanging lower than all around it, a cone's tip, which no face
+   angle catches) for a print, `assert stands(model) > 0.1` for a model
+   that must stand), and for a rig a promise
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing
@@ -76,7 +78,8 @@ the inside is cut open.
    then is the model judged as a print (or with `--3mf`). `check` then
    prints the size in millimetres and whether it fits the bed, and the
    report's Print section has the thinnest wall and where it is, the
-   support under the overhangs and what rests on the plate; `model.stl`
+   support under the overhangs (with the bridges and the islands apart)
+   and what rests on the plate; `model.stl`
    is in millimetres with z up and `model.3mf` carries the unit and the
    colours. Promise the walls with `assert wall(model) > 0.8` (model
    units: 0.8 mm is two lines of a 0.4 mm nozzle). A game asset or a

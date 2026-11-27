@@ -11,7 +11,7 @@ import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
 import { regionTouches, voidWitness, outsideWitness, insideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
 import { loosePiece, standing, type MeshCache } from "../mesh/pieces.js";
-import { supportOf, thinnestWall, UNITS } from "../mesh/print.js";
+import { BRIDGE_MM, supportOf, thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -309,9 +309,14 @@ const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "gro
 const CONTACTS = new Set(["rest", "lean"]);
 
 /** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
-const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "stands"]);
+const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "islands", "stands"]);
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall", "support", "stands"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall", "support", "islands", "stands"]);
+/** The shape a meshed query measures: its first positional argument, or the one named `shape`. */
+function meshedShape(values: { name?: string; value: Value }[]): Shape3 | undefined {
+  const v = values.find((a) => !a.name) ?? values.find((a) => a.name === "shape");
+  return v && isShape3(v.value) ? v.value : undefined;
+}
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
@@ -1062,7 +1067,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // see the same cells (round 8: the default 64 flipped a pieces() promise the report at grid 220 did not), and a
     // part costs no more than the model's mesh (round 11: the program's grid laid across a bowl 2.4 wide meshed it at
     // a 0.012 cell where the whole mixer meshes at 0.019, and one wall(bowl) took 5.3 s of a 6.2 s check).
-    if (MESHED_QUERIES.has(callee) && values.length === 1 && isShape3(values[0].value)) values.push({ name: "resolution", value: defaultResolution(values[0].value) });
+    // The shape is the one positional argument or named `shape`, and no resolution is given either way (support's
+    // span may be named beside it).
+    const queried = MESHED_QUERIES.has(callee) ? meshedShape(values) : undefined;
+    if (queried && values.filter((v) => !v.name).length <= 1 && !values.some((v) => v.name === "resolution")) values.push({ name: "resolution", value: defaultResolution(queried) });
     const result = callBuiltin(builtin, values, line, CONTACTS.has(callee) ? args : undefined);
     // The first call to make a shape is where it came from; one that hands back its input unchanged keeps the input's.
     if ((isShape3(result) || isShape2(result)) && !origins.has(result)) {
@@ -1134,17 +1142,28 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       }
     }
     // A support() promise says where the tallest column is and what it stands on (round 11: the support kept small
-    // could only be promised as a share of the surface).
-    if (assertDepth > 0 && callee === "support" && typeof result === "number" && isShape3(values[0].value)) {
-      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+    // could only be promised as a share of the surface), and what it left out as bridged; an islands() promise says
+    // where each island is.
+    const supported = callee === "support" || callee === "islands" ? meshedShape(values) : undefined;
+    if (assertDepth > 0 && supported && typeof result === "number") {
+      const arg = (name: string, k: number) => values.find((v) => v.name === name)?.value ?? values.filter((v) => !v.name)[k]?.value;
+      const res = arg("resolution", 1);
       const r = typeof res === "number" ? res : 64;
-      const sup = supportOf(values[0].value, r, meshes);
-      if (sup.at && sup.foot) {
-        const tol = Math.max(...boundsSize(values[0].value.bounds)) / r * 0.5;
-        const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
-        const on = sup.tallestOnModel ? `on the model at (${sup.foot.map(fmt3).join(", ")})${named(stepsAtSurface(sup.foot, values[0].value, tol))}` : `on the plate at y = ${fmt3(sup.foot[1])}`;
-        witness = `the tallest column is ${Number(sup.tallest.toPrecision(3))} ${linear()} under (${sup.at.map(fmt3).join(", ")})${named(stepsAtSurface(sup.at, values[0].value, tol))}, standing ${on}, of ${Number(sup.volume.toPrecision(3))} ${cubic()} under ${Number(sup.area.toPrecision(3))} ${square()} in plan`;
-      } else witness = "nothing faces down more than 45° above the floor: no support";
+      const spanMm = callee === "support" ? arg("span", 2) : undefined;
+      const unit = declaredUnit(), part = supported;
+      const sup = supportOf(part, r, meshes, (typeof spanMm === "number" ? spanMm : BRIDGE_MM) / (unit ? UNITS[unit] : 1));
+      const tol = Math.max(...boundsSize(part.bounds)) / r * 0.5;
+      const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+      const fig = (v: number) => Number(v.toPrecision(3));
+      if (callee === "islands") {
+        const list = sup.islands.slice(0, 3).map((i) => `(${i.at.map(fmt3).join(", ")})${named(stepsAtSurface(i.at, part, tol))}, a column ${fig(i.height)} ${linear()} down to ${i.onModel ? "the model" : "the plate"}`);
+        witness = sup.islands.length ? `${sup.islands.length === 1 ? "the island is" : `the lowest ${Math.min(3, sup.islands.length)} of ${sup.islands.length} are`} at ${list.join("; ")}` : "no point hangs lower than all around it";
+      } else if (sup.at && sup.foot) {
+        const on = sup.tallestOnModel ? `on the model at (${sup.foot.map(fmt3).join(", ")})${named(stepsAtSurface(sup.foot, part, tol))}` : `on the plate at y = ${fmt3(sup.foot[1])}`;
+        const sliver = sup.sliver ? `; that column stands on ${sup.sliver.faces} face${sup.sliver.faces === 1 ? "" : "s"} under a cell across: where the shape does not face down there, a cutter's face lies exactly on the part's own, and moving the cutter by half a cell clears it` : "";
+        const bridged = sup.bridged > 0 ? ` (${fig(sup.bridged)} ${cubic()} more under bridges up to ${fig(sup.span)} ${linear()}, left out)` : "";
+        witness = `the tallest column is ${fig(sup.tallest)} ${linear()} under (${sup.at.map(fmt3).join(", ")})${named(stepsAtSurface(sup.at, part, tol))}, standing ${on}, of ${fig(sup.volume)} ${cubic()} under ${fig(sup.area)} ${square()} in plan${bridged}${sliver}`;
+      } else witness = sup.bridged > 0 ? `no overhang needs support: ${fig(sup.bridged)} ${cubic()} lies under bridges up to ${fig(sup.span)} ${linear()}` : "nothing faces down more than 45° above the floor: no support";
     }
     // A stands() promise says where the centre of mass is and which way the shape would tip.
     if (assertDepth > 0 && callee === "stands" && typeof result === "number" && isShape3(values[0].value)) {
@@ -1239,7 +1258,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     for (const ov of b.overloads) {
       const bound = bind(ov, args);
       if (typeof bound === "string") { failures.push(bound); continue; }
-      const ctx: CallContext = { meshes };
+      const unit = declaredUnit();
+      const ctx: CallContext = { meshes, mmPerUnit: unit ? UNITS[unit] : 1 };
       if (exprs) {
         const text = (param: string): string | undefined => {
           const byName = exprs.find((a) => a.name === param);

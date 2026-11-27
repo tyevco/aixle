@@ -33,10 +33,10 @@ import { assertLine, type AssertInfo, type AssertResult, type ContactRecord, eva
 import { vecText } from "./lang/builtins.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
-import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
+import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, weldIndices, type Mesh } from "./mesh/mesh.js";
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
-import { bedFit, contactArea, supportVolume, threemfUnit, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
+import { bedFit, BRIDGE_MM, contactArea, supportVolume, threemfUnit, UNITS, wallThickness, type BedFit, type SupportResult } from "./mesh/print.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { encodeApng, type DecodedPng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
@@ -1174,6 +1174,36 @@ export function fitText(fit: BedFit, bed: number[]): string {
 }
 
 /**
+ * The Supports row: the support the overhangs need (on the plate and on the model, the tallest column, and a note
+ * when that column stands on a sliver at a crease), what is bridged instead, and the islands. `names` gives the steps
+ * at a point, for an island's place.
+ */
+export function supportsText(sup: SupportResult, mm: number, cellSize: number, names: (p: Vec3) => string[]): string {
+  const mm3 = mm * mm * mm;
+  const vol = (v: number) => (v * mm3 >= 1000 ? `${fmtMm((v * mm3) / 1000)} cm³` : `${fmtMm(v * mm3)} mm³`);
+  const pt = (p: Vec3) => `(${p.map(fmt).join(", ")})`;
+  const parts: string[] = [];
+  if (sup.volume > 0) {
+    // A column on a few faces covering under a cell at a crease is most often a cutter's face laid exactly on the
+    // part's own, which the mesher leaves as a sliver facing down (round 11: a 33 mm column under 0.23 mm²).
+    const sliver = sup.sliver ? `; it stands on ${sup.sliver.faces} face${sup.sliver.faces === 1 ? "" : "s"} covering ${fmtMm(sup.sliver.area * mm * mm)} mm², under a cell: where the shape itself does not face down there, a cutter's face lies exactly on the part's own, and moving the cutter by half a cell (${fmt(cellSize / 2)}) clears it` : "";
+    parts.push(`about ${vol(sup.volume)} under the overhangs that need it (${vol(sup.fromFloor)} standing on the plate, ${vol(sup.onModel)} on the model itself), over ${fmtMm(sup.area * mm * mm)} mm² in plan; the tallest column is ${fmtMm(sup.tallest * mm)} mm under ${pt(sup.at!)}${sliver}`);
+  } else parts.push(sup.bridged > 0 ? "none needed under the overhangs" : "none: nothing faces down more than 45° above the plate");
+  if (sup.bridged > 0)
+    parts.push(`${vol(sup.bridged)} ${sup.volume > 0 ? "more " : ""}under bridges over ${fmtMm(sup.bridgedArea * mm * mm)} mm², level ceilings spanning at most ${fmtMm(sup.span * mm)} mm to solid that stands on both sides (the longest ${fmtMm(sup.longestBridge * mm)} mm, at ${pt(sup.bridgeAt!)}): they print without support with supports off, past ${fmtMm(sup.span * mm)} mm PrusaSlicer's own check adds a support point, and with supports on a slicer fills them too unless told not to`);
+  if (sup.islands.length) {
+    const first = sup.islands.slice(0, 3).map((i) => {
+      const at = names(i.at);
+      return `${pt(i.at)}${at.length ? ` in ${at.map((n) => `'${n}'`).join(", ")}` : ""}, a column ${fmtMm(i.height * mm)} mm down to ${i.onModel ? "the model" : "the plate"}`;
+    });
+    const more = sup.islands.length > 3 ? `, and ${sup.islands.length - 3} more` : "";
+    parts.push(`${sup.islands.length} island${sup.islands.length === 1 ? "" : "s"}, a point lower than all the surface around it, which prints in the air whatever its faces' angles and needs a column: at ${first.join("; at ")}${more}`);
+  }
+  const skipped = sup.skipped > 0 ? `; ${fmtMm(sup.skipped * mm * mm)} mm² of mesh faces tilted past 45° where the shape itself faces down less (bent beside a sharp edge, or faceted along a curve's 45° line) are left out` : "";
+  return `${parts.join("; ")}${sup.volume > 0 ? ". An upper estimate: a slicer fills support sparsely" : ""}${skipped}`;
+}
+
+/**
  * The Print section of the report: the unit, the size in millimetres, the
  * bed, the thinnest wall and where, the support under the overhangs, what
  * rests on the plate and how much material it takes, and a summary line.
@@ -1196,7 +1226,9 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
   } else rows.push(`| Bed | not set: \`set bed 220 220 250\` (width, depth, height in millimetres) checks the fit |`);
   let summary: string[] = [];
   if (!quick) {
-    const w = time("walls", () => wallThickness(output, mesh, cellSize));
+    // One welding for both passes: the wall's rays are cast once per position, and the islands are read on it.
+    const welded = weldIndices(mesh);
+    const w = time("walls", () => wallThickness(output, mesh, cellSize, undefined, welded));
     if (w.thinnest) {
       const t = w.thinnest;
       const names = namesAt(evaluation, t.at, cellSize);
@@ -1211,16 +1243,18 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
       json.wall = { thickness: t.thickness, mm: t.thickness * mm, at: t.at, to: t.to, steps: names.map((n) => n.name), farSteps: far.map((n) => n.name), rays: w.rays, measured: w.exits, under08mm: share };
       if (t.thickness * mm < 0.8) summary.push(`a wall ${fmtMm(t.thickness * mm)} mm thin`);
     } else rows.push(`| Thinnest wall | no ray found a far side (${w.rays} rays) |`);
-    const sup = time("supports", () => supportVolume(output, mesh, cellSize, physics.floor));
+    const sup = time("supports", () => supportVolume(output, mesh, cellSize, physics.floor, { span: BRIDGE_MM / mm, welded }));
+    rows.push(`| Supports | ${supportsText(sup, mm, cellSize, (p) => namesAt(evaluation, p, cellSize).map((n) => n.name))} |`);
     const mm3 = mm * mm * mm;
-    const vol = (v: number) => (v * mm3 >= 1000 ? `${fmtMm((v * mm3) / 1000)} cm³` : `${fmtMm(v * mm3)} mm³`);
-    // Faces the mesh tilts past 45 degrees where the shape itself does not face down so far are left out, and said to
-    // be (round 11: a cutter's corner on the part's corner read as a 33 mm column). Most are bent beside a sharp
-    // edge, but a curve's facets along its 45 degree line are too, so the row does not say every one is at an edge.
-    const skipped = sup.skipped > 0 ? `; ${fmtMm(sup.skipped * mm * mm)} mm² of mesh faces tilted past 45° where the shape itself faces down less (bent beside a sharp edge, or faceted along a curve's 45° line) are left out` : "";
-    rows.push(`| Supports | ${sup.volume > 0 ? `about ${vol(sup.volume)} under the overhangs (${vol(sup.fromFloor)} standing on the plate, ${vol(sup.onModel)} on the model itself), over ${fmtMm(sup.area * mm * mm)} mm² in plan; the tallest column is ${fmtMm(sup.tallest * mm)} mm under (${sup.at!.map(fmt).join(", ")}). An upper estimate: a slicer bridges short spans and fills support sparsely${skipped}` : `none: nothing faces down more than 45° above the plate${skipped}`} |`);
-    json.support = { volume: sup.volume, mm3: sup.volume * mm3, fromFloorMm3: sup.fromFloor * mm3, onModelMm3: sup.onModel * mm3, areaMm2: sup.area * mm * mm, tallestMm: sup.tallest * mm, at: sup.at, skippedMm2: sup.skipped * mm * mm };
-    if (sup.volume > 0) summary.push(`support under ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface`);
+    json.support = {
+      volume: sup.volume, mm3: sup.volume * mm3, fromFloorMm3: sup.fromFloor * mm3, onModelMm3: sup.onModel * mm3, areaMm2: sup.area * mm * mm, tallestMm: sup.tallest * mm, at: sup.at, skippedMm2: sup.skipped * mm * mm,
+      sliver: sup.sliver ? { areaMm2: sup.sliver.area * mm * mm, faces: sup.sliver.faces } : undefined,
+      bridged: { mm3: sup.bridged * mm3, areaMm2: sup.bridgedArea * mm * mm, spanMm: BRIDGE_MM, longestMm: sup.longestBridge * mm, at: sup.bridgeAt },
+      islands: sup.islands.slice(0, 50).map((i) => ({ at: i.at, columnMm: i.height * mm, onModel: i.onModel, hangsMm: i.depth * mm, steps: namesAt(evaluation, i.at, cellSize).map((n) => n.name) })),
+      islandCount: sup.islands.length,
+    };
+    if (sup.volume > 0) summary.push(`${fmtMm(sup.volume * mm3 >= 1000 ? (sup.volume * mm3) / 1000 : sup.volume * mm3)} ${sup.volume * mm3 >= 1000 ? "cm³" : "mm³"} of support`);
+    if (sup.islands.length) summary.push(`${sup.islands.length} island${sup.islands.length === 1 ? "" : "s"} needing a column`);
   } else rows.push(`| Thinnest wall, supports | not measured on a quick pass |`);
   const contact = contactArea(mesh, cellSize, physics.floor) * mm * mm;
   rows.push(`| On the plate | ${fmtMm(contact)} mm² of the base rests flat on the bed${contact < 0.02 * sizeMm[0] * sizeMm[1] ? " (a small foothold for its size: a brim, or a flat cut under it, holds it down)" : ""} |`);

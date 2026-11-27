@@ -162,6 +162,11 @@ describe("the meshed queries' default cell (round 11)", () => {
     const bowl = run('set grid 200\nbase = box(3.66, 0.4, 2) | move(0, 0.2, 0)\nbowl = cylinder(1.34, 1.5) - (cylinder(1.3, 1.5) | move(0, 0.05, 0))\nshow base + (bowl | move(0, 1.2, 0))\nassert wall(bowl) == wall(bowl, 147)');
     expect(bowl.asserts[0].passed).toBe(true);
   });
+  it("is the model's cell whichever way the shape is passed, and with only other parameters named", () => {
+    // A slab on posts at grid 200: the shape named, or a span named beside it, still meshes at the model's 0.24 cell.
+    const ev = run('set units mm\nset grid 200\na = box(10, 20, 10) | move(-9, 10, 0)\nb = box(10, 20, 10) | move(9, 10, 0)\nslab = box(48, 3, 10) | move(0, 21.5, 0)\nm = a + b + slab\nshow m\nassert support(shape=m) == support(m)\nassert support(m, span=5) == support(m, 200, 5)\nassert support(shape=m, span=5) == support(m, 200, 5)\nassert islands(shape=m) == islands(m, 200)\nassert overhang(shape=m) == overhang(m, 200)');
+    expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual(ev.asserts.map((a) => [true, a.detail]));
+  });
 });
 
 describe("support() (round 11)", () => {
@@ -206,11 +211,53 @@ describe("the report's Supports row (round 11)", () => {
     try {
       const r = render("set units mm\nset grid 48\nball = sphere(20) | move(0, 20, 0)\nshow ball", "ball.aix", dir, { views: [], steps: false, slices: false, turntable: false, callouts: false, glb: false, viewer: false, beauty: false });
       const row = r.report.split("\n").find((l) => l.startsWith("| Supports |")) ?? "";
-      expect(row).toMatch(/about [\d.]+ (mm|cm)³ under the overhangs \(.*\), over [\d.]+ mm² in plan;/);
+      expect(row).toMatch(/about [\d.]+ (mm|cm)³ under the overhangs that need it \(.*\), over [\d.]+ mm² in plan;/);
       expect(row).toMatch(/mm² of mesh faces tilted past 45° where the shape itself faces down less \(bent beside a sharp edge, or faceted along a curve's 45° line\) are left out \|$/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+  it("splits the bridged volume off and lists the islands, in report.json too (roadmap 20)", async () => {
+    const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { run: render } = await import("../src/pipeline.js");
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A slab on posts 8 apart, and a cone hanging tip down off the right post.
+      const src = "set units mm\nset grid 96\na = box(10, 20, 10) | move(-9, 10, 0)\nb = box(10, 20, 10) | move(9, 10, 0)\nslab = box(28, 3, 10) | move(0, 21.5, 0)\ntip = cone(4, 0, 6.93) | rotate(x=180) | move(9, 16.5, 7.5)\nshow a + b + slab + tip";
+      const r = render(src, "bridge.aix", dir, { views: [], steps: false, slices: false, turntable: false, callouts: false, glb: false, viewer: false, beauty: false });
+      const row = r.report.split("\n").find((l) => l.startsWith("| Supports |")) ?? "";
+      expect(row).toMatch(/^\| Supports \| none needed under the overhangs; 1\.\d+ cm³ under bridges over \d+(\.\d+)? mm², level ceilings spanning at most 16 mm to solid that stands on both sides \(the longest [\d.]+ mm, at \(.*\)\): they print without support with supports off/);
+      expect(row).toMatch(/; 1 island, a point lower than all the surface around it, which prints in the air whatever its faces' angles and needs a column: at \([-\d., ]+\) in 'tip', a column 1\d(\.\d+)? mm down to the plate(; [\d.]+ mm² of mesh faces tilted past 45° .* are left out)? \|$/);
+      expect(r.report).toMatch(/\| Summary \| [^|]*1 island needing a column/);
+      const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(json.print.support.mm3).toBe(0);
+      expect(json.print.support.bridged.spanMm).toBe(16);
+      expect(json.print.support.bridged.mm3).toBeGreaterThan(1500);
+      expect(json.print.support.islandCount).toBe(1);
+      expect(json.print.support.islands[0].steps).toEqual(["tip"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("islands() and the bridges support() leaves out (roadmap 20)", () => {
+  // Posts 8 apart under a slab that runs on 10 past the right post: the span between them is a bridge, the end a
+  // cantilever, 10 x 10 in plan and 20 tall.
+  const slab = "set units mm\na = box(10, 20, 10) | move(-9, 10, 0)\nb = box(10, 20, 10) | move(9, 10, 0)\nslab = box(38, 3, 10) | move(5, 21.5, 0)\nm = a + b + slab\nshow m\n";
+  it("support() reads only what needs support, says what it left out, and span=0 counts the bridge too", () => {
+    const ev = run(`${slab}assert support(m) > 1800\nassert support(m) < 2200\nassert support(m, span=0) > 3400\nassert support(m, span=5) > 3400\nassert support(m) < 100`);
+    expect(ev.asserts.map((a) => a.passed)).toEqual([true, true, true, true, false]);
+    expect(ev.asserts[4].where).toMatch(/^the tallest column is 2\d(\.\d+)? mm under \([-\d., ]+\) in 'slab', standing on the plate at y = 0, of \d+ mm³ under \d+(\.\d+)? mm² in plan \(1[56]\d\d mm³ more under bridges up to 16 mm, left out\)$/);
+  });
+  it("islands() counts a cone hanging tip down off a wall, and a failure says where", () => {
+    const src = "set units mm\nwall = box(20, 40, 6) | move(0, 20, -3)\ntip = cone(5, 0, 8.66) | rotate(x=180) | move(0, 31.67, 4)\nm = wall + tip\nshow m\nassert support(m) < 1\nassert islands(m) == 0\nassert islands(wall) == 0";
+    const ev = run(src);
+    expect(ev.asserts.map((a) => a.passed)).toEqual([true, false, true]);
+    expect(ev.asserts[1].detail).toBe("1 == 0");
+    expect(ev.asserts[1].where).toMatch(/^the island is at \(-?[\d.]+, 27\.\d+, [\d.]+\) in 'tip', a column 2\d(\.\d+)? mm down to the plate$/);
   });
 });
 
