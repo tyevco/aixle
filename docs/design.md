@@ -508,6 +508,27 @@ it, says where it is. A `curve2` outline knows the point of its thinnest
 wall, and an extrude or a revolve lays that point into its own frame, so
 a sliver on a 46-point outline is placed in the profile and in the model.
 
+## The model's size
+
+Nothing in the pipeline should care how big the model is in its own
+units, since the unit is the program's choice: the grid is cells along
+the longest side, every tolerance in the mesher, the checks and the
+beauty render's march follows the cell, and the cameras fit the model.
+The skill once told agents to keep a model within 1 to 20 units, which
+sent two of round 11's agents to decimetres and left a third unsure
+whether a 117 mm print could be 117 units. Measured on a mug with a
+lettered label, a worn rusty handle and a wooden saucer, built at 1, 100,
+0.01 and 0.001 times: the same 119068 triangles and the same sheet and
+beauty render, once four constants were taken out. The beauty render's
+steps had a floor of 1e-4 units, three times the cell of the 4 mm mug,
+whose contact shadows went; a point light without a range reached 2
+units, which lights a model in millimetres to nothing; the sheet's grid
+steps stopped at 0.01 and 1000; and sizes under 0.005 printed as 0 in
+the titles and spans. The point light now reaches half the model's
+longest side, the others follow the model, and none of them moved an
+existing render. What stays in units on purpose is what the program
+says in units: a preset's pattern size, `text`'s size, a bump's height.
+
 ## Glass, a light with a size, depth of field
 
 A transmitting material is shaded by continuing the ray: refract in at the

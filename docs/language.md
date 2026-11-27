@@ -16,6 +16,17 @@ This document is the language around them.
   `set units mm` (or `cm`, `dm`, `m`, `in`, `ft`) says which, and the
   exports and the report's Print section use it (see Settings); a model
   is judged as a print only then.
+- Draw in the real unit: nothing in the mesh, the checks, the warnings or
+  the pictures depends on the model's absolute size, since the grid is
+  cells along its longest side and every tolerance follows the cell
+  (measured: a mug with a lettered label, a worn rusty handle and a
+  wooden saucer, built at 1, 100, 0.01 and 0.001 times, meshed to the
+  same 119068 triangles and drew the same sheet and beauty render but
+  for the numbers in the captions). What does depend on it is the few
+  defaults given in units: a material preset's pattern size (below) and
+  `text`'s `size` of 1, so a model in millimetres gives `scale=` and
+  `size=`. A point light's reach without `range=` is half the model's
+  longest side, at any size.
 - **Angles are degrees**, in `rotate`, `twist`, `bend` and in `sin`/`cos`.
 - Every primitive is centred on the origin. Anything with an axis
   (cylinder, cone, capsule, prism, capsule) stands along y; a torus lies
@@ -662,7 +673,10 @@ laid down; a rotation after painting turns the pattern with the part.
 A preset at another feature size is `material("granite", scale=0.4)`:
 start from the preset, change only what is given. Pattern sizes are in
 model units (the reference lists each preset's), so wood grain 0.25
-apart suits a table and a 20-unit floor wants `scale=2`.
+apart suits a table and a 20-unit floor wants `scale=2`; a part drawn in
+millimetres wants a hundred times the preset's (a wooden box 120 mm
+across, `material("wood", scale=25)`), or the grain is finer than its
+cell and reads as noise.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
 tiles, dots, rust. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 

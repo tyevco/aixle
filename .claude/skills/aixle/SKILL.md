@@ -17,8 +17,13 @@ Reference: `docs/reference.md` (every function, generated from the code),
 ## The loop
 
 1. **Plan in words.** What is it, how big, which way is its front (+z),
-   what are its parts. Pick a unit and keep the whole model within about
-   1 to 20 units.
+   what are its parts. Draw in its real unit: millimetres for a print
+   (`set units mm`; a 117 mm stand is 117 units), metres or centimetres
+   for furniture, a room or a game prop. Nothing in the mesh, the checks
+   or the pictures depends on the size (the grid is cells along the
+   longest side); what does is the defaults given in units, a material
+   preset's pattern (wood grain 0.25) and `text`'s size 1, so in
+   millimetres give `scale=` and `size=`.
 2. **Write `model.aix`**, one part per named line. For a bolt, a chair,
    a tree or the like, `use "std/hardware"`, `"std/furniture"` or
    `"std/plants"` first (`npx aixle doc std/hardware.aix` says what each

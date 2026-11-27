@@ -125,7 +125,7 @@ export interface Light {
   power: number;
   /** A point light: where it is; azimuth and elevation are then unused. */
   position?: [number, number, number];
-  /** A point light's reach: its strength halves at this distance from it. */
+  /** A point light's reach: its strength halves at this distance from it; undefined, half the model's longest side. */
   range?: number;
   line: number;
 }
@@ -585,8 +585,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (posV !== undefined) {
       if (!Array.isArray(posV) || posV.length !== 3 || !posV.every((v) => typeof v === "number")) throw new RuntimeError(`light("${name}"): position is [x, y, z]`, line);
       position = [posV[0] as number, posV[1] as number, posV[2] as number];
-      range = num("range", 2);
-      if (range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
+      // Without range= the render takes half the model's longest side, so the default is a reach for any size of
+      // model: a fixed 2 units lit a stand drawn in millimetres to a few thousandths at 50 mm.
+      range = values.some((x) => x.name === "range") ? num("range", 2) : undefined;
+      if (range !== undefined && range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
       if (values.some((x) => x.name === "azimuth" || x.name === "elevation")) warnings.push(`light("${name}") (line ${line}): a point light is at its position; azimuth and elevation are ignored`);
     } else if (values.some((x) => x.name === "range")) throw new RuntimeError(`light("${name}"): range goes with position=[x, y, z]; a light with no position is a direction`, line);
     const lightDef: Light = { name, azimuth, elevation, size, color, colorName, power, position, range, line };

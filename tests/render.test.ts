@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
-import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, meshSteps } from "../src/render/views.js";
+import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, dimsLabel, meshSteps } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
 import { attributeVertices, renderCallouts, hiddenFraction } from "../src/render/callouts.js";
 import { decodePng, encodePng, encodeApng } from "../src/render/png.js";
@@ -141,6 +141,33 @@ describe("views", () => {
     expect(gridStep(3)).toBe(0.2);
     expect(gridStep(30)).toBe(2);
     expect(gridStep(0.5)).toBe(0.05);
+    // Past the steps a model of a few units uses: a 4 mm part drawn in metres, a 100 m building in millimetres.
+    expect(gridStep(0.005)).toBe(0.0005);
+    expect(gridStep(1e5)).toBe(5000);
+    // Inside them nothing moved (0.01 still for a span of 0.02 to 0.24).
+    expect(gridStep(0.1)).toBe(0.01);
+    expect(gridStep(24000)).toBe(1000);
+    // A size under 0.005 prints its figures, not 0.
+    expect(dimsLabel({ min: [0, 0, 0], max: [0.0044, 0.0025, 0.0036] })).toBe("0.0044 × 0.0025 × 0.0036");
+    expect(dimsLabel({ min: [0, 0, 0], max: [4.36, 2.48, 3.6] })).toBe("4.36 × 2.48 × 3.6");
+  });
+  it("renders a model the same at any absolute size: the beauty render's steps follow the cell, a point light's default reach the model", () => {
+    // A ball on a slab lit by one point light with no range, built at 1 and at 1/1000 and 100 times that: the same
+    // picture. The beauty render's steps had a floor of 1e-4 units, three times the cell of a 4 mm part drawn in
+    // metres, and lost its contact shadow; a point light reached 2 units, which lights a model in millimetres to
+    // nothing.
+    const at = (k: number) => {
+      const shape = O.union([O.move(P.sphere(k), 0, 1.4 * k, 0), O.move(P.box(4 * k, 0.4 * k, 4 * k), 0, 0.2 * k, 0)]);
+      const nets = surfaceNets(shape, { resolution: 48 });
+      const light = { azimuth: 0, elevation: 0, size: 1, color: [1, 1, 1] as [number, number, number], power: 1.5, position: [k, 3 * k, 1.5 * k] as [number, number, number] };
+      return renderBeauty(shape, nets.mesh, shape.bounds, { size: 64, cellSize: nets.cellSize, lights: [light] });
+    };
+    const mean = (c: Canvas) => { let t = 0; for (let y = 0; y < 56; y++) for (let x = 0; x < 64; x++) t += c.get(x, y) & 0xff; return t / (56 * 64); };
+    const diff = (a: Canvas, b: Canvas) => { let n = 0; for (let y = 0; y < 56; y++) for (let x = 0; x < 64; x++) { const p = a.get(x, y), q = b.get(x, y); if (Math.abs((p & 0xff) - (q & 0xff)) + Math.abs(((p >> 8) & 0xff) - ((q >> 8) & 0xff)) + Math.abs(((p >> 16) & 0xff) - ((q >> 16) & 0xff)) > 24) n++; } return n / (56 * 64); };
+    const one = at(1), tiny = at(0.001), big = at(100);
+    expect(diff(one, tiny)).toBeLessThan(0.01);
+    expect(diff(one, big)).toBeLessThan(0.01);
+    expect(Math.abs(mean(one) - mean(big))).toBeLessThan(2);
   });
 });
 

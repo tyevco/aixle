@@ -271,7 +271,8 @@ describe("interpreter", () => {
     expect(w).toContainEqual('camera "x" (line 2): focus="nope" names no step or object; the shot frames the whole model');
     // A point light: at a place, with a range; the parts it does not take are errors or a warning.
     const point = run('light("fire", position=[0, 0.4, 0], range=1.5, color="#ff9a3c")\nlight("odd", position=[1, 1, 1], azimuth=30)');
-    expect(point.lights.map((l) => [l.name, l.position, l.range])).toEqual([["fire", [0, 0.4, 0], 1.5], ["odd", [1, 1, 1], 2]]);
+    // Without range= the render takes half the model's longest side, so the default suits a model of any size.
+    expect(point.lights.map((l) => [l.name, l.position, l.range])).toEqual([["fire", [0, 0.4, 0], 1.5], ["odd", [1, 1, 1], undefined]]);
     expect(point.warnings).toContainEqual('light("odd") (line 2): a point light is at its position; azimuth and elevation are ignored');
     expect(() => run('light("k", position=[1, 2])')).toThrow(/position is \[x, y, z\]/);
     expect(() => run('light("k", range=2)')).toThrow(/range goes with position/);

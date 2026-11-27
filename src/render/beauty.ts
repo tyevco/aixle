@@ -32,7 +32,7 @@ export interface BeautyLight {
   color: Vec3;
   /** 1 is the default key light's strength. */
   power: number;
-  /** A point light: its place; azimuth and elevation are unused. Its strength halves `range` away from it. */
+  /** A point light: its place; azimuth and elevation are unused. Its strength halves `range` away from it (half the model's longest side when unset). */
   position?: Vec3;
   range?: number;
 }
@@ -114,8 +114,10 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   // The lights: the program's, or the one key light the settings describe (its default direction kept as it was).
   type Lit = { dir: Vec3; softness: number; color: Vec3; power: number; pos?: Vec3; range: number };
   const centre = boundsCenter(opts.reachBounds ?? bounds);
+  // A point light with no range of its own reaches half the model's longest side, whatever the unit.
+  const halfModel = Math.max(...boundsSize(opts.reachBounds ?? bounds)) / 2 || 1;
   const lights: Lit[] = (opts.lights && opts.lights.length
-    ? opts.lights.map((l) => ({ dir: l.position ? normalize([l.position[0] - centre[0], l.position[1] - centre[1], l.position[2] - centre[2]]) : lightDirection(l.azimuth, l.elevation), size: l.size, color: l.color, power: l.power, pos: l.position, range: l.range ?? 2 }))
+    ? opts.lights.map((l) => ({ dir: l.position ? normalize([l.position[0] - centre[0], l.position[1] - centre[1], l.position[2] - centre[2]]) : lightDirection(l.azimuth, l.elevation), size: l.size, color: l.color, power: l.power, pos: l.position, range: l.range ?? halfModel }))
     : [{ dir: opts.lightAzimuth === undefined && opts.lightElevation === undefined ? DEFAULT_LIGHT : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55), size: opts.lightSize ?? 1, color: [1, 1, 1] as Vec3, power: 1, pos: undefined, range: 2 }]
   ).map((l) => ({ dir: l.dir, softness: 6 / Math.max(0.1, l.size), color: l.color, power: Math.max(0, l.power), pos: l.pos, range: Math.max(1e-6, l.range) }));
   const totalPower = Math.max(1e-6, lights.reduce((s, l) => s + l.power, 0));
@@ -128,8 +130,10 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
   };
   const ambient = Math.max(0, opts.ambient ?? 1) * pal.ambient;
   const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, opts.fitPoints ?? mesh.positions);
-  const cell = Math.max(opts.cellSize, 1e-4);
   const model = opts.reachBounds ?? bounds;
+  // The mesh's cell sets every step and offset below; a floor of 1e-4 units made them three times the cell of a
+  // 4 mm mug drawn in metres, which lost its contact shadows. Only an unknown cell falls back, to the model's own.
+  const cell = opts.cellSize > 0 ? opts.cellSize : Math.max(...boundsSize(model)) / 128 || 1e-4;
   const floorY = Math.min(0, model.min[1]);
   const shadowBox = boundsGrow(model, cell);
   const reach = Math.hypot(...boundsSize(model)) * 1.5;

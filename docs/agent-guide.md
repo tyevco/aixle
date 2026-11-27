@@ -7,7 +7,8 @@ the inside is cut open.
 ## The loop
 
 1. **Plan in words first.** What is it, how big, which way does it face,
-   what are its parts. Decide the unit. Decide the front is +z.
+   what are its parts. Decide the unit: the real one (millimetres for a
+   print, with `set units mm`). Decide the front is +z.
 2. **Write `model.aix`** part by part, one named step per line. Before
    building a bolt, a chair or a tree, `use "std/hardware"`,
    `"std/furniture"` or `"std/plants"` (`aixle doc std/hardware.aix` lists
@@ -248,8 +249,18 @@ shown, so a lug welded to a boom is blamed as the lug, not the boom.
 - `| ground()` when the lowest point should touch the floor. It reads the
   surface itself, so a blend or a cut that leaves the bounding box loose
   does not lift the model; a base already on y = 0 does not need it.
-- Keep the whole model within about 1 to 20 units; the grid resolution is
-  relative to the longest side, so a giant scene loses small detail.
+- Draw in the real unit, millimetres for a print (a 117 mm stand is 117
+  units, with `set units mm`). Nothing in the mesh, the checks or the
+  pictures depends on the model's absolute size: measured, a mug built at
+  1, 100, 0.01 and 0.001 times gave the same mesh and the same sheet and
+  beauty render, but for the numbers in the captions. What does depend on
+  the unit is the few defaults given in units: a material preset's
+  pattern size (wood grain 0.25 apart, granite speckle 0.05; the
+  reference lists each) and `text`'s size of 1, so a model in
+  millimetres gives `scale=` and `size=` (`material("wood", scale=25)`
+  on a 120 mm box, `text("PERCH", 9)`). The grid is cells along the
+  longest side, so what loses detail is a big scene with small parts, at
+  any unit: raise the grid, or `--focus` the part.
 - Name steps for what they are (`lid`, `left_arm`, `stair_3`), since the
   names are what the steps sheet and the report show you, and a part's
   sizes too: `seat = {w: 0.9, h: 0.45}` read as `seat.h` says what each
