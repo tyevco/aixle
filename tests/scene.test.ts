@@ -580,3 +580,32 @@ describe("the report's material rows", () => {
     }
   });
 });
+
+describe("a loose piece in the report", () => {
+  it("is named by the steps on its own surface, with its joint, and its volume to two figures", () => {
+    // Round 11: a knocker's ring, hanging clear of its eye in its own joint, was put down to the wall and the door
+    // leaf it hung in front of, and its volume of about 0.0003 printed as 0.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = [
+        "post = box(0.2, 1, 0.2) | move(0, 0.5, 0)",
+        "pin = cylinder(0.03, 0.4) | rotate(x=90) | move(0, 0.9, 0.2)",
+        "ring = torus(0.2, 0.03) | rotate(x=90) | move(0, 0.81, 0.3)",
+        'knocker = joint(ring, "knocker", 0, 0.93, 0.3, axis=[0, 0, 1])',
+        "small = sphere(0.05) | move(0.6, 0.5, 0)",
+        "show post + pin + knocker + small",
+      ].join("\n");
+      const r = run(src, "knocker.aix", dir, { grid: 80, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, glb: false, obj: false });
+      const row = /\| Pieces \| (.*) \|/.exec(r.report)![1];
+      expect(row).toMatch(/^3 \(/);
+      expect(row).toMatch(/in 'ring', the part of joint 'knocker', clear of what it turns on/);
+      expect(row).not.toMatch(/in 'pin'/);
+      // The small sphere's volume, 0.00052, is printed to two figures, where three decimals printed 0.001.
+      expect(row).toMatch(/; 0\.0005\d at \(0\.6, 0\.5, 0\) in 'small'/);
+      // The warning names them the same way.
+      expect(r.warnings.find((w) => /separate pieces/.test(w))).toMatch(/'ring', the part of joint 'knocker'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

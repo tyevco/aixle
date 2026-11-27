@@ -1204,7 +1204,12 @@ its longest side, the program's `set grid` when none is given (64
 without one), as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
-chair's floating back once passed); `overhang(shape, resolution)` is
+chair's floating back once passed). The row gives each loose piece's
+volume to two figures, where it is, and the steps it is made of, named
+at its own surface rather than at its centre (a ring's centre is in the
+air); a piece that is a joint's part, turning clear of what it hangs on
+(a knocker's ring in its eye), is said to be one, since it is loose by
+design and a print would print it so; `overhang(shape, resolution)` is
 the fraction of the surface that faces down more than 45° with the
 floor faces left out, the report's Overhangs row, for `assert
 overhang(part) < 0.05` on something to be printed without support (it

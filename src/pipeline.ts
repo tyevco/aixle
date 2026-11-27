@@ -591,15 +591,65 @@ export function capShare(note: { meshes: { name: string; before: number; after: 
   return shared + flat;
 }
 
-/** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and step. */
+/** A volume to two significant figures: a loose ring's 0.00031, which three decimals print as 0 (round 11). */
+const fmtVolume = (v: number): string => (v === 0 ? "0" : String(Number(Math.abs(v).toPrecision(2))));
+
+/**
+ * The steps a loose piece is made of, named where its own surface is (a few of its vertices), not at its centre,
+ * which for a ring is in the air beside whatever passes there (round 11: a knocker's ring, clear of its eye in its
+ * own joint, was put down to the wall and the door leaf). The innermost steps whose surfaces pass within two cells
+ * of most of those points; and the joint they all turn with, when they do, since a joint's part clear of its parent
+ * is a loose piece by design (a ring hanging in an eye, a wheel on an axle).
+ */
+export function pieceSteps(evaluation: Evaluation, pc: Piece, cellSize: number): { names: string[]; joint?: string } {
+  const tally = new Map<string, number>();
+  for (const q of pc.points) for (const n of namesAt(evaluation, q, cellSize)) tally.set(n.name, (tally.get(n.name) ?? 0) + 1);
+  const ranked = [...tally].sort((a, b) => b[1] - a[1]);
+  const names = ranked.filter(([, c], i) => i === 0 || c * 2 >= pc.points.length).slice(0, 2).map(([n]) => n);
+  if (!names.length) return { names };
+  const joints = jointsOfSteps(evaluation);
+  const js = new Set(names.map((n) => joints.get(n)));
+  const joint = js.size === 1 ? [...js][0] : undefined;
+  return { names, ...(joint ? { joint } : {}) };
+}
+
+/** Per step name, the innermost joint it turns with (none for a step outside every joint), read from the tree. */
+function jointsOfSteps(evaluation: Evaluation): Map<string, string | undefined> {
+  const names = new Map<Shape3, string>();
+  for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
+  const out = new Map<string, string | undefined>();
+  const seen = new Set<Shape3>();
+  const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
+  const walk = (n: Shape3, joint: string | undefined) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    // A joint's own name is a step of the joint above it; what it turns is its own.
+    const nm = names.get(n);
+    if (nm !== undefined && !out.has(nm)) out.set(nm, joint);
+    const inner = n.joint ? n.joint.name : joint;
+    for (const k of n.parts ?? n.inner ?? []) walk(k, inner);
+    if (n.instanced) walk(n.instanced.base, inner);
+  };
+  for (const r of roots) walk(r, undefined);
+  return out;
+}
+
+/** A loose piece as the report says it: its volume, where, the steps it is made of, and its joint when it has one. */
+function looseText(evaluation: Evaluation, pc: Piece, cellSize: number): string {
+  const { names, joint } = pieceSteps(evaluation, pc, cellSize);
+  const own = names.length ? ` in ${names.map((n) => `'${n}'`).join(", ")}` : "";
+  const turns = joint ? `, the part of joint '${joint}', clear of what it turns on` : "";
+  return `${fmtVolume(pc.volume)} at (${pc.centre.map(fmt).join(", ")})${own}${turns}`;
+}
+
+/** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and steps. */
 function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): string {
   const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics, cellSize));
   if (solid.length <= 1) return `${solid.length}`;
-  const rest = solid.slice(1, 5).map((pc) => {
-    const at = stepsNear(evaluation, pc.centre, Math.max(pc.size * 0.5, Math.cbrt(Math.abs(pc.volume))) + cellSize * 2);
-    return `${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})${at.length ? ` in ${at.join(", ")}` : ""}`;
-  });
-  return `${solid.length} (the largest ${fmt(Math.abs(solid[0].volume))}; then ${rest.join("; ")}${solid.length > 5 ? "; ..." : ""})`;
+  const rest = solid.slice(1, 5).map((pc) => looseText(evaluation, pc, cellSize));
+  const jointed = solid.slice(1, 5).filter((pc) => pieceSteps(evaluation, pc, cellSize).joint).length;
+  const note = jointed && jointed === Math.min(4, solid.length - 1) ? `; a joint's part that turns clear of its parent is a piece of its own by design` : "";
+  return `${solid.length} (the largest ${fmt(Math.abs(solid[0].volume))}; then ${rest.join("; ")}${solid.length > 5 ? "; ..." : ""}${note})`;
 }
 
 /**
@@ -1655,9 +1705,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Name the steps whose surface is near each loose piece's centre, smallest first (by the field, not the box:
       // measured, a blended step's box named the wrong part). A piece's centre can be inside a hollow, so the
       // tolerance is the piece's own size.
-      const stepsAt = (pc: Piece) => stepsNear(evaluation, pc.centre, Math.cbrt(Math.abs(pc.volume)) + cellSize * 2);
       const loose = physics.pieces.filter((pc) => !specks.includes(pc) && !pc.cavity && pc !== main).slice(0, 4);
-      const where = loose.map((pc) => `volume ${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})${stepsAt(pc).length ? ` in ${stepsAt(pc).join(", ")}` : ""}`).join("; ");
+      const where = loose.map((pc) => `volume ${looseText(evaluation, pc, cellSize)}`).join("; ");
       // A quick pass that dropped thin steps has probably dropped the joins too (round 4: every quick sheet of a
       // railed excavator said "4 pieces"); the note above says so instead.
       if (!quickDropped) warnings.push(`The model is ${parts} separate pieces: the largest is ${fmt(Math.abs(main.volume))}, the loose ${loose.length === 1 ? "piece is" : "pieces are"} ${where}${parts - 1 > loose.length ? ", ..." : ""}. A piece not touching the rest floats free: overlap parts slightly, or use scene for separate objects.`);
