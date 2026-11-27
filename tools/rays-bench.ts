@@ -8,6 +8,7 @@
  *           march it replaces, areaVisibility(); and the BVH's build
  *   early   areaVisibility's early out against always eight rays, both through the visibility filter
  *   largest the BVH build on the largest mesh any render-set program makes (every program meshed, none rendered)
+ *   build   the BVH build on the programs named (paths from the repository's root), cold and then warm
  *   cube    the penumbra behind a unit cube under a directional light of size 1 and 3, against the analytic disc's
  *   door    the round-11 door's stone through the filter: HEAD's render, the raw rays, the whole diffuse term filtered
  *           (accel's washed-out door_v2 crop) and visibility alone filtered
@@ -786,7 +787,7 @@ async function main(): Promise<void> {
 
   FIELD_STEPS = Number(flag("--field-steps", String(1 << 16)));
   mkdirSync(out, { recursive: true });
-  const names = args.length ? args : Object.keys(SCENES);
+  const names = args.length && !modes.has("build") ? args : Object.keys(SCENES);
   const lines: string[] = [];
   const log = (s: string) => { console.log(s); lines.push(s); };
   if (modes.has("faith") || modes.has("cost") || modes.has("early") || modes.has("noise"))
@@ -836,6 +837,13 @@ async function main(): Promise<void> {
   }
   if (modes.has("door")) log(await door(size, out));
   if (modes.has("largest")) log(await largest());
+  if (modes.has("build"))
+    for (const file of args) {
+      const c = await capture(file, 64);
+      const times: number[] = [];
+      for (let r = 0; r < 4; r++) { const t0 = performance.now(); buildBvh(c.mesh); times.push(performance.now() - t0); }
+      log(`${file}: ${c.mesh.indices.length / 3} triangles; BVH build cold ${times[0].toFixed(0)} ms, then ${times.slice(1).map((t) => t.toFixed(0)).join("/")} ms`);
+    }
   writeFileSync(join(out, `bench_${[...modes].join("_")}_${size}.txt`), lines.join("\n") + "\n");
 }
 
