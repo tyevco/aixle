@@ -9,14 +9,11 @@
  */
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderSet } from "./render-set.js";
+import { PROBE, renderSet } from "./render-set.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 renderSet(resolve(ROOT, "dogfood"), resolve(ROOT, "dogfood", "renders"), "dogfood", {
   only: process.argv.slice(2),
-  // An agent names a probe for what it measures (hub_probe_onebyone.aix) as
-  // often as plainly (chess_nodes_probe.aix); both are probes, and some are
-  // deliberate failures or a reproduction of a hang, so none are rendered.
-  skip: /_probe(_[^/]*)?\.aix$/,
+  skip: PROBE,
   sheetAndBeautyOnly: true,
 });

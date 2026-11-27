@@ -11,6 +11,14 @@ import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { run } from "../src/pipeline.js";
 
+/**
+ * A probe: a file an agent wrote to measure something, kept beside the
+ * models but neither rendered nor listed. Agents name one plainly
+ * (chess_nodes_probe.aix) or for what it measures (hub_probe_onebyone.aix),
+ * and some are deliberate failures or reproduce a hang.
+ */
+export const PROBE = /_probe(_[^/]*)?\.aix$/;
+
 export interface RenderSetOptions {
   /** Only these names (file names without .aix); empty for all. */
   only?: string[];

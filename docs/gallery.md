@@ -364,14 +364,6 @@ round 10: A bolted wheel hub flange for printing: a thick disc with a raised bos
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub.aix) · <a href="/aixle/viewers/round-10_hub.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/hub.report.md)
 
-### round-10_hub_probe_onebyone
-
-round 10: Probe: the same hub as hub.aix with the cutters subtracted one by one instead of as one union,
-
-![round-10_hub_probe_onebyone, beauty render](../dogfood/renders/round-10_hub_probe_onebyone_beauty.png) ![round-10_hub_probe_onebyone, contact sheet](../dogfood/renders/round-10_hub_probe_onebyone.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub_probe_onebyone.aix) · <a href="/aixle/viewers/round-10_hub_probe_onebyone.html" target="_blank" rel="noopener">viewer</a>
-
 ### round-10_ring
 
 round 10: A jewelled ring on a velvet display stand, about 1.5 tall on y = 0.
@@ -396,30 +388,6 @@ round 11: A dungeon door for a game engine, shipped as a GLB.
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/door.aix) · <a href="/aixle/viewers/round-11_door.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/door.report.md)
 
-### round-11_door_probe_bracket
-
-round 11: PROBE (bracket): door.aix with one deliberate fault, to see what check says.
-
-![round-11_door_probe_bracket, beauty render](../dogfood/renders/round-11_door_probe_bracket_beauty.png) ![round-11_door_probe_bracket, contact sheet](../dogfood/renders/round-11_door_probe_bracket.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/door_probe_bracket.aix) · <a href="/aixle/viewers/round-11_door_probe_bracket.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_door_probe_eye
-
-round 11: PROBE (eye): door.aix with one deliberate fault, to see what check says.
-
-![round-11_door_probe_eye, beauty render](../dogfood/renders/round-11_door_probe_eye_beauty.png) ![round-11_door_probe_eye, contact sheet](../dogfood/renders/round-11_door_probe_eye.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/door_probe_eye.aix) · <a href="/aixle/viewers/round-11_door_probe_eye.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_door_probe_pivot
-
-round 11: PROBE (pivot): door.aix with one deliberate fault, to see what check says.
-
-![round-11_door_probe_pivot, beauty render](../dogfood/renders/round-11_door_probe_pivot_beauty.png) ![round-11_door_probe_pivot, contact sheet](../dogfood/renders/round-11_door_probe_pivot.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/door_probe_pivot.aix) · <a href="/aixle/viewers/round-11_door_probe_pivot.html" target="_blank" rel="noopener">viewer</a>
-
 ### round-11_mixer
 
 round 11: A tilt-head kitchen stand mixer. One unit is a decimetre (10 cm).
@@ -427,70 +395,6 @@ round 11: A tilt-head kitchen stand mixer. One unit is a decimetre (10 cm).
 ![round-11_mixer, beauty render](../dogfood/renders/round-11_mixer_beauty.png) ![round-11_mixer, contact sheet](../dogfood/renders/round-11_mixer.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer.aix) · <a href="/aixle/viewers/round-11_mixer.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/mixer.report.md)
-
-### round-11_mixer_probe_bowl
-
-round 11: Probe: the mixer's bowl alone at the scene's cell (0.0189), to find where its
-
-![round-11_mixer_probe_bowl, beauty render](../dogfood/renders/round-11_mixer_probe_bowl_beauty.png) ![round-11_mixer_probe_bowl, contact sheet](../dogfood/renders/round-11_mixer_probe_bowl.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_bowl.aix) · <a href="/aixle/viewers/round-11_mixer_probe_bowl.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_fail_float
-
-round 11: Probe: the mixer with one deliberate fault (bowl floating 0.03 above the plate), to see what check says.
-
-![round-11_mixer_probe_fail_float, beauty render](../dogfood/renders/round-11_mixer_probe_fail_float_beauty.png) ![round-11_mixer_probe_fail_float, contact sheet](../dogfood/renders/round-11_mixer_probe_fail_float.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_fail_float.aix) · <a href="/aixle/viewers/round-11_mixer_probe_fail_float.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_fail_gap
-
-round 11: Probe: the mixer with one deliberate fault (beater gap 0.01), to see what check says.
-
-![round-11_mixer_probe_fail_gap, beauty render](../dogfood/renders/round-11_mixer_probe_fail_gap_beauty.png) ![round-11_mixer_probe_fail_gap, contact sheet](../dogfood/renders/round-11_mixer_probe_fail_gap.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_fail_gap.aix) · <a href="/aixle/viewers/round-11_mixer_probe_fail_gap.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_fail_sunk
-
-round 11: Probe: the mixer with one deliberate fault (bowl sunk 0.02 into the plate), to see what check says.
-
-![round-11_mixer_probe_fail_sunk, beauty render](../dogfood/renders/round-11_mixer_probe_fail_sunk_beauty.png) ![round-11_mixer_probe_fail_sunk, contact sheet](../dogfood/renders/round-11_mixer_probe_fail_sunk.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_fail_sunk.aix) · <a href="/aixle/viewers/round-11_mixer_probe_fail_sunk.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_fail_thin
-
-round 11: Probe: the mixer with one deliberate fault (bowl wall 0.03), to see what check says.
-
-![round-11_mixer_probe_fail_thin, beauty render](../dogfood/renders/round-11_mixer_probe_fail_thin_beauty.png) ![round-11_mixer_probe_fail_thin, contact sheet](../dogfood/renders/round-11_mixer_probe_fail_thin.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_fail_thin.aix) · <a href="/aixle/viewers/round-11_mixer_probe_fail_thin.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_fail_tilt
-
-round 11: Probe: the mixer with one deliberate fault (tilt of only 12 degrees), to see what check says.
-
-![round-11_mixer_probe_fail_tilt, beauty render](../dogfood/renders/round-11_mixer_probe_fail_tilt_beauty.png) ![round-11_mixer_probe_fail_tilt, contact sheet](../dogfood/renders/round-11_mixer_probe_fail_tilt.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_fail_tilt.aix) · <a href="/aixle/viewers/round-11_mixer_probe_fail_tilt.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_posed
-
-round 11: Probe: is a reassigned step (head_shell, painted then decalled) measured where the pose puts it?
-
-![round-11_mixer_probe_posed, beauty render](../dogfood/renders/round-11_mixer_probe_posed_beauty.png) ![round-11_mixer_probe_posed, contact sheet](../dogfood/renders/round-11_mixer_probe_posed.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_posed.aix) · <a href="/aixle/viewers/round-11_mixer_probe_posed.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_mixer_probe_units
-
-round 11: Probe: does set units take a decimetre, the unit the mixer is drawn in?
-
-![round-11_mixer_probe_units, beauty render](../dogfood/renders/round-11_mixer_probe_units_beauty.png) ![round-11_mixer_probe_units, contact sheet](../dogfood/renders/round-11_mixer_probe_units.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer_probe_units.aix) · <a href="/aixle/viewers/round-11_mixer_probe_units.html" target="_blank" rel="noopener">viewer</a>
 
 ### round-11_shelf
 
@@ -508,62 +412,6 @@ round 11: shelf_lib: a parametric bookcase, the books on it and the bookends tha
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_lib.aix) · <a href="/aixle/viewers/round-11_shelf_lib.html" target="_blank" rel="noopener">viewer</a>
 
-### round-11_shelf_probe_band
-
-round 11: Probe: does decal()'s "touches none of the shape's surface" warning depend on the region's thickness?
-
-![round-11_shelf_probe_band, beauty render](../dogfood/renders/round-11_shelf_probe_band_beauty.png) ![round-11_shelf_probe_band, contact sheet](../dogfood/renders/round-11_shelf_probe_band.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_band.aix) · <a href="/aixle/viewers/round-11_shelf_probe_band.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_shelf_probe_fail
-
-round 11: Probe: the bookcase with three books put wrong on purpose: book 3 sunk 0.03 into
-
-![round-11_shelf_probe_fail, beauty render](../dogfood/renders/round-11_shelf_probe_fail_beauty.png) ![round-11_shelf_probe_fail, contact sheet](../dogfood/renders/round-11_shelf_probe_fail.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_fail.aix) · <a href="/aixle/viewers/round-11_shelf_probe_fail.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_shelf_probe_ground
-
-round 11: Probe: is the leaning book's 0.003 gap over its shelf from ground() or from clearance()?
-
-![round-11_shelf_probe_ground, beauty render](../dogfood/renders/round-11_shelf_probe_ground_beauty.png) ![round-11_shelf_probe_ground, contact sheet](../dogfood/renders/round-11_shelf_probe_ground.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_ground.aix) · <a href="/aixle/viewers/round-11_shelf_probe_ground.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_shelf_probe_hang
-
-round 11: Probe: overlap() does not return. A box grounded and set on a board whose
-
-![round-11_shelf_probe_hang, beauty render](../dogfood/renders/round-11_shelf_probe_hang_beauty.png) ![round-11_shelf_probe_hang, contact sheet](../dogfood/renders/round-11_shelf_probe_hang.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_hang.aix) · <a href="/aixle/viewers/round-11_shelf_probe_hang.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_shelf_probe_hang2
-
-round 11: Probe: overlap() does not return for a box leaning 18 degrees with its top
-
-![round-11_shelf_probe_hang2, beauty render](../dogfood/renders/round-11_shelf_probe_hang2_beauty.png) ![round-11_shelf_probe_hang2, contact sheet](../dogfood/renders/round-11_shelf_probe_hang2.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_hang2.aix) · <a href="/aixle/viewers/round-11_shelf_probe_hang2.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_shelf_probe_overlap
-
-round 11: Probe: overlap() of each kind of book (upright, leaning left and right, flat, flat 0.45 up) on the library's board, alone: every one returns at once. The hang needed the board's height to come out of arithmetic (shelf_probe_hang.aix).
-
-![round-11_shelf_probe_overlap, beauty render](../dogfood/renders/round-11_shelf_probe_overlap_beauty.png) ![round-11_shelf_probe_overlap, contact sheet](../dogfood/renders/round-11_shelf_probe_overlap.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_overlap.aix) · <a href="/aixle/viewers/round-11_shelf_probe_overlap.html" target="_blank" rel="noopener">viewer</a>
-
-### round-11_shelf_probe_speed
-
-round 11: Probe: the bookcase with no asserts, to time check without them.
-
-![round-11_shelf_probe_speed, beauty render](../dogfood/renders/round-11_shelf_probe_speed_beauty.png) ![round-11_shelf_probe_speed, contact sheet](../dogfood/renders/round-11_shelf_probe_speed.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_probe_speed.aix) · <a href="/aixle/viewers/round-11_shelf_probe_speed.html" target="_blank" rel="noopener">viewer</a>
-
 ### round-11_stand
 
 round 11: A desk stand for a phone, printed in PLA standing on its base.
@@ -571,14 +419,6 @@ round 11: A desk stand for a phone, printed in PLA standing on its base.
 ![round-11_stand, beauty render](../dogfood/renders/round-11_stand_beauty.png) ![round-11_stand, contact sheet](../dogfood/renders/round-11_stand.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/stand.aix) · <a href="/aixle/viewers/round-11_stand.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/stand.report.md)
-
-### round-11_stand_probe_phone
-
-round 11: Probe: dogfood/stand.aix copied up to its show, with the phone and the cable drawn
-
-![round-11_stand_probe_phone, beauty render](../dogfood/renders/round-11_stand_probe_phone_beauty.png) ![round-11_stand_probe_phone, contact sheet](../dogfood/renders/round-11_stand_probe_phone.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/stand_probe_phone.aix) · <a href="/aixle/viewers/round-11_stand_probe_phone.html" target="_blank" rel="noopener">viewer</a>
 
 ### round-2_excavator
 
@@ -699,54 +539,6 @@ round 5: A sailing dinghy on a cradle, about 5 units long. Bow is +z. The cradle
 ![round-5_sailboat, beauty render](../dogfood/renders/round-5_sailboat_beauty.png) ![round-5_sailboat, contact sheet](../dogfood/renders/round-5_sailboat.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat.aix) · <a href="/aixle/viewers/round-5_sailboat.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/sailboat.report.md)
-
-### round-5_sailboat_probe_dark
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_dark, beauty render](../dogfood/renders/round-5_sailboat_probe_dark_beauty.png) ![round-5_sailboat_probe_dark, contact sheet](../dogfood/renders/round-5_sailboat_probe_dark.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_dark.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_dark.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_decal
-
-round 5: Probe: which decal wins where two regions overlap?
-
-![round-5_sailboat_probe_decal, beauty render](../dogfood/renders/round-5_sailboat_probe_decal_beauty.png) ![round-5_sailboat_probe_decal, contact sheet](../dogfood/renders/round-5_sailboat_probe_decal.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_decal.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_decal.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_main
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_main, beauty render](../dogfood/renders/round-5_sailboat_probe_main_beauty.png) ![round-5_sailboat_probe_main, contact sheet](../dogfood/renders/round-5_sailboat_probe_main.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_main2
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_main2, beauty render](../dogfood/renders/round-5_sailboat_probe_main2_beauty.png) ![round-5_sailboat_probe_main2, contact sheet](../dogfood/renders/round-5_sailboat_probe_main2.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main2.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main2.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_sharp
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_sharp, beauty render](../dogfood/renders/round-5_sailboat_probe_sharp_beauty.png) ![round-5_sailboat_probe_sharp, contact sheet](../dogfood/renders/round-5_sailboat_probe_sharp.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_sharp.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_sharp.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_well
-
-round 5: Probe: why does a decal region that contains a well's floor not paint it?
-
-![round-5_sailboat_probe_well, beauty render](../dogfood/renders/round-5_sailboat_probe_well_beauty.png) ![round-5_sailboat_probe_well, contact sheet](../dogfood/renders/round-5_sailboat_probe_well.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_well.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_well.html" target="_blank" rel="noopener">viewer</a>
 
 ### round-5_treehouse
 
@@ -875,38 +667,6 @@ round 9: A machined L-bracket for a print: a base plate on y = 0, an upright at 
 ![round-9_bracket, beauty render](../dogfood/renders/round-9_bracket_beauty.png) ![round-9_bracket, contact sheet](../dogfood/renders/round-9_bracket.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket.aix) · <a href="/aixle/viewers/round-9_bracket.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/bracket.report.md)
-
-### round-9_bracket_probe_void
-
-round 9: Probe: void() on a blind cut (a counterbore) versus a through cut.
-
-![round-9_bracket_probe_void, beauty render](../dogfood/renders/round-9_bracket_probe_void_beauty.png) ![round-9_bracket_probe_void, contact sheet](../dogfood/renders/round-9_bracket_probe_void.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void.html" target="_blank" rel="noopener">viewer</a>
-
-### round-9_bracket_probe_void2
-
-round 9: Probe 2: which part of the bracket makes void(cbore, model) fail?
-
-![round-9_bracket_probe_void2, beauty render](../dogfood/renders/round-9_bracket_probe_void2_beauty.png) ![round-9_bracket_probe_void2, contact sheet](../dogfood/renders/round-9_bracket_probe_void2.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void2.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void2.html" target="_blank" rel="noopener">viewer</a>
-
-### round-9_bracket_probe_void3
-
-round 9: Probe 3: void() on a counterbore cut as part of a union of cutters.
-
-![round-9_bracket_probe_void3, beauty render](../dogfood/renders/round-9_bracket_probe_void3_beauty.png) ![round-9_bracket_probe_void3, contact sheet](../dogfood/renders/round-9_bracket_probe_void3.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void3.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void3.html" target="_blank" rel="noopener">viewer</a>
-
-### round-9_bracket_probe_void4
-
-round 9: Probe 4: which members of a cutter union does void() misread?
-
-![round-9_bracket_probe_void4, beauty render](../dogfood/renders/round-9_bracket_probe_void4_beauty.png) ![round-9_bracket_probe_void4, contact sheet](../dogfood/renders/round-9_bracket_probe_void4.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void4.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void4.html" target="_blank" rel="noopener">viewer</a>
 
 ### round-9_campsite
 
