@@ -388,16 +388,34 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   noteFirst(program.body);
   // The top-level statement running, and the defs it is inside, for that message.
   let runningLine = 0;
-  const calling: string[] = [];
+  const calling: UserFn[] = [];
 
-  /** Why `name` has no value here: not defined at all, or not yet, when the file assigns it further down. */
-  function notDefined(name: string): string {
+  /**
+   * Why `name` has no value at `line`: not defined at all, or not yet, when the def's block body or the file assigns
+   * it further down. Only the program's own file is looked in: a library's def does not see the program's names.
+   */
+  function notDefined(name: string, scope: Scope, line: number): string {
+    // A name the block body running assigns below this line.
+    const fn = calling[calling.length - 1];
+    if (fn?.block && scope.root() === ((fn.closure as Scope | undefined) ?? global)) {
+      const later = (body: Stmt[]): number | undefined => {
+        for (const st of body) {
+          if (st.type === "assign" && st.name === name && st.line > line) return st.line;
+          if (st.type === "for") { const l = st.name === name && st.line > line ? st.line : later(st.body); if (l !== undefined) return l; }
+        }
+        return undefined;
+      };
+      const at = later(fn.block);
+      if (at !== undefined) return `'${name}' is not defined yet: it is assigned on line ${at} of ${fn.name}()'s body, after this line; statements run in order, top to bottom`;
+    }
     const at = firstAt.get(name);
-    if (!at || at.line <= runningLine) return `'${name}' is not defined`;
+    if (!at || at.line <= runningLine || scope.root() !== global) return `'${name}' is not defined`;
     const what = at.def ? `its def is on line ${at.line}` : `it is assigned on line ${at.line}`;
-    const when = calling.length ? `after line ${runningLine}, which calls ${calling[0]}()` : "after this line";
+    const when = calling.length ? `after line ${runningLine}, which calls ${calling[0].name}()` : "after this line";
     return `'${name}' is not defined yet: ${what}, ${when}; statements run in order, top to bottom`;
   }
+  /** Whether `name` is one the file assigns below the running line, for the messages that would say "unknown". */
+  const comesLater = (name: string, scope: Scope): boolean => scope.root() === global && (firstAt.get(name)?.line ?? 0) > runningLine;
 
   function evalExpr(e: Expr, scope: Scope): Value {
     switch (e.type) {
@@ -434,7 +452,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "ident": {
         if (e.name.includes(".")) return dottedValue(e.name, e.line, scope);
         const v = scope.get(e.name);
-        if (v === undefined) throw new RuntimeError(notDefined(e.name), e.line);
+        if (v === undefined) throw new RuntimeError(notDefined(e.name, scope, e.line), e.line);
         // Only the program's own names are steps: a def's parameter or block name, or a library's constant, is not the
         // step of the same name (round 11: a library def's parameter b made a caller's step b a part of every book).
         if (scope.owner(e.name) === global) reads?.add(e.name);
@@ -747,7 +765,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     else {
       const head = scope.get(parts[0]);
       if (head === undefined) {
-        if (firstAt.has(parts[0]) && firstAt.get(parts[0])!.line > runningLine) throw new RuntimeError(notDefined(parts[0]), line);
+        if (comesLater(parts[0], scope)) throw new RuntimeError(notDefined(parts[0], scope, line), line);
         const known = [...table.keys()];
         throw new RuntimeError(`'${parts[0]}' is not a used library or a defined record${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${parts[0]}.aix" or use "std/${parts[0]}" first, or define ${parts[0]} = {${parts[1]}: ...}`, line);
       }
@@ -810,7 +828,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     if (!builtin) {
       if (user !== undefined) throw new RuntimeError(`'${callee}' is a ${typeName(user)}, not a function`, line);
-      if (firstAt.has(callee) && firstAt.get(callee)!.line > runningLine) throw new RuntimeError(notDefined(callee), line);
+      if (comesLater(callee, scope)) throw new RuntimeError(notDefined(callee, scope, line), line);
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
@@ -962,7 +980,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     });
     for (const a of named) if (!fn.params.some((p) => p.name === a.name)) throw new RuntimeError(`'${fn.name}' has no parameter '${a.name}'`, line);
     depth++;
-    calling.push(fn.name);
+    calling.push(fn);
     try {
       if (!fn.block) return evalExpr(fn.body!, local);
       // A block body: its statements in order in the call's own scope, then the return's value. What they assign

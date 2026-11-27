@@ -349,3 +349,14 @@ describe("choosing without an if (round 11: no conditional, and a copy scaled to
     expect(error("a = [box(1), sphere(1)][box(1)]\n")).toBe("line 1: a list index must be a whole number, not a shape");
   });
 });
+
+describe("a name read above its line in a def's block body, or in a library", () => {
+  const error = (src: string, opts = {}): string => { try { evaluate(parse(src), opts); } catch (err) { return (err as Error).message; } return "no error"; };
+  it("names the line of the body that assigns it", () => {
+    expect(error("def book(b) {\n  all = cover + b\n  cover = box(1)\n  return all\n}\nx = book(box(2))\n")).toBe("line 2: 'cover' is not defined yet: it is assigned on line 3 of book()'s body, after this line; statements run in order, top to bottom");
+  });
+  it("does not point a library's def at the program's lines, which it cannot see", () => {
+    const resolve = () => ({ source: "def leg(h) = box(gap, h, gap)\n", file: "legs.aix" });
+    expect(error('use "legs"\nl = legs.leg(1)\ngap = 0.1\n', { resolveModule: resolve })).toBe("line 1: 'gap' is not defined");
+  });
+});
