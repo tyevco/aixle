@@ -491,7 +491,7 @@ The thinnest wall of the shape: from every vertex of its mesh at `resolution` ce
 
 ### overlap
 
-The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled on a lattice over the shared box, 24 cells along its longest side and at least four across its shortest (a rim sunk 0.02 into a base), so measure parts, not a scene; a failure says where.
+The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled on a lattice over the shared box, 24 cells along its longest side and at least four across its shortest (a rim sunk 0.02 into a base) within a budget of 200 thousand samples, whatever the shared box: a corner on a face, or two faces that meet to within floating point (a box ground()ed onto a board whose top came out of arithmetic), read 0 at once. Measure parts, not a scene; a failure says where.
 
     overlap(a, b) -> number
 

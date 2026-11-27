@@ -38,16 +38,25 @@ export function regionTouches(shape: Shape3, region: Shape3, n = 12): boolean {
   return false;
 }
 
-/** The box two boxes share, or undefined when they do not meet. */
-function sharedBox(a: Shape3, b: Shape3): { min: Vec3; max: Vec3 } | undefined {
+/**
+ * The box two boxes share, or undefined when they do not meet. With `touch`, a shared box thinner than that on any
+ * side is a touch, not a meeting: a book ground()ed onto a board whose top is 0.8000000000000002 shares a box 1e-16
+ * tall (round 11), which holds no volume worth sampling, and a lattice one cell across it measures nothing.
+ */
+function sharedBox(a: Shape3, b: Shape3, touch = 0): { min: Vec3; max: Vec3 } | undefined {
   if (isEmpty(a.bounds) || isEmpty(b.bounds)) return undefined;
   const min: Vec3 = [0, 0, 0], max: Vec3 = [0, 0, 0];
   for (let k = 0; k < 3; k++) {
     min[k] = Math.max(a.bounds.min[k], b.bounds.min[k]);
     max[k] = Math.min(a.bounds.max[k], b.bounds.max[k]);
-    if (max[k] <= min[k]) return undefined;
+    if (!(max[k] - min[k] > touch)) return undefined;
   }
   return { min, max };
+}
+
+/** Floating point's reach at the size of two parts: a shared box thinner than this is two faces that meet. */
+function touchTolerance(a: Shape3, b: Shape3): number {
+  return 1e-9 * Math.max(1, ...boundsSize(a.bounds), ...boundsSize(b.bounds));
 }
 
 /**
@@ -57,21 +66,36 @@ function sharedBox(a: Shape3, b: Shape3): { min: Vec3; max: Vec3 } | undefined {
  */
 /**
  * A lattice cell for a box: `n` cells along its longest side, then halved while the sample count stays within
- * the budget, and never coarser than a quarter of the shortest side. A rim sunk 0.02 into a base shares a box the
- * height of the rim's cut but overlaps it in a ring 0.02 tall, which 24 cells miss (round 10); 200k samples cost
- * well under a second.
+ * the budget, and never coarser than a quarter of the shortest side unless the budget forbids it. A rim sunk 0.02
+ * into a base shares a box the height of the rim's cut but overlaps it in a ring 0.02 tall, which 24 cells miss
+ * (round 10); 200k samples cost well under a second. The count never exceeds the budget, whatever the box: a side
+ * thinner than the cell is one cell across however fine the cell, so scaling the cell by the cube root of the
+ * excess undershoots, and a box 1e-16 tall asked for seven billion samples (round 11: check ran for twelve
+ * minutes on a book resting on a shelf). The cell is then searched for between the two, a bounded bisection.
  */
-function latticeCell(size: Vec3, n: number, budget = 200000): number {
+export function latticeCell(size: Vec3, n: number, budget = 200000): number {
   const longest = Math.max(size[0], size[1], size[2]), shortest = Math.max(1e-9, Math.min(size[0], size[1], size[2]));
+  if (!(longest > 0) || !Number.isFinite(longest)) return longest;
   const count = (c: number) => Math.ceil(size[0] / c) * Math.ceil(size[1] / c) * Math.ceil(size[2] / c);
   let cell = longest / n;
+  while (count(cell) > budget) cell *= 2;
   while (count(cell / 2) <= budget) cell /= 2;
-  if (cell > shortest / 4) { cell = shortest / 4; if (count(cell) > budget) cell *= Math.cbrt(count(cell) / budget); }
+  if (cell > shortest / 4) {
+    const coarse = cell;
+    cell = shortest / 4;
+    if (count(cell) > budget) cell *= Math.cbrt(count(cell) / budget);
+    if (count(cell) > budget) {
+      // Within budget at `coarse`, over it at `cell`: the finest cell that keeps to it lies between.
+      let lo = cell, hi = coarse;
+      for (let i = 0; i < 60 && hi - lo > hi * 1e-6; i++) { const mid = (lo + hi) / 2; if (count(mid) > budget) lo = mid; else hi = mid; }
+      cell = hi;
+    }
+  }
   return cell;
 }
 
 export function overlapVolume(a: Shape3, b: Shape3, n = 24): number {
-  const box = sharedBox(a, b);
+  const box = sharedBox(a, b, touchTolerance(a, b));
   if (!box) return 0;
   const size = boundsSize(box);
   const cell = latticeCell(size, n);
@@ -89,7 +113,7 @@ export function overlapVolume(a: Shape3, b: Shape3, n = 24): number {
 
 /** The point deepest inside both shapes, or undefined when no sample is in both: where an overlap is, for a failure. */
 export function overlapWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
-  const box = sharedBox(a, b);
+  const box = sharedBox(a, b, touchTolerance(a, b));
   if (!box) return undefined;
   const size = boundsSize(box);
   const cell = latticeCell(size, n);

@@ -1210,7 +1210,13 @@ small (a pin of radius 0.05 sunk 0.07 shares 0.00055; a ring's band, a
 torus of radius 0.42 and tube 0.065 standing on a flat cushion, sunk
 0.03 into it shares 0.00047, and a band of radius 0.2 sunk as far
 0.00034), so take a "joined" threshold from the part's size, and a
-failure says where the two overlap. An overlap of 0 says why: the two
+failure says where the two overlap. The lattice keeps to 200 thousand
+samples whatever the two shapes' shared box, so a near contact costs no
+more than any other: a turned corner resting on a face, or a book
+`ground()`ed onto a board whose top came out of arithmetic as
+0.8000000000000002, shares a box a few thousandths or 1e-16 thick, and
+reads 0 at once (two faces that meet to within floating point only
+touch). An overlap of 0 says why: the two
 only touch there (a board's back face exactly on a wall: sink it), they
 stand apart by so much, or they overlap by less than the lattice can
 measure over their shared box (promise that on a chunk of the part, `rim
