@@ -1,0 +1,222 @@
+import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import * as P from "../src/sdf/primitives.js";
+import * as O from "../src/sdf/ops.js";
+import { customMaterial, materialFromString } from "../src/sdf/materials.js";
+import type { Material, Shape3 } from "../src/sdf/types.js";
+import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
+import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
+import { pbr, type PbrTables } from "../src/render/pbr.js";
+import type { Camera } from "../src/render/camera.js";
+import { buildEnvironment, prefilterLevels, projectSh, type EnvironmentState } from "../src/render/environment.js";
+import { FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
+import { openBeautyPool } from "../src/render/beauty-pool.js";
+import { check } from "../src/pipeline.js";
+
+/**
+ * The pbr kernel's shading, measured in linear radiance: the units a light's power is in, energy kept by the BRDF in a
+ * constant sky, a metal's reflectance, a point light's falloff, the split slots, the bytes on the pool, glass.
+ */
+
+/** A render through the kernel's own passes, for its HDR and its buffers; `env` stands in for the palette's sky. */
+function shade(shape: Shape3, opts: Omit<BeautyOptions, "cellSize">, resolution = 40, env?: EnvironmentState): { hdr: Float32Array; slots: Float32Array[]; buffers: Buffers; size: number; camera: Camera } {
+  const nets = surfaceNets(shape, { resolution });
+  const mesh = nets.mesh, bounds = shape.bounds, size = opts.size;
+  const o: BeautyOptions = { ...opts, cellSize: nets.cellSize };
+  const camera = beautyCamera(mesh, bounds, o);
+  const prime = beautyPrime(mesh, camera, size);
+  const tables = pbr.prepare!({ shape, mesh, bounds, opts: o, camera, prime, size, cell: nets.cellSize, cache: beautyCache(), shared: false }) as PbrTables;
+  if (env) tables.env = env;
+  const buffers = allocBuffers(pbr.layout(o, size), size, false);
+  const ctx = { shape, mesh, bounds, opts: o, camera, prime, size, cell: nets.cellSize, buffers, tables, ids: materialIds(mesh.materials.map(materialKey)) };
+  const rows = pbr.rows(ctx);
+  for (let y = 0; y < size; y++) rows.primary(y);
+  for (let y = 0; y < size; y++) rows.edges(y);
+  const res = pbr.finish(ctx);
+  const slots = res.hdr!;
+  const hdr = new Float32Array(size * size * 3);
+  for (const s of slots) for (let k = 0; k < hdr.length; k++) hdr[k] += s[k];
+  return { hdr, slots, buffers, size, camera };
+}
+
+/** The studio's tables with the sky replaced by a constant radiance L everywhere: no structure, cards, sun or stars. */
+function constantSky(L: number): EnvironmentState {
+  const s = buildEnvironment("studio", { cameraAzimuth: 35, lights: [] });
+  const flat = (_x: number, _y: number, _z: number, out: Float64Array) => { out[0] = L; out[1] = L; out[2] = L; };
+  return {
+    ...s, ambient: 1, walls: 0, zenith: 1, flag: 0, shadow: 0, stars: 0,
+    grad: new Float64Array(s.grad.length).fill(L), below: new Float64Array(3).fill(L),
+    cards: new Float64Array(0), disc: new Float64Array(0), boxes: new Float64Array(0),
+    sh: projectSh(flat), levels: prefilterLevels(flat),
+  };
+}
+
+const white = (rough: number, metal = 0): Material => customMaterial({ color: [1, 1, 1], rough, metal });
+const dark: BeautyLight = { azimuth: 0, elevation: 90, size: 1, color: [1, 1, 1], power: 0 };
+
+/** The mean of channel c (or of all three) over the pixels a predicate picks. */
+function meanOver(hdr: Float32Array, pick: (i: number) => boolean, n: number, c = -1): number {
+  let s = 0, k = 0;
+  for (let i = 0; i < n; i++) if (pick(i)) { s += c < 0 ? (hdr[i * 3] + hdr[i * 3 + 1] + hdr[i * 3 + 2]) / 3 : hdr[i * 3 + c]; k++; }
+  return k ? s / k : NaN;
+}
+
+describe("shading: units and energy", () => {
+  it("a white Lambert face square to a power-1 key and no sky sends back KEY, less the share Fresnel's reflection takes", () => {
+    // A slab's top lit from straight above, the sky's light off (ambient 0): every top pixel away from the edges.
+    const slab = O.paint(O.move(P.box(4, 0.4, 4), 0, 0.2, 0), white(1));
+    const r = shade(slab, { size: 64, ambient: 0, elevation: 35, lights: [{ azimuth: 0, elevation: 90, size: 0.5, color: [1, 1, 1], power: 1 }] });
+    const { flags, normal } = r.buffers as { flags: Uint8Array; normal: Float32Array };
+    const top = (i: number) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE) && normal[i * 3 + 1] > 0.99;
+    const got = meanOver(r.hdr, top, 64 * 64);
+    // The diffuse part is KEY·(1 − F) with F Schlick's 0.04 at the half vector (the camera 35° up: v·h = cos 27.5°),
+    // and the rough lobe returns F·D·V·π: at rough 1 that is under 0.4 of F. So KEY within 3%, and above 1.
+    const F = 0.04 + 0.96 * Math.pow(1 - Math.cos((27.5 * Math.PI) / 180), 5);
+    expect(got).toBeGreaterThan(KEY * (1 - F) * 0.99);
+    expect(got).toBeLessThan(KEY * (1 - F + F * 0.45) * 1.01);
+    expect(Math.abs(got - KEY) / KEY).toBeLessThan(0.03);
+  });
+
+  it("keeps the energy of a constant sky: a white sphere of any roughness, dielectric or metal, returns L within 5%", () => {
+    const L = 0.6;
+    for (const metal of [0, 1])
+      for (const rough of [0.2, 0.5, 1]) {
+        // High above the floor, so nothing but the sky is round it.
+        const ball = O.paint(O.move(P.sphere(1), 0, 6, 0), white(rough, metal));
+        const r = shade(ball, { size: 64, lights: [dark] }, 32, constantSky(L));
+        const { flags } = r.buffers as { flags: Uint8Array };
+        const got = meanOver(r.hdr, (i) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE), 64 * 64);
+        expect(Math.abs(got - L) / L, `rough ${rough} metal ${metal}: ${got}`).toBeLessThan(0.05);
+      }
+  });
+
+  it("a polished metal seen square-on returns its F0 times the sky", () => {
+    const L = 0.5, f0 = [0.95, 0.64, 0.54];
+    const copper = customMaterial({ color: f0.map((v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)) as [number, number, number], rough: 0.05, metal: 1 });
+    // A slab's front face, the camera square to it.
+    const face = O.paint(O.move(P.box(4, 4, 0.4), 0, 6, 0), copper);
+    const r = shade(face, { size: 64, azimuth: 0, elevation: 0, lights: [dark] }, 32, constantSky(L));
+    const { flags, normal } = r.buffers as { flags: Uint8Array; normal: Float32Array };
+    const front = (i: number) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE) && normal[i * 3 + 2] > 0.99;
+    for (let c = 0; c < 3; c++) expect(Math.abs(meanOver(r.hdr, front, 64 * 64, c) - f0[c] * L) / (f0[c] * L), `channel ${c}`).toBeLessThan(0.03);
+  });
+
+  it("a point light's radiance halves at its range", () => {
+    const range = 2, size = 48;
+    const slab = O.paint(O.move(P.box(8, 0.4, 8), 0, 0.2, 0), white(1));
+    const opts = { size, ambient: 0, elevation: 35 };
+    const sun = shade(slab, { ...opts, lights: [{ azimuth: 0, elevation: 90, size: 0.2, color: [1, 1, 1], power: 1 }] }, 32);
+    // The point the middle pixel sees, from its depth along its ray.
+    const cam = sun.camera, i = (size / 2) * size + size / 2;
+    const f = size / 2 / Math.tan(((cam.fov ?? 30) * Math.PI) / 360), u = 0.5 / f;
+    const d = [0, 1, 2].map((k) => cam.right[k] * u - cam.up[k] * u + cam.forward[k]);
+    const dl = Math.hypot(d[0], d[1], d[2]), t = (sun.buffers.depth as Float32Array)[i];
+    const p = [0, 1, 2].map((k) => cam.eye[k] + (d[k] / dl) * t);
+    // A point light straight above it at its range: the same light direction and view, so the BRDF cancels and the
+    // ratio to a directional light of the same power straight above is the falloff, range² / (range² + d²) = 1/2.
+    const lamp = shade(slab, { ...opts, lights: [{ azimuth: 0, elevation: 0, size: 0.2, color: [1, 1, 1], power: 1, position: [p[0], p[1] + range, p[2]], range }] }, 32);
+    for (let c = 0; c < 3; c++) expect(lamp.hdr[i * 3 + c] / sun.hdr[i * 3 + c]).toBeCloseTo(0.5, 2);
+  });
+
+  it("splits the light into slots that sum to the unsplit render", () => {
+    const scene = O.union([
+      O.paint(O.move(P.sphere(0.6), -0.7, 0.6, 0), materialFromString("chrome")!),
+      O.paint(O.move(P.box(0.8, 1, 0.8), 0.6, 0.5, 0), materialFromString("amber")!),
+      O.paint(O.move(P.sphere(0.4), 0.2, 0.4, 0.9), customMaterial({ color: [0.6, 0.6, 0.6], rough: 0.8 })),
+    ]);
+    const lights: BeautyLight[] = [
+      { azimuth: -40, elevation: 50, size: 1, color: [1, 1, 1], power: 1 },
+      { azimuth: 150, elevation: 25, size: 2, color: [0.8, 0.9, 1], power: 0.5 },
+      { azimuth: 0, elevation: 0, size: 1, color: [1, 0.7, 0.4], power: 1, position: [0.1, 1.4, 0.9], range: 1.2 },
+    ];
+    const one = shade(scene, { size: 64, lights }, 36);
+    const split = shade(scene, { size: 64, lights, splitLights: true }, 36);
+    expect(split.slots.length).toBe(4);
+    let worst = 0;
+    for (let k = 0; k < one.hdr.length; k++) worst = Math.max(worst, Math.abs(split.hdr[k] - one.hdr[k]) / Math.max(1e-3, one.hdr[k]));
+    expect(worst).toBeLessThan(1e-5);
+    // Each light's slot holds light where that light reaches and nothing it cannot: the sky's slot is not the whole.
+    for (const s of split.slots) expect(s.some((v) => v > 0.01)).toBe(true);
+  });
+
+  it("draws the same bytes on one thread and on four", () => {
+    const src = 'ball = sphere(0.5) | move(-0.6, 0.5, 0) | paint("gold")\npane = box(0.8, 1.2, 0.8) | move(0.6, 0.6, 0) | paint("amber")\nember = sphere(0.15) | move(0, 0.15, 0.7) | paint(material("#ffd27a", glow=1.5))\nshow ball + pane + ember';
+    const shape = check(src, "glass.aix").output!;
+    const nets = surfaceNets(shape, { resolution: 40 });
+    const opts: BeautyOptions = { size: 96, cellSize: nets.cellSize, environment: "sunset", dof: 1, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }, { azimuth: 0, elevation: 0, size: 0.5, color: [1, 0.8, 0.6], power: 0.8, position: [0.2, 1.4, 1.0], range: 1.5 }] };
+    const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+    const one = sha(renderBeauty(shape, nets.mesh, shape.bounds, opts).data);
+    const pool = openBeautyPool(4)!;
+    pool.warm({ source: src, sourceName: "glass.aix" });
+    expect(pool.waitReady()).toBe(true);
+    const four = sha(renderBeauty(shape, nets.mesh, shape.bounds, { ...opts, pool }).data);
+    pool.close();
+    expect(four).toBe(one);
+  });
+});
+
+describe("shading: glass", () => {
+  it("draws a tumbler's base with no white triangles and its drink with no contour bands", () => {
+    // The example tumbler without its depth of field, which would blur away what this looks for.
+    const src = readFileSync(new URL("../examples/tumbler.aix", import.meta.url), "utf8").replace(/^set dof .*$/m, "");
+    const shape = check(src, "tumbler.aix").output!;
+    const size = 256;
+    const nets = surfaceNets(shape, { resolution: 64 });
+    const r = renderBeautyResult(shape, nets.mesh, shape.bounds, { size, cellSize: nets.cellSize, lightSize: 2.5 });
+    const c = r.canvas;
+    const rgbAt = (x: number, y: number) => { const p = c.get(x, y); return [(p >> 16) & 255, (p >> 8) & 255, p & 255]; };
+    const lum = (x: number, y: number) => { const [R, G, B] = rgbAt(x, y); return 0.2126 * R + 0.7152 * G + 0.0722 * B; };
+    // The drink's body seen through the wall: orange, mid-bright. Down the middle column, its longest run of rows.
+    const body = (x: number, y: number) => { const [R, , B] = rgbAt(x, y); const l = lum(x, y); return R - B > 50 && l > 60 && l < 200; };
+    const cx = size / 2 - 4;
+    let best = [0, 0], run = -1;
+    for (let y = 0; y <= size; y++) {
+      if (y < size && body(cx, y)) { if (run < 0) run = y; continue; }
+      if (run >= 0 && y - run > best[1] - best[0]) best = [run, y];
+      run = -1;
+    }
+    const [top, foot] = best;
+    expect(foot - top).toBeGreaterThan(size / 6);
+    // No row-to-row step above 6 levels down it (a few columns either side of the middle, its ends left out).
+    let step = 0, prev = -1;
+    for (let y = top + 2; y < foot - 2; y++) {
+      let s = 0;
+      for (let x = cx - 3; x <= cx + 3; x++) s += lum(x, y);
+      if (prev >= 0) step = Math.max(step, Math.abs(s / 7 - prev));
+      prev = s / 7;
+    }
+    expect(step).toBeLessThanOrEqual(6);
+    // Below the drink, in the glass's base, nothing brighter than the backdrop behind the glass (the old renderer's
+    // total internal reflection drew white triangles there).
+    const backdrop = lum(2, 2);
+    let brightest = 0;
+    for (let x = 0; x < size; x++) {
+      if (!body(x, foot - 3)) continue;
+      for (let y = foot; y < Math.min(size, foot + Math.round(size * 0.12)); y++) brightest = Math.max(brightest, lum(x, y));
+    }
+    expect(brightest).toBeGreaterThan(0);
+    expect(brightest).toBeLessThanOrEqual(backdrop);
+  });
+
+  it("tints a shadow through amber glass and leaves one through clear glass its own colour", () => {
+    const ratio = (m: Material) => {
+      // A pane on legs over the floor, lit from behind it so its shadow falls towards the camera.
+      const pane = O.paint(O.move(P.box(1.6, 0.2, 1.6), 0, 1.2, 0), m);
+      const legs = O.union([-0.7, 0.7].flatMap((x) => [-0.7, 0.7].map((z) => O.paint(O.move(P.box(0.08, 1.1, 0.08), x, 0.55, z), customMaterial({ color: [0.6, 0.6, 0.6], rough: 0.8 })))));
+      const r = shade(O.union([pane, legs]), { size: 96, lights: [{ azimuth: 215, elevation: 45, size: 0.5, color: [1, 1, 1], power: 1 }] }, 48);
+      const { flags, V } = r.buffers as { flags: Uint8Array; V: Float32Array };
+      const floor = (i: number) => (flags[i] & KIND_MASK) === KIND_FLOOR && !(flags[i] & FLAG_EDGE);
+      // The pane's shadow: floor the light reaches only through it (the legs' shadows, which it does not reach at
+      // all, are left out); the open floor: floor it reaches unhindered.
+      const shadow = (i: number) => floor(i) && V[i] > 0.1 && V[i] < 0.9, open = (i: number) => floor(i) && V[i] > 0.999;
+      const n = 96 * 96;
+      expect(r.buffers.V.some((_, i) => shadow(i))).toBe(true);
+      const rb = (pick: (i: number) => boolean) => meanOver(r.hdr, pick, n, 0) / meanOver(r.hdr, pick, n, 2);
+      return rb(shadow) / rb(open);
+    };
+    expect(ratio(materialFromString("amber")!)).toBeGreaterThan(1.3);
+    expect(Math.abs(ratio(customMaterial({ color: [1, 1, 1], transmit: 0.9, rough: 0.05 })) - 1)).toBeLessThan(0.05);
+  });
+});

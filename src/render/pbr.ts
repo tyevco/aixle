@@ -101,12 +101,23 @@ function sceneLights(opts: BeautyOptions, model: Bounds): SceneLight[] {
 const lightCount = (opts: BeautyOptions): number => (opts.lights && opts.lights.length ? opts.lights.length : 1);
 const slotCount = (opts: BeautyOptions): number => (opts.splitLights ? lightCount(opts) + 1 : 1);
 
-/** How far the specular occlusion takes the cavity term: K^p, K the first three taps of the field's occlusion. */
-export const CAVITY_POWER = 1;
+/**
+ * How far the reflections take the cavity term: K^p, K the first three taps of the field's occlusion (6.4 cells). It
+ * dims the prefiltered sky (with Lagarde's specular occlusion) and what the traced rays bring. Tuned on the ring's
+ * FOREVER and the medal's FOR MACHINES at 384: at 1 the letters read only at their edges, at 3 as dark letters, as
+ * the old renderer drew them; at 5 no better.
+ */
+export const CAVITY_POWER = 3;
 /** Roughness below which a surface is a mirror: one traced ray, and the lights' softboxes in place of their highlights. */
 export const MIRROR_ROUGH = 0.12;
 /** Roughness below which a glossy metal takes several traced GGX rays, and above which only the prefiltered sky. */
 export const GLOSSY_ROUGH = 0.35, TRACED_ROUGH = 0.55;
+/**
+ * The most radiance one of a glossy surface's few traced rays may bring, scaled down whole (so its hue is kept): a
+ * ray of four that met a mirror showing a light's softbox (150 times a lit face) or a flame put one pixel in a hundred
+ * at white, a sparkle that read as a bump; a mirror's own single ray is not clamped, since it shows the softbox.
+ */
+export const GLOSSY_CLAMP = 3;
 
 export const pbr: Kernel<PbrTables> = {
   name: "pbr",
@@ -362,6 +373,13 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     else { TMP[0] = 1; TMP[1] = 1; TMP[2] = 1; }
   };
 
+  /** The brightest channel of the radiance at COL[o..], summed over the slots. */
+  const slotPeak = (o: number): number => {
+    let r = 0, g = 0, b = 0;
+    for (let k = 0; k < W; k += 3) { r += COL[o + k]; g += COL[o + k + 1]; b += COL[o + k + 2]; }
+    return r > g ? (r > b ? r : b) : g > b ? g : b;
+  };
+
   /**
    * The light a surface sends back along -d into COL at depth; its surface is SURF at depth. `area`: a primary
    * surface, whose lights' direct light goes to DL and VL (the area light's visibility, filtered later) rather than
@@ -454,7 +472,10 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     const q1 = (depth + 1) * W;
     // Specular occlusion (Lagarde): the occlusion as the reflection sees it, tighter for a smooth surface; times the
     // cavity term, so a groove in polished metal stays dark enough to read.
-    const so = Math.max(0, Math.min(1, Math.pow(nv + ao, Math.pow(2, -16 * rough - 1)) - 1 + ao)) * (CAVITY_POWER === 1 ? cav : Math.pow(cav, CAVITY_POWER));
+    const hitK = Math.pow(cav, CAVITY_POWER);
+    const so = Math.max(0, Math.min(1, Math.pow(nv + ao, Math.pow(2, -16 * rough - 1)) - 1 + ao)) * hitK;
+    // What a traced ray brings is dimmed by the cavity term too: from inside a groove the rays meet its walls, which
+    // reflect the sky as brightly as the face round it, and an engraving in polished metal read only at its edges.
     for (let k = 0; k < W; k++) RF[o + k] = 0;
     const traceable = canTrace && depth < MAX_DEPTH && depth + 1 < MAXD;
     if (!traceable || rough > TRACED_ROUGH || weight < 0.015 || (depth > 0 && rough >= MIRROR_ROUGH)) {
@@ -462,7 +483,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     } else if (rough < MIRROR_ROUGH) {
       // A mirror: one ray, and whatever it meets.
       trace(depth + 1, ox, oy, oz, mx, my, mz, false, SEE_MIRROR);
-      for (let k = 0; k < W; k++) RF[o + k] = COL[q1 + k];
+      for (let k = 0; k < W; k++) RF[o + k] = COL[q1 + k] * hitK;
     } else {
       // Several GGX rays where the lobe is narrow enough that four of them are not grain; past that, one ray blended
       // into the prefiltered sky, which is smooth (four rays in a steel bowl of roughness 0.45 were salt and pepper).
@@ -471,7 +492,8 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
         // One ray along the mirror direction: what it meets, blurred towards the prefiltered sky by roughness.
         const g = (1 - rough) * (1 - rough);
         if (trace(depth + 1, ox, oy, oz, mx, my, mz, true, SEE_MIRROR)) {
-          for (let k = 0; k < W; k++) RF[o + k] = COL[q1 + k] * g;
+          const cl = GLOSSY_CLAMP / Math.max(GLOSSY_CLAMP, slotPeak(q1));
+          for (let k = 0; k < W; k++) RF[o + k] = COL[q1 + k] * g * hitK * cl;
           prefiltered(SKY, mx, my, mz, rough, E * so * (1 - g), RF, o);
         } else prefiltered(SKY, mx, my, mz, rough, E * so, RF, o);
       } else {
@@ -491,7 +513,10 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
           const vh = vx * Hx + vy * Hy + vz * Hz;
           const lx = 2 * vh * Hx - vx, ly = 2 * vh * Hy - vy, lz = 2 * vh * Hz - vz;
           if (lx * nx + ly * ny + lz * nz <= 0) { misses++; continue; }
-          if (trace(depth + 1, ox, oy, oz, lx, ly, lz, true, SEE_MIRROR)) for (let c = 0; c < W; c++) RF[o + c] += COL[q1 + c] / n;
+          if (trace(depth + 1, ox, oy, oz, lx, ly, lz, true, SEE_MIRROR)) {
+            const cl = GLOSSY_CLAMP / Math.max(GLOSSY_CLAMP, slotPeak(q1));
+            for (let c = 0; c < W; c++) RF[o + c] += (COL[q1 + c] * hitK * cl) / n;
+          }
           else misses++;
         }
         if (misses > 0) prefiltered(SKY, mx, my, mz, rough, (E * so * misses) / n, RF, o);
@@ -584,12 +609,11 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       const q = i * LS;
       if (area) { DL[i * 3] = 0; DL[i * 3 + 1] = 0; DL[i * 3 + 2] = 0; VL[i] = 1; }
       if (!LP[q + 15]) continue;
-      // A point light reaches only the floor near the model, fading out with it.
-      if (LP[q + 6] && near <= 0) continue;
-      let att = lightAt(i, fx, floorY, fz);
+      // Every light reaches the whole floor; its shadows are traced only near the model. A point light cut off with
+      // the near floor drew the edge of its pool as a line across a low shot (the door's torch: 22 levels a row).
+      const att = lightAt(i, fx, floorY, fz);
       const ly = L3[1];
       if (ly <= 0) { if (area) VL[i] = 0; continue; }
-      if (LP[q + 6]) att *= near;
       // Under a part standing on the floor the lights take its occlusion and the contact term too: the area rays see
       // the light's disc past the part, but not the darkening a base makes where it meets the floor (without it the
       // floor under the lantern's base was 45% brighter than the old renderer's; with it, it is darker than the open

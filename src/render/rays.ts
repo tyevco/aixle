@@ -279,12 +279,23 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
   /**
    * insideMarch() on IR: 1 with IR[6] the exit's distance and `abs` filled, 0 when the solid is not left.
    *
-   * The absorption is integrated stretch by stretch: hit() is asked every three cells, and where two samples differ
-   * the boundary between them is found by bisection, so each material's sigma counts for the length the ray spends in
-   * it. Averaging the samples instead counted a stretch by how many samples happened to fall in it, a whole sample more
+   * The absorption is integrated stretch by stretch: hit() is asked every six cells and just short of the exit, and
+   * where two samples differ the boundary between them is found by bisection, so each material's sigma counts for the
+   * length the ray spends in it. Averaging the samples instead counted a stretch by how many samples happened to fall in it, a whole sample more
    * or less from one ray to the next: a tumbler's base, where the ray crosses the glass floor into the drink, drew a
    * stripe every few rows.
    */
+  /** Where along the ray, between a (in the stretch of sigma r, g, b) and b (past it), the stretch ends: five bisections on hit(). */
+  function boundary(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, a: number, b: number, r: number, g: number, bl: number): number {
+    for (let k = 0; k < 5; k++) {
+      const mid = (a + b) / 2;
+      stats.hits++;
+      const q = shape.hit(ox + dx * mid, oy + dy * mid, oz + dz * mid).mat;
+      if (sigmaOf(q, 0) === r && sigmaOf(q, 1) === g && sigmaOf(q, 2) === bl) a = mid; else b = mid;
+    }
+    return (a + b) / 2;
+  }
+
   function insideCore(entry: Material): number {
     stats.inside++;
     const ox = IR[0], oy = IR[1], oz = IR[2], dx = IR[3], dy = IR[4], dz = IR[5];
@@ -316,11 +327,24 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
         let a = prevT, b = t;
         for (let k = 0; k < 5; k++) { const m = (a + b) / 2; if (-dist(ox + dx * m, oy + dy * m, oz + dz * m) < hitEps) b = m; else a = m; }
         if (!have) { cr = sigmaOf(entry, 0); cg = sigmaOf(entry, 1); cb = sigmaOf(entry, 2); }
+        else if (b - lastHit > cell * 0.5) {
+          // The last stretch: what the ray passes through just short of the exit (a far wall thinner than the samples'
+          // spacing), its start found as the others are.
+          const te = b - cell * 0.25;
+          stats.hits++;
+          const m = shape.hit(ox + dx * te, oy + dy * te, oz + dz * te).mat;
+          const s0 = sigmaOf(m, 0), s1 = sigmaOf(m, 1), s2 = sigmaOf(m, 2);
+          if (s0 !== cr || s1 !== cg || s2 !== cb) {
+            const tb = boundary(ox, oy, oz, dx, dy, dz, lastHit, te, cr, cg, cb);
+            ar += cr * (tb - seg); ag += cg * (tb - seg); ab += cb * (tb - seg);
+            seg = tb; cr = s0; cg = s1; cb = s2;
+          }
+        }
         abs[0] = ar + cr * (b - seg); abs[1] = ag + cg * (b - seg); abs[2] = ab + cb * (b - seg);
         IR[6] = b;
         return 1;
       }
-      // What the ray passes through, every three cells of its length (hit() allocates).
+      // What the ray passes through, every six cells of its length (hit() allocates).
       if (t >= nextHit) {
         stats.hits++;
         const m = shape.hit(x, y, z).mat;
@@ -328,19 +352,12 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
         if (!have) { cr = s0; cg = s1; cb = s2; have = true; }
         else if (s0 !== cr || s1 !== cg || s2 !== cb) {
           // Where the stretch ended, between the last sample (in it) and this one (past it).
-          let a = lastHit, b = t;
-          for (let k = 0; k < 4; k++) {
-            const mid = (a + b) / 2;
-            stats.hits++;
-            const q = shape.hit(ox + dx * mid, oy + dy * mid, oz + dz * mid).mat;
-            if (sigmaOf(q, 0) === cr && sigmaOf(q, 1) === cg && sigmaOf(q, 2) === cb) a = mid; else b = mid;
-          }
-          const tb = (a + b) / 2;
+          const tb = boundary(ox, oy, oz, dx, dy, dz, lastHit, t, cr, cg, cb);
           ar += cr * (tb - seg); ag += cg * (tb - seg); ab += cb * (tb - seg);
           seg = tb; cr = s0; cg = s1; cb = s2;
         }
         lastHit = t;
-        nextHit = t + cell * 3;
+        nextHit = t + cell * 6;
       }
       prevT = t;
       t += d * 0.9 > cell * 0.5 ? d * 0.9 : cell * 0.5;

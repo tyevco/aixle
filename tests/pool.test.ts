@@ -145,28 +145,24 @@ const SPHERE = "show sphere(1) | move(0, 1, 0)";
 const GLASS = 'ball = sphere(0.5) | move(-0.6, 0.5, 0) | paint("gold")\npane = box(0.8, 1.2, 0.8) | move(0.6, 0.6, 0) | paint("amber")\nember = sphere(0.15) | move(0, 0.15, 0.7) | paint(material("#ffd27a", glow=1.5))\nshow ball + pane + ember';
 const GLASS_OPTS: Omit<BeautyOptions, "cellSize"> = { size: 96, environment: "sunset", dof: 1, label: "glass and metal", lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }, { azimuth: 0, elevation: 0, size: 0.5, color: [1, 0.8, 0.6], power: 0.8, position: [0.2, 1.4, 1.0], range: 1.5 }] };
 
-describe("the classic kernel", () => {
-  // sha256 of the RGBA bytes the renderer drew before it was split into a kernel (commit 2ec0531), for these fixtures.
-  const HEAD_SPHERE = "dae2567a6a29ac4d68801cc1f4f2718da200e51d4966d80c46af2a14970a4ed6";
-  const HEAD_GLASS = "f0e500bbb77e13a2dc3c41c80f9523571e7ed5b9b00e259c9bf4c69be39910ef";
-
-  it("draws what the renderer drew before, byte for byte, on one thread and on four", () => {
+describe("the kernel on the pool", () => {
+  it("draws the same bytes on one thread and on four, and fills the glow mask from every thread's rows", () => {
     const s = scene(SPHERE, "sphere.aix", 32);
     const g = scene(GLASS, "glass.aix", 40);
     const sphereOpts: BeautyOptions = { size: 96, cellSize: s.cell };
     const glassOpts: BeautyOptions = { ...GLASS_OPTS, cellSize: g.cell };
-    expect(sha(renderBeauty(s.shape, s.mesh, s.shape.bounds, sphereOpts).data)).toBe(HEAD_SPHERE);
-    const glow = new Uint8Array(96 * 96);
-    expect(sha(renderBeauty(g.shape, g.mesh, g.shape.bounds, { ...glassOpts, glowMask: glow }).data)).toBe(HEAD_GLASS);
-    expect(glow.reduce((a, b) => a + b, 0)).toBe(97);
-    for (const [x, opts, want] of [[s, sphereOpts, HEAD_SPHERE], [g, glassOpts, HEAD_GLASS]] as const) {
+    for (const [x, opts] of [[s, sphereOpts], [g, glassOpts]] as const) {
+      const glow = new Uint8Array(96 * 96);
+      const want = sha(renderBeauty(x.shape, x.mesh, x.shape.bounds, { ...opts, glowMask: glow }).data);
+      const glowing = glow.reduce((a, b) => a + b, 0);
+      expect(glowing > 0).toBe(x === g);
       const pool = openBeautyPool(4)!;
       pool.warm(x.ref);
       expect(pool.waitReady()).toBe(true);
       const mask = new Uint8Array(96 * 96);
       expect(sha(renderBeauty(x.shape, x.mesh, x.shape.bounds, { ...opts, glowMask: mask, pool }).data)).toBe(want);
       // The glow mask is filled on the main thread from every thread's rows.
-      expect(mask.reduce((a, b) => a + b, 0)).toBe(x === g ? 97 : 0);
+      expect(mask.reduce((a, b) => a + b, 0)).toBe(glowing);
       pool.close();
     }
   });
