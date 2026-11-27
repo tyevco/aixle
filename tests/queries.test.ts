@@ -194,6 +194,26 @@ describe("support() (round 11)", () => {
   });
 });
 
+describe("the report's Supports row (round 11)", () => {
+  it("says what it leaves out without calling a curve's facets a sharp edge", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { run: render } = await import("../src/pipeline.js");
+    // A ball has no sharp edge, but its mesh facets along the 45 degree line tilt either side of it, and those past
+    // it where the field is not are left out: the row said they were "bent past 45° at a sharp edge".
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = render("set units mm\nset grid 48\nball = sphere(20) | move(0, 20, 0)\nshow ball", "ball.aix", dir, { views: [], steps: false, slices: false, turntable: false, callouts: false, glb: false, viewer: false, beauty: false });
+      const row = r.report.split("\n").find((l) => l.startsWith("| Supports |")) ?? "";
+      expect(row).toMatch(/about [\d.]+ (mm|cm)³ under the overhangs \(.*\), over [\d.]+ mm² in plan;/);
+      expect(row).toMatch(/mm² of mesh faces tilted past 45° where the shape itself faces down less \(bent beside a sharp edge, or faceted along a curve's 45° line\) are left out \|$/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("stands() (round 11)", () => {
   it("is the margin of the centre of mass inside the footprint, and says which way it tips", () => {
     const ev = run('top = box(1.2, 0.05, 0.8) | move(0, 0.75, 0)\nleg = box(0.05, 0.725, 0.05) | move(0.55, 0.3625, 0.35)\ntable = top + (leg | mirror("x") | mirror("z"))\ntall = box(0.3, 2, 0.3) | move(0, 1, 0) | rotate(z=12) | move(3, 0, 0)\nshow table + tall\nassert stands(table) > 0.3\nassert stands(table) < 0.4\nassert stands(tall) > 0\nassert stands(table) > 1');

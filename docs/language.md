@@ -1134,7 +1134,8 @@ edge, and above all where a cutter's corner lies exactly on the part's
 own corner, dual contouring bends the faces beside the edge a few
 degrees, and a phone stand's slot ceiling at 40° from the vertical read
 as a 33 mm column of support that nothing in the shape needs; the row
-says how much area it left out that way. The thinnest wall is measured by a
+says how much area it left out (a curved part always leaves out a
+little, the mesh's facets along its 45° line). The thinnest wall is measured by a
 ray from every vertex inward to the far side of the solid, through the
 field, so a wall under a cell is still read at its own thickness, and a
 cut's walls (a flute through a vase's side, an engraving's floor) are
