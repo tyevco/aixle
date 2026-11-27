@@ -239,6 +239,13 @@ export interface Shape2 {
   revolveDist?: DistFn2;
   /** Lettering bent onto an arc: the nearest and farthest the ink comes to the arc's centre, the origin. */
   arcSpan?: [number, number];
+  /**
+   * Set where the field is known to read at least its distance from the box outside the box, as a distance does: a
+   * circle, a rectangle, a polygon, and the unions, differences, moves, turns, uniform scales, offsets and shells of
+   * such profiles. Not an ellipse, whose field reads as little as 0.88 of that a few sizes off on a diagonal, nor an
+   * intersection or an outline's scan. A sweep bounds its pieces across the path by it (sweeps.ts).
+   */
+  boxFloor?: boolean;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

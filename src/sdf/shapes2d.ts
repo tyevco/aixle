@@ -25,16 +25,28 @@ export function shape2(dist: DistFn2, bounds: Bounds2, cost = 1): Shape2 {
 
 const sym2 = (hx: number, hy: number): Bounds2 => ({ min: [-hx, -hy], max: [hx, hy] });
 
+/** A profile whose field is a distance, so reads at least its box distance outside its box (Shape2.boxFloor). */
+const floored = (s: Shape2): Shape2 => {
+  s.boxFloor = true;
+  return s;
+};
+/** A profile that keeps the floor when what it was made from has one. */
+const floorIf = (s: Shape2, on: boolean | undefined): Shape2 => {
+  if (on) s.boxFloor = true;
+  return s;
+};
+
 export function circle(r: number): Shape2 {
-  return shape2((x, y) => length2(x, y) - r, sym2(r, r));
+  return floored(shape2((x, y) => length2(x, y) - r, sym2(r, r)));
 }
 
 export function rect(w: number, h: number, round = 0): Shape2 {
   const hx = Math.max(w / 2 - round, 0), hy = Math.max(h / 2 - round, 0);
-  return shape2((x, y) => {
+  // A distance, so floored, while the rounding fits inside the box (a larger one bulges out of it).
+  return floorIf(shape2((x, y) => {
     const qx = Math.abs(x) - hx, qy = Math.abs(y) - hy;
     return length2(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - round;
-  }, sym2(w / 2, h / 2));
+  }, sym2(w / 2, h / 2)), round >= 0 && round <= Math.min(w, h) / 2);
 }
 
 export function ellipse(rx: number, ry: number): Shape2 {
@@ -71,6 +83,8 @@ export function polygon(points: readonly number[]): Shape2 {
     }
     return s * Math.sqrt(d);
   }, { min: [minx, miny], max: [maxx, maxy] }, n);
+  // The distance to the nearest edge, so at least the box's distance (outside the box no crossing count can flip it).
+  out.boxFloor = true;
   // A lathe profile's edges on x = 0 are inside the solid once it is spun, so a full revolve measures the outline
   // without them (see Shape2.revolveDist), as curve2 does. With the plain distance the revolved field is zero all up
   // the axis, and `shell()` of it left a hollow rod up the middle of the teapot (measured: every slice showed it).
@@ -168,6 +182,9 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
     return d;
   }, bounds, live.reduce((c, s) => c + s.cost, 0));
   if (k <= 0) out.parts = live;
+  // The least of fields that keep their boxes' floor keeps the union box's; a blend reads at most k/4 under it and
+  // its box is grown by k/2.
+  if (live.every((s) => s.boxFloor)) out.boxFloor = true;
   for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) { out.feature = s.feature; out.featureAt = s.featureAt; }
   for (const s of live) if (s.gap !== undefined && (out.gap === undefined || s.gap < out.gap)) { out.gap = s.gap; out.gapWhat = s.gapWhat; }
   return out;
@@ -175,7 +192,8 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
 
 export function difference2(a: Shape2, b: Shape2, k = 0): Shape2 {
   const da = a.dist, db = b.dist;
-  return keep(shape2((x, y) => smax(da(x, y), -db(x, y), k), a.bounds, a.cost + b.cost), a);
+  // At least a's value, in a's box: a's floor.
+  return floorIf(keep(shape2((x, y) => smax(da(x, y), -db(x, y), k), a.bounds, a.cost + b.cost), a), a.boxFloor);
 }
 
 export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
@@ -196,7 +214,7 @@ function keep(out: Shape2, from: Shape2, by = 1, at: (p: [number, number]) => [n
 export function move2(s: Shape2, dx: number, dy: number): Shape2 {
   const d = s.dist;
   const b = s.bounds;
-  return keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s, 1, (p) => [p[0] + dx, p[1] + dy]);
+  return floorIf(keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s, 1, (p) => [p[0] + dx, p[1] + dy]), s.boxFloor);
 }
 
 export function rotate2(s: Shape2, deg: number): Shape2 {
@@ -211,8 +229,8 @@ export function rotate2(s: Shape2, deg: number): Shape2 {
       bounds = bounds2Union(bounds, { min: [rx, ry], max: [rx, ry] });
     }
   }
-  // Inverse rotation of the point.
-  return keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s, 1, (p) => [c * p[0] - sn * p[1], sn * p[0] + c * p[1]]);
+  // Inverse rotation of the point. The box of the turned box holds the turned one, so the floor is kept.
+  return floorIf(keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s, 1, (p) => [c * p[0] - sn * p[1], sn * p[0] + c * p[1]]), s.boxFloor);
 }
 
 export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
@@ -225,7 +243,8 @@ export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
         min: [Math.min(b.min[0] * sx, b.max[0] * sx), Math.min(b.min[1] * sy, b.max[1] * sy)],
         max: [Math.max(b.min[0] * sx, b.max[0] * sx), Math.max(b.min[1] * sy, b.max[1] * sy)],
       };
-  return keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m, (p) => [p[0] * sx, p[1] * sy]);
+  // A uniform scale (a flip included) keeps the floor; a stretched one reads its smallest factor's share along the other.
+  return floorIf(keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m, (p) => [p[0] * sx, p[1] * sy]), s.boxFloor && Math.abs(sx) === Math.abs(sy));
 }
 
 export function flip2(s: Shape2, axis: "x" | "y"): Shape2 {
@@ -239,13 +258,13 @@ export function mirror2(s: Shape2, axis: "x" | "y"): Shape2 {
 /** Grow (r > 0) or shrink (r < 0) the profile by `r`, rounding convex corners. */
 export function offset2(s: Shape2, r: number): Shape2 {
   const d = s.dist;
-  return keep(shape2((x, y) => d(x, y) - r, bounds2Grow(s.bounds, Math.max(r, 0)), s.cost), s);
+  return floorIf(keep(shape2((x, y) => d(x, y) - r, bounds2Grow(s.bounds, Math.max(r, 0)), s.cost), s), s.boxFloor);
 }
 
 /** Keep only a band of width `t` inside the profile's outline. */
 export function shell2(s: Shape2, t: number): Shape2 {
   const d = s.dist;
-  const out = shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost);
+  const out = floorIf(shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost), s.boxFloor);
   out.feature = s.feature === undefined ? t : Math.min(s.feature, t);
   if (s.featureAt && s.feature !== undefined && s.feature <= t) out.featureAt = s.featureAt;
   return out;

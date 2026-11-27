@@ -24,6 +24,15 @@ export interface SpatialIndex {
    * and on the first piece's face the other piece decides whether that face is a surface at all.
    */
   min(x: number, y: number, z: number, piece: PieceDist, boxDist: PieceDist, init: number): number;
+  /**
+   * The same minimum, with the pieces listed in the point's cell visited nearest first: `bound(i, x, y, z)` is a
+   * lower bound on piece i's value wherever the bound is positive (it may read anything where it is not), tighter
+   * than the box. The listed pieces are bounded, the one with the least bound is evaluated, then every other whose
+   * bound is not already past the best so far. A min over the same pieces, so the same bits. The floor, the scan of
+   * the unlisted pieces and a point outside the grid are min()'s, in its order with its box cull, the bound skipping
+   * as well a piece the box passes. Allocates nothing.
+   */
+  minNearest(x: number, y: number, z: number, piece: PieceDist, bound: PieceDist, boxDist: PieceDist, init: number): number;
   inside(x: number, y: number, z: number): boolean;
   /** Cell index for a point inside the grid. */
   cell(x: number, y: number, z: number): number;
@@ -107,6 +116,51 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
       }
   const inv = 1 / cell;
   const mark = new Uint8Array(n);
+  // The bounds of one cell's listed pieces, for minNearest: as long as the longest list.
+  let longestList = 0;
+  for (let c = 0; c < cells; c++) longestList = Math.max(longestList, start[c + 1] - start[c]);
+  const bounds = new Float64Array(longestList);
+  // In the scans below a piece the box passes may still be skipped by `bound`, when one is given: a piece skipped that
+  // way reads at least the best so far, so the best goes on exactly as it would have, and so does every later skip.
+  /** Every piece, box culled: a point outside the grid. */
+  const scanAll = (x: number, y: number, z: number, piece: PieceDist, boxDist: PieceDist, bound: PieceDist | undefined, best: number): number => {
+    for (let i = 0; i < n; i++) {
+      const bd = boxDist(i, x, y, z);
+      if (bd > 0 && bd >= best) continue;
+      if (bound) { const b = bound(i, x, y, z); if (b > 0 && b >= best) continue; }
+      const d = piece(i, x, y, z);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  /** After cell c's own pieces gave `best`: the unlisted pieces, when the floor says one of them could still win. */
+  const beyond = (c: number, x: number, y: number, z: number, piece: PieceDist, boxDist: PieceDist, bound: PieceDist | undefined, best: number): number => {
+    if (floor[c] >= best) return best;
+    const s0 = start[c], s1 = start[c + 1];
+    for (let s = s0; s < s1; s++) mark[items[s]] = 1;
+    // The likely winners first, so the cull below has a tight bound.
+    for (let q = 0; q < NEAR; q++) {
+      const i = near[c * NEAR + q];
+      if (i < 0) break;
+      mark[i] = 1;
+      const bd = boxDist(i, x, y, z);
+      if (bd > 0 && bd >= best) continue;
+      if (bound) { const b = bound(i, x, y, z); if (b > 0 && b >= best) continue; }
+      const d = piece(i, x, y, z);
+      if (d < best) best = d;
+    }
+    for (let i = 0; i < n; i++) {
+      if (mark[i]) continue;
+      const bd = boxDist(i, x, y, z);
+      if (bd > 0 && bd >= best) continue;
+      if (bound) { const b = bound(i, x, y, z); if (b > 0 && b >= best) continue; }
+      const d = piece(i, x, y, z);
+      if (d < best) best = d;
+    }
+    for (let s = s0; s < s1; s++) mark[items[s]] = 0;
+    for (let q = 0; q < NEAR; q++) { const i = near[c * NEAR + q]; if (i < 0) break; mark[i] = 0; }
+    return best;
+  };
   const index: SpatialIndex = {
     inside: (x, y, z) => x >= ox && y >= oy && z >= oz && x < ox + nx * cell && y < oy + ny * cell && z < oz + nz * cell,
     cell: (x, y, z) => (Math.floor((z - oz) * inv) * ny + Math.floor((y - oy) * inv)) * nx + Math.floor((x - ox) * inv),
@@ -114,16 +168,8 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
     items,
     floor,
     min: (x, y, z, piece, boxDist, init) => {
+      if (!index.inside(x, y, z)) return scanAll(x, y, z, piece, boxDist, undefined, init);
       let best = init;
-      if (!index.inside(x, y, z)) {
-        for (let i = 0; i < n; i++) {
-          const bd = boxDist(i, x, y, z);
-          if (bd > 0 && bd >= best) continue;
-          const d = piece(i, x, y, z);
-          if (d < best) best = d;
-        }
-        return best;
-      }
       const c = index.cell(x, y, z);
       const s0 = start[c], s1 = start[c + 1];
       for (let s = s0; s < s1; s++) {
@@ -133,28 +179,31 @@ export function buildSpatialIndex(n: number, bmin: Float64Array, bmax: Float64Ar
         const d = piece(i, x, y, z);
         if (d < best) best = d;
       }
-      if (floor[c] >= best) return best;
-      for (let s = s0; s < s1; s++) mark[items[s]] = 1;
-      // The likely winners first, so the cull below has a tight bound.
-      for (let q = 0; q < NEAR; q++) {
-        const i = near[c * NEAR + q];
-        if (i < 0) break;
-        mark[i] = 1;
-        const bd = boxDist(i, x, y, z);
-        if (bd > 0 && bd >= best) continue;
-        const d = piece(i, x, y, z);
+      return beyond(c, x, y, z, piece, boxDist, undefined, best);
+    },
+    minNearest: (x, y, z, piece, bound, boxDist, init) => {
+      if (!index.inside(x, y, z)) return scanAll(x, y, z, piece, boxDist, bound, init);
+      let best = init;
+      const c = index.cell(x, y, z);
+      const s0 = start[c], s1 = start[c + 1];
+      let first = -1, least = Infinity;
+      for (let s = s0; s < s1; s++) {
+        const b = bound(items[s], x, y, z);
+        bounds[s - s0] = b;
+        if (b < least) { least = b; first = s; }
+      }
+      if (first >= 0) {
+        const d = piece(items[first], x, y, z);
         if (d < best) best = d;
       }
-      for (let i = 0; i < n; i++) {
-        if (mark[i]) continue;
-        const bd = boxDist(i, x, y, z);
-        if (bd > 0 && bd >= best) continue;
-        const d = piece(i, x, y, z);
+      for (let s = s0; s < s1; s++) {
+        if (s === first) continue;
+        const b = bounds[s - s0];
+        if (b > 0 && b >= best) continue;
+        const d = piece(items[s], x, y, z);
         if (d < best) best = d;
       }
-      for (let s = s0; s < s1; s++) mark[items[s]] = 0;
-      for (let q = 0; q < NEAR; q++) { const i = near[c * NEAR + q]; if (i < 0) break; mark[i] = 0; }
-      return best;
+      return beyond(c, x, y, z, piece, boxDist, bound, best);
     },
   };
   return index;

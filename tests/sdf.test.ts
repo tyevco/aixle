@@ -10,6 +10,7 @@ import { isWatertight, meshBounds } from "../src/mesh/mesh.js";
 import * as C_ from "../src/sdf/measure.js";
 import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
 import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
+import { buildSpatialIndex, cellsFor } from "../src/sdf/spatial.js";
 import { albedo, customMaterial, materialFromString, preset } from "../src/sdf/materials.js";
 
 describe("primitives", () => {
@@ -390,6 +391,82 @@ describe("spatial index", () => {
 describe("fewer evaluations, the same bits", () => {
   let seed = 11;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  it("visits an index's pieces nearest first and gives min()'s value to the bit, inside and outside the grid", () => {
+    const n = 60;
+    const cx = new Float64Array(n), cy = new Float64Array(n), cz = new Float64Array(n), r = new Float64Array(n);
+    const bmin = new Float64Array(n * 3), bmax = new Float64Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      cx[i] = rnd() * 6 - 3; cy[i] = rnd() * 6 - 3; cz[i] = rnd() * 6 - 3; r[i] = 0.1 + rnd() * 0.6;
+      bmin.set([cx[i] - r[i], cy[i] - r[i], cz[i] - r[i]], i * 3);
+      bmax.set([cx[i] + r[i], cy[i] + r[i], cz[i] + r[i]], i * 3);
+    }
+    const index = buildSpatialIndex(n, bmin, bmax, { min: [-4, -4, -4], max: [4, 4, 4] }, cellsFor(n));
+    const piece = (i: number, x: number, y: number, z: number) => Math.hypot(x - cx[i], y - cy[i], z - cz[i]) - r[i];
+    // A bound under the piece by a varying amount, and one that is no bound at all where it is not positive.
+    const bound = (i: number, x: number, y: number, z: number) => { const d = piece(i, x, y, z); return d > 0 ? d * 0.9 : -5; };
+    const boxDist = (i: number, x: number, y: number, z: number) => {
+      const ex = Math.max(bmin[i * 3] - x, 0, x - bmax[i * 3]), ey = Math.max(bmin[i * 3 + 1] - y, 0, y - bmax[i * 3 + 1]), ez = Math.max(bmin[i * 3 + 2] - z, 0, z - bmax[i * 3 + 2]);
+      return Math.sqrt(ex * ex + ey * ey + ez * ez);
+    };
+    let skipped = 0, calls = 0;
+    const counted = (i: number, x: number, y: number, z: number) => { calls++; return piece(i, x, y, z); };
+    for (let k = 0; k < 3000; k++) {
+      const x = rnd() * 12 - 6, y = rnd() * 12 - 6, z = rnd() * 12 - 6;
+      const before = calls;
+      const got = index.minNearest(x, y, z, counted, bound, boxDist, Infinity);
+      skipped += n - (calls - before);
+      expect(Object.is(got, index.min(x, y, z, piece, boxDist, Infinity))).toBe(true);
+    }
+    expect(skipped).toBeGreaterThan(3000 * n * 0.8);
+  });
+  const sweeps: [string, () => W.SweepPieces][] = [
+    ["a square swept round sharp turns, its corner on the bound", () => W.sweepPieces(S.rect(0.4, 0.4), [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0.5, 2.6, 0.4], [0, 1, 1.5], [1, 0.5, 2.5], [2.5, 0.3, 2], [3, 1.5, 1], [3.5, 0, 0], [4, 1, -1]])!],
+    ["three strands twisted along a helix", () => W.sweepPieces(S.union2([0, 120, 240].map((a) => S.rotate2(S.move2(S.circle(0.11), 0.12, 0), a))), W.toPoints(W.helixPath(1, 1.4, 2, 24), "p"), 720)!],
+    ["a tapered polygon", () => W.sweepPieces(S.polygon([-0.3, 0, 0.3, 0, 0.3, 0.22, -0.3, 0.22]), W.toPoints(W.helixPath(1.5, 2, 1.5, 10), "p"), 90, 2.5)!],
+    ["an ellipse, bounded by its ends alone", () => W.sweepPieces(S.ellipse(0.11, 0.2), W.smoothPath([[-1.85, 0.9, 0], [-2.75, 1.3, 0], [-2.85, 2.2, 0], [-1.75, 2.45, 0]], 6))!],
+  ];
+  for (const [what, make] of sweeps)
+    it(`bounds each piece of ${what} from below, out to five times its size`, () => {
+      const sp = make();
+      const b = sp.bounds;
+      const size = Math.max(...boundsSize(b));
+      let positive = 0;
+      for (let k = 0; k < 6000; k++) {
+        const x = b.min[0] - 2 * size + rnd() * 5 * size, y = b.min[1] - 2 * size + rnd() * 5 * size, z = b.min[2] - 2 * size + rnd() * 5 * size;
+        for (let i = 0; i < sp.n; i++) {
+          const lb = sp.bound(i, x, y, z);
+          if (!(lb > 0)) continue;
+          positive++;
+          expect(lb).toBeLessThanOrEqual(sp.piece(i, x, y, z));
+        }
+      }
+      expect(positive).toBeGreaterThan(6000);
+    });
+  it("bounds a square's piece to within a hair of it on the diagonal, where the two agree", () => {
+    const sp = W.sweepPieces(S.rect(0.4, 0.4), [[0, 0, 0], [3, 0, 0]])!;
+    // Beside the middle of the bar, out along the square's diagonal: the profile reads |q| - reach exactly there.
+    for (const t of [0.5, 1, 3]) {
+      const q = 0.2 + t / Math.SQRT2;
+      const v = sp.piece(0, 1.5, q, -q), lb = sp.bound(0, 1.5, q, -q);
+      expect(lb).toBeLessThan(v);
+      expect(v - lb).toBeLessThan(1e-9);
+    }
+  });
+  it("keeps the floor only through what keeps it", () => {
+    const c = S.circle(0.3), e = S.ellipse(0.1, 0.3);
+    expect([c, S.rect(1, 0.5), S.rect(1, 0.5, 0.2), S.polygon([0, 0, 1, 0, 0, 1]), S.ngon(6, 1), S.star(5, 1, 0.4)].every((p) => p.boxFloor)).toBe(true);
+    expect([S.union2([c, S.move2(c, 1, 0)]), S.union2([c, S.move2(c, 1, 0)], 0.2), S.difference2(S.rect(1, 1), e), S.rotate2(S.rect(1, 0.2), 30), S.scale2(c, 2, 2), S.flip2(S.move2(c, 1, 0), "x"), S.offset2(S.rect(1, 0.2), 0.1), S.shell2(c, 0.05)].every((p) => p.boxFloor)).toBe(true);
+    expect([e, S.rect(0.2, 1, 0.3), S.intersect2(S.rect(1, 1), c), S.scale2(c, 2, 1), S.union2([c, e]), S.difference2(e, c), S.move2(e, 1, 0)].some((p) => p.boxFloor)).toBe(false);
+    // Each floored profile reads at least its box distance outside its box.
+    for (const p of [c, S.rect(1, 0.5, 0.2), S.star(5, 1, 0.4), S.union2([c, S.move2(c, 1, 0)], 0.2), S.rotate2(S.rect(1, 0.2), 30), S.offset2(S.rect(1, 0.2), 0.1)])
+      for (let k = 0; k < 2000; k++) {
+        const x = rnd() * 8 - 4, y = rnd() * 8 - 4;
+        const dx = Math.max(p.bounds.min[0] - x, 0, x - p.bounds.max[0]), dy = Math.max(p.bounds.min[1] - y, 0, y - p.bounds.max[1]);
+        if (dx > 0 || dy > 0) expect(p.dist(x, y)).toBeGreaterThanOrEqual(Math.hypot(dx, dy) - 1e-12);
+      }
+    // And the ellipse does not: far off on a diagonal it reads under its box distance.
+    expect(e.dist(2, 2)).toBeLessThan(Math.hypot(2 - 0.1, 2 - 0.3));
+  });
   it("skips a dear cutter outside its box and reads max(base, -cutter) to the bit everywhere", () => {
     const board = P.box(4, 1, 0.4);
     const letters = O.move(S.extrude(textProfile("AIXLE", 0.5), 0.3, "z"), -1.2, -0.2, 0.2);
