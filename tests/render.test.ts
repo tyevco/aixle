@@ -256,6 +256,29 @@ describe("callouts", () => {
     expect(one.labelled.map((l) => l.name)).toEqual(["cut"]);
     expect(one.unlabelled.map((u) => u.name).sort()).toEqual(["hole", "knob"]);
   });
+  it("credits a face only to a step whose own surface faces the same way there, not to a thin operand running through it", () => {
+    // Round 11: the mixer's slab, the 0.06-thick operand of `(cavity | offset(-inset)) & slab`, runs down through the
+    // base inside its own box, so on the base's top a strip within a cell of the slab's side faces was "on" the
+    // slab's field (the slab is the smaller box) and callouts.png labelled SLAB on the base beside the plate.
+    const base = O.move(P.box(2, 0.4, 2), 0, 0.2, 0);
+    const slab = O.move(P.box(1.6, 2, 0.12), 0, 1, 0);
+    const paddle = O.intersect(slab, O.move(P.sphere(0.5), 0, 1.2, 0));
+    const model = O.union([base, paddle]);
+    const nets = surfaceNets(model, { resolution: 64 });
+    const steps = [{ name: "base", shape: base }, { name: "slab", shape: slab }, { name: "paddle", shape: paddle }];
+    const owner = attributeVertices(nets.mesh, steps, nets.cellSize, 1, model);
+    let onTop = 0, slabOnTop = 0;
+    for (let v = 0; v < owner.length; v++) {
+      const y = nets.mesh.positions[v * 3 + 1], ny = nets.mesh.normals[v * 3 + 1];
+      if (Math.abs(y - 0.4) > nets.cellSize * 0.5 || ny < 0.9) continue;
+      onTop++;
+      if (owner[v] === 1) slabOnTop++;
+    }
+    expect(onTop).toBeGreaterThan(100);
+    expect(slabOnTop).toBe(0);
+    // The paddle's own faces are still the paddle's.
+    expect([...owner].filter((o) => o === 2).length).toBeGreaterThan(50);
+  });
 });
 
 describe("animated PNG", () => {

@@ -134,6 +134,14 @@ the second test is what keeps a cutter from claiming the face it cut (a
 cavity's field is zero on the cup's inner wall too, but the cup's solid
 is outside the cavity), and it uses the model's own field to step back
 less at an edge cell rather than hand a rim to the cavity below it. A
+third test asks that the step's field rise along the vertex's normal,
+as a step's own surface does, at least 0.3 per unit (an exact distance
+rises at 1, a blend a little less): a thin operand of an `&` that runs
+down through a larger part inside its own box is within a cell of its
+side faces all along that part's top, with its inside under it too, so
+the first two tests credited the mixer's 0.06 slab with a strip of the
+base beside the clamp plate (round 11), where its field does not change
+going up. A
 step is visible where the depth buffer shows its vertices, its label
 sits out from the picture's centre past the visible vertex nearest its
 visible centroid (so a ring's label points at the ring, not its hole),
