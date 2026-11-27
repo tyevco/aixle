@@ -62,6 +62,15 @@ const PALETTES: Record<Environment, Palette> = {
   night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], ambient: 0.4 },
 };
 
+/** A sky's colours and its ambient strength, 0..1 as the beauty render draws them: what the viewer's scene mode builds its sky from. */
+export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Vec3; ground: Vec3; floor: Vec3; ambient: number } {
+  const p = PALETTES[env ?? "studio"];
+  return { sky: [...p.sky], ...(p.horizon ? { horizon: [...p.horizon] as Vec3 } : {}), ground: [...p.ground], floor: [...p.floor], ambient: p.ambient };
+}
+
+/** The default key light's direction (towards the light), for a viewer that lights the program's scene without declared lights. */
+export const DEFAULT_LIGHT_DIRECTION: Vec3 = normalize([-0.55, 0.9, 0.65]);
+
 export interface BeautyOptions {
   size: number;
   /** Cell size of the extraction, for step tolerances. */
@@ -92,7 +101,7 @@ export interface BeautyOptions {
 }
 
 /** The default key light: upper left, from the front. */
-const DEFAULT_LIGHT: Vec3 = normalize([-0.55, 0.9, 0.65]);
+const DEFAULT_LIGHT: Vec3 = DEFAULT_LIGHT_DIRECTION;
 
 /** A light's direction from its azimuth about y (0 is +z, 90 is +x) and elevation, in degrees. */
 export function lightDirection(azimuth: number, elevation: number): Vec3 {

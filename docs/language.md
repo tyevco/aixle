@@ -722,6 +722,18 @@ few pixels of the whole picture (a spark over a ring's stone) fills its
 own frame there, so its reach and its colour can be judged. The frames
 are half the beauty render's size.
 
+The lights go into `model.glb` as well, each a `KHR_lights_punctual`
+light on a node of its own (a point light at its position, an azimuth
+light as a directional one), so an engine lights the model with them;
+the intensities are chosen so an engine agrees with the beauty render on
+a face turned 60 degrees from the light, at `range` from a point light,
+and is brighter nearer and on faces turned to it (the design notes have
+the numbers). The cameras and the sky stay out of the GLB, but
+`viewer.html` has them: its Scene button lights the GLB with its own
+lights under the program's sky and ambient, the cameras are buttons, and
+it opens that way when the program declares a light or a sky; its Studio
+button is a grey backdrop and a white key for judging the maps.
+
 What the lights and the skies can and cannot do, measured in round 9:
 
 - A light with an azimuth is a direction, not a place: `elevation=8`

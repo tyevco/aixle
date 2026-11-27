@@ -478,3 +478,78 @@ describe("a triangle cap on the exports", () => {
     }
   });
 });
+
+describe("the program's lights and scene in the exports", () => {
+  it("writes each light as a KHR_lights_punctual light on its own node, and the viewer a scene mode with the sky and cameras", () => {
+    // Round 11: a torch that lit a door in beauty.png lit nothing in an engine, and the viewer had only its studio.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = [
+        'door = box(1, 2, 0.1) | move(0, 1, 0) | paint("oak")',
+        "set environment night",
+        "set ambient 1.3",
+        'light("torch", position=[0.6, 1.8, 0.4], range=1.5, color="#ff8800", power=2)',
+        'light("moon", azimuth=-50, elevation=40, power=0.5, color="#9fb4ff")',
+        'camera("hero", azimuth=20, elevation=10, zoom=1.2)',
+        "set camera hero",
+        "show door",
+      ].join("\n");
+      run(src, "door.aix", dir, { grid: 32, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      const glb = readFileSync(join(dir, "model.glb"));
+      const json = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
+      expect(json.extensionsUsed).toContain("KHR_lights_punctual");
+      const lights = json.extensions.KHR_lights_punctual.lights;
+      expect(lights.map((l: { name: string; type: string }) => [l.name, l.type])).toEqual([["torch", "point"], ["moon", "directional"]]);
+      // A point light in candela, agreeing with the beauty render at its range on a face turned 60 degrees from it;
+      // glTF's range is the cutoff, three times it.
+      expect(lights[0].intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.2125 * 2, 2.2) * 1.5 * 1.5, 3);
+      expect(lights[0].range).toBeCloseTo(4.5, 6);
+      // Colours are linear: #ff8800's green is 0.533 in sRGB, 0.246 linear.
+      expect(lights[0].color[0]).toBeCloseTo(1, 4);
+      expect(lights[0].color[1]).toBeCloseTo(0.2462, 3);
+      expect(lights[0].color[2]).toBeCloseTo(0, 6);
+      expect(lights[1].intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425 * 0.5, 2.2), 3);
+      expect(lights[1].range).toBeUndefined();
+      // Each on a root node of the scene; the point light at its position, the directional one turned so its -z runs
+      // from the light towards the model.
+      const nodeOf = (i: number) => json.nodes.find((n: { extensions?: { KHR_lights_punctual?: { light: number } } }) => n.extensions?.KHR_lights_punctual?.light === i);
+      expect(json.scenes[0].nodes).toContain(json.nodes.indexOf(nodeOf(0)));
+      expect(nodeOf(0).translation).toEqual([0.6, 1.8, 0.4]);
+      const q = nodeOf(1).rotation as number[];
+      const rot = (v: number[]) => {
+        // v' = v + 2w (q × v) + 2 q × (q × v)
+        const [x, y, z, w] = q;
+        const c1 = [y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]];
+        const c2 = [y * c1[2] - z * c1[1], z * c1[0] - x * c1[2], x * c1[1] - y * c1[0]];
+        return v.map((vi, k) => vi + 2 * w * c1[k] + 2 * c2[k]);
+      };
+      const travels = rot([0, 0, -1]);
+      const az = (-50 * Math.PI) / 180, el = (40 * Math.PI) / 180;
+      const toward = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+      for (let k = 0; k < 3; k++) expect(travels[k]).toBeCloseTo(-toward[k], 5);
+      // The viewer: a scene mode with the night sky, the ambient as the beauty render takes it, the hero camera, and it
+      // opens in the scene from that camera.
+      const html = readFileSync(join(dir, "viewer.html"), "utf8");
+      const scene = JSON.parse(/const SCENE = (.*);\n/.exec(html)![1]);
+      expect(scene.environment).toBe("night");
+      expect(scene.ambient).toBeCloseTo(0.42 * 1.3 * 0.4, 4);
+      expect(scene.key).toBeUndefined();
+      expect(scene.start).toBe(true);
+      expect(scene.camera).toBe("hero");
+      expect(scene.cameras.map((c: { name: string }) => c.name)).toEqual(["hero"]);
+      expect(html).toContain('<button id="scene">Scene: night</button>');
+      expect(html).toContain("◎ hero");
+      // Without lights the GLB carries none, and the viewer's scene has the beauty render's default key, opening in the studio.
+      const plain = run('show box(1, 1, 1) | paint("red")', "box.aix", join(dir, "plain"), { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      expect(plain.files).toContain("model.glb");
+      const g2 = readFileSync(join(dir, "plain", "model.glb"));
+      const j2 = JSON.parse(g2.toString("utf8", 20, 20 + g2.readUInt32LE(12)));
+      expect(j2.extensions).toBeUndefined();
+      const s2 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "plain", "viewer.html"), "utf8"))![1]);
+      expect(s2.start).toBe(false);
+      expect(s2.key.intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425, 2.2), 3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

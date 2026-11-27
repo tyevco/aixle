@@ -12,7 +12,7 @@ import { parseGlb } from "./import/glb.js";
 import { fieldFromSamples, sampleMesh, type MeshSamples } from "./mesh/meshSdf.js";
 import { importKey, type ImportCache } from "./import/cache.js";
 import { box, primitive } from "./sdf/primitives.js";
-import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
+import { axisAngleToQuat, eulerToQuat, glbLights, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
 import { to3mf } from "./export/threemf.js";
@@ -25,8 +25,9 @@ import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, pl
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
-import { viewerHtml } from "./export/viewer.js";
-import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { viewerHtml, type ViewerScene } from "./export/viewer.js";
+import { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { perspective } from "./render/camera.js";
 import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
@@ -1331,6 +1332,28 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // viewer shows as its first frame. Not on a quick pass.
     if (opts.turntable !== false && !opts.quick) time("turntable:apng", () => { const fr = turntableFrames(mesh!, info, Math.round(size / 2)); write("turntable.apng", encodeApng(fr[0].width, fr[0].height, fr.map((c) => c.data), 80)); });
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
+    // The program's scene for the viewer's Scene mode: its sky and ambient as the beauty render takes them, its default
+    // key when it declares no light, and its named cameras framed as their beauty shots are.
+    const viewerScene = (lit: Bounds): ViewerScene => {
+      const pal = environmentPalette(environment);
+      const setAmbient = typeof evaluation.settings.ambient === "number" ? Math.max(0, evaluation.settings.ambient) : 1;
+      const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      const cameras = evaluation.cameras.map((c) => {
+        const r = c.focus ? resolveFocus(c.focus) : undefined;
+        const b = r ? r.frame : focusName ? frame : lit;
+        const cam = perspective(b, 512, 512, c.azimuth ?? azimuth, c.elevation ?? elevation, 30, c.zoom ?? zoom ?? 1, r || focusName ? pointsWithin(mesh!, b) ?? mesh!.positions : mesh!.positions);
+        return { name: c.name, eye: cam.eye.map((v) => Number(v.toFixed(5))) as Vec3, target: boundsCenter(b).map((v) => Number(v.toFixed(5))) as Vec3, fov: 30 };
+      });
+      return {
+        environment: environment ?? "studio",
+        sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground, floor: pal.floor,
+        ambient: Number((0.42 * setAmbient * pal.ambient).toFixed(4)),
+        ...(evaluation.lights.length ? {} : { key: { direction: DEFAULT_LIGHT_DIRECTION, intensity: Number((2 * Math.PI * Math.pow(0.425, 2.2)).toFixed(4)) } }),
+        cameras,
+        start: evaluation.lights.length > 0 || evaluation.settings.environment !== undefined,
+        ...(shot ? { camera: shot.name } : {}),
+      };
+    };
     // Wear reads curvature over a distance set by the model's size, the same in the bake and the beauty render, so
     // the GLB's worn edges are the picture's and a quick pass shows the band the full render will.
     const wearScale = triangleCount(mesh!) > 0 ? wearProbe(Math.max(...boundsSize(meshBounds(mesh!)))) : undefined;
@@ -1401,9 +1424,13 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         }
       }
       if (opts.glb !== false) {
-        const glb = toGlbScene(hierarchy, name, glbAnimations);
+        // The program's lights go into the GLB, so an engine lights the model as the beauty render does (round 11).
+        const lit = triangleCount(mesh!) > 0 ? meshBounds(mesh!) : bounds;
+        const litSize = boundsSize(lit);
+        const punctual = glbLights(evaluation.lights, boundsCenter(lit), Math.max(0.5 * Math.hypot(litSize[0], litSize[1], litSize[2]), 1e-3));
+        const glb = toGlbScene(hierarchy, name, glbAnimations, punctual);
         write("model.glb", glb);
-        if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name)));
+        if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name), viewerScene(lit)));
       }
       // Roblox: the meshes decimated to the budget (an accessory's 4000 when an Attachment anchor is present, a
       // MeshPart's 10000 otherwise), their own atlas, under a root turned to face -Z with the attachments as nodes.
@@ -1744,7 +1771,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "turntable.png": "eight views around the model",
     "turntable.apng": "the model turning, an animated PNG of 24 frames (a browser plays it)",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown, in millimetres with z up",
-    "model.3mf": "3MF for a slicer: the model in the program's unit with z up, a colour per triangle from the materials", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
+    "model.3mf": "3MF for a slicer: the model in the program's unit with z up, a colour per triangle from the materials", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": `binary glTF with the texture atlas embedded${evaluation.lights.length ? ", and the program's lights as KHR_lights_punctual lights on nodes of their own" : ""}`,
     "model.png": "the texture atlas: the materials baked per chart",
     "model_normal.png": "the GLB's tangent-space normal map on the atlas's UVs: the field's detail finer than the mesh and the bumps (lavender is flat)",
     "model_mr.png": "the GLB's metallic-roughness map on the atlas's UVs (green roughness, blue metalness), where wear or rust varies them",
@@ -1754,7 +1781,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
-    "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
+    "viewer.html": `orbit the GLB in a browser (self-contained; loads three.js from a CDN), under its own studio or the program's scene (the GLB's lights, the ${environment ?? "studio"} sky and ambient${evaluation.cameras.length ? ", the cameras as viewpoints" : ""}), opening in the ${evaluation.lights.length || evaluation.settings.environment !== undefined ? "scene" : "studio"}`,
     "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
     "lights.png": "the beauty render under each declared light alone, then all of them; under each, what that light adds on its own, brightened, and the picture under no light at all",
     "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}`,

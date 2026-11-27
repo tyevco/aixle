@@ -92,8 +92,8 @@ npx aixle doc                        # the reference, to stdout
 | `model.3mf` | with `set units`, `set bed` or `--3mf`: the same mesh for a slicer in the program's unit, a colour per triangle from the materials |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
 | `model_normal.png`, `model_mr.png`, `model_emissive.png` | when the program has them: the normal map (bumps, and `displace` relief finer than the mesh), the metallic-roughness map (wear, rust) and the emissive map (a patterned glow), on the atlas's UVs |
-| `model.glb` | binary glTF with the atlas and those maps embedded, tangents for the normal map (`--no-texture` for vertex colours instead); this, the OBJ and the viewer are decimated past 200 thousand triangles (`--triangles`) |
-| `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
+| `model.glb` | binary glTF with the atlas and those maps embedded, tangents for the normal map (`--no-texture` for vertex colours instead), and the program's lights; this, the OBJ and the viewer are decimated past 200 thousand triangles (`--triangles`), the cap shared by error over every mesh |
+| `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn), under its own studio or the program's scene (its lights, sky and cameras): self-contained, loads three.js from a CDN |
 | `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |

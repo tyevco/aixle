@@ -317,6 +317,38 @@ search prunes by boxes, and a sliver up a tin's wall has a box the
 height of the wall, so a point inside is near every box (the tin's
 capped GLB at resolution 64: 25 s, the full one 5 s).
 
+## Lights in the export
+
+The program's lights are part of the model as shipped: a torch is why a
+scene is at night. The GLB writes each as a `KHR_lights_punctual` light
+on a node of its own, a point light at its position and a directional
+one turned so its -z runs from the light to the model. The beauty render
+works in display values (a white face turned θ from a light of power p
+reads 0.85 p cos θ, a point light's strength is range² / (range² + d²) of
+that) and an engine in linear light with the inverse square, so the two
+cannot agree everywhere. They are made to agree on a face turned 60
+degrees from the light, at `range` from a point light: 2π (0.425 p)^2.2
+lux for a directional light and 2π (0.2125 p)^2.2 range² candela for a
+point light. Over a wall beside a point light at 0.3 to 1 range from it
+that is within 0.04 to 0.10 of the beauty render's display value (rms),
+where agreeing on a face turned to the light was 0.07 to 0.23 off,
+brighter; the engine's light is still brighter on faces turned to it
+and near it, and darker at a slant. glTF's range is a cutoff, not a
+half-strength distance, so it is written as three times the program's,
+where the beauty render's strength is a tenth. The apparent size has no
+glTF counterpart. The cameras stay out of the GLB, since an engine
+imports them as objects in the level; the viewer page has them.
+
+The viewer page has two lightings. Its studio (a grey backdrop, a room
+environment for the metals, a white key) is for judging the maps; its
+scene is the program's: the GLB's own lights, or the beauty render's
+default key when the program declares none, the program's sky drawn
+behind as the beauty render's backdrop and, scaled by the ambient as the
+beauty render scales it, standing in for the light from all round, a
+floor of the sky's floor colour, and each named camera as a button that
+puts the view where the beauty shot's eye is. It opens in the scene when
+the program declares lights or a sky, and from `set camera`'s shot.
+
 ## Imported meshes
 
 An imported mesh becomes a field by sampling: unsigned distance on a grid
