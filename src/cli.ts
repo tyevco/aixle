@@ -9,7 +9,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { assertsRow, BEAUTY_ONLY, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -87,7 +87,8 @@ function usage(): never {
       "                          [--no-asserts]                     skip the program's asserts (a pieces() promise on a big rig can cost more than the render)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
       "                          [--triangles N]                    the most triangles the GLB, OBJ and viewer carry, decimated past it (default 200000; 0 for all)",
-      "                          [--beauty-only]                    the beauty render, its shots and the sheet alone (no steps, slices, turntable, callouts, exports): a lighting loop",
+      "                          [--beauty-only]                    the sheet and one beauty render, the set camera's shot or --camera's, written once: a lighting loop",
+      "                          [--lights | --no-lights]           lights.png, each light alone (with two or more lights): on with --beauty, off with --beauty-only",
       "                          [--no-caption]                     no caption on beauty.png and the camera shots: a presentation copy",
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
@@ -462,7 +463,8 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       glb: opts["no-export"] ? false : undefined,
       viewer: opts["no-viewer"] ? false : undefined,
       beauty: opts.beauty === true || opts["beauty-only"] === true ? true : undefined,
-      ...(opts["beauty-only"] ? { views: [], steps: false, slices: false, turntable: false, callouts: false, poses: false, animations: false, obj: false, glb: false, viewer: false } : {}),
+      ...(opts["beauty-only"] ? BEAUTY_ONLY : {}),
+      lights: opts.lights ? true : opts["no-lights"] ? false : opts["beauty-only"] ? false : undefined,
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       sharp: opts.soft ? false : undefined,
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,

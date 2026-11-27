@@ -54,6 +54,13 @@ export const WEB_TRIANGLES = 200000;
 /** The inner-loop preset: a small grid, the sheet only, no exports. A render in a second or two. */
 export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: false };
 
+/**
+ * The lighting and material loop (`--beauty-only`): the sheet and one beauty render, the shot `set camera` or
+ * `--camera` names, written once; no light study, no other camera's shot, nothing else (round 11: the "one shot"
+ * also wrote the shot again and lights.png, 28 s against the shot's 8).
+ */
+export const BEAUTY_ONLY: RunOptions = { beauty: true, views: [], steps: false, slices: false, turntable: false, callouts: false, poses: false, animations: false, obj: false, glb: false, viewer: false, shots: false, lights: false };
+
 export interface RunOptions {
   /** A quick pass: the grid is coarse for speed, so thin-part warnings are judged at the grid a full render would use. */
   quick?: boolean;
@@ -77,6 +84,10 @@ export interface RunOptions {
   environment?: string;
   /** Render this declared camera only (beauty.png and the sheet take its view), over the program's `set camera`. */
   camera?: string;
+  /** false renders beauty.png alone, not each declared camera's own shot as beauty_<name>.png. */
+  shots?: boolean;
+  /** false skips lights.png, the light study a program with two or more lights gets with the beauty render. */
+  lights?: boolean;
   slices?: boolean;
   turntable?: boolean;
   obj?: boolean;
@@ -981,6 +992,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let calloutNote: string | undefined;
   // The step slices.png cut through, when it was asked for one.
   let sliceNote: string | undefined;
+  // Where each declared camera's shot was written, when the beauty render ran: beauty.png for the shot it shows.
+  let shotFiles: Map<string, string> | undefined;
   let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[]; unseen: string[] } | undefined;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [];
@@ -1499,12 +1512,16 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // (measured: a focused beauty render fitted every point and framed the whole mug).
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
         write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label: captioned ? label : undefined, wearProbe: wearScale }).toPng());
-      time("beauty", () => shoot("beauty.png", beautyFrame, !!(shotFocus || focusName), azimuth, elevation, zoom, shot?.dof ?? dof, `${shownName}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
+      // beauty.png is the shot: the camera `set camera` or --camera names, with what the command line overrides, framed
+      // on its focus=, its caption naming the camera as that camera's own shot would. The light study and the skies
+      // are the same shot, so each can be set beside it.
+      const shotDof = shot?.dof ?? dof;
+      const shotFocused = !!(shotFocus || focusName);
+      time("beauty", () => shoot("beauty.png", beautyFrame, shotFocused, azimuth, elevation, zoom, shotDof, `${shownName}${shot ? `, camera ${shot.name}` : ""}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
       // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders.
       const stripFrame = Math.max(96, Math.round(bsize * 0.5));
-      const framed = !!(shotFocus || focusName);
       const stripShot = (o: Partial<Parameters<typeof renderBeauty>[3]>) =>
-        renderBeauty(output, mesh!, beautyFrame, { size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: framed ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: framed ? modelBounds : undefined, wearProbe: wearScale, ...o });
+        renderBeauty(output, mesh!, beautyFrame, { size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: shotFocused ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocused ? modelBounds : undefined, wearProbe: wearScale, ...o });
       // Every sky at once, or the ones listed, for choosing one: environments.png beside beauty.png.
       if (skies && skies.length) {
         const gutter = 6, bar = 26;
@@ -1516,27 +1533,33 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         });
         write("environments.png", strip.toPng());
       }
-      log(`beauty render ${bsize}px in ${timings.beauty} ms`);
+      log(`beauty render ${bsize}px in ${timings.beauty} ms${shot ? `, camera ${shot.name}` : ""}`);
       // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
       // near-identical pictures (round 9: two agents could not tell whether a light did anything); under it, what each
       // light adds on its own, brightened, so a small point light's reach and colour can be judged (round 10: a
       // ring's spark was a few pixels in the strip), and last the picture under no light at all.
-      if (lights && lights.length >= 2) {
+      // A light study is four or more marches more, so --beauty-only leaves it to --lights (round 11: 28 s of a material
+      // loop's 36 went on lights.png and a second copy of the shot).
+      if (lights && lights.length >= 2 && opts.lights !== false) {
         const gutter = 6, bar = 26, rowBar = 16;
         const cols = lights.length + 1;
         const strip = new Canvas((stripFrame + gutter) * cols + gutter, bar + (stripFrame + gutter) * 2 + rowBar + gutter, INK.page);
         strip.fill(0, 0, strip.width, bar, INK.bar);
         barTitle(strip, `LIGHTS   each alone, then all ${lights.length}`);
         const rowY = bar + gutter + stripFrame + gutter;
-        drawText(strip, 10, rowY + 3, "what each adds on its own, brightened by the gain shown. last: no light at all, the sky's ambient and the glows", INK.dim, 1);
+        // The row's key, as much of it as the strip is wide for (a quick pass's strip cut the long one short).
+        const key = ["what each adds on its own, brightened by the gain shown, a glowing part flat grey. last: no light at all, the sky's ambient and the glows", "what each adds, brightened by the gain shown, glows grey. last: no light at all", "what each adds, glows grey. last: no light"].find((t) => textWidth(t, 1) + 20 <= strip.width) ?? "what each adds";
+        drawText(strip, 10, rowY + 3, key, INK.dim, 1);
         const label = (c: Canvas, text: string, color = INK.dim) => drawText(c, 8, c.height - 12, text, color, 1);
         time("lights", () => {
           // No light: the same shot with one light of no power, so the lights' floor shares and the sky stay as they are.
-          const none = stripShot({ lights: [{ ...lights[0], power: 0 }] });
+          // Where a glowing part is: the frames of what a light adds draw it flat grey (round 11: a flame read green).
+          const glow = new Uint8Array(stripFrame * stripFrame);
+          const none = stripShot({ lights: [{ ...lights[0], power: 0 }], glowMask: glow });
           lights.forEach((l, i) => {
             const desc = l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`;
             const alone = stripShot({ lights: [l] });
-            const adds = lightContribution(alone, none);
+            const adds = lightContribution(alone, none, glow);
             label(alone, `${l.name}  ${desc}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}`);
             label(adds.canvas, `${l.name} adds${adds.gain > 1.05 ? `, ×${fmt(Number(adds.gain.toPrecision(2)))}` : ""}`, 0xb0b0b0);
             strip.blit(alone, gutter + i * (stripFrame + gutter), bar + gutter);
@@ -1548,15 +1571,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         });
         write("lights.png", strip.toPng());
       }
-      // Every declared camera is a shot of its own, framed on its focus= when it has one.
+      // Every declared camera is a shot of its own, framed on its focus= when it has one; --camera NAME and
+      // --beauty-only render the one shot beauty.png is. The shot beauty.png already shows is not rendered again as
+      // beauty_<name>.png (round 11: the same camera marched twice, 9 s of a minute's render); with the command line's
+      // angles over it, beauty.png is another picture, and the camera's own is rendered.
+      shotFiles = new Map();
       for (const c of evaluation.cameras) {
-        if (shot && opts.camera && c.name !== shot.name) continue;
+        const isShot = !!shot && c.name === shot.name;
+        if (!isShot && (opts.camera || opts.shots === false)) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         const b = r ? r.frame : beautyFrame;
+        const az = c.azimuth ?? azimuth, el = c.elevation ?? elevation, zm = c.zoom ?? zoom, df = c.dof ?? dof;
         // A focus mostly hidden from its camera by the rest of the model is said, not discovered in the picture,
         // when another azimuth would see much more of it (a gem in its setting is hidden from every side alike).
         if (r) {
-          const az = c.azimuth ?? azimuth, el = c.elevation ?? elevation;
           const info = { name: shownName, bounds: modelBounds };
           const hidden = hiddenFraction(mesh!, b, info, cellSize, az, el, 160, r.shape);
           if (hidden > 0.15) {
@@ -1565,8 +1593,14 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
             if (best < hidden - 0.2) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}; from azimuth ${fmt(((bestAz % 360) + 360) % 360)} it is ${Math.round(best * 100)}%`);
           }
         }
+        if (isShot) {
+          const same = az === azimuth && el === elevation && zm === zoom && df === shotDof && [0, 1, 2].every((k) => b.min[k] === beautyFrame.min[k] && b.max[k] === beautyFrame.max[k]);
+          if (same) { shotFiles.set(c.name, "beauty.png"); log(`beauty_${c.name}.png not written: beauty.png is camera ${c.name}'s shot`); continue; }
+          if (opts.shots === false) continue;
+        }
         // An unfocused shot gives the model's size as beauty.png does, the mesh's extent held within the bounds.
-        time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom, c.dof ?? dof, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(!r && shownSize ? shownSize : b)}`));
+        time(`beauty:${c.name}`, () => shoot(`beauty_${c.name}.png`, b, !!(r || focusName), az, el, zm, df, `${shownName}, camera ${c.name}${r ? ` → ${c.focus}` : ""}  ${dimsLabel(!r && shownSize ? shownSize : b)}`));
+        shotFiles.set(c.name, `beauty_${c.name}.png`);
       }
     }
   }
@@ -1702,7 +1736,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   }
   if (calloutNote) lines.push(`Callouts (callouts.png, the largest visible steps named): ${calloutNote}`, "");
   if (evaluation.images.length) lines.push(`Images: ${evaluation.images.map((i) => `${i.name} ${i.width} × ${i.height} (${i.projection === "box" ? i.size : `${i.projection}, ${i.size}`}; line ${i.line})`).join("; ")}`, "");
-  for (const l of presentationLines(evaluation, shot?.name, environment, opts.azimuth !== undefined || opts.elevation !== undefined || opts.zoom !== undefined)) lines.push(l, "");
+  for (const l of presentationLines(evaluation, shot?.name, environment, opts.azimuth !== undefined || opts.elevation !== undefined || opts.zoom !== undefined, shotFiles)) lines.push(l, "");
   lines.push("## Steps", "", "Sizes and spans are bounding boxes: exact for primitives and unions, loose after a cut (`a - b` keeps a's box), a rotation or a twist; `a & b` tightens to the overlap. In output: yes for a part, cut for a shape subtracted from one, region for a shape only an assert, a decal or a camera reads.", "", "| # | Name | Line | Size | x | y | z | In output |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   shapeSteps.forEach((st, i) => {
     const sh = st.value as Shape3;
@@ -1741,7 +1775,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
-    "beauty.png": "the field ray-marched with soft shadows and ambient occlusion",
+    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from camera ${shot.name}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}`,
     "lights.png": "the beauty render under each declared light alone, then all of them; under each, what that light adds on its own, brightened, and the picture under no light at all",
     "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}`,
     ...cameraFiles,
@@ -1823,11 +1857,16 @@ export function roleLabel(role: StepRole | undefined): string {
   return role === "part" ? "yes" : role === "cut" ? "cut" : role === "mask" ? "mask" : role === "region" ? "region" : "no";
 }
 
-/** The Lights, Cameras and Environment lines of the report, printed by `check` too. */
-export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false): string[] {
+/**
+ * The Lights, Cameras and Environment lines of the report, printed by `check` too. The shot beauty.png shows is
+ * written once, as beauty.png, unless the command line's angles made beauty.png another picture; `written`, from a
+ * render, is the file each camera's shot went to, and a camera missing from it was not rendered (--camera or
+ * --beauty-only render one shot).
+ */
+export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false, written?: Map<string, string>): string[] {
   const lines: string[] = [];
   if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}${evaluation.lights.length >= 2 ? " (lights.png shows each alone, and what each adds)" : ""}`);
-  if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
+  if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → ${written ? written.get(c.name) ?? "not rendered (one shot)" : c.name === shotName && !overridden ? "beauty.png" : `beauty_${c.name}.png`}`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
   if (environment) lines.push(`Environment: ${environment}`);
   return lines;
 }

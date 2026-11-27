@@ -845,6 +845,22 @@ the frames went from 0.4 to half the beauty size: 6.1 s to 9.6 s on the
 ring's three lights. The no-light frame closes the row, since it is
 what every light adds to.
 
+The difference is taken from the finished pixels, after the shading has
+clipped each channel at white, so on a glowing part it is not that
+light's term: a flame near white under no light and a little whiter
+under the moon differs only in green and blue, and brightened 7.9 times
+it read as a green flame (round 11). The render marks the pixels whose
+surface glows, and that row draws them flat grey and leaves them out of
+the gain. A light that does reach a glow is still seen on everything
+round it.
+
+The strip is four or more marches beside the shot, so it is part of the
+full `--beauty` render and not of `--beauty-only`, the loop for trying
+a finish, unless `--lights` asks; and the shot `set camera` names is
+`beauty.png` and is not marched again as `beauty_<name>.png` (round 11:
+the material loop's one shot was the shot twice and the strip, 28 s
+against 8).
+
 ## Lighting a metal, lighting a lamp
 
 A metal is mostly what it reflects, and a fixed sky is not enough for

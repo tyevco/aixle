@@ -708,19 +708,32 @@ and floor where a `glow` material carries the picture. A named shot,
 when it has one and taking the render's own view for whatever it leaves
 out; `set camera hero` makes that shot the sheet's perspective view and
 `beauty.png` as well (the front, right and top views are unchanged).
+That shot is rendered once, as `beauty.png`, its caption naming the
+camera, and not again as `beauty_hero.png`: the two were the same
+picture marched twice. With `--azimuth`, `--elevation` or `--zoom` over
+it, `beauty.png` is another picture, and the camera's own shot is
+rendered as `beauty_hero.png` too. The report's Cameras line says where
+each shot went.
 `check` and the report list the lights, the cameras and the
 environment, so a misspelt name is a warning before any render. With
 two or more lights `render --beauty` also writes `lights.png`, the
 picture under each light alone and then all of them, so what a rim
-light adds is seen rather than guessed from two near-identical shots. Under
+light adds is seen rather than guessed from two near-identical shots;
+every frame is the shot `beauty.png` shows, whether `set camera` or
+`--camera` chose it. `--beauty-only` leaves it out (it is four or more
+marches more) unless `--lights` asks for it, and `--no-lights` leaves it
+off a full render. Under
 each of those is what that light adds on its own: the picture under it
 alone minus the picture under no light at all, brightened until its
 brightest part is near white, with the gain printed (`spark adds, ×3`),
 and last the picture under no light, which is the sky's ambient, the
 glows and the metals' reflections. A small point light that changes a
 few pixels of the whole picture (a spark over a ring's stone) fills its
-own frame there, so its reach and its colour can be judged. The frames
-are half the beauty render's size.
+own frame there, so its reach and its colour can be judged. A glowing
+part is flat grey in that row: its own light is in every frame, and two
+near-white glows differ only in the channels not already full, so a
+flame a light barely touches came out bright green once brightened. The
+frames are half the beauty render's size.
 
 What the lights and the skies can and cannot do, measured in round 9:
 
@@ -778,9 +791,12 @@ What the lights and the skies can and cannot do, measured in round 9:
   the sheet's view and `beauty.png` only; a declared camera keeps its
   own angles. `--camera NAME` renders one declared shot (the sheet and
   `beauty.png` take its view, and its `focus=` framing) while a lighting
-  loop runs, `--beauty-only` skips the steps, slices, turntable,
-  callouts and exports for that loop, and `--environment NAME` tries a
-  sky without editing the program. The caption at the foot of
+  loop runs. `--beauty-only` is that loop: the sheet and the one shot
+  (`set camera`'s, `--camera`'s, or the render's own view), written
+  once as `beauty.png`, and nothing else: no other camera's shot, no
+  `lights.png` (`--lights` adds it), no steps, slices, turntable,
+  callouts or exports. `--environment NAME` tries a sky without editing
+  the program. The caption at the foot of
   `beauty.png` and of each shot names the shot and its size for whoever
   checks it; `set caption 0` (or `--no-caption`) leaves it off a
   presentation copy, where at a low camera it can overprint the model.

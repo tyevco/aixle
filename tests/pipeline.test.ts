@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { afterAll, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { BEAUTY_ONLY, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -30,6 +30,15 @@ describe("pipeline", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
       const r = run("m = box(1) | paint(\"gold\")", "box.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, beauty: true, beautySize: 64 });
+      // Read before the next run into the folder, which removes what this one wrote and it does not.
+      expect(r.files).toContain("viewer.html");
+      expect(r.files).toContain("beauty.png");
+      const html = readFileSync(join(dir, "viewer.html"), "utf8");
+      expect(html).toContain("<title>m · aixle viewer</title>");
+      expect(html).toMatch(/const GLB = "Z2xURg/); // "glTF" in base64
+      expect(html).toContain("three@0.160.0");
+      const png = readFileSync(join(dir, "beauty.png"));
+      expect(png.readUInt32BE(16)).toBe(64);
       // A declared camera is a shot of its own, framed on its focus; the report lists lights, cameras and the sky.
       const shots = run('m = box(1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5, color="#cfe0ff")\ncamera("hero", azimuth=20, zoom=1.2)\ncamera("knob", focus="k")\nset environment night\nshow both', "shots.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
       expect(shots.files).toEqual(expect.arrayContaining(["beauty.png", "beauty_hero.png", "beauty_knob.png", "lights.png"]));
@@ -40,9 +49,12 @@ describe("pipeline", () => {
       expect(shots.report).toMatch(/Environment: night/);
       expect(shots.report).toMatch(/`beauty_knob\.png`: the beauty render from camera knob, framed on k/);
       expect(shots.timings["beauty:knob"]).toBeDefined();
-      // One camera and another sky from the command line: only that shot, its view on beauty.png, the sky noted.
+      // lights.png: each light alone, then all, and under them what each adds on its own and the picture under none.
+      const lit = readFileSync(join(dir, "lights.png"));
+      expect([lit.readUInt32BE(16), lit.readUInt32BE(20)]).toEqual([(96 + 6) * 3 + 6, 26 + (96 + 6) * 2 + 16 + 6]);
+      // One camera and another sky from the command line: only that shot, as beauty.png, the sky noted.
       const one = run('m = box(1)\ncamera("hero", azimuth=20)\ncamera("side", azimuth=90)\nset environment night\nshow m', "one.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, camera: "side", environment: "sunset" });
-      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_side.png"]);
+      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
       expect(one.report).toMatch(/\(the sheet and beauty\.png use "side"\)/);
       expect(one.report).toMatch(/Environment: sunset/);
       const all = run('m = box(1)\nset environment night\nshow m', "all.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "all" });
@@ -56,21 +68,10 @@ describe("pipeline", () => {
       expect(pair.report).toMatch(/`environments\.png`: the beauty render under overcast, sunset, from --environment/);
       expect(readFileSync(join(dir, "environments.png")).readUInt32BE(16)).toBe((96 + 6) * 2 + 6);
       expect(pair.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--environment mars: no such environment/)]));
-      // lights.png: each light alone, then all, and under them what each adds on its own and the picture under none.
-      const lit = readFileSync(join(dir, "lights.png"));
-      expect([lit.readUInt32BE(16), lit.readUInt32BE(20)]).toEqual([(96 + 6) * 3 + 6, 26 + (96 + 6) * 2 + 16 + 6]);
       // A focus hidden behind the rest of the model from its camera is warned about; from the other side it is not.
       const hid = run('wall = box(2, 2, 0.2) | move(0, 1, 1)\nball = sphere(0.3) | move(0, 1, 0)\nboth = wall + ball\ncamera("front", focus="ball", azimuth=0, elevation=5)\ncamera("back", focus="ball", azimuth=180, elevation=5)\nshow both', "hid.aix", dir, { grid: 24, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
       expect(hid.warnings.filter((w) => /hidden behind/.test(w))).toEqual([expect.stringMatching(/^camera "front" \(line 4\): \d+% of ball is hidden behind the rest of the model from azimuth 0, elevation 5; from azimuth \d+ it is \d+%$/)]);
       expect(run('m = box(1)\nshow m', "bad.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, camera: "nope", environment: "mars" }).warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera \(declare one/), expect.stringMatching(/^--environment mars: no such environment; the skies are studio/)]));
-      expect(r.files).toContain("viewer.html");
-      expect(r.files).toContain("beauty.png");
-      const html = readFileSync(join(dir, "viewer.html"), "utf8");
-      expect(html).toContain("<title>m · aixle viewer</title>");
-      expect(html).toMatch(/const GLB = "Z2xURg/); // "glTF" in base64
-      expect(html).toContain("three@0.160.0");
-      const png = readFileSync(join(dir, "beauty.png"));
-      expect(png.readUInt32BE(16)).toBe(64);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -483,4 +484,48 @@ describe("glass on a bound", () => {
     const bottle = check('wall = curve2([0,0.02, 0.5,0.02, 0.55,1.2, 0.2,1.6, 0.18,2], wall=0.04)\nbottle = revolve(wall) | paint("glass")\nflask = extrude(bezier2([0,0, 0.6,0, 0.6,1, 0,1]), 0.3, "z") | paint("glass")\nshow bottle + flask', "b.aix");
     expect(glassWarnings(bottle)).toEqual([]);
   });
+});
+
+describe("round-11 renders", () => {
+  const opts = { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 };
+  const lit = 'm = box(1, 1, 1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5)\ncamera("hero", azimuth=-20, elevation=10, zoom=1.2)\ncamera("knob", focus="k", azimuth=60, elevation=30, zoom=1)\n';
+  const dirs: string[] = [];
+  const tmp = () => { const d = mkdtempSync(join(tmpdir(), "aixle-r11-")); dirs.push(d); return d; };
+  const bytes = (dir: string, f: string) => readFileSync(join(dir, f));
+  afterAll(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+
+  it("renders the shot beauty.png shows once, and --beauty-only renders that one shot alone", () => {
+    // Round 11: with set camera hero, beauty.png and beauty_hero.png were the same camera marched twice, and
+    // --beauty-only --camera iron wrote the shot twice and lights.png: 28 s against the shot's 8.
+    const a = tmp(), b = tmp(), c = tmp();
+    const full = run(lit + "set camera hero\nshow both", "lit.aix", a, opts);
+    expect(full.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_knob.png"]);
+    expect(full.files).toContain("lights.png");
+    expect(full.timings["beauty:hero"]).toBeUndefined();
+    expect(full.report).toMatch(/Cameras: hero \(azimuth -20, elevation 10, zoom 1\.2\) → beauty\.png; knob \(azimuth 60, elevation 30, zoom 1, on k\) → beauty_knob\.png/);
+    expect(full.report).toMatch(/`beauty\.png`: the field ray-marched with soft shadows and ambient occlusion, from camera hero \(set camera\)/);
+    // --camera knob: beauty.png is knob's shot, the very picture the full run wrote as beauty_knob.png, and the only one.
+    const one = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "knob" });
+    expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
+    expect(bytes(b, "beauty.png").equals(bytes(a, "beauty_knob.png"))).toBe(true);
+    // --beauty-only: the sheet and the one shot, the same picture as the full run's beauty.png; no light study.
+    const only = run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64 });
+    expect(only.files).toEqual(["sheet.png", "beauty.png", "report.md", "report.json"]);
+    expect(bytes(c, "beauty.png").equals(bytes(a, "beauty.png"))).toBe(true);
+    expect(only.report).toMatch(/knob \([^)]*\) → not rendered \(one shot\)/);
+    // --lights asks for the study in the loop; --no-lights leaves it off a full run.
+    expect(run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, lights: true }).files).toContain("lights.png");
+    expect(run(lit + "show both", "lit.aix", c, { ...opts, lights: false }).files).not.toContain("lights.png");
+  });
+
+  it("draws lights.png from the shot beauty.png shows, whether set camera or --camera chose it", () => {
+    const a = tmp(), b = tmp(), c = tmp();
+    run(lit + "set camera hero\nshow both", "lit.aix", a, opts);
+    run(lit + "show both", "lit.aix", b, { ...opts, camera: "hero" });
+    run(lit + "show both", "lit.aix", c, opts);
+    expect(bytes(a, "lights.png").equals(bytes(b, "lights.png"))).toBe(true);
+    expect(bytes(a, "lights.png").equals(bytes(c, "lights.png"))).toBe(false);
+  });
+
+
 });

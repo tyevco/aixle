@@ -131,7 +131,7 @@ set grid 200   set size 768   set focus lid   set slice stem   set pose reach   
 set units mm   set bed 220 220 250                                                       # a print: the report's Print section, model.stl in mm, model.3mf
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")  light("rim", azimuth=150, elevation=20, power=0.5)  light("fire", position=[0, 0.4, 0], range=2)   # several lights, a point light; lights.png shows each alone
-camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky (--camera NAME, --environment NAME|a,b|all, --beauty-only for the loop)
+camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky; set camera's shot is beauty.png, written once (--camera NAME, --environment NAME|a,b|all; --beauty-only: that one shot and the sheet, --lights to add lights.png)
 decal(part, label_box, image="label.png")   material("cream", image="skin.png", projection="cylindrical", scale=0.6)   # a PNG as a label or a skin
 material("rust", wear=0.4, bump=0.003, bump_scale=0.05)   # a finish: worn edges, rust, bumps below the mesh (beauty and GLB only, not the sheet)
 
@@ -212,7 +212,7 @@ show arm
 | a smooth profile's base rocks, or its box passes x = 0 | the spline overshoots at a sharp turn | give the axis points and the foot's edge twice: corners, straight between |
 | a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
 | stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
-| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty` is a few seconds, but it cannot judge glass: its grid is coarse) |
+| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty-only` is one shot in a few seconds, but it cannot judge glass: its grid is coarse) |
 | the model looks new, like plastic | one smooth colour everywhere | `wear=0.4` (edges bright, creases dark), `bump=` (roughness below the mesh), `"rust"`; judge in `--beauty`, never on the sheet; the GLB carries them as maps (the report's Maps row) |
 | a thin rod or ring is worn bright all over | wear's band is ~1.2% of the model's size; thinner than two bands is all edge | thicken it, or less wear on that part |
 | chrome is a white blob; a night scene is black; a low shot looks down | neutral skies reflect white; `night` cuts the ambient; elevation is about the centre | `sunset`/`night` or `steel` for a mirror; `set ambient 1.6`; `elevation=-8`; a glow lights only itself, so a lamp or a fire lighting its neighbours is `light(..., position=[x, y, z], range=2)` just outside it |

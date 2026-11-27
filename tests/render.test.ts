@@ -176,6 +176,29 @@ describe("what a light adds", () => {
     // A light that reaches nothing adds a black frame at a gain of 1.
     expect(lightContribution(none, none).gain).toBe(1);
   });
+  it("draws a glowing surface flat grey and leaves it out of the gain, where its clipped colour would read as a light's", () => {
+    // Round 11: a flame near white under no light and a little whiter under the moon differs only in green, and at the
+    // moon's gain of 7.9 the flame read bright green in "moon adds".
+    const none = new Canvas(10, 10, rgb(20, 20, 20));
+    const alone = new Canvas(10, 10, rgb(20, 20, 20));
+    for (let i = 0; i < 10; i++) { none.set(i, 0, rgb(255, 200, 90)); alone.set(i, 0, rgb(255, 240, 95)); }
+    for (let i = 0; i < 10; i++) alone.set(i, 5, rgb(60, 60, 60));
+    const glow = new Uint8Array(100);
+    for (let i = 0; i < 10; i++) glow[i] = 1;
+    const { canvas, gain } = lightContribution(alone, none, glow);
+    const px = (x: number, y: number) => [...canvas.data.slice((y * 10 + x) * 4, (y * 10 + x) * 4 + 3)];
+    expect(gain).toBeCloseTo(230 / 40, 5);
+    expect(px(3, 0)).toEqual([0x58, 0x58, 0x58]);
+    expect(px(3, 5)).toEqual([230, 230, 230]);
+    // The beauty render marks the pixels whose surface glows.
+    const shape = O.union([P.box(1, 1, 1), O.paint(O.move(P.sphere(0.3), 0, 0.8, 0), { ...preset("gold")!, glow: 1 })]);
+    const m = surfaceNets(shape, { resolution: 24 }).mesh;
+    const mask = new Uint8Array(48 * 48);
+    renderBeauty(shape, m, shape.bounds, { size: 48, cellSize: 0.1, glowMask: mask });
+    const lit = mask.reduce((a, b) => a + b, 0);
+    expect(lit).toBeGreaterThan(20);
+    expect(lit).toBeLessThan(48 * 48 * 0.3);
+  });
 });
 
 describe("pictures", () => {

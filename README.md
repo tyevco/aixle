@@ -67,6 +67,7 @@ npx aixle render model.aix --beauty         # plus beauty.png (a second or a few
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
 npx aixle render model.aix --slice stem         # slices.png through one step, framed on it, the rest faint
+npx aixle render model.aix --beauty-only        # the sheet and one beauty render (set camera's shot), for a lighting loop
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
@@ -94,7 +95,7 @@ npx aixle doc                        # the reference, to stdout
 | `model_normal.png`, `model_mr.png`, `model_emissive.png` | when the program has them: the normal map (bumps, and `displace` relief finer than the mesh), the metallic-roughness map (wear, rust) and the emissive map (a patterned glow), on the atlas's UVs |
 | `model.glb` | binary glTF with the atlas and those maps embedded, tangents for the normal map (`--no-texture` for vertex colours instead); this, the OBJ and the viewer are decimated past 200 thousand triangles (`--triangles`) |
 | `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
-| `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
+| `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion, from the camera `set camera` names; each other declared camera's shot is `beauty_<name>.png`, and with two lights or more `lights.png` shows each alone |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
 | `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, a bone per object and per joint, with its texture |

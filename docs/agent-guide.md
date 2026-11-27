@@ -72,11 +72,11 @@ npx aixle render model.aix --focus lid     frame every view on one step or objec
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
 npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises: both for a big rig's loop
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
-npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
+npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it; with lights and cameras it draws lights.png and every shot too, so --beauty-only for one)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
 npx aixle render model.aix --slice stem    slices.png through one step, framed on it, the rest of the model faint
                                            with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png, a sky
-npx aixle render model.aix --beauty-only --camera hero   one shot and the sheet, nothing else: the lighting loop
+npx aixle render model.aix --beauty-only --camera hero   one shot (written once, as beauty.png) and the sheet, nothing else: the lighting loop (--lights adds lights.png)
 npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all)
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
@@ -111,11 +111,16 @@ mesh; `--no-cache` samples afresh.
   one part (a plant's stem down into the soil it stands in), `--slice
   plant` or `set slice plant`: the planes go through that step's solid,
   framed on it, its cut in full and the rest faint.
-- **`lights.png`** (two or more lights, with `--beauty`): the top row is
+- **`lights.png`** (two or more lights, with `--beauty`; with
+  `--beauty-only` only if `--lights`): every frame is the shot
+  `beauty.png` shows. The top row is
   each light alone and then all; the bottom row is what each light adds
   on its own, brightened by the gain printed under it, so a small point
-  light's reach and colour fill the frame, and last the picture under
+  light's reach and colour fill the frame (a glowing part is flat grey
+  there: its light is its own), and last the picture under
   no light at all.
+- The shot `set camera` names is `beauty.png`, captioned with the
+  camera's name, and is not written again as `beauty_<name>.png`.
 - A small part of a large model is a few pixels on the sheet: `--focus
   name` (or `--focus name_3` for one copy of a placed set) frames every
   view on that step alone, meshed at the frame's own
