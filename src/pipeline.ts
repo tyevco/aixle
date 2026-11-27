@@ -1073,6 +1073,12 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? "beauty.png takes the render's own view" : "every shot is rendered"}`);
   const azimuth = opts.azimuth ?? shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  // The command line's angles over the camera's own make beauty.png another picture than beauty_<name>.png, so its
+  // caption and the report say which (round 11: a door rendered with --azimuth 22 over set camera hero had beauty.png
+  // and lights.png at 22 and beauty_hero.png at -18, both captioned as the camera's, and read as the light study
+  // ignoring the camera).
+  const shotOverrides = shot ? ([["azimuth", opts.azimuth, shot.azimuth], ["elevation", opts.elevation, shot.elevation], ["zoom", opts.zoom, shot.zoom]] as const).filter(([, o, c]) => o !== undefined && c !== undefined && o !== c).map(([k, o]) => `--${k} ${fmt(o!)}`).join(" ") : "";
+  const shotLabel = shot ? `camera ${shot.name}${shotOverrides ? ` with ${shotOverrides}` : ""}` : "";
   // `--environment all`, or a list `--environment studio,overcast`, renders the shot under each of those skies into
   // environments.png in the one run (round 10: a glass dome compared under two skies took two full renders); a list
   // gives beauty.png its first sky, as a single name does, and `all` leaves beauty.png the program's own.
@@ -1572,7 +1578,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // are the same shot, so each can be set beside it.
       const shotDof = shot?.dof ?? dof;
       const shotFocused = !!(shotFocus || focusName);
-      time("beauty", () => shoot("beauty.png", beautyFrame, shotFocused, azimuth, elevation, zoom, shotDof, `${shownName}${shot ? `, camera ${shot.name}` : ""}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
+      time("beauty", () => shoot("beauty.png", beautyFrame, shotFocused, azimuth, elevation, zoom, shotDof, `${shownName}${shot ? `, ${shotLabel}` : ""}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
       // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders.
       const stripFrame = Math.max(96, Math.round(bsize * 0.5));
       const stripShot = (o: Partial<Parameters<typeof renderBeauty>[3]>) =>
@@ -1588,7 +1594,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         });
         write("environments.png", strip.toPng());
       }
-      log(`beauty render ${bsize}px in ${timings.beauty} ms${shot ? `, camera ${shot.name}` : ""}`);
+      log(`beauty render ${bsize}px in ${timings.beauty} ms${shot ? `, ${shotLabel}` : ""}`);
       // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
       // near-identical pictures (round 9: two agents could not tell whether a light did anything); under it, what each
       // light adds on its own, brightened, so a small point light's reach and colour can be judged (round 10: a
@@ -1831,7 +1837,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
-    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from camera ${shot.name}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}`,
+    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}`,
     "lights.png": "the beauty render under each declared light alone, then all of them; under each, what that light adds on its own, brightened, and the picture under no light at all",
     "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}`,
     ...cameraFiles,

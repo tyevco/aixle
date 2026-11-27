@@ -722,9 +722,11 @@ out; `set camera hero` makes that shot the sheet's perspective view and
 That shot is rendered once, as `beauty.png`, its caption naming the
 camera, and not again as `beauty_hero.png`: the two were the same
 picture marched twice. With `--azimuth`, `--elevation` or `--zoom` over
-it, `beauty.png` is another picture, and the camera's own shot is
-rendered as `beauty_hero.png` too. The report's Cameras line says where
-each shot went.
+it, `beauty.png` is another picture, captioned `camera hero with
+--azimuth 60`, and the camera's own shot is rendered as
+`beauty_hero.png` too, so the light study, which is always the shot
+`beauty.png` shows, is never read as ignoring the camera. The report's
+Cameras line says where each shot went.
 `check` and the report list the lights, the cameras and the
 environment, so a misspelt name is a warning before any render. With
 two or more lights `render --beauty` also writes `lights.png`, the
