@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exprText, type Expr, type Stmt } from "../src/lang/ast.js";
 import { parse } from "../src/lang/parser.js";
 import { evaluate } from "../src/lang/interpreter.js";
 
 const run = (src: string) => evaluate(parse(src));
+/** The CLI from source, its output whether it passes or fails. */
+const cli = (...args: string[]): string => {
+  try { return execFileSync("npx", ["tsx", "src/cli.ts", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (err) { const e = err as { stdout?: string; stderr?: string }; return `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+};
+const dir = mkdtempSync(join(tmpdir(), "aixle-round11-"));
+/** A program written to a scratch file, for the CLI. */
+const file = (name: string, src: string): string => { const f = join(dir, name); writeFileSync(f, src); return f; };
 
 /** Every program in the repo: the examples, the shipped libraries and every dogfood round's. */
 function programs(): string[] {
@@ -59,5 +68,14 @@ describe("an expression printed back (round 11: parentheses dropped)", () => {
   it("prints an assert's text with its parentheses in check's line", () => {
     const ev = run("F = 1\nstack_y = 0\nc = 0.001\nassert F * (stack_y > 0) * c < 0.005, \"rests\"");
     expect(ev.asserts[0].text).toBe("F * (stack_y > 0) * c < 0.005");
+  });
+});
+
+describe("check prints a value's small numbers (round 11: a bump of 0.002 printed 0)", () => {
+  it("prints the numbers in a record, a list and a number step to four significant figures", { timeout: 30000 }, () => {
+    const out = cli("check", file("bump.aix", "oak_bump = {bump: 0.002, bump_scale: 0.02, seed: 3}\nwear = [0.0015, 0.25, 12.5]\ntiny = 0.0004\nm = box(1)\n"));
+    expect(out).toMatch(/(^|\n)oak_bump +=  ?\{bump: 0\.002, bump_scale: 0\.02, seed: 3\}\n/);
+    expect(out).toMatch(/\nwear +=  ?\[0\.0015, 0\.25, 12\.5\]\n/);
+    expect(out).toMatch(/\ntiny +=  ?0\.0004\n/);
   });
 });

@@ -117,7 +117,10 @@ parts.lid` shows that field, and the output is then the step the field
 holds, so a record's other parts are still reported as unused. `check`
 prints a record as it would be written (`seat = {w: 0.9, h: 0.45, d:
 0.8}`), or, when it holds shapes or is too long for a line, a line per
-field with a shape's box, as a step's would be.
+field with a shape's box, as a step's would be. A value's numbers (a
+number step, a list's, a record's) are printed to four significant
+figures, as an assert's sides are, so `{bump: 0.002}` reads as written;
+sizes and places keep two decimals.
 
 ## Calls and pipelines
 

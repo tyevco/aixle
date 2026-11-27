@@ -30,11 +30,17 @@ import { format } from "./lang/format.js";
 const short = (v: number): string => { const t = (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : Math.abs(v) < 0.1 && Math.abs(v) >= 0.005 ? String(Number(v.toPrecision(2))) : v.toFixed(2)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; return t === "-0" ? "0" : t; };
 
 /**
- * A value on one line, as `check` and `explain` print it: numbers short, strings quoted, a shape by its size, a
- * record as {name: value, ...}, so a record of parameters reads as it was written.
+ * A number as a value: four significant figures, as an assert's sides are printed, so a bump of 0.002 in a record
+ * reads 0.002 and not 0 (round 11); `short` is for sizes and places, where two decimals are the scale of a model.
+ */
+const valueNum = (v: number): string => { const t = String(Number(v.toPrecision(4))); return t === "-0" ? "0" : t; };
+
+/**
+ * A value on one line, as `check` and `explain` print it: numbers to four significant figures, strings quoted, a
+ * shape by its size, a record as {name: value, ...}, so a record of parameters reads as it was written.
  */
 function valueText(v: Value, depth = 0): string {
-  if (typeof v === "number") return short(v);
+  if (typeof v === "number") return valueNum(v);
   if (typeof v === "string") return JSON.stringify(v);
   if (Array.isArray(v)) return depth > 3 ? `a list of ${v.length}` : `[${v.map((x) => valueText(x, depth + 1)).join(", ")}]`;
   if (isRecord(v)) return depth > 3 ? "a record" : `{${[...v.fields].map(([k, x]) => `${k}: ${valueText(x, depth + 1)}`).join(", ")}}`;
@@ -203,8 +209,8 @@ function main(argv: string[]): number {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
         // A number set inside a loop is the last iteration's, not a size: not listed (round 9: "a = 327" as a step).
         if (st.inLoop && !isShape3(st.value) && !isShape2(st.value)) continue;
-        if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${short(st.value)}`); continue; }
-        if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => short(v as number)).join(", ")}]`); continue; }
+        if (typeof st.value === "number") { console.log(`${st.name.padEnd(18)} = ${valueNum(st.value)}`); continue; }
+        if (Array.isArray(st.value) && st.value.every((v) => typeof v === "number")) { console.log(`${st.name.padEnd(18)} = [${st.value.map((v) => valueNum(v as number)).join(", ")}]`); continue; }
         // A record on one line when it fits; else a line per field (or per record of a list), a shape field with its
         // box, as a step would have, so a record of parts reads like the parts.
         const recordList = Array.isArray(st.value) && st.value.length > 0 && st.value.every(isRecord);
@@ -345,9 +351,9 @@ function main(argv: string[]): number {
         if (!st) return `${name}: not a step`;
         const v = st.value;
         let what: string;
-        if (typeof v === "number") what = `= ${short(v)}`;
+        if (typeof v === "number") what = `= ${valueNum(v)}`;
         else if (typeof v === "string") what = `= "${v}"`;
-        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => short(x as number)).join(", ")}]` : v.length && v.every(isRecord) ? clip(`= ${valueText(v)}`) : `a list of ${v.length}`;
+        else if (Array.isArray(v)) what = v.every((x) => typeof x === "number") ? `= [${v.map((x) => valueNum(x as number)).join(", ")}]` : v.length && v.every(isRecord) ? clip(`= ${valueText(v)}`) : `a list of ${v.length}`;
         else if (isRecord(v)) what = clip(`= ${valueText(v)}`);
         else if (isShape3(v)) {
           const b = v.bounds;
