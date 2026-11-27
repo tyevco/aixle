@@ -826,7 +826,22 @@ three.js, Blender and Babylon read all three. Unity's glTFast approximates trans
 
 **Cost.** A day for the factors with one thickness per material; two to four days for per-material surfaces. No committed render changes.
 
-### 22. Fewer evaluations in a render: reuse the export's mesh, skip a cutter, bound a sweep's pieces
+### 22. Fewer evaluations in a render: reuse the export's mesh, skip a cutter, bound a sweep's pieces: built
+
+Built in the order of safety the proposal gives, with every field, mesh
+and export file the same to the bit. The export takes the main mesh for
+one object with no joints or placed sets cut over its own bounds at the
+same resolution (21 of the 25 examples, 17 of the other 47 programs); a
+resolution one more by rounding, or a tightened box, extracts as
+before. A difference skips a cutter of two primitives or more outside
+its box, but not one that holds a field that is only a bound on the
+distance or an intersection: round 10's wrapped inscription read under
+its box distance. A sweep visits its pieces nearest first under a bound
+proved against each, the part across the path only for a profile that
+reads at least its box distance, which an ellipse does not. Tubes were
+left as they were, since a capsule is its own bound, and curve2 is not
+touched. design.md, "Fewer evaluations", has the rest. What follows is
+the proposal as it was written.
 
 **Why.** Once the narrow band is in, what remains is repeated work and the cost per evaluation of a few primitives:
 - **The export meshes the model twice.** buildHierarchy's extract() meshes each object at ceil(longest / cell) over its bounds. For a single object with no joints, that is the main extraction, and it gave back the same positions, indices and normals on six examples. 20 of 24 examples qualify. The second extraction was 8.8 s of the rope's 40 s render, and would be about 3 s after the band.

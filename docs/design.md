@@ -148,6 +148,103 @@ microsecond a point either way). Every caller of the mesher gets it: the main me
 step thumbnails, the export, the poses, `pieces()`, `wall()`, `overhang()`
 and `support()`.
 
+## Fewer evaluations: the export's mesh, a cutter's box, a sweep's pieces
+
+With the band sampling only near the surface, what was left was work done
+twice and pieces evaluated for nothing. Three changes take it away, and
+every field, mesh and export file is the same to the bit.
+
+The export takes the main mesh again. buildHierarchy meshes each object
+over its own bounds at the export's cell, ceil(longest / cell) cells
+along its longest side, which for one object with no joints and no
+placed sets, cut over its bounds, is the very call the pipeline has just
+made. The pipeline hands over its mesh with what it was cut with (the
+shape, the box, the resolution, the sharpness and the crease), and the
+hierarchy takes it when the call it would make is that one. A box the
+extent pass tightened, or a resolution the rounding makes one more
+(round 8's multitool comes out at 221 cells for a grid of 220), extracts
+as before, and a test holds each of these, a joint and another shape to
+a miss. The mesh is only read: the decimation cap and the atlas make new
+meshes from it, which a test checks byte for byte against a fresh
+extraction. 21 of the 25 examples qualify, and 17 of the 47 dogfood and
+std programs; none of the 72 has a tightened box.
+
+A difference skips its cutter outside the cutter's box. Outside its box
+by bd a cutter reads at least bd, so where the base reads -bd or more,
+max(base, -cutter) is the base's value to the bit and the cutter is not
+asked; the box distance is taken a hair low so rounding cannot skip a
+cutter that decides the value. The box test costs about a primitive, so
+it is made only for a cutter of two or more: over a lattice on each
+base, a cutter of one primitive took a sample to 0.75 to 1.95 of its
+time with the test (the mug's two cylinders 1.05 and 0.83), and one of
+two or more to 0.20 to 1.11 (the sign's lettering 0.20, slower only on
+a lighthouse's three primitives and a hub's 58). The floor the cull
+reads is the one union()'s cull already assumes, and not every field
+keeps it. Round 10's ring wraps its inscription, and a wrap shortens arc
+length outside its radius, so that cutter read under its box distance
+and the cull changed 6 lattice values. A cutter is culled only when
+nothing in it is marked as a bound on the distance (a twist, a bend or
+a wrap, a non-uniform scale, a displacement, a loft, a blend) and it
+holds no intersection, whose box is the overlap of its operands' boxes
+while its field is only the larger of their fields. The cull reads the
+base's own value, never more than the difference did, so the band's
+bound holds.
+
+A sweep's pieces are visited nearest first. The rope's sweep evaluated
+22 of its 120 pieces at a sample near its surface: each piece's box is
+its segment's grown by one and a half reaches, and the turns stack, so
+a point is inside most of the boxes round it and the box cull skips
+almost none. Each piece has a lower bound now. With rho the point's
+distance from the segment's line and cap the piece's own end value
+(positive past a mitre plane or an end of the path), the piece reads at
+least rho - reach between its planes and hypot(max(rho - reach, 0),
+cap) past one. The plain distance to the segment is no bound: between
+the mitre planes, past the segment's end and off the path, the piece
+reads the profile alone, which is less. The bound across the path needs
+the profile to read at least its box distance outside its box. A
+circle, a rectangle and a polygon do, and so does what the booleans and
+transforms that keep it build of them, which a profile now says
+(`boxFloor`). An ellipse does not: its field reads 0.88 of its box
+distance a few sizes off on a diagonal, and with the bound across the
+path the teapot's handle read differently at 4307 points of a lattice at
+half density. A profile without the floor is bounded by its end values
+alone, which hold for any profile. The spatial index bounds the pieces listed in the point's
+cell, evaluates the one with the least bound, then only those whose
+bound is under the best so far; the scans past the cell keep their
+order and their box cull, the bound skipping only a piece that cannot
+lower the best, so they give the same bits wherever the bound holds.
+Near the rope's surface that is 2.1 pieces a sample against 21.7 (4.4
+against 24.9 over its whole box), and a sample there takes a third of
+the time. A test holds every bound under its piece at 6000 points out
+to five times the sweep's size, sharp turns, a twist and a taper
+included, and on a square's diagonal, where the two agree, to within
+1e-9. Tubes are as
+they were: a capsule is its own bound, and a round cone's capsule bound
+took a sample near the surface to 0.91 to 1.10 of its time.
+
+Measured on a machine shared with other work. A script compared the
+field before and after bit for bit at every lattice sample of every
+sweep, tube and difference in the 72 programs of examples, dogfood and
+std (5 sweeps, 141 tubes and 177 differences): on a lattice over each
+one's own box, 133 million samples; at every point of the main
+extraction's lattice carried into its frame through the moves, turns,
+scales and warps above it, 1.37 billion; and the whole model's field at
+every point of that lattice, 223 million. Not one differs. The main
+extraction of all 72 meshes to the same bytes (positions, indices,
+normals, materials, NaN counts), in 152 s against 166 s: the sign's
+from 0.64 s to 0.33, the rope's 5.0 s to 2.7, the windmill's and the
+tower's by a third, and none slower past the machine's noise (the eight
+that read 1.07 to 1.48 times as long read 0.93 to 1.09 run again, the
+least of five). model.glb, model.obj, its
+atlas and maps, model.stl and viewer.html came out the same to the byte
+on the 21 examples the reuse applies to, rendered by `aixle render` from
+the tree before and after, and the rope's and the teapot's committed
+renders regenerate unchanged. Whole renders, `aixle render` the better of
+two runs alternating before and after: the rope from 26.4 s to 19.5 (its
+export's hierarchy from 7.2 s to 2.7), the nameplate 8.6 s to 7.9, the
+teapot 7.0 s to 6.8, and std/hardware 4.5 s and 4.8, where none of the
+three applies (six objects, cutters of one primitive, no sweep).
+
 ## One mesh, rendered and exported; one field, for the beauty render
 
 The checking views draw the extracted mesh, not the field. That was a
