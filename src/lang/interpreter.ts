@@ -9,13 +9,13 @@ import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } f
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
-import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
-import { loosePiece, type MeshCache } from "../mesh/pieces.js";
-import { thinnestWall, UNITS } from "../mesh/print.js";
+import { regionTouches, voidWitness, outsideWitness, insideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
+import { loosePiece, standing, type MeshCache } from "../mesh/pieces.js";
+import { supportOf, thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
+import { boundsSize, boundsUnion, EMPTY_BOUNDS, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
 import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
@@ -27,6 +27,12 @@ const MASK_MOVES = new Set(["move", "rotate", "scale", "mirror", "flip"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
+/** A way across the floor, [x, z] of unit length, in words: "+x", "-z", or "+x and -z" within 22.5 degrees of between. */
+const compass = (d: [number, number]): string => {
+  const axes = [[d[0], "x"], [d[1], "z"]] as const;
+  const big = axes.filter(([v]) => Math.abs(v) > Math.sin(Math.PI / 8)).map(([v, a]) => `${v < 0 ? "-" : "+"}${a}`);
+  return big.join(" and ");
+};
 const dimsLabel = (b: { min: number[]; max: number[] }): string => [0, 1, 2].map((k) => fmt3(b.max[k] - b.min[k])).join(" × ");
 
 export class RuntimeError extends Error {
@@ -232,7 +238,9 @@ export function assertLine(a: AssertResult): string {
 const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
 
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall"]);
+/** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
+const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "stands"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall", "support", "stands"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
@@ -783,9 +791,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const roots = [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()];
       for (const v of values) if (isShape3(v.value)) v.value = placedUnder(roots, v.value);
     }
-    // pieces() counts at the program's grid unless told otherwise, so a promise made at rest and the report's Pieces
-    // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
-    if ((callee === "pieces" || callee === "overhang" || callee === "wall") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
+    // The meshed queries mesh at the model's own cell unless told otherwise, so a promise made at rest and the report
+    // see the same cells (round 8: the default 64 flipped a pieces() promise the report at grid 220 did not), and a
+    // part costs no more than the model's mesh (round 11: the program's grid laid across a bowl 2.4 wide meshed it at
+    // a 0.012 cell where the whole mixer meshes at 0.019, and one wall(bowl) took 5.3 s of a 6.2 s check).
+    if (MESHED_QUERIES.has(callee) && values.length === 1 && isShape3(values[0].value)) values.push({ name: "resolution", value: defaultResolution(values[0].value) });
     const result = callBuiltin(builtin, values, line);
     if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
@@ -796,12 +806,21 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A failing void, inside or overlap says where (round 9: three agents bisected a bare 0 by hand).
     if (assertDepth > 0 && (callee === "void" || callee === "inside" || callee === "overlap") && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const a = values[0].value, b = values[1].value;
-      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? outsideWitness(a, b) : result === 0 ? undefined : overlapWitness(a, b);
+      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? undefined : result === 0 ? undefined : overlapWitness(a, b);
       if (p) {
         const at = `(${p.map(fmt3).join(", ")})`;
-        const first = args[0].value, second = args[1].value;
-        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
-        witness = what;
+        const first = args[0].value;
+        witness = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : `they overlap at ${at}`;
+      }
+      // A failing inside() says where a is outside b, for a promise that it is all in, and where it is inside, for
+      // one that it is all out (round 11: inside(cable, stand) == 0 failing said where the cable was outside).
+      if (callee === "inside" && typeof result === "number") {
+        const pt = (q: Vec3) => `(${q.map(fmt3).join(", ")})`;
+        const out = result < 1 ? outsideWitness(a, b) : undefined, inn = result > 0 ? insideWitness(a, b) : undefined;
+        const A = exprText(args[0].value), B = exprText(args[1].value);
+        const outside = out && `outside ${B} at ${pt(out)}`, inside = inn && `inside ${B} at ${pt(inn)}${stepAt(inn, [], b)}`;
+        const said = (result < 0.5 ? [inside, outside] : [outside, inside]).filter(Boolean) as string[];
+        if (said.length) witness = `${A} is ${said[0]}${said[1] ? `, and ${said[1].replace(` ${B} `, " it ")}` : ""}`;
       }
       // An overlap of nothing says whether the two touch, stand apart, or overlap by less than the lattice can see
       // (round 10: a sign board's back face exactly on the wall read 0 with no place, and a rim sunk 0.02 read 0).
@@ -826,7 +845,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (assertDepth > 0 && callee === "pieces" && typeof result === "number" && result > 1 && isShape3(values[0].value)) {
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
       const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64, meshes);
-      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
+      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} ${cubic()} at (${loose.centre.map(fmt3).join(", ")})${stepAt(loose.inside, [], values[0].value)}`;
     }
     // A wall() promise says where the thinnest wall is and in which step, so the line to edit is in the message.
     if (assertDepth > 0 && callee === "wall" && typeof result === "number" && Number.isFinite(result) && isShape3(values[0].value)) {
@@ -834,9 +853,35 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const w = thinnestWall(values[0].value, typeof res === "number" ? res : 64, meshes);
       if (w.empty) witness = w.empty.cellSize > 0 ? `no surface at a cell of ${Number(w.empty.cellSize.toPrecision(3))}: the shape is empty or thinner than a cell everywhere, so there is no wall to measure (or to print)` : "the shape is empty: there is no wall to measure";
       else if (w.at && w.to) {
-        const mid: Vec3 = [(w.at[0] + w.to[0]) / 2, (w.at[1] + w.to[1]) / 2, (w.at[2] + w.to[2]) / 2];
-        witness = `thinnest at (${w.at.map(fmt3).join(", ")})${stepAt(mid, [], values[0].value)}`;
+        // The innermost steps whose surfaces bound the wall on each side, as the report's Thinnest wall row names them
+        // (round 11: a bowl's wall was blamed on 'bowl', the argument given back, not on 'bowl_wall').
+        const size = boundsSize(values[0].value.bounds), tol = Math.max(...size) / (typeof res === "number" ? res : 64) * 0.25;
+        const near = stepsAtSurface(w.at, values[0].value, tol), far = stepsAtSurface(w.to, values[0].value, tol);
+        const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+        witness = `thinnest at (${w.at.map(fmt3).join(", ")})${named(near)}, through to (${w.to.map(fmt3).join(", ")})${named(far)}`;
       }
+    }
+    // A support() promise says where the tallest column is and what it stands on (round 11: the support kept small
+    // could only be promised as a share of the surface).
+    if (assertDepth > 0 && callee === "support" && typeof result === "number" && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const r = typeof res === "number" ? res : 64;
+      const sup = supportOf(values[0].value, r, meshes);
+      if (sup.at && sup.foot) {
+        const tol = Math.max(...boundsSize(values[0].value.bounds)) / r * 0.5;
+        const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+        const on = sup.tallestOnModel ? `on the model at (${sup.foot.map(fmt3).join(", ")})${named(stepsAtSurface(sup.foot, values[0].value, tol))}` : `on the plate at y = ${fmt3(sup.foot[1])}`;
+        witness = `the tallest column is ${Number(sup.tallest.toPrecision(3))} ${linear()} under (${sup.at.map(fmt3).join(", ")})${named(stepsAtSurface(sup.at, values[0].value, tol))}, standing ${on}, of ${Number(sup.volume.toPrecision(3))} ${cubic()} under ${Number(sup.area.toPrecision(3))} ${square()} in plan`;
+      } else witness = "nothing faces down more than 45° above the floor: no support";
+    }
+    // A stands() promise says where the centre of mass is and which way the shape would tip.
+    if (assertDepth > 0 && callee === "stands" && typeof result === "number" && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const st = standing(values[0].value, typeof res === "number" ? res : 64, meshes);
+      const way = st.towards ? compass(st.towards) : "";
+      if (!st.centre) witness = "no surface at that cell: nothing to stand";
+      else if (st.footprint.length < 3) witness = `the centre of mass is at (${st.centre.map(fmt3).join(", ")}), and the shape rests on a point or an edge, with no footprint to stand on`;
+      else witness = `the centre of mass (${st.centre.map(fmt3).join(", ")}) is ${Number(Math.abs(st.margin).toPrecision(3))} ${st.margin < 0 ? `outside the footprint, so it tips towards ${way}` : `inside the footprint, nearest its edge towards ${way}`}`;
     }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
     // beside the wrong part).
@@ -1055,7 +1100,25 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
    * bell for the gnome that poked through it), the shape itself when it is a step; none when no step holds it.
    */
   function stepAt(p: Vec3, exclude: Shape3[], within: Shape3): string {
-    const roots = posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [];
+    const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
+    const tree = shapeTree(within);
+    let best: string | undefined, bv = Infinity;
+    for (const st of steps.values()) {
+      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
+      // Where the measured shape puts the step: a bowl's wall built at the origin and moved into the bowl is tested
+      // in the bowl, not at the origin (round 11: it was never found, and the bowl was named instead).
+      const s = placedUnder(roots, st.value);
+      const b = s.bounds;
+      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
+      if (s.dist(p[0], p[1], p[2]) > 0) continue;
+      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
+      if (v < bv) { bv = v; best = st.name; }
+    }
+    return best ? ` in '${best}'` : "";
+  }
+
+  /** Every shape in `within`'s tree, through unions, wrappers, placed sets and joints. */
+  function shapeTree(within: Shape3): Set<Shape3> {
     const tree = new Set<Shape3>();
     const walk = (s: Shape3, depth: number) => {
       if (tree.has(s) || depth > 200) return;
@@ -1065,17 +1128,69 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (s.joint) walk(s.joint.child, depth + 1);
     };
     walk(within, 0);
-    let best: string | undefined, bv = Infinity;
+    return tree;
+  }
+
+  /**
+   * The innermost named steps of `within` whose surface passes within `tol` of a surface point, at most two, smallest
+   * box first and none that only holds another one found: the steps a wall's face belongs to, a cut's among them.
+   */
+  function stepsAtSurface(p: Vec3, within: Shape3, tol: number): string[] {
+    const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
+    const tree = shapeTree(within);
+    const found: { name: string; value: Shape3; v: number }[] = [];
     for (const st of steps.values()) {
-      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
-      const s = posed ? placedUnder(roots, st.value) : st.value;
+      if (!isShape3(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
+      const s = placedUnder(roots, st.value);
       const b = s.bounds;
-      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
-      if (s.dist(p[0], p[1], p[2]) > 0) continue;
-      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
-      if (v < bv) { bv = v; best = st.name; }
+      if (p[0] < b.min[0] - tol || p[0] > b.max[0] + tol || p[1] < b.min[1] - tol || p[1] > b.max[1] + tol || p[2] < b.min[2] - tol || p[2] > b.max[2] + tol) continue;
+      if (Math.abs(s.dist(p[0], p[1], p[2])) > tol) continue;
+      found.push({ name: st.name, value: st.value, v: (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]) });
     }
-    return best ? ` in '${best}'` : "";
+    found.sort((x, y) => x.v - y.v);
+    const out: { name: string; value: Shape3 }[] = [];
+    for (const f of found) {
+      if (out.some((o) => o.name === f.name)) continue;
+      const below = shapeTree(f.value);
+      if (out.some((o) => below.has(o.value))) continue;
+      out.push(f);
+      if (out.length === 2) break;
+    }
+    return out.map((o) => o.name);
+  }
+
+  /**
+   * The cells across a part's longest side that give it the model's own cell: the model's longest side over the
+   * program's `set grid`, the model being the shown shape (or, for an assert above the `show`, everything built so
+   * far), and never under 64 cells across the part, so a small part is still measured, nor over the grid itself.
+   * Without `set grid`, 64 cells across the part, as before.
+   */
+  function defaultResolution(part: Shape3): number {
+    const grid = settings.grid;
+    if (typeof grid !== "number" || !(grid > 0)) return 64;
+    let box = EMPTY_BOUNDS;
+    if (shown) for (const s of shown.shapes) box = boundsUnion(box, s.bounds);
+    else for (const st of steps.values()) if (isShape3(st.value) && !isEmpty(st.value.bounds)) box = boundsUnion(box, st.value.bounds);
+    const model = isEmpty(box) ? 0 : Math.max(...boundsSize(box));
+    const side = isEmpty(part.bounds) ? 0 : Math.max(...boundsSize(part.bounds));
+    if (!(model > 0) || !(side > 0)) return grid;
+    return Math.min(grid, Math.max(Math.min(64, grid), Math.ceil((grid * side) / model)));
+  }
+
+  /** "cubic units", or the declared unit's cube when the program sets units (mm³ for a print in millimetres). */
+  function cubic(): string {
+    const u = declaredUnit();
+    return u ? `${u}³` : "cubic units";
+  }
+  function square(): string {
+    const u = declaredUnit();
+    return u ? `${u}²` : "square units";
+  }
+  function linear(): string {
+    return declaredUnit() ?? "units";
+  }
+  function declaredUnit(): string | undefined {
+    return typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
   }
 
   function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {

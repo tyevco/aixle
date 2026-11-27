@@ -1,6 +1,7 @@
 import type { Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "./surfaceNets.js";
 import { analyse, isSpeck, type Physics } from "./physics.js";
+import type { Vec3 } from "../core/vec.js";
 import { boundsSize, isEmpty } from "../sdf/types.js";
 import type { Mesh } from "./mesh.js";
 
@@ -65,12 +66,54 @@ export function overhangFraction(shape: Shape3, resolution = 64, cache?: MeshCac
   return m ? m.physics.overhang : 0;
 }
 
-/** The smallest solid piece other than the largest, when the shape meshes into more than one: what a pieces() promise names. */
-export function loosePiece(shape: Shape3, resolution = 64, cache?: MeshCache): { count: number; volume: number; centre: [number, number, number] } | undefined {
+/**
+ * The smallest solid piece other than the largest, when the shape meshes into more than one: what a pieces() promise
+ * names. `inside` is a point in the piece's solid, half a cell in from one of its vertices along the field, for naming
+ * the step it is made of (its centre can be in the air: a ring's is in its hole).
+ */
+export function loosePiece(shape: Shape3, resolution = 64, cache?: MeshCache): { count: number; volume: number; centre: [number, number, number]; inside: [number, number, number] } | undefined {
   const m = meshedAnalysis(shape, resolution, cache);
   if (!m) return undefined;
   const solid = m.physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, m.physics, m.cell));
   if (solid.length < 2) return undefined;
   const last = solid[solid.length - 1];
-  return { count: solid.length, volume: Math.abs(last.volume), centre: [last.centre[0], last.centre[1], last.centre[2]] };
+  const [x, y, z] = last.at, e = m.cell * 0.05, d = shape.dist;
+  const g = [d(x + e, y, z) - d(x - e, y, z), d(x, y + e, z) - d(x, y - e, z), d(x, y, z + e) - d(x, y, z - e)];
+  const gl = Math.hypot(g[0], g[1], g[2]) || 1;
+  const k = m.cell * 0.5 / gl;
+  const inward: [number, number, number] = [x - g[0] * k, y - g[1] * k, z - g[2] * k];
+  return { count: solid.length, volume: Math.abs(last.volume), centre: [last.centre[0], last.centre[1], last.centre[2]], inside: d(inward[0], inward[1], inward[2]) < 0 ? inward : [x, y, z] };
+}
+
+/**
+ * Whether a shape on its own stands: the margin by which its centre of mass, projected on the floor, lies inside the
+ * footprint of what rests within a cell and a half of its lowest point, in model units, positive inside and negative
+ * outside (the report's Stands row, at `resolution` cells). With the centre of mass and the footprint, and, for a
+ * failure, the way it would tip: from the footprint's nearest edge towards the centre of mass, on the plan (x, z).
+ * A shape balanced on an edge or a point has the strip of cells along the contact for a footprint, so it reads a
+ * small positive margin, about a cell; -Infinity only when there is no footprint at all (no surface at that cell,
+ * or fewer than three vertices that low).
+ */
+export function standing(shape: Shape3, resolution = 64, cache?: MeshCache): { margin: number; centre?: Vec3; footprint: [number, number][]; towards?: [number, number] } {
+  const m = meshedAnalysis(shape, Math.max(8, Math.round(resolution)), cache);
+  if (!m) return { margin: -Infinity, footprint: [] };
+  const ph = m.physics, hull = ph.footprint;
+  const [cx, , cz] = ph.centre;
+  let towards: [number, number] | undefined;
+  if (hull.length >= 3) {
+    // The nearest point of the footprint's edge to the centre of mass.
+    let best = Infinity, near: [number, number] = [cx, cz];
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i], b = hull[(i + 1) % hull.length];
+      const ex = b[0] - a[0], ez = b[1] - a[1], l2 = ex * ex + ez * ez || 1;
+      const t = Math.max(0, Math.min(1, ((cx - a[0]) * ex + (cz - a[1]) * ez) / l2));
+      const px = a[0] + ex * t, pz = a[1] + ez * t, dd = Math.hypot(cx - px, cz - pz);
+      if (dd < best) { best = dd; near = [px, pz]; }
+    }
+    // Outside, it tips from the edge towards the centre of mass; inside, the nearest edge is the way it would go.
+    const dx = ph.stabilityMargin < 0 ? cx - near[0] : near[0] - cx, dz = ph.stabilityMargin < 0 ? cz - near[1] : near[1] - cz;
+    const l = Math.hypot(dx, dz);
+    if (l > 0) towards = [dx / l, dz / l];
+  }
+  return { margin: ph.stabilityMargin, centre: [ph.centre[0], ph.centre[1], ph.centre[2]], footprint: hull, towards };
 }

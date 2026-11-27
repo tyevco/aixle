@@ -604,7 +604,12 @@ units` and `set bed`). `decal(shape, region, m)` paints only the surface inside 
 no geometry: a pupil on an eyeball, a mouth along a thin tube, a label on
 a jar; `region` is any shape, and it must cross the surface (a sphere
 centred on the skin, a box through it): a region that touches none of
-the shape's surface paints nothing, and `check` warns. A picture is a
+the shape's surface paints nothing, and `check` warns. The test samples
+the region's box and the region's own surface, and walks the nearest of
+those points along the shape's surface into the region, so a region of
+several thin pieces far apart (two bands across a spine, `band_a +
+band_b`, or two thin rings round a ball) is found on the surface piece
+by piece. A picture is a
 PNG beside the program: `decal(jar, label_box, image="label.png")` fits
 it to the region's box across the box's shortest side (u along x where
 it can, v down), and its transparent texels leave the base material, so
@@ -1120,9 +1125,17 @@ degrees on the plate it does, the smallest turn, in degrees as
 `rotate(y=)` turns; only lying on its side; not at all), the
 thinnest wall with where it is and the steps on both sides of it, the
 support volume under the overhangs (standing on the plate and on the
-model, the tallest column and where, an upper estimate since a slicer
-bridges short spans), what rests flat on the plate, and the material in
-cubic centimetres and grams of PLA. The thinnest wall is measured by a
+model, the area the columns cover in plan, the tallest column and where,
+an upper estimate since a slicer bridges short spans; `support()` is the
+same number in a promise), what rests flat on the plate, and the material in
+cubic centimetres and grams of PLA. A face counts towards the support
+only where the field faces down past 45° as well as the mesh: at a sharp
+edge, and above all where a cutter's corner lies exactly on the part's
+own corner, dual contouring bends the faces beside the edge a few
+degrees, and a phone stand's slot ceiling at 40° from the vertical read
+as a 33 mm column of support that nothing in the shape needs; the row
+says how much area it left out (a curved part always leaves out a
+little, the mesh's facets along its 45° line). The thinnest wall is measured by a
 ray from every vertex inward to the far side of the solid, through the
 field, so a wall under a cell is still read at its own thickness, and a
 cut's walls (a flute through a vase's side, an engraving's floor) are
@@ -1172,26 +1185,71 @@ with the library's path.
 
 The queries that make it useful: `pieces(shape, resolution)` is the
 number of separate pieces the shape meshes into at that many cells on
-its longest side, the program's `set grid` when none is given (64
-without one), as the report's Pieces row counts them (it meshes the
+its longest side, as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
-chair's floating back once passed); `overhang(shape, resolution)` is
+chair's floating back once passed). With no resolution given, the
+queries that mesh (`pieces`, `overhang`, `wall`, `support`, `stands`)
+mesh at the model's own cell, the shown model's longest side over `set
+grid`, so a part is meshed as the report meshes it and costs no more
+than the model's own mesh: the mixer's bowl, 2.68 of a model 3.66 long at
+`set grid 200`, is meshed at 147 cells, where laying the grid across the
+bowl's own side meshed it at 200 and one `wall(bowl)` took 5.3 s of a
+6.2 s check. A small part still gets at least 64 cells across it, and
+none gets more than the grid; an assert above the `show` takes the model
+to be everything built so far; without `set grid` it is 64 cells across
+the part, as before. `overhang(shape, resolution)` is
 the fraction of the surface that faces down more than 45° with the
 floor faces left out, the report's Overhangs row, for `assert
 overhang(part) < 0.05` on something to be printed without support (it
 meshes too); `wall(shape, resolution)` is the thinnest wall, as the
 Print section measures it, in model units: with `set units mm`, `assert
 wall(model) > 0.8, "two lines of a 0.4 mm nozzle"`, and a failure says
-where the thinnest wall is and in which step (it meshes too, at the
-program's grid or 64; a shape with no surface in that mesh, empty or
-thinner than a cell everywhere, reads 0 and fails the promise);
+where the thinnest wall is and, as the report's row does, the innermost
+steps whose faces bound it on each side, each tested where the shape
+puts it, so a bowl's wall built at the origin and moved into the bowl is
+named rather than the bowl: `thinnest at (2.02, 18.27, 30.06) in 'word',
+through to (2.02, 18.18, 29.88) in 'slot'` is an engraving's floor
+against a slot's face. It meshes too, at the model's own cell as
+`pieces` does; a shape with no surface in that mesh, empty or
+thinner than a cell everywhere, reads 0 and fails the promise;
+`support(shape, resolution)` is the support volume under the shape's
+overhangs, as the Print section's Supports row estimates it, in cubic
+model units (mm³ with `set units mm`): `assert support(stand) < 50,
+"little support"` promises it in the unit a printer's user reads, where
+`overhang()`, a share of the whole surface, moved only from 0.0013 to
+0.0035 for a flat 14 mm bridge under a phone stand; a failure says where
+the tallest column is, in which step, and what it stands on (the plate,
+or the model at a point and a step). `stands(shape, resolution)` is the
+Physics section's Stands row as a number: the margin by which the
+centre of mass (uniform density), projected on the floor, lies inside
+the footprint of what rests within a cell and a half of the shape's
+lowest point, positive inside and negative outside, in units: `assert
+stands(bookcase) > 0.5, "the case stands"`; a failure gives the centre of
+mass and which way it tips (`is 0.047 outside the footprint, so it tips
+towards -x`). A shape balanced on an edge or a point still has a
+footprint, the strip of cells along the contact, so it reads a small
+positive margin that shrinks with the cell (a cube on its edge reads
+0.025 at 64 cells across it and 0.008 at 200, a ball 0.28 and 0.17):
+promise a margin of several cells, not `> 0`; a shape with no surface at
+that cell reads -Infinity. Both mesh as `pieces` does, sharing its mesh;
 `clearance(a, b)` is
-the smallest gap between two surfaces, negative by how deep they overlap,
-zero when they touch, sampled from the fields at twelve points per side
-of each shape's box and then tightened, so it is exact for parts that
-face each other and can miss a feature narrower than a twelfth of the
-part. Measure parts rather than the whole model: `clearance(handle,
+the smallest gap between two surfaces, zero when they touch, and
+negative when they overlap: minus the depth of the deepest point either
+surface reaches inside the other, measured to the other's surface, which
+for a face sunk into a face or a round part pressed into another is how
+far they must be moved apart to only touch. A book sunk 0.03 into its
+shelf reads -0.03, and a book whose top is 0.15 into the 0.2 board above
+it reads -0.15, not the 0.05 to the board's top face (the nearer way out
+of the board); it is the same either way round, so a threshold on the
+depth means what it says. A part wholly inside another reads how deep its
+surface lies, which is less than the move that would free it. It is
+sampled from the fields at twelve points per side of each shape's box and
+of the box where the two meet, and the best points are then walked down
+each surface, so it is exact for faces that face each other, for a
+rounded edge resting on a plane and for a turned corner against a face,
+and can miss a feature narrower than a twelfth of the part away from
+where they meet. Measure parts rather than the whole model: `clearance(handle,
 body)`, not `clearance(handle, model)` (the handle is in the model, so
 that is zero). `void(region, shape)` is 1 when the region holds no
 solid of the shape: `assert void(cavity, mug)` promises nothing pokes
@@ -1202,6 +1260,17 @@ own, never the cutter: a cutter's volume is empty by construction, so
 `void(slot, plate)` holds whether or not the slot went through; "the
 hole goes through" is a thinner rod reaching past both faces,
 `rod = cylinder(0.04, 0.3) | move(...)` and `assert void(rod, plate)`.
+The lattice over the region is 25 points a side, so along a long probe
+(a cable 77 long) its points are 3 apart, and `void` also slides every
+point in the void onto the shape's surface: a skin of the shape pressed
+into the region is found that way however thin, down to a
+hundred-thousandth of the region's longest side (what is taken for the
+region's own boundary, where a cavity's wall lies exactly). A 3.6 cable
+probe along a 3 slot, 0.3 into both walls, fails `void(cable, stand)`
+with the place in the wall. What it can still miss is an intrusion both
+thinner and smaller across than the lattice spacing that no point in the
+void has as its nearest surface; `clearance(probe, shape) > 0` beside it
+measures the gap itself.
 `overlap(a, b)` is the volume two parts share, zero when they only
 touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
 rather than sunk into it, and `assert overlap(handle, body) > 0.001`
@@ -1210,13 +1279,28 @@ small (a pin of radius 0.05 sunk 0.07 shares 0.00055; a ring's band, a
 torus of radius 0.42 and tube 0.065 standing on a flat cushion, sunk
 0.03 into it shares 0.00047, and a band of radius 0.2 sunk as far
 0.00034), so take a "joined" threshold from the part's size, and a
-failure says where the two overlap. An overlap of 0 says why: the two
+failure says where the two overlap. The lattice keeps to 200 thousand
+samples whatever the two shapes' shared box, so a near contact costs no
+more than any other: a turned corner resting on a face, or a book
+`ground()`ed onto a board whose top came out of arithmetic as
+0.8000000000000002, shares a box a few thousandths or 1e-16 thick, and
+reads 0 at once (two faces that meet to within floating point only
+touch). An overlap of 0 says why: the two
 only touch there (a board's back face exactly on a wall: sink it), they
 stand apart by so much, or they overlap by less than the lattice can
 measure over their shared box (promise that on a chunk of the part, `rim
 & box(...)`, or as `clearance(a, b) < 0`). `inside(a, b)` is the fraction of a's volume inside b: `== 1`
 for a spring that must stay in its housing, `== 0` for a handle that
-must stay out of the cavity, and a failure says where a is outside b.
+must stay out of the cavity, and a failure says where a is inside b
+(and in which step) and where it is outside. A skin of `b` thinner than
+the lattice inside `a` does not read 0: when the lattice reads 0 the
+surfaces are walked as `void` walks them, and if `b` reaches into `a`
+the fraction is read again on a finer lattice and is never 0, so
+`inside(cable, stand) == 0` fails for a cable 0.3 into a slot's walls.
+The other way is not walked: a sliver of `a` outside `b` thinner than
+the lattice can still read 1 (a flame blended with `union(k=)` bulges
+0.003 below the floor of the hearth it sits in, and reads 1), so a
+promise that nothing pokes out is `void(outside_region, part)`.
 `b` is the solid volume: a mantle hangs in the air inside a shelled
 shade, so `inside(mantle, shade)` is 0; keep the un-shelled shape as a
 step (`shade = shade_space | shell(0.05)`) and test against that; that
@@ -1228,8 +1312,10 @@ three sample a lattice (24 cells along the longest side, and `void`
 walks the surface too, so a pin thinner than the lattice is caught), so
 measure parts, not a scene. The bound queries (`width`, `tall`,
 `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are the
-rest. A failing `pieces()` names the smallest loose piece and where it
-is. A failing `void` whose region is made of copies (a ring of probe
+rest. A failing `pieces()` names the smallest loose piece, its volume
+(in mm³, or the declared unit's cube, with `set units`; in cubic units
+without), where it is and the step it is made of: `the smallest piece is
+36600 mm³ at (0, 76.36, -12.71) in 'body'`. A failing `void` whose region is made of copies (a ring of probe
 rods) says which copy held the solid, `in copy 3 of the 6 in rods`, and
 one whose region is a union of named probes names the probe. A `void` whose region's box never meets the shape's box holds for
 no reason, and `check` says so: a probe built in one frame against a

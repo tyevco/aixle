@@ -42,8 +42,10 @@ the inside is cut open.
    a thinner rod reaching past both faces, never on the cutter, which is
    empty by construction; `inside` wants the solid, not a shell; a
    failing `void`, `inside` or `overlap` says where and in which step;
-   `assert overhang(part) < 0.05` and `assert wall(model) > 0.8` for a
-   print), and for a rig a promise
+   `assert overhang(part) < 0.05`, `assert wall(model) > 0.8` and
+   `assert support(part) < 50` (cubic millimetres with `set units mm`)
+   for a print, `assert stands(model) > 0.1` for a model that must
+   stand), and for a rig a promise
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing

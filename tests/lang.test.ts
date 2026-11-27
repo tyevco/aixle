@@ -292,7 +292,7 @@ describe("interpreter", () => {
     expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
     // inside and overlap failures say where too; a passing query leaves no witness.
     const f = run('a = sphere(1)\nb = sphere(1) | move(1.5, 0, 0)\nassert inside(a, b) == 1\nassert overlap(a, b) < 0.001\nassert overlap(a, b) > 0\nshow a + b');
-    expect(f.asserts.map((x) => [x.passed, x.where])).toEqual([[false, expect.stringMatching(/^a is outside b at \(-0\.\d+, -?[\d.]+, -?[\d.]+\)$/)], [false, expect.stringMatching(/^they overlap at \(0\.7\d, -?[\d.]+, -?[\d.]+\)$/)], [true, undefined]]);
+    expect(f.asserts.map((x) => [x.passed, x.where])).toEqual([[false, expect.stringMatching(/^a is inside b at \(0\.7\d, -?[\d.]+, -?[\d.]+\) in 'b', and outside it at \(-0\.\d+, -?[\d.]+, -?[\d.]+\)$/)], [false, expect.stringMatching(/^they overlap at \(0\.7\d, -?[\d.]+, -?[\d.]+\)$/)], [true, undefined]]);
   });
   it("gives each step a role: a part, a cut, a region, or none, and the unused warning only to the last", () => {
     const ev = run('base = box(2, 0.2, 2)\nhole = cylinder(0.1, 1)\nrod = cylinder(0.05, 2)\nplate = base - hole\npeg = cylinder(0.05, 0.5) | move(0.5, 0.2, 0)\nspare = sphere(0.1)\neye = sphere(0.2) | move(0.5, 0.1, 0)\nmodel = decal(plate + peg, eye, "black")\ncamera("c", focus="rod")\nassert void(rod, model)\nshow model');
@@ -327,7 +327,7 @@ describe("interpreter", () => {
     expect(run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(1.1, 0, 0)\nassert void(b, a)\nshow a').warnings.filter((w) => /trivially/.test(w))).toEqual([]);
     // A failing pieces() names the loose piece.
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
-    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
+    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ cubic units at \(3, 0, 0\) in 'b'$/);
   });
   it("warns when a part round about the ring's axis is turned just before the ring, which turns nothing (round 10)", () => {
     const ev = run('pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0) | rotate(y=30)\npockets = pocket | ring(6, 0.7)\nslot = box(0.3, 0.1, 0.1) | rotate(y=30)\nslots = slot | ring(6, 0.7)\nright = cylinder(0.1, 0.3) | ring(6, 0.7) | rotate(y=30)\nshow pockets + slots + right');

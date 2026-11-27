@@ -62,7 +62,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    pad) < 0.001` (on the pad, not sunk in), `assert
    tall(model) < 2.2`, `assert overhang(part) < 0.05` (printable without
    support), `assert wall(model) > 0.8` (walls a 0.4 mm nozzle lays in
-   two lines, with `set units mm`; the number is in model units). A hole that must go through is `void` on a thin rod past
+   two lines, with `set units mm`; the number is in model units),
+   `assert support(part) < 50` (the support volume, mm³ with `set units
+   mm`), `assert stands(model) > 0.1` (the centre of mass that far inside
+   the footprint). A hole that must go through is `void` on a thin rod past
    both faces, not on the cutter (empty by construction); `inside` wants
    the solid, not a shell; a probe step only an assert reads is a region
    and is not warned about. `check` then fails, with the numbers and
@@ -126,7 +129,7 @@ import("part.obj", size=2)                                                      
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 height(s, x, z)  top(s)  bottom(s)  width(s)  depth(s)  tall(s)  angle("elbow")           # read sizes and the pose to place parts
-pieces(s)  overhang(s)  wall(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b   # measure for assert
+pieces(s)  overhang(s)  wall(s)  support(s)  stands(s)  clearance(a, b)  void(region, s)  overlap(a, b)  inside(a, b)   a < b  a == b   # measure for assert
 set grid 200   set size 768   set focus lid   set slice stem   set pose reach   set azimuth 60   # settings (CLI flags override)
 set units mm   set bed 220 220 250                                                       # a print: the report's Print section, model.stl in mm, model.3mf
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
