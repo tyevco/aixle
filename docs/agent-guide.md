@@ -111,7 +111,9 @@ mesh; `--no-cache` samples afresh.
   that broke out where it should not. Filled means solid. To cut through
   one part (a plant's stem down into the soil it stands in), `--slice
   plant` or `set slice plant`: the planes go through that step's solid,
-  framed on it, its cut in full and the rest faint.
+  framed on it, its cut in full and the rest faint; where the step meets
+  the rest of the model (a book on its shelf) the planes across the
+  contact go through the contact, so the cut shows what it rests on.
 - **`lights.png`** (two or more lights, with `--beauty`; with
   `--beauty-only` only if `--lights`): every frame is the shot
   `beauty.png` shows. The top row is

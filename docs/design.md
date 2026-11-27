@@ -826,6 +826,31 @@ faint, as a focus close-up draws it, so the step is the thing read and
 the rest is its context. A probe or a cutter places the planes with its
 own volume but is not drawn: what is read there is the model.
 
+The centroid is still wrong for a part that leans on something: a book
+leaning 18 degrees on a shelf has its centroid's vertical plane through
+a slanted band in the air between two shelves (round 11), and the cut
+was asked for to show that the book stands. A slice through a step is
+usually there to show what the step meets, so when the step touches the
+rest of the model or comes within two cells of it, the planes go
+through that contact. The contact is found from the fields, not a mesh:
+lattice samples near the step's surface slide onto it, and one is a
+contact when, a little way out along its normal, the model is nearer
+than the step itself is, which a step's own concave side never is.
+Contacts are grouped by lattice neighbours and the lowest group taken,
+since what a part rests on is under it (a leaning book also touches its
+neighbour at the top). Of the three planes, the one most nearly parallel
+to the contact (the horizontal plane under a book on a shelf) would cut
+along it and show nothing of it, so it keeps the step's own level; the
+other two go through the group's centroid moved two cells into the
+step, so they cut the step and what it rests on together. A contact
+all round (a stem in its soil) has no direction, and the horizontal
+plane keeps its level. A cutter is never given a contact: it is where
+the model is not. The two programs that name a slice step at this point
+were the shelf, whose X plane moved from the air (x 1.17) onto the
+board (x 1.51) once its hand-set `slice_x` was taken out, and the mixer,
+whose beater meets the model only where its shaft enters the hub, on
+the planes it already had.
+
 ## What each light adds
 
 `lights.png` began as each light alone, then all, which shows what a

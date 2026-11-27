@@ -278,3 +278,82 @@ export function sliceLevels(shape: Shape3, box: Bounds = shape.bounds, n = 40): 
   }
   return { at, centroid, area, widest };
 }
+
+/**
+ * Where a step rests on the rest of the model, for slices through it: the lowest place where the model's surface
+ * comes within `reach` of the step's own (two cells, say), or passes into it. A slice through a step is usually there
+ * to show what the step stands on, and its centroid's planes can miss that: a book leaning 18 degrees has its
+ * centroid's vertical plane in the air between two shelves (round 11). Sampled on a lattice of `n` cells along the
+ * box's longest side: each sample near the step's surface slides onto it along the gradient, and is a contact when,
+ * a little way out along the normal, something of `model` other than the step is nearer than the step is. The
+ * contacts are grouped by lattice neighbours and the lowest group is taken (its centroid's height), since what a
+ * part rests on is under it. `at` is that group's centroid moved a little into the step, so the planes cut the step
+ * and what it rests on together; `normal` is the group's mean outward normal, zero for a contact all round (a stem
+ * in its soil), which says which plane lies along the contact and is better left where it was.
+ */
+export function restingContact(step: Shape3, model: Shape3, reach: number, box: Bounds = step.bounds, n = 48): { at: Vec3; normal: Vec3; samples: number } | undefined {
+  if (isEmpty(box) || !(reach > 0)) return undefined;
+  const size = boundsSize(box);
+  const longest = Math.max(size[0], size[1], size[2]);
+  if (!(longest > 0)) return undefined;
+  const h = longest / n;
+  const dims = [0, 1, 2].map((k) => Math.max(2, Math.ceil(size[k] / h) + 2));
+  const o = [0, 1, 2].map((k) => box.min[k] - h);
+  const d = step.dist;
+  const eps = h * 0.25;
+  // The probe sits `out` beyond the surface; something else is in reach when it is nearer the probe than the step
+  // is by a margin (so a step's own concave side, which is nearest itself, never counts).
+  const out = reach * 0.6, margin = reach * 0.25;
+  const hits = new Map<number, { p: Vec3; nrm: Vec3 }>();
+  const key = (i: number, j: number, k: number) => (i * dims[1] + j) * dims[2] + k;
+  for (let i = 0; i < dims[0]; i++)
+    for (let j = 0; j < dims[1]; j++)
+      for (let k = 0; k < dims[2]; k++) {
+        const x = o[0] + i * h, y = o[1] + j * h, z = o[2] + k * h;
+        const s = d(x, y, z);
+        if (!(Math.abs(s) < h * 0.75)) continue;
+        let gx = d(x + eps, y, z) - d(x - eps, y, z), gy = d(x, y + eps, z) - d(x, y - eps, z), gz = d(x, y, z + eps) - d(x, y, z - eps);
+        const gl = Math.hypot(gx, gy, gz);
+        if (!(gl > 0)) continue;
+        gx /= gl; gy /= gl; gz /= gl;
+        const p: Vec3 = [x - gx * s, y - gy * s, z - gz * s];
+        const q: Vec3 = [p[0] + gx * out, p[1] + gy * out, p[2] + gz * out];
+        if (d(q[0], q[1], q[2]) - model.dist(q[0], q[1], q[2]) > margin) hits.set(key(i, j, k), { p, nrm: [gx, gy, gz] });
+      }
+  if (!hits.size) return undefined;
+  // Groups of lattice neighbours (26 round each), by a flood from each unvisited contact.
+  const seen = new Set<number>();
+  let best: { at: Vec3; normal: Vec3; samples: number; low: number } | undefined;
+  for (const start of hits.keys()) {
+    if (seen.has(start)) continue;
+    const stack = [start];
+    seen.add(start);
+    const sum: Vec3 = [0, 0, 0], ns: Vec3 = [0, 0, 0];
+    let count = 0;
+    while (stack.length) {
+      const c = stack.pop()!;
+      const hit = hits.get(c)!;
+      for (let a = 0; a < 3; a++) { sum[a] += hit.p[a]; ns[a] += hit.nrm[a]; }
+      count++;
+      const k = c % dims[2], j = Math.floor(c / dims[2]) % dims[1], i = Math.floor(c / (dims[1] * dims[2]));
+      for (let di = -1; di <= 1; di++)
+        for (let dj = -1; dj <= 1; dj++)
+          for (let dk = -1; dk <= 1; dk++) {
+            const ii = i + di, jj = j + dj, kk = k + dk;
+            if (ii < 0 || jj < 0 || kk < 0 || ii >= dims[0] || jj >= dims[1] || kk >= dims[2]) continue;
+            const nk = key(ii, jj, kk);
+            if (hits.has(nk) && !seen.has(nk)) { seen.add(nk); stack.push(nk); }
+          }
+    }
+    const centre: Vec3 = [sum[0] / count, sum[1] / count, sum[2] / count];
+    // A group of a sample or two is noise at a corner; the lowest group of the rest wins, the larger of two at a height.
+    if (count < 3) continue;
+    if (best && (centre[1] > best.low + h || (Math.abs(centre[1] - best.low) <= h && count <= best.samples))) continue;
+    const nl = Math.hypot(ns[0], ns[1], ns[2]) / count;
+    const normal: Vec3 = nl > 0.2 ? [ns[0] / count / nl, ns[1] / count / nl, ns[2] / count / nl] : [0, 0, 0];
+    // Into the step, so the planes cut it as well as what it rests on.
+    const at: Vec3 = [centre[0] - normal[0] * reach, centre[1] - normal[1] * reach, centre[2] - normal[2] * reach];
+    best = { at, normal, samples: count, low: centre[1] };
+  }
+  return best ? { at: best.at, normal: best.normal, samples: best.samples } : undefined;
+}

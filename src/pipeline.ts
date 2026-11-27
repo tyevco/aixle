@@ -39,7 +39,7 @@ import { bedFit, contactArea, supportVolume, UNIT_3MF, UNITS, wallThickness, typ
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
-import { sliceLevels } from "./sdf/measure.js";
+import { restingContact, sliceLevels } from "./sdf/measure.js";
 
 /**
  * The most triangles the GLB, the OBJ and the viewer page carry unless `set triangles` or `--triangles` says
@@ -1347,7 +1347,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
           sliced = asPart ? own : output;
           slicedGhost = asPart ? output : undefined;
           (["x", "y", "z"] as const).forEach((axis, k) => { levels[axis] = lv.at[k]; });
-          slicedThrough = asPart ? `${sliceName} at its centroid (or its widest section), framed on it, the rest of the model faint` : `${sliceName} (a ${role}: its volume places the planes, and the model is drawn in full), framed on it`;
+          // A step that rests on the rest of the model, touching it or within two cells of it, is cut where it rests:
+          // the two planes across the contact go through it, and the one lying along it (a horizontal plane under a
+          // book on a shelf) keeps the step's own level (round 11: a leaning book's centroid put its vertical plane in
+          // the air between two shelves). A cutter touches nothing; it is where the model is not.
+          const contact = role !== "cut" ? time("slices:contact", () => restingContact(own, output, viewCell * 2, ob)) : undefined;
+          let rests = "";
+          if (contact) {
+            const n = contact.normal;
+            const along = n[0] === 0 && n[1] === 0 && n[2] === 0 ? 1 : [0, 1, 2].reduce((a, k) => (Math.abs(n[k]) > Math.abs(n[a]) ? k : a), 0);
+            (["x", "y", "z"] as const).forEach((axis, k) => { if (k !== along) levels[axis] = contact.at[k]; });
+            const moved = (["X", "Y", "Z"] as const).filter((_, k) => k !== along);
+            rests = `, where it meets the rest of the model (${moved.join(" and ")}; ${"XYZ"[along]} at its own level)`;
+          }
+          slicedThrough = asPart ? `${sliceName}${rests || " at its centroid (or its widest section)"}, framed on it, the rest of the model faint` : `${sliceName} (a ${role}: its volume places the planes${rests}, and the model is drawn in full), framed on it`;
         } else warnings.push(`slice ${sliceName}: no such step or object with a surface; the slices cut through the model's centre`);
       }
       // A default plane that lies on a face (a 0.25-thick disc cut at y = 0.25) draws that face as outline, not as a

@@ -176,7 +176,10 @@ describe("pipeline", () => {
       const src = "slab = box(2, 0.1, 2) | move(0, -0.05, 0)\npost = cylinder(0.05, 1) | move(0.6, 0.5, 0.3)\nglobe = sphere(0.25) | move(0.6, 1.2, 0.3)\nm = slab + post + globe\nshow m";
       const r = run(src, "post.aix", dir, { grid: 32, size: 96, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "post" });
       expect(r.files).toContain("slices.png");
-      expect(r.report).toMatch(/`slices\.png`: cross-sections through post at its centroid/);
+      // The post stands on the slab, so the planes across that contact go through it (round 11).
+      expect(r.report).toMatch(/`slices\.png`: cross-sections through post, where it meets the rest of the model \(X and Z; Y at its own level\), framed on it/);
+      const air = run("slab = box(2, 0.1, 2) | move(0, -0.05, 0)\nball = sphere(0.3) | move(0.5, 1, 0)\nm = slab + ball\nshow m", "air.aix", dir, { grid: 32, size: 96, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "ball" });
+      expect(air.report).toMatch(/`slices\.png`: cross-sections through ball at its centroid/);
       expect(r.warnings.join()).not.toMatch(/slice/);
       // A probe only the slice reads is a region, not an unused step; a name that is no step is said.
       const probe = check("m = box(1)\nrod = cylinder(0.05, 2) | move(0.2, 0, 0)\nset slice rod\nshow m");

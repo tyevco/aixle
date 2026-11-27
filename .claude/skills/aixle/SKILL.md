@@ -39,8 +39,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    a second or two; on a rig add `--no-poses` until the geometry settles,
    the strips come with the full render), then read `out/model/sheet.png`. Drop `--quick` for
    the full render: read `slices.png` if anything is hollow or nested
-   (`--slice step` puts its planes through one step, framed on it, so a
-   stem is cut where it meets the soil),
+   (`--slice step` puts its planes through one step, framed on it, and
+   through where it meets the rest of the model, so a stem is cut where
+   it meets the soil and a leaning book where it stands on the shelf),
    `steps.png` if a part is missing or misplaced, `callouts.png` to read
    which step a thing in the picture is; `report.md` has the
    numbers, including whether the model stands and is in one piece; a

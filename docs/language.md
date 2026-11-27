@@ -892,7 +892,16 @@ air between a post and the lamp it carries), never the box's centre,
 which a leaning canopy or a reaching arm puts in the air (measured on
 74 parts in five programs: through the box's centre a vertical plane
 missed the part on 4 of 148 cuts and cut under a quarter of its widest
-section on 8; through the centroid, on none). A `slice_x` given as well
+section on 8; through the centroid, on none). A step that meets the
+rest of the model, touching it or within two cells of it (a book on a
+shelf, a stem in its soil, a beater's shaft in its hub), is cut where it
+meets it instead: the two planes across the contact go through it, a
+little inside the step, and the plane lying along it (the horizontal one
+under a book) keeps the step's own level; of several contacts the lowest
+is taken, since what a part rests on is under it. A book leaning 18
+degrees had its centroid's vertical plane in the air between two
+shelves; through its contact the same plane shows it standing on the
+board. The report's Files line says which planes went where. A `slice_x` given as well
 still sets that plane. Sliced through a probe or a cutter, the planes
 go through its volume and the model is drawn in full, so `--slice rods`
 cuts down the holes a promise's ring of rods stands in. A step only sliced
