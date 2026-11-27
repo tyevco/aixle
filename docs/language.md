@@ -324,15 +324,21 @@ each call, how far it moved or turned the part and the gap it left
 a call a loop makes 33 times is one line, with the range). The contact
 holds by construction: `clearance(part, on)` afterwards is within a
 millionth of the part's size of 0 (measured on round 11's bookcase: its
-33 books at most 1.2e-6 from touching where they lean or stand, against
+33 books at most 1.3e-6 from touching where they lean or stand, against
 0.0065 to 0.0076 left by the hand-worked placement), and `overlap` reads
-0. What they do at the edges:
+0. That holds at any scale: the search runs at the part's own size, so a
+cube a centimetre across in a model in metres slides to its wall as a
+cube of 1 does. A displaced skin's field is not a distance, and there
+`clearance` and the contact are good to about a ten-thousandth of the
+part (round 3's frog on its pad: 3e-4). What they do at the edges:
 
-- **Touching meshes as one piece**, so `sink` is 0: a face on a face
-  reads `pieces() == 1` and meshes watertight at every grid tried. Give
-  `sink=` a cell for a print that must overlap, or a negative one to stop
-  short: `rest(prev, dir=[-1, 0, 0], sink=-0.06)` stands a book 0.06 from
-  its neighbour.
+- **A face on a face meshes as one piece**, so `sink` is 0: it reads
+  `pieces() == 1` and meshes watertight at every grid tried. A corner on
+  a face touches at a point and can mesh as two pieces at some grids (a
+  cube standing on its corner, at 128 cells). Give `sink=` a cell for a
+  print that must overlap or a promise of one piece, or a negative one to
+  stop short: `rest(prev, dir=[-1, 0, 0], sink=-0.06)` stands a book 0.06
+  from its neighbour.
 - **A part that starts inside `on`** is backed out against the motion to
   the first place it is clear, so a part built at the origin rests on a
   shelf above it (`check` says it was backed out). A part sunk only a
@@ -340,7 +346,8 @@ millionth of the part's size of 0 (measured on round 11's bookcase: its
   part up to 5e-5 in the floor), is lifted out of it first, so it can
   slide along what it stands on.
 - **A part that never touches** along the direction, or in half a turn,
-  is an error that says where both are.
+  is an error that says where both are; an empty part or `on` is an
+  error that says it is empty.
 - **`lean` turns the right-handed way** about `axis`, as `rotate` turns
   about x, y and z: thumb along the axis, the fingers curl the way it
   turns, so `axis=[0, 0, 1]` tips +y towards -x and a book whose heel is
@@ -367,12 +374,12 @@ leaning = book(0.3, 2.5) | move(-0.1, 0.8, 0) | lean(upright, pivot="heel", axis
 ```
 
 `check` prints `lean (line 5)  leaning onto upright: turned 3.393
-degrees about [0, 0, 1] through (-0.23, 0.82, 0); gap 0.0000012`, and
+degrees about [0, 0, 1] through (-0.23, 0.82, 0); gap 0.0000013`, and
 the leaning book is still 1e-7 from the shelf: its heel is its
 rounding's centre.
 
 A call costs 10 to 60 ms for parts like these (the readings of
-`clearance` most of it), about a second for a frog with displaced skin;
+`clearance` most of it), one to two seconds for a frog with displaced skin;
 round 11's bookcase placed by 34 calls checked in 5.6 s against 3.7 s by
 hand.
 

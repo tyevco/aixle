@@ -529,10 +529,15 @@ tightens on clearance(), read a leaf of `on` at a time and following the
 leaf the part is pressed into, so the shelf a book slides along, which
 reads zero the whole way, cannot pass for the neighbour it slides into.
 What the prototype left open, decided:
-- **sink defaults to 0.** A touch meshes as one piece: pieces() read 1
-  for every book on round 11's shelf, the mixer's bowl on its plate, the
-  frog on its pad and a cube on a board at 32 to 317 cells, touching or
-  sunk a cell, and the report reads it watertight. A cell is not known
+- **sink defaults to 0.** A face on a face meshes as one piece: pieces()
+  read 1 for every book on round 11's shelf, the mixer's bowl on its
+  plate, the frog on its pad and a cube on a board at 32 to 317 cells,
+  touching or sunk a cell, and the report reads it watertight. In review,
+  224 more face-on-face touches (boxes on boards and a box attached to a
+  post, at 48 to 256 cells) and round 10's lantern rebuilt alone on its
+  collar (160 to 300) were all one piece. A corner on a face touches at a
+  point and can mesh as two: a cube standing on its corner did at 128
+  cells, and was one at 64, at 200 and sunk 0.02. A cell is not known
   when rest() runs (it comes from the shown model and `set grid`), and a
   cell of sink would break the bookcase's own `clearance(bk, board) >
   -0.002`.
@@ -557,7 +562,7 @@ Measured, against the hand values:
   rest() calls, dropped, slid along the shelf to `sink=-0.06` short of the
   one before, or slid against it when leaning. All 271 of the agents'
   asserts hold. The uprights land within 2e-6 of the hand's positions.
-  The three leaning books touch at 1.0e-6 to 1.2e-6, where the hand's
+  The three leaning books touch at 1.1e-6 to 1.3e-6, where the hand's
   `min(b.h * s, prev_h * s / max(c, 0.01))` left 0.0072, 0.0065 and 0.0076
   (promised < 0.012). The book after the second lean stands 0.0600 from
   it, where the hand's cursor gave 0.0656 (it reckoned the square corner,
@@ -575,22 +580,68 @@ Measured, against the hand values:
   probe first, and small leaves seeded).
 - **Frog** (round 3): rest() finds a toe 0.0031 lower than ground()'s
   rays did, so the hand's `ground() | move(0, pad_thick - 0.01, 0)` sinks
-  it 0.0131, not 0.01. About a second a call: the skin is displaced, a
-  clearance reading costs 144 ms and the contact takes six or seven.
+  it 0.0131, not 0.01. One to two seconds a call: the skin is displaced,
+  a clearance reading costs 144 ms and the contact takes 11 to 17. The
+  displaced field is not a distance, and clearance() on it is good to a
+  ten-thousandth of the frog's size: at the place rest() finds, it reads
+  +2.9e-4 at its own lattice and -1.7e-4 at four times as fine, and a
+  march up the columns under the frog finds it 2e-4 into the pad. The
+  same search on the frog scaled by 2 ended 4e-4 off before the review
+  below; where it ends now does not depend on the scale.
 - **The prototype's cases**, exact by hand: a box tilted 18 degrees onto
-  a board 1.0 within 8.6e-8 (the corner the lattice missed by 0.0046); a
-  ball into a ring, the contact off the drop line, within 3.6e-7; the
+  a board 1.0 within 1.2e-7 (the corner the lattice missed by 0.0046); a
+  ball into a ring, the contact off the drop line, within 2.9e-7; the
   slide along a ledge 0.01 below, and along the ledge it stands on, square
   or rounded, within 3e-7, where conservative advancement stalled; drops
   onto a 20-degree ramp and along a diagonal into a corner within 1e-6; a
   book leaned on its neighbour at 2.865974 degrees against 2.865984. 10 to
   60 ms each, one to three clearance readings.
 
+An adversarial review then broke it five ways, each fixed with a test
+that failed first (tests/contact.test.ts):
+- **A thin sheet met at a slant was stepped through.** A card 0.002
+  thick turned 60 degrees, dropped from 2 onto a sheet as thin tilted 30
+  degrees, landed on the floor 3 below it, silently: every seed of both
+  closed on the other at a slant, and the step of a 48th taken near a
+  surface jumped the sheet. The trace now goes on from its probe while
+  the probe finds the point closing on the surface; the step of a 48th is
+  only for a point sliding along one. 12 drop heights onto sheets 0.001
+  to 0.008 thick, tilted 30 and 45 degrees, now all land on the sheet,
+  and thin cards, rods and wires on thin sheets and rods take 9 to 23 ms
+  a call where they took 24 to 230.
+- **When no seed met, the search gave up after 1.2 of the part's size.**
+  Two crossed wires 0.001 thick, which no seed lies on, fell back on
+  stepping by clearance(), read capped at a twentieth of the part, 24
+  steps; a drop of 0.6 was said never to touch. The steps are now a
+  lower bound on the gap past the cap (the near leaves' readings, the far
+  ones' box gaps), up to 64 of them.
+- **At a centimetre in metres it slid the wrong way.** A cube 0.007
+  across standing on its board read as inside it, through clearance()'s
+  fixed tolerances (a gradient step of 1e-4, a surface within 1e-7), and
+  was backed out 3.8 times its size the other way; a book 0.02 tall
+  stopped 1.1e-5 of its size short. The search now runs on the two scaled
+  by the power of two that brings the part to about 1: from 2e-4 to 1e5
+  times the size the cube lands within 1e-7 of its size and the book
+  within 2.2e-7.
+- **A scaled part of `on` was read without its factor.** Read a leaf at a
+  time, a board made at four times its size and scaled by 0.25 read four
+  times its distance, so a block sunk 8e-5 into it was not lifted out and
+  was backed out the wrong way along its slide.
+- **Backing out went no farther than the forward search**, which for a
+  part deep in the near half of `on` stopped short of freeing it and
+  blamed something it would slide along. It now goes back until the
+  part's box is behind on's. An empty part or `on` says it is empty.
+
 Not built: a sink for lean() (its contacts are an edge or a corner), and
 oriented anchors, as below. A feature thinner than a 48th of the part,
 met only while the part slides along another face, can still be stepped
-over; the other surface's seeds usually meet it. What follows is the
-proposal as it was written.
+over; the other surface's seeds usually meet it. A field that only
+bounds the distance loosely (a twist, a bend) is traced as if it were a
+distance; balls dropped on twisted blades and a bent plank met them where
+a dense sampling of the ball did, but nothing proves it. When no seed
+meets and the gap closes by less than a fifth a step (the motion within
+12 degrees of the contact's tangent), 64 steps can run out and the call
+says it never touches. What follows is the proposal as it was written.
 
 **Why.** Placement is where code-writing models fail most:
 - Coordinates an LLM writes place objects no better than random. In Holodeck, human ranking (MRR) gave LLM coordinates 0.364, random placement 0.369, and relations solved by a solver 0.706 (CVPR 2024).

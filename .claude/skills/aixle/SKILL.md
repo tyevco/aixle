@@ -267,7 +267,7 @@ show arm
 | a small point light cannot be judged in `lights.png` | it changes a few pixels of the whole picture | the bottom row is what each light adds on its own, brightened |
 | `overlap(a, b)` fails at 0 | they only touch, stand apart, or overlap thinner than the lattice: the failure says which | sink one into the other, or promise a chunk of the part |
 | a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
-| a part meant to sit on or lean on another floats, sinks a hair, or needs trigonometry | the contact is worked out by hand | `rest(on)` / `lean(on, pivot, axis)`: moved or turned until it touches, a millionth of its size from touching |
+| a part meant to sit on or lean on another floats, sinks a hair, or needs trigonometry | the contact is worked out by hand | `rest(on)` / `lean(on, pivot, axis)`: moved or turned until it touches, a millionth of its size from touching (a ten-thousandth on a displaced skin), at any scale |
 | `lean` turns the long way round, or never touches | it turns the right-handed way about `axis`, as `rotate` does | the other sign, `axis=[0, 0, -1]`; check's line flags a turn past a quarter |
 | `rest` lands a part on what it should pass, or backs it out | `on` holds what it falls past, or it started inside `on` (check's line says) | leave that out of `on`; start the part clear |
 | a copy should be left out of a loop, or a value differ by a test | there is no `if`; a comparison is 1 or 0 | a number `(t > 0) * a + (t <= 0) * b`; a shape, a material or a record `[if_false, if_true][t > 0]`; leave a copy out with `[part, empty()][i == k]` (a copy scaled to 0 collapses onto the origin) |
