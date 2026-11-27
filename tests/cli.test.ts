@@ -111,6 +111,17 @@ describe("aixle fmt", () => {
 });
 
 describe("check in a pose", () => {
+  it("keeps the warnings a promise at rest raised, though the pose does not judge it again", { timeout: 30000 }, () => {
+    // A void() whose probe is nowhere near the shape is warned about as it is judged; judged at rest only, its warning
+    // went missing from check --pose, which prints the posed evaluation's warnings.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-pose-"));
+    const file = join(dir, "far.aix");
+    writeFileSync(file, 'body = box(1)\nfar = sphere(0.1) | move(0, 5, 0)\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nassert void(far, body)\nshow body + lid\n');
+    for (const out of [cli("check", file, "--brief"), cli("check", file, "--brief", "--pose", "open")]) {
+      expect(out).toMatch(/\nwarning: line 5: void\(far, body\) holds trivially: their boxes are 4\.4 apart/);
+      expect(out).not.toMatch(/\nno warnings/);
+    }
+  });
   it("prints a posed line for a step assigned twice, and for a union a larger union flattened", { timeout: 30000 }, () => {
     const out = cli("check", "tests/fixtures/posed_lines.aix", "--pose", "up");
     // Round 11: the mixer's agent missed a posed line under a step assigned twice, while the asserts measured it posed.

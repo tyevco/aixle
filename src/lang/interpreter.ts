@@ -193,6 +193,12 @@ export interface Evaluation {
   defs: UserFn[];
   settings: Settings;
   warnings: string[];
+  /**
+   * The warnings raised while judging the promises at rest (a void() whose region is nowhere near its shape), also in
+   * `warnings`: an evaluation in a pose does not judge those promises again, so a caller showing it takes these from
+   * the rest evaluation.
+   */
+  restAssertWarnings: string[];
   /** Every assert the program ran, in order, passed or not; a used library's come first with its path. */
   asserts: AssertResult[];
   /** The pictures the program painted with, for the report. */
@@ -359,6 +365,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // The shown shape, set once the program has run; a root for placing a measured step.
   let output: Shape3 | undefined;
   const warnings: string[] = [...(program.warnings ?? [])];
+  // Those raised while judging a promise at rest, which an evaluation in a pose does not judge again.
+  const restAssertWarnings: string[] = [];
   const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
   // "pose:joint" for every pose value given as one number rather than a triple.
@@ -1339,6 +1347,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const t = stmt.test;
         let value: Value, detail: string | undefined, margin: number | undefined;
         const info: AssertInfo = { line: stmt.line, text: exprText(t), pose: stmt.pose };
+        const warned = warnings.length;
         options.onAssert?.("start", info);
         assertDepth++;
         witness = undefined;
@@ -1362,6 +1371,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           message = m;
         }
         asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined, margin });
+        if (!stmt.pose || stmt.pose === "rest") restAssertWarnings.push(...warnings.slice(warned));
         return;
       }
     }
@@ -1451,7 +1461,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images };
 }
 
 export function signature(name: string, ov: Overload): string {

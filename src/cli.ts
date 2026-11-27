@@ -9,7 +9,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { AssertClock, assertLabel, assertsRow, cameraSight, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { AssertClock, assertLabel, assertsRow, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -375,7 +375,7 @@ function main(argv: string[]): number {
       }
       // A Bedrock export's own thinness test runs here too, so check says what render would (round 7: a nose skin).
       const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
-      const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : []), ...(bedWarning ? [bedWarning] : [])];
+      const warnings = [...ev.warnings, ...restAssertWarningsFor(ev, rest), ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : []), ...(bedWarning ? [bedWarning] : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
       // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike; with no
       // warnings it shares their line, so "no warnings" is never read as the whole verdict (round 11: a 1.6-cell wall's

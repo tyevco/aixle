@@ -486,6 +486,22 @@ describe("glass on a bound", () => {
   });
 });
 
+describe("round 11: a promise at rest is judged once", () => {
+  it("keeps the warnings a promise at rest raised on a render shown in a pose", () => {
+    // The pose's evaluation no longer judges the promise at rest, so its warning comes from the rest evaluation.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = 'body = box(1)\nfar = sphere(0.1) | move(0, 5, 0)\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nassert void(far, body)\nshow body + lid';
+      for (const pose of [undefined, "open"]) {
+        const r = run(src, "far.aix", dir, { ...QUICK, grid: 24, poses: false, pose });
+        expect(r.warnings.filter((w) => /holds trivially/.test(w))).toHaveLength(1);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("round 11: check aims a camera", () => {
   it("says how much of a camera's focus is hidden from its angle, from rays, and warns as the render does when another azimuth shows more", () => {
     // A lantern behind a wall: from the front (azimuth 0, +z) the wall hides it, from the back nothing does.

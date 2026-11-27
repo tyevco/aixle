@@ -823,6 +823,15 @@ export function check(source: string, sourceName = "model.aix", log?: (line: str
   return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts, onAssert });
 }
 
+/**
+ * The warnings the promises at rest raised as they were judged, for an evaluation in a pose that did not judge them
+ * again (a void() whose region is nowhere near its shape is said in every pose, as it was before a pose's evaluation
+ * stopped judging the promises at rest); none for the rest evaluation itself, whose warnings hold them.
+ */
+export function restAssertWarningsFor(shown: Evaluation, rest: Evaluation): string[] {
+  return shown === rest ? [] : [...new Set(rest.restAssertWarnings)].filter((w) => !shown.warnings.includes(w));
+}
+
 /** An assert as a line names it: `assert (line 12) in pose open: clearance(lid, box) > 0.02`, its library first. */
 export function assertLabel(a: AssertInfo): string {
   return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""}: ${a.text}`;
@@ -1081,7 +1090,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"
   // on a rig failed in its jump pose) unless one names its pose, which is tested in that pose's evaluation.
   const asserts = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? evalAt(p.joints, pn) : undefined; });
-  const warnings = [...evaluation.warnings, ...asserts.filter((a) => !a.passed).map(assertLine)];
+  const warnings = [...evaluation.warnings, ...restAssertWarningsFor(evaluation, rest), ...asserts.filter((a) => !a.passed).map(assertLine)];
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // Set when the shown pose has lifted the whole model off the floor: standing is then not judged.
