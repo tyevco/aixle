@@ -689,6 +689,12 @@ formatted program parses to the same tree with every token and comment
 in order, it changes 20 of 6071 lines in 11 files (a named argument
 written `x = 1`, an `=` padded out of line with its neighbours, one
 comment a space from its code), and it takes about 60 ms for all of them.
+Round 11 made a column of trailing comments move as one, at least two
+spaces after the longest line's code, where fmt had moved only the
+comment whose code reached into the two spaces and broken the column;
+over the 135 programs of that round, fmt changes 31 of 7730 lines in 12
+files rather than 21, the ten more being two such columns (round 4's
+market, a copy of round 11's bookcase) moved out by one space whole.
 
 ## Paths
 

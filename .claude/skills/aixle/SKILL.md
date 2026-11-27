@@ -55,7 +55,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    around it, with its own watertight row.
    `npx aixle diff before.aix after.aix` shows two versions side by side;
    `npx aixle fmt model.aix --write` lays the program out in the one
-   layout (comments kept, meaning unchanged) before you hand it on.
+   layout (comments kept, meaning unchanged) before you hand it on;
+   `--check` says `formatted`, or shows each line that differs.
    On a program you did not write, `npx aixle explain model.aix` first: the
    tree from the output down, each step with its source line, size,
    material and anchors, so you know which step feeds which before you

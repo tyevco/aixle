@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { format } from "../src/lang/format.js";
+import { format, formatDiff } from "../src/lang/format.js";
 import { parse } from "../src/lang/parser.js";
 import { tokenize } from "../src/lang/lexer.js";
 
@@ -146,8 +146,50 @@ describe("aixle fmt's layout", () => {
     const src = "\n\n# header\n\n\n\na = 1   # one\nb = 2# two\n\n\n  # about c\nc = 3\nfor i in [1] {\n  d = i\n\n    # last in the loop\n}\n// the end\n\n\n";
     expect(format(src)).toBe("# header\n\na = 1   # one\nb = 2  # two\n\n# about c\nc = 3\nfor i in [1] {\n  d = i\n\n  # last in the loop\n}\n// the end\n");
   });
-  it("keeps a trailing comment's column as its line moves, and pushes it out only when the code reaches it", () => {
-    expect(format("for i in [1] {\nabc = 1      # a\nd = 22222222 # b\n}\n")).toBe("for i in [1] {\n  abc = 1      # a\n  d = 22222222  # b\n}\n");
+  it("keeps a trailing comment's column as its line moves, and pushes the whole column out when one line's code reaches it", () => {
+    // Two spaces before a trailing comment at least: a column one line's code reaches into moves out as one.
+    expect(format("for i in [1] {\nabc = 1      # a\nd = 22222222 # b\n}\n")).toBe("for i in [1] {\n  abc = 1       # a\n  d = 22222222  # b\n}\n");
+    // A lone comment is pushed out alone, and a blank line ends a column.
+    expect(format("a = 1 # x\n\nbb = 2   # y\nc = 3    # z\n")).toBe("a = 1  # x\n\nbb = 2   # y\nc = 3    # z\n");
+    // Round 11's bookcase: five comments in a column at 23, one line's code ending a space before it. fmt moved
+    // that one comment to 24 and left the other four; the column now moves together, and stays put a second time.
+    const shelf = [
+      "for r in rows {",
+      "  x = r.start          # the next free x, a gap past the last book's right side",
+      "  prev = r.first       # what the next book leans on or stands beside",
+      "  prev_h = spacing.gap # how tall that is (a panel reaches the shelf above)",
+      "  stack_y = 0          # how high the stack has grown",
+      "  hold = x             # the cursor after the last book not in the stack",
+      "}",
+      "",
+    ].join("\n");
+    const once = format(shelf);
+    expect(once.split("\n").slice(1, 6).map((l) => l.indexOf("#"))).toEqual([24, 24, 24, 24, 24]);
+    expect(once).toBe(shelf.replace(/ #/g, "  #"));
+    expect(format(once)).toBe(once);
+  });
+  it("says where a program differs from its layout: each line as it is and as fmt writes it, and the blank lines", () => {
+    const src = "\n\na=1   \n\n\n\nb = box(1)  # x\n   \nc=2";
+    const d = formatDiff(src, format(src));
+    // 2 blank lines at the start, a=1, two of three blank lines, the spaces on a blank line, c=2, the last line break.
+    expect(d.count).toBe(8);
+    expect(d.lines).toEqual([
+      "line 1: 2 blank lines at the start of the file; fmt drops them",
+      'line 3 is:  "a=1   "',
+      'fmt writes: "a = 1"',
+      "line 4: 3 blank lines in a row; fmt keeps one",
+      "line 8: a blank line holds spaces; fmt empties it",
+      'line 9 is:  "c=2"',
+      'fmt writes: "c = 2"',
+      "... and 1 more",
+    ]);
+    // A long line is shown from a little before where the two first differ.
+    const long = `x = [${"1, ".repeat(60)}2] # ${"z".repeat(40)}\n`;
+    const l = formatDiff(long, format(long));
+    expect(l.count).toBe(1);
+    expect(l.lines[0]).toMatch(/^line 1 is: {2}"\.\.\.[ 1,]{30,50}2\] # z{40}"$/);
+    expect(l.lines[1]).toMatch(/^fmt writes: "\.\.\.[ 1,]{30,50}2\] {2}# z{40}"$/);
+    expect(formatDiff("a = 1\r\nb = 2\r\n", format("a = 1\r\nb = 2\r\n")).lines).toEqual(["its lines end in \\r\\n; fmt writes \\n"]);
   });
   it("refuses a program that does not parse, and accepts one with nothing but comments", () => {
     expect(() => format("a = (1\n")).toThrow(/line/);

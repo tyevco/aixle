@@ -87,7 +87,7 @@ npx aixle render model.aix --3mf           also model.3mf (written anyway with `
 npx aixle render model.aix --triangles 50000   a lighter GLB, OBJ and viewer, decimated (default cap 200000; 0 keeps every triangle)
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
-npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check fails if it is not
+npx aixle fmt model.aix --write            the program in the one layout (comments kept, meaning unchanged); --check says formatted, or fails with each line that differs
 ```
 
 An `import()` is sampled once per file and resolution and cached on

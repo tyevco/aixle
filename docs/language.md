@@ -1002,8 +1002,18 @@ blobs or gone at a quick cell, so judge a working end at full grid, with
 ## Layout: `aixle fmt`
 
 `aixle fmt model.aix` prints the program in the one layout the tool
-keeps; `--write` rewrites the file, `--check` changes nothing and fails
-naming each file that is not in it. It moves only the space between
+keeps; `--write` rewrites the file (or says it is already formatted),
+`--check` changes nothing and says of each file `formatted`, or fails
+with how many lines differ and the first five of them, each as it is
+and as fmt writes it:
+
+```
+shelf.aix: not formatted, 1 line differs; aixle fmt --write shelf.aix
+  line 84 is:  "  prev_h = spacing.gap # how tall that is"
+  fmt writes: "  prev_h = spacing.gap  # how tall that is"
+```
+
+ It moves only the space between
 tokens, so it cannot change what a program means: no token is added,
 dropped or respelled (a number stays `0.50`), no line is joined or split,
 and every comment stays where it was. The layout:
@@ -1023,9 +1033,13 @@ and every comment stays where it was. The layout:
   a closing bracket that starts a line at its opener's line;
 - an `=` (or a record's value) padded into a column with the line above
   or below keeps the column, and every line of the column stays in it
-  (pushed right together when one line's code now reaches past it); a
-  trailing comment keeps its column unless the code now reaches it, so a
-  column of them stays a column;
+  (pushed right together when one line's code now reaches past it);
+- a comment after code has at least two spaces before it, and otherwise
+  keeps its column, moved with its line's indentation; comments at one
+  column on consecutive lines are a column and move as one, so when one
+  line's code reaches into the two spaces before its comment, the whole
+  column moves out with it (a blank line or a line without a trailing
+  comment ends a column);
 - one blank line where there were several, none at the ends.
 
 ## What the tool checks for you

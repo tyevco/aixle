@@ -86,14 +86,14 @@ describe("libraries", () => {
 });
 
 describe("aixle fmt", () => {
-  it("prints the program in the one layout, rewrites with --write, and fails --check naming the file", { timeout: 60000 }, () => {
+  it("prints the program in the one layout, rewrites with --write, and fails --check with the lines that differ", { timeout: 60000 }, () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-fmt-"));
     const file = join(dir, "messy.aix");
     writeFileSync(file, "a=box(1,2, 3)|move( 0 , 1, 0 )   # up\nshow a\n");
     const tidy = "a = box(1,2, 3) | move(0, 1, 0)  # up\nshow a\n";
     expect(cli("fmt", file)).toBe(tidy);
-    // An already formatted program passes --check silently.
-    expect(cli("fmt", "--check", "examples/mug.aix")).toBe("");
+    // An already formatted program passes --check with a word, so a pass is not taken for a skipped file (round 11).
+    expect(cli("fmt", "--check", "examples/mug.aix")).toBe("examples/mug.aix: formatted\n");
     let failed = "";
     try {
       cli("fmt", "--check", file, "examples/mug.aix");
@@ -101,10 +101,12 @@ describe("aixle fmt", () => {
       failed = (e as { stdout: string; status: number }).stdout;
       expect((e as { status: number }).status).toBe(1);
     }
-    expect(failed).toBe(`${file}: not formatted; aixle fmt --write ${file}\n`);
+    // The line that differs, as it is and as fmt writes it (round 11: "not formatted" alone cost a diff by hand).
+    expect(failed).toBe(`${file}: not formatted, 1 line differs; aixle fmt --write ${file}\n  line 1 is:  "a=box(1,2, 3)|move( 0 , 1, 0 )   # up"\n  fmt writes: "a = box(1,2, 3) | move(0, 1, 0)  # up"\nexamples/mug.aix: formatted\n`);
     expect(cli("fmt", "--write", file)).toBe(`formatted ${file}\n`);
     expect(readFileSync(file, "utf8")).toBe(tidy);
-    expect(cli("fmt", "--check", file)).toBe("");
+    expect(cli("fmt", "--check", file)).toBe(`${file}: formatted\n`);
+    expect(cli("fmt", "--write", file)).toBe(`${file}: already formatted\n`);
   });
 });
 

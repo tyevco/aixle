@@ -23,7 +23,7 @@ import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
 import { isMaterial, isRecord, isShape2, isShape3, isUserFn, typeName, type Value } from "./lang/values.js";
 import { parse } from "./lang/parser.js";
-import { format } from "./lang/format.js";
+import { format, formatDiff } from "./lang/format.js";
 
 // Trailing zeros come off only after a decimal point: -100 once printed as -1 (measured).
 // Two decimals, one above ten, none above a hundred; below 0.1, two significant figures, so a small model's parts
@@ -104,7 +104,7 @@ function usage(): never {
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
       "  aixle diff   <a.aix> <b.aix> [--out FILE.png]   the two side by side, quickly",
       "  aixle fmt    <file.aix>         the program in the one layout, to stdout (comments kept, meaning unchanged)",
-      "  aixle fmt    <file.aix>... --write | --check   rewrite them in place, or list the ones not in it and fail",
+      "  aixle fmt    <file.aix>... --write | --check   rewrite them in place, or check them: each line fmt would change, as it is and as fmt writes it, and fail",
       "  aixle doc    [--write FILE]    the language reference, generated from the builtins",
       "  aixle doc    <lib.aix>          a library's defs and their comments, for a program that would use it",
     ].join("\n"),
@@ -114,8 +114,8 @@ function usage(): never {
 
 /**
  * `aixle fmt`: the program in the one layout. Alone it prints the result; `--write` rewrites each file that is not
- * in it; `--check` changes nothing and fails naming each file that is not, for CI or a hook. A program that does not
- * parse is an error, never rewritten.
+ * in it; `--check` changes nothing, says of each file whether it is formatted, and fails on one that is not, with
+ * the lines that differ, for CI or a hook. A program that does not parse is an error, never rewritten.
  */
 function fmt(args: string[]): number {
   const files = args.filter((a) => !a.startsWith("--"));
@@ -131,9 +131,17 @@ function fmt(args: string[]): number {
     let formatted: string;
     try { formatted = format(source); } catch (err) { console.error(`${file}: ${(err as Error).message}`); status = 1; continue; }
     if (checkOnly) {
-      if (formatted !== source) { console.log(`${file}: not formatted; aixle fmt --write ${file}`); status = 1; }
+      // The lines that differ, as they are and as fmt writes them, and a word for a file that passes, so a pass is
+      // not taken for a file never looked at (round 11).
+      if (formatted !== source) {
+        const d = formatDiff(source, formatted);
+        console.log(`${file}: not formatted, ${d.count} line${d.count === 1 ? " differs" : "s differ"}; aixle fmt --write ${file}`);
+        for (const l of d.lines) console.log(`  ${l}`);
+        status = 1;
+      } else console.log(`${file}: formatted`);
     } else if (write) {
       if (formatted !== source) { writeFileSync(file, formatted); console.log(`formatted ${file}`); }
+      else console.log(`${file}: already formatted`);
     } else process.stdout.write(formatted);
   }
   return status;
