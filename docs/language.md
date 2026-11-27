@@ -1160,10 +1160,19 @@ one into the other by a cell or two, or blend them with `union(k=)`,
 which also seals the void a tangency leaves. The converse holds too: a
 part that reaches through a face by less than a cell (a tube's round
 cap ending a hair past a plate, a hex head whose corners sit just above
-a boss, a hub top just under a plank) or stops less than a cell short of
-it (a stringer passing a leg with a cell of gap) leaves the same seam,
-and no warning, since nothing there is thin: overlap by a cell or more,
-or clear by a cell or more. When the mesh is not watertight the report
+a boss, a hub top just under a plank) or stops less than a cell and a
+half short of it (a stringer passing a leg with a cell of gap, a door
+leaf 1.35 cells inside its arched opening) leaves the same seam, and no
+warning, since nothing there is thin: overlap by a cell or more, or
+clear by a cell and a half or more. The clearance is the larger because
+curved faces need it: measured over ten placements on the lattice at
+each gap, a round leaf in a round opening and a ball in a round pocket
+left open edges up to 1.4 cells and none from 1.5, two flat faces at a
+slant up to 1.2 cells, and two flat faces along the lattice's axes none
+at any gap from 0.8; parts sunk into each other from 0.4 to 2.2 cells,
+or a rod's end or round cap through a plate, left none attributable to
+the overlap (round 11's door kept 5 edges round its arch at 1.35 cells
+and lost them at 1.44). When the mesh is not watertight the report
 prints the three largest clusters of open edges, and `report.json`
 lists every one under `watertight.clusters` (its position, its edge
 count and the steps whose surfaces pass there). Where a cluster is
@@ -1174,7 +1183,7 @@ cell)`) or how far one reaches into the other (`'pin' only 0.01 into
 when the other is a cutter, whose inside is air), from points of each
 surface within a cell and a half of the edge read in the other's field,
 so the fix is a number: the gap closed to an overlap of a cell, or
-opened to a cell; `report.json` has it as `gap` on the three clusters
+opened to a cell and a half; `report.json` has it as `gap` on the three clusters
 the report prints, negative for an overlap. A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set

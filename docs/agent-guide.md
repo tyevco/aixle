@@ -150,7 +150,7 @@ mesh; `--no-cache` samples afresh.
 | an edge looks jagged | the grid is coarse for the size | `--grid 200` (slower, cubic) |
 | a shell wall, a tube or lettering is broken or gone, though the part is thick | the wall, tube radius or stroke weight is under a grid cell | `check` says which step and what grid; thicken it or raise the grid |
 | a library part comes out broken, or leaves a loose sliver, in a scene | a slat, rod or wall of the `use`d part is thinner than the scene's cell | `check` names the step and the size; raise the scene's grid, or use a bigger part |
-| open edges at a cap, a bolt head or a hub, with nothing thin nearby | the part reaches through a face, or stops short of it, by less than a cell | sink it a cell or more into the host, or leave a cell or more clear |
+| open edges at a cap, a bolt head or a hub, with nothing thin nearby | the part reaches through a face by less than a cell, or stops short of it by less than a cell and a half | sink it a cell or more into the host, or leave a cell and a half or more clear (curved faces still seam at 1.4) |
 | open edges "in 'x' twice, as 'a' and 'b'" | two placements of one step cross each other there | move one, or bury one in the other by a cell |
 | a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |

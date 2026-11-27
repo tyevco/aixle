@@ -790,7 +790,9 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
   // and one that clears them here need not hold at rest (round 8: a lug blamed on a plane in two poses).
   const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : ` Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part by half a cell (${fmt(cellSize / 2)}) along ${"xyz"[planeAxis ?? 1]}, which puts the face midway between two sample planes, or change the radius a little.`) : "";
   const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
-  const gapNote = gaps ? " Two parts closer than a cell, or sunk into each other by less than one, leave a seam: overlap them by a cell or more, or part them by a cell." : "";
+  // Measured over ten placements on the lattice: two curved faces (a round leaf in a round opening, a ball in a pocket)
+  // left open edges up to 1.4 cells apart and none from 1.5; a door's arch kept 5 at 1.35 cells (round 11).
+  const gapNote = gaps ? " Two parts closer than a cell and a half, or sunk into each other by less than a cell, leave a seam: overlap them by a cell or more, or part them by a cell and a half (curved faces still seam at 1.4)." : "";
   return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${planeNote}`;
 }
 

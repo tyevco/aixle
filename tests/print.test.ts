@@ -6,6 +6,7 @@ import { inflateRawSync } from "node:zlib";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { watertightReport } from "../src/mesh/mesh.js";
 import { countPieces, type MeshCache } from "../src/mesh/pieces.js";
 import { bedFit, boxCorners, supportVolume, thinnestWall, wallThickness } from "../src/mesh/print.js";
 import { to3mf } from "../src/export/threemf.js";
@@ -320,6 +321,19 @@ describe("set units and set bed", () => {
 });
 
 describe("open edges between two parts", () => {
+  it("clear at a cell and a half between two curved faces, and seam at a cell", () => {
+    // Round 11's door: a leaf 1.35 cells inside its arched opening kept 5 open edges. A round leaf in a round opening
+    // at the gap, over five placements on the lattice: the gap the docs and the watertight row give is clean.
+    const cell = 2 / 64;
+    const at = (c: number, ph: number) => {
+      const g = c * cell;
+      const s = O.move(O.union([P.cylinder(0.45, 0.8), O.difference(P.box(1.6, 0.8, 1.6), P.cylinder(0.45 + g, 1))]), ph * cell, 0, ph * cell * 0.7);
+      const w = watertightReport(surfaceNets(s, { resolution: 64, bounds: { min: [-1, -1, -1], max: [1, 1, 1] } }).mesh);
+      return w.holes + w.nonManifold;
+    };
+    for (const ph of [0, 0.2, 0.4, 0.6, 0.8]) expect(at(1.5, ph)).toBe(0);
+    expect([0, 0.2, 0.4, 0.6, 0.8].every((ph) => at(1.1, ph) > 0)).toBe(true);
+  });
   it("say how far apart the two surfaces are, or how deep one reaches into the other", () => {
     const cluster = (at: [number, number, number]) => ({ centre: at, at, box: { min: [at[0] - 0.01, at[1] - 0.1, at[2] - 0.1] as [number, number, number], max: [at[0] + 0.01, at[1] + 0.1, at[2] + 0.1] as [number, number, number] }, count: 6 });
     const w = (at: [number, number, number]) => ({ ok: false, holes: 6, nonManifold: 0, note: "no: 6 open edges.", where: cluster(at).box, clusters: [cluster(at)] });
@@ -327,7 +341,7 @@ describe("open edges between two parts", () => {
     expect(surfaceGap(apart, "a", "b", [0.505, 0.2, 0.1], 0.05)!.gap).toBeCloseTo(0.01, 3);
     const note = watertightNote(w([0.505, 0.2, 0.1]), apart, 0.05);
     expect(note).toMatch(/6 at \(0\.505, 0\.2, 0\.1\) in 'a', 'b', their surfaces 0\.01 apart there \(0\.2 of a cell\)/);
-    expect(note).toMatch(/overlap them by a cell or more, or part them by a cell/);
+    expect(note).toMatch(/overlap them by a cell or more, or part them by a cell and a half \(curved faces still seam at 1\.4\)/);
     const sunk = check("a = box(1, 1, 1)\nb = box(1, 1, 1) | move(0.99, 0, 0)\nboth = a + b");
     expect(watertightNote(w([0.495, 0.2, 0.1]), sunk, 0.05)).toMatch(/in 'a', 'b', '[ab]' only 0\.01 into '[ab]' there \(0\.2 of a cell\)/);
     // A cutter's inside is air: pebbles 0.01 inside a recess's wall are 0.01 clear of the dish (round 10's terrarium).
