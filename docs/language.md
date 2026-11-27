@@ -1021,12 +1021,12 @@ with how many lines differ and the first five of them, each as it is
 and as fmt writes it:
 
 ```
-shelf.aix: not formatted, 1 line differs; aixle fmt --write shelf.aix
-  line 84 is:  "  prev_h = spacing.gap # how tall that is"
-  fmt writes: "  prev_h = spacing.gap  # how tall that is"
+model.aix: not formatted, 1 line differs; aixle fmt --write model.aix
+  line 2 is:  "lid=box(2, 0.2, 2)|move(0, 1, 0)"
+  fmt writes: "lid = box(2, 0.2, 2) | move(0, 1, 0)"
 ```
 
- It moves only the space between
+It moves only the space between
 tokens, so it cannot change what a program means: no token is added,
 dropped or respelled (a number stays `0.50`), no line is joined or split,
 and every comment stays where it was. The layout:
