@@ -778,7 +778,10 @@ What the lights and the skies can and cannot do, measured in round 9:
   the two shares can differ by a few points, and by fifteen or so on a
   focus that hides much of itself (a ring of stones round a fire, 57%
   against the render's 63; a window's interior behind its pane, 46
-  against 30). Under its `Cameras:` line,
+  against 30). The render's share also moves with its mesh, where the
+  rays' does not: the mixer's paddle from azimuth 60 is 51% hidden to
+  the render at grid 120 and 64% at grid 200, and 55% to `check`, so a
+  warning one of them gives the other may not. Under its `Cameras:` line,
   each camera with a focus gets how much of it is hidden from its angle
   and, past 15%, the least from seven other azimuths 45 degrees apart
   (`into_bowl: 52% of paddle hidden behind the rest of the model from
@@ -1213,7 +1216,7 @@ prints every passing assert with its numbers too, so how close a promise
 came is on the terminal. An assert judged many times from one line, in a
 loop, is one line: how many times it held and the judgement nearest to
 failing, with that judgement's message, `assert (line 104) holds 33
-times: clearance(bk, board) > -0.002, nearest to failing -3.6e-16 >
+times: clearance(bk, board) > -0.002, nearest to failing -3.608e-16 >
 -0.002: book 24 is not sunk into its shelf` (or `is 1 == 1 each time`
 when it came out the same each time). Nearest to failing is the smallest
 margin, how far the comparison passed by: `a - b` for `>` and `>=`,
