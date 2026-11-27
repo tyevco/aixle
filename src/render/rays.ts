@@ -11,9 +11,9 @@
  * channel; a reflection that meets glass returns the field's point for the kernel to shade.
  *
  * Pure and deterministic: no file system, no process, no randomness. The area-light rays are stratified over the
- * light's disc and rotated per pixel by a hash of the pixel, the light and the subsample, so every value is a function
- * of its arguments alone and a render's bytes cannot depend on which thread drew which row. Nothing here allocates
- * except the shape's own hit(), which the glass paths call.
+ * light's disc and placed by a fixed pattern of the pixel, the light and the subsample (diskPattern), so every value
+ * is a function of its arguments alone and a render's bytes cannot depend on which thread drew which row. Nothing here
+ * allocates except the shape's own hit(), which the glass paths call.
  */
 import type { Mesh } from "../mesh/mesh.js";
 import { boundsGrow, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
@@ -23,12 +23,10 @@ import { ALL, BvhTracer, GLASS, OPAQUE, type BvhData } from "./bvh.js";
 export const NEAR_CELLS = 3;
 /** Cells the model's box is grown by to clip every secondary ray. */
 export const BOX_CELLS = 2;
-/** Area-light rays per light on a primary hit, the first four one per quadrant of the light's disc. */
+/** Area-light rays per light: four on the outer half of the disc's area, four on the inner. */
 export const AREA_RAYS = 8;
 
-
-
-/** A hashed uniform in [0, 1) from two integers (murmur-style finaliser): every stochastic choice, keyed by pixel, light and subsample. */
+/** A hashed uniform in [0, 1) from two integers (murmur-style finaliser). */
 export function hash01(a: number, b: number): number {
   let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul((b + 0x632be5ab) | 0, 0xc2b2ae35);
   h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
@@ -37,9 +35,27 @@ export function hash01(a: number, b: number): number {
   return (h >>> 0) / 4294967296;
 }
 
-/** The key areaVisibility hashes: a pixel's index and its subsample (0 the centre, 1 to 4 an edge pixel's quarter offsets). */
-export function pixelKey(index: number, subsample = 0): number {
-  return index * 5 + subsample;
+/**
+ * Where a pixel's area-light rays fall on the light's disc, from the pixel (x, y), the light and the subsample (0
+ * the pixel's centre, 1 to 4 an edge pixel's quarter offsets), into out: the rotation (a fraction of a turn) and the
+ * two rings' radius offsets, each in [0, 1).
+ *
+ * The rotation is interleaved gradient noise over the pixel grid (transposed, so it does not follow the dither's,
+ * which is the same noise the other way round) and the offsets an R2 lattice over it, each shifted by a hash of the
+ * light and the subsample. Neighbouring pixels so take well-spread rotations, and the visibility filter, which averages
+ * them, is left with less to smooth: measured through it against 24 times the rays (tools/rays-bench.ts, noise), a
+ * penumbra on the medal's floor at 768 keeps 3.0 levels of noise against 3.6 for a hash per pixel, the teapot's 2.0
+ * against 2.5, and the cube's (192 px) 4.9 and 3.9 against 5.8 and 5.4. Every value is a function of its arguments.
+ */
+export function diskPattern(x: number, y: number, light: number, sub: number, out: Float64Array): void {
+  const sh = hash01(sub * 131 + light, 0x51ed);
+  const g = 52.9829189 * ((0.06711056 * y + 0.00583715 * x) % 1);
+  let r = g - Math.floor(g) + sh;
+  out[0] = r - Math.floor(r);
+  r = 0.5 + x * 0.7548776662466927 + y * 0.5698402909980532 + sh * 1.7;
+  out[1] = r - Math.floor(r);
+  r = 0.5 + x * 0.5698402909980532 + y * 0.7548776662466927 + sh * 2.3;
+  out[2] = r - Math.floor(r);
 }
 
 /** The soft march's constant for a light of angular radius `angle` (radians): its penumbra reaches full light at that angle. */
@@ -71,7 +87,7 @@ export interface RayStats {
   /** Field evaluations in near marches (every kind of ray) and in confirmation windows. */
   nearSteps: number;
   windowSteps: number;
-  /** occlusion() and areaVisibility() calls; rays areaVisibility traced beyond NEAR; calls its early out stopped at four. */
+  /** occlusion() and areaVisibility() calls; rays areaVisibility traced beyond NEAR; calls the cone test answered alone. */
   occlusion: number;
   area: number;
   areaRays: number;
@@ -119,10 +135,11 @@ export interface Rays {
   occlusion(ox: number, oy: number, oz: number, lx: number, ly: number, lz: number, tMax: number, softness: number): number;
   /**
    * The fraction of a light's disc (directional) or sphere (point) that p sees, per channel into `vis` (coloured glass
-   * tints it); returns their mean. `rays` is 8 on a primary hit, at most 8; `earlyOut` (on by default) stops at four
-   * when the four quadrants agree and none crossed glass.
+   * tints it); returns their mean. p is lifted off its surface, as for occlusion(). (x, y) is the pixel and `sub` its
+   * subsample, which place the rays on the disc (diskPattern). `rays` is 8, at most 8. `earlyOut` (on by default)
+   * answers without them when no triangle can meet the cone they span: exactly what all eight would say.
    */
-  areaVisibility(px: number, py: number, pz: number, light: RayLight, key: number, rays?: number, earlyOut?: boolean): number;
+  areaVisibility(px: number, py: number, pz: number, light: RayLight, x: number, y: number, sub?: number, rays?: number, earlyOut?: boolean): number;
   /**
    * From o just inside a solid along d to where it is left: the exit's distance, or -1. `abs` gets sigma times
    * length per channel, Beer's law being exp(-abs). `entry` is the material the ray went in through.
@@ -167,12 +184,12 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
   // exit. AP: areaVisibility()'s point. ST: what the inner functions leave: [0] the last clip's entry, [1] its exit,
   // [2] where a near march stopped, [3] closest()'s distance, [4] the near march's penumbra term, [5] its limit (the
   // light's distance), [6] its softness, [7] how far it marches (NEAR, or the whole ray for the reference), [8] its
-  // least step. WN: a window march's from, to and answer. XG: a glass crossing's entry and
-  // exit distances along the ray it is given. FT: one far ray's transmittance. OUT, SUM: the area rays' sums on the
-  // disc's outer and inner halves.
+  // least step. WN: a window march's from, to and answer. XG: a glass crossing's entry and exit distances along the
+  // ray it is given. FT: one far ray's transmittance. OUT, SUM: the area rays' sums on the disc's outer and inner
+  // halves. DP: diskPattern's answer.
   const RY = new Float64Array(8), FR = new Float64Array(8), IR = new Float64Array(8), AP = new Float64Array(3);
   const ST = new Float64Array(9), WN = new Float64Array(3), XG = new Float64Array(2);
-  const FT = new Float64Array(3), SUM = new Float64Array(3), OUT = new Float64Array(3);
+  const FT = new Float64Array(3), SUM = new Float64Array(3), OUT = new Float64Array(3), DP = new Float64Array(3);
   const TR = tracer.ray, TH = tracer.hit;
 
   /** The ray in `reg` (origin, direction, [7] tMax) against the grown box: ST[0], ST[1] its entry and exit within [0, tMax]; false when it misses. */
@@ -258,8 +275,8 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       const d = -dist(x, y, z);
       stats.insideSteps++;
       if (d < hitEps) {
-        // A zero the field touches without crossing (a revolved outline's axis, two coincident faces): still inside a
-        // cell on, so it is no exit (the tumbler's drink drew contour bands from it).
+        // A zero the field touches without crossing (two coincident faces of a union; a revolved outline's axis did
+        // before round 11): still inside a cell on, so it is no exit (the tumbler's drink drew contour bands from it).
         if (-dist(x + dx * cell, y + dy * cell, z + dz * cell) > hitEps) { prevT = t; t += cell; continue; }
         // The exit, refined between the last inside sample and this one, so a coarse step does not move it.
         let a = prevT, b = t;
@@ -308,11 +325,10 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
   }
 
   /**
-   * The field's soft march along RY (towards a light) from the last clip's entry to min(ST[7], ST[1]), at most
-   * `cap` steps: Quilez's
-   * closest approach with softness ST[6], counting only surfaces the ray is closing on and that lie short of the
-   * light (ST[5]); glass is crossed and dims `out`. 0 when blocked; else 1, with ST[4] the penumbra term and ST[2]
-   * where the field's part of the ray ended.
+   * The field's soft march along RY (towards a light) from the last clip's entry to min(ST[7], ST[1]), at most `cap`
+   * steps: Quilez's closest approach with softness ST[6], counting only surfaces the ray is closing on and that lie
+   * short of the light (ST[5]); glass is crossed and dims `out`. 0 when blocked; else 1, with ST[4] the penumbra term
+   * and ST[2] where the field's part of the ray ended.
    */
   function nearMarch(out: Float64Array, cap: number): number {
     const ox = RY[0], oy = RY[1], oz = RY[2], lx = RY[3], ly = RY[4], lz = RY[5];
@@ -429,7 +445,7 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
   }
 
   /** areaVisibility() at AP: fills vis. */
-  function areaCore(light: RayLight, key: number, rays: number, earlyOut: boolean): void {
+  function areaCore(light: RayLight, x: number, y: number, sub: number, rays: number, earlyOut: boolean): void {
     stats.area++;
     vis[0] = 1; vis[1] = 1; vis[2] = 1;
     const px = AP[0], py = AP[1], pz = AP[2];
@@ -470,14 +486,15 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
     const t1x = 1 + sg * lx * lx * ia, t1y = sg * ib, t1z = -sg * lx;
     const t2x = ib, t2y = sg + ly * ly * ia, t2z = -ly;
     // The pixel's rotation and radii, from the pixel, the light and the subsample.
-    const salt = light.index * 131;
-    const o1 = hash01(key, 977 + salt), o2 = hash01(key, 1979 + salt), rot = hash01(key, 2971 + salt) * 2 * Math.PI;
+    diskPattern(x, y, light.index, sub, DP);
+    const o1 = DP[1], o2 = DP[2], rot = DP[0] * 2 * Math.PI;
     const cr = Math.cos(rot), sr = Math.sin(rot);
     const c45 = (cr - sr) * Math.SQRT1_2, s45 = (sr + cr) * Math.SQRT1_2;
     const n = rays < 1 ? 1 : rays > AREA_RAYS ? AREA_RAYS : rays | 0;
     // Eight rays: four on the outer half of the disc's area (radius squared in [1/2, 1]), a quarter turn apart at one
-    // hashed radius, then four on the inner half, turned an eighth further. Each ray alone is uniform over its half,
-    // so the mean is the disc's visible fraction without bias. Fewer than five rays share one ring over the whole disc.
+    // radius the pattern gives, then four on the inner half, turned an eighth further. Over the pattern each ray is
+    // uniform over its half, so the mean is the disc's visible fraction without bias (the cube's penumbra measures
+    // within 2.5% of the exact disc's width). Fewer than five rays share one ring over the whole disc.
     const ring = n <= 4;
     const rOut = ring ? Math.sqrt(o1) : Math.sqrt(0.5 + 0.5 * o1), rIn = Math.sqrt(0.5 * o2);
     const step = ring ? (2 * Math.PI) / n : 0, cs = Math.cos(step), ss = Math.sin(step);
@@ -554,9 +571,9 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       vis[0] = FT[0]; vis[1] = FT[1]; vis[2] = FT[2];
       return (vis[0] + vis[1] + vis[2]) / 3;
     },
-    areaVisibility(px, py, pz, light, key, rays = AREA_RAYS, earlyOut = true) {
+    areaVisibility(px, py, pz, light, x, y, sub = 0, rays = AREA_RAYS, earlyOut = true) {
       AP[0] = px; AP[1] = py; AP[2] = pz;
-      areaCore(light, key, rays, earlyOut);
+      areaCore(light, x, y, sub, rays, earlyOut);
       return (vis[0] + vis[1] + vis[2]) / 3;
     },
     insideMarch(ox, oy, oz, dx, dy, dz, entry) {

@@ -13,7 +13,7 @@ import { boundsSize, type Bounds, type Material, type Shape3 } from "../src/sdf/
 import { perspective } from "../src/render/camera.js";
 import { lightDirection } from "../src/render/beauty.js";
 import { ALL, buildBvh, bvhFor, BvhTracer, GLASS, OPAQUE, triangleIsGlass, type BvhData } from "../src/render/bvh.js";
-import { createRays, hash01, pixelKey, type RayLight, type Rays } from "../src/render/rays.js";
+import { createRays, diskPattern, hash01, type RayLight, type Rays } from "../src/render/rays.js";
 import { filterRadius, filterVisibility, filterVisibilityRows, FLAG_EDGE, KIND_FLOOR, KIND_MODEL, KIND_SKY, type FilterGuides } from "../src/render/denoise.js";
 
 // ---- fixtures ----
@@ -196,7 +196,8 @@ describe("bvh", () => {
 
   it("is built once per mesh in a run's cache, in shared memory when asked", () => {
     const { mesh } = meshes[0];
-    const cache = { bvh: new WeakMap<Mesh, unknown>() };
+    // As the pool package's per-run BeautyCache carries it, beside its other tables.
+    const cache: { bvh: WeakMap<Mesh, BvhData>; env: Map<string, unknown> } = { bvh: new WeakMap(), env: new Map() };
     const a = bvhFor(mesh, cache);
     expect(bvhFor(mesh, cache)).toBe(a);
     const s = bvhFor(mesh, cache, true);
@@ -346,7 +347,7 @@ function cubeProfile(size: number, earlyOut = true) {
   for (let row = 0; row < 120; row++) {
     const z = -0.6 - (row / 119) * 1.8;
     let s = 0;
-    for (let col = 0; col < 48; col++) s += rays.areaVisibility(-0.24 + (col / 47) * 0.48, cell, z, light, pixelKey(row * 48 + col), 8, earlyOut);
+    for (let col = 0; col < 48; col++) s += rays.areaVisibility(-0.24 + (col / 47) * 0.48, cell, z, light, col, row, 0, 8, earlyOut);
     zs.push(z); mean.push(s / 48); ref.push(exact([0, cell, z]));
   }
   const cross = (v: number[], level: number) => {
@@ -382,10 +383,10 @@ describe("areaVisibility", () => {
       const o = [0, 1, 2].map((k) => px.P[i * 3 + k] + px.N[i * 3 + k] * f.cell);
       for (const l of lights) {
         const e0 = rays.stats.earlyOut;
-        const a = rays.areaVisibility(o[0], o[1], o[2], l, pixelKey(i), 8, true);
+        const a = rays.areaVisibility(o[0], o[1], o[2], l, i % 64, Math.floor(i / 64), 0, 8, true);
         const av = Array.from(rays.vis);
         if (rays.stats.earlyOut > e0) early++;
-        const b = rays.areaVisibility(o[0], o[1], o[2], l, pixelKey(i), 8, false);
+        const b = rays.areaVisibility(o[0], o[1], o[2], l, i % 64, Math.floor(i / 64), 0, 8, false);
         expect(a).toBe(b);
         expect(av).toEqual(Array.from(rays.vis));
         if (b > 0 && b < 1) partial++;
@@ -395,22 +396,32 @@ describe("areaVisibility", () => {
     expect(partial).toBeGreaterThan(20);
   });
 
-  it("takes the same hashed rays whenever it is asked, and other rays at another pixel, light or subsample", () => {
+  it("takes the same rays whenever it is asked, and other rays at another pixel, light or subsample", () => {
     const p1 = cubeProfile(1);
     const rays = p1.rays;
     const L = lightDirection(0, 45);
     const light: RayLight = { point: false, x: L[0], y: L[1], z: L[2], radius: 3 / 18, index: 0 };
-    const at = (key: number, l = light) => rays.areaVisibility(0.1, 0.02, -1.4, l, key, 8, false);
-    const first = [0, 1, 2, 3, 4, 5].map((k) => at(pixelKey(1000, k)));
+    const at = (x: number, y: number, sub: number, l = light) => rays.areaVisibility(0.1, 0.02, -1.4, l, x, y, sub, 8, false);
+    const subs = [0, 1, 2, 3, 4];
+    const first = subs.map((k) => at(200, 300, k));
     // Other calls in between, and a fresh instance, change nothing.
-    for (let k = 0; k < 50; k++) at(pixelKey(k * 31));
-    expect([0, 1, 2, 3, 4, 5].map((k) => at(pixelKey(1000, k)))).toEqual(first);
+    for (let k = 0; k < 50; k++) at(k * 31, k, k % 5);
+    expect(subs.map((k) => at(200, 300, k))).toEqual(first);
     const again = cubeProfile(1).rays;
-    expect([0, 1, 2, 3, 4, 5].map((k) => again.areaVisibility(0.1, 0.02, -1.4, light, pixelKey(1000, k), 8, false))).toEqual(first);
-    // In the penumbra, subsamples and lights differ.
+    expect(subs.map((k) => again.areaVisibility(0.1, 0.02, -1.4, light, 200, 300, k, 8, false))).toEqual(first);
+    // In the penumbra, subsamples, pixels and lights differ.
     expect(new Set(first).size).toBeGreaterThan(1);
-    const other = { ...light, index: 1 };
-    expect([0, 1, 2, 3, 4, 5].map((k) => at(pixelKey(1000, k), other))).not.toEqual(first);
+    expect(subs.map((k) => at(201, 300, k))).not.toEqual(first);
+    expect(subs.map((k) => at(200, 300, k, { ...light, index: 1 }))).not.toEqual(first);
+    // The pattern: every value in [0, 1), and over a block of pixels the rotations spread evenly.
+    const out = new Float64Array(3), bins = new Array(8).fill(0);
+    for (let y = 0; y < 64; y++)
+      for (let x = 0; x < 64; x++) {
+        diskPattern(x, y, 2, 1, out);
+        for (const v of out) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThan(1); }
+        bins[Math.floor(out[0] * 8)]++;
+      }
+    for (const b of bins) expect(Math.abs(b - 512)).toBeLessThan(64);
   });
 
   it("stops rays to a point light its radius short of it, so the light's own flame does not shadow it", () => {
@@ -422,7 +433,7 @@ describe("areaVisibility", () => {
       const nets = surfaceNets(shape, { resolution: 96 });
       const rays = createRays(shape, nets.mesh, buildBvh(nets.mesh), nets.cellSize, shape.bounds, 3);
       const light: RayLight = { point: true, x: 0, y: 1, z: 0, radius: 0.05, index: 0 };
-      for (const p of [[1, 0.8, 0.2], [0.04, 0.3, 0.5], [-0.7, 1.4, 0]]) expect(rays.areaVisibility(p[0], p[1], p[2], light, 1)).toBe(seen);
+      for (const p of [[1, 0.8, 0.2], [0.04, 0.3, 0.5], [-0.7, 1.4, 0]]) expect(rays.areaVisibility(p[0], p[1], p[2], light, 3, 4)).toBe(seen);
     }
   });
 });

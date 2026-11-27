@@ -31,7 +31,7 @@ import { albedo, bumpScaleOf, bumpSlope, fieldCurvature, hasFinish, surface, wea
 import { boundsDistance, boundsSize, type Bounds, type Shape3 } from "../src/sdf/types.js";
 import { DEFAULT_LIGHT_DIRECTION, lightDirection, renderBeauty, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
 import { buildBvh, type BvhData } from "../src/render/bvh.js";
-import { createRays, pixelKey, softnessFor, type RayLight, type Rays } from "../src/render/rays.js";
+import { createRays, hash01, softnessFor, type RayLight, type Rays } from "../src/render/rays.js";
 import { filterRadius, filterVisibility, FLAG_EDGE, KIND_FLOOR, KIND_MODEL, KIND_SKY, type FilterGuides } from "../src/render/denoise.js";
 import { perspective, type Camera } from "../src/render/camera.js";
 import { createTarget, renderMesh } from "../src/render/raster.js";
@@ -333,9 +333,9 @@ function faith(sc: Scene, pr: Primary, rays: Rays, outDir: string): FaithResult 
       if (how === 2) { confirmed++; if (e <= 0.05) confirmedWithin005++; }
       reflPic.set(x, y, e <= 0.05 ? 0x68a868 : e <= 2 ? 0xe0b020 : 0xe0301e);
     }
-  writeFileSync(join(outDir, `${sc.name}_faith_${size}.png`), panel(`${sc.name} ${size}px: rays.ts against the field alone, from the same origins`, [
-    { c: shadowPic, caption: `key light, hard: ${pct(shadowDis, shadowPixels)} of ${shadowPixels} lit-facing differ, ${shadowDisOffEdge} off an edge` },
-    { c: reflPic, caption: `mirror rays: ${pct(reflDis, refl)} hit/miss differ, ${pct(over2, both)} > 2 cells` },
+  writeFileSync(join(outDir, `${sc.name}_faith_${size}.png`), panel(`${sc.name} ${size}px against the field alone. shadow: red field only, blue rays only. mirror: green same, red > 2 cells, magenta hit/miss`, [
+    { c: shadowPic, caption: `hard shadow: ${pct(shadowDis, shadowPixels)} differ, ${shadowDisOffEdge} off edges` },
+    { c: reflPic, caption: `mirror: ${pct(reflDis, refl)} hit/miss, ${pct(over2, both)} > 2 cells` },
   ]).toPng());
   return { shadowPixels, shadowDis, shadowDisOffEdge, fieldOnly, faced, facedDis, refl, reflDis, both, within005, over2, confirmed, confirmedWithin005, trusted };
 }
@@ -355,7 +355,7 @@ function clockCost(): number {
   return median(s);
 }
 
-interface CostResult { farMedianUs: number; farMeanUs: number; farRays: number; occMeanUs: number; fieldOccMeanUs: number; closestUs: number; field128Us: number; fieldFullUs: number; areaUs: number; earlyOutRate: number; buildMs: number; triangles: number }
+interface CostResult { farMedianUs: number; farMeanUs: number; beyondMedianUs: number; beyondMeanUs: number; farRays: number; occMeanUs: number; fieldOccMeanUs: number; closestUs: number; field128Us: number; fieldFullUs: number; areaUs: number; earlyOutRate: number; buildMs: number; triangles: number }
 
 function cost(sc: Scene, pr: Primary, rays: Rays, buildMs: number): CostResult {
   const { size } = pr;
@@ -385,6 +385,18 @@ function cost(sc: Scene, pr: Primary, rays: Rays, buildMs: number): CostResult {
       per[k] = Math.max(0, Number(b - a) - clock) / 1000;
     }
   const farMedianUs = median(per), farMeanUs = per.reduce((s, v) => s + v, 0) / Math.max(1, per.length);
+  // The same stretch as occlusion() takes it: the BVH, then the glass solids crossed on the field.
+  const glassPer = new Float64Array(shadow.length);
+  for (let rep = 0; rep < 2; rep++)
+    for (let k = 0; k < shadow.length; k++) {
+      lifted(sc, pr, shadow[k], o);
+      const to = boxExit(rays, o, L, Infinity);
+      const a = now();
+      rays.beyond(o[0], o[1], o[2], L[0], L[1], L[2], rays.near, to);
+      const b = now();
+      glassPer[k] = Math.max(0, Number(b - a) - clock) / 1000;
+    }
+  const beyondMedianUs = median(glassPer), beyondMeanUs = glassPer.reduce((s, v) => s + v, 0) / Math.max(1, glassPer.length);
   // Whole occlusion() calls against the field's march over the whole ray (today's shadow march), batch-timed.
   const time = (f: () => void): number => { f(); const t0 = performance.now(); f(); return performance.now() - t0; };
   const occMs = time(() => { for (const i of shadow) { lifted(sc, pr, i, o); rays.occlusion(o[0], o[1], o[2], L[0], L[1], L[2], Infinity, softnessFor(lightAngle(1))); } });
@@ -412,10 +424,10 @@ function cost(sc: Scene, pr: Primary, rays: Rays, buildMs: number): CostResult {
     if (pr.N[i * 3] * d[0] + pr.N[i * 3 + 1] * d[1] + pr.N[i * 3 + 2] * d[2] > 0) lit.push(i);
   }
   const e0 = rays.stats.earlyOut, a0 = rays.stats.area;
-  const areaMs = time(() => { for (const i of lit) { lifted(sc, pr, i, o); rays.areaVisibility(o[0], o[1], o[2], key.ray, pixelKey(i)); } });
+  const areaMs = time(() => { for (const i of lit) { lifted(sc, pr, i, o); rays.areaVisibility(o[0], o[1], o[2], key.ray, i % size, Math.floor(i / size)); } });
   const earlyOutRate = (rays.stats.earlyOut - e0) / Math.max(1, rays.stats.area - a0);
   return {
-    farMedianUs, farMeanUs, farRays: shadow.length,
+    farMedianUs, farMeanUs, beyondMedianUs, beyondMeanUs, farRays: shadow.length,
     occMeanUs: (occMs * 1000) / Math.max(1, shadow.length), fieldOccMeanUs: (fieldOccMs * 1000) / Math.max(1, shadow.length),
     closestUs: (closestMs * 1000) / Math.max(1, mirror.length), field128Us: (field128Ms * 1000) / Math.max(1, mirror.length), fieldFullUs: (fieldFullMs * 1000) / Math.max(1, mirror.length),
     areaUs: (areaMs * 1000) / Math.max(1, lit.length), earlyOutRate, buildMs, triangles: sc.mesh.indices.length / 3,
@@ -442,8 +454,8 @@ function early(sc: Scene, pr: Primary, rays: Rays, outDir: string): EarlyResult 
       if (l.point) { lx -= pr.P[i * 3]; ly -= pr.P[i * 3 + 1]; lz -= pr.P[i * 3 + 2]; }
       if (pr.N[i * 3] * lx + pr.N[i * 3 + 1] * ly + pr.N[i * 3 + 2] * lz <= 0) continue;
       tested[i * NL + li] = 1;
-      Ve[i * NL + li] = rays.areaVisibility(o[0], o[1], o[2], l, pixelKey(i), 8, true);
-      V8[i * NL + li] = rays.areaVisibility(o[0], o[1], o[2], l, pixelKey(i), 8, false);
+      Ve[i * NL + li] = rays.areaVisibility(o[0], o[1], o[2], l, i % size, Math.floor(i / size), 0, 8, true);
+      V8[i * NL + li] = rays.areaVisibility(o[0], o[1], o[2], l, i % size, Math.floor(i / size), 0, 8, false);
     }
   }
   const g = guides(pr);
@@ -468,6 +480,53 @@ function early(sc: Scene, pr: Primary, rays: Rays, outDir: string): EarlyResult 
   }
   writeFileSync(join(outDir, `${sc.name}_early_${size}.png`), panel(`${sc.name}: area visibility filtered, early out vs always 8 (red: > 2 levels apart)`, [{ c: pic, caption: `${pct(over2, pixels)} of ${pixels} pixels differ by > 2 levels after filtering` }]).toPng());
   return { pixels, over2, maxLevels, rawOver2 };
+}
+
+// ---- noise through the filter ----
+
+/**
+ * The key light's visibility through the filter against a reference of 24 independent eight-ray estimates a pixel
+ * (filtered the same way, so only noise is left), over the penumbra: with the rays' pattern over the pixel grid, and
+ * with each pixel's pattern taken at random coordinates instead, which is a hash per pixel.
+ */
+function noise(sc: Scene, pr: Primary, rays: Rays): string {
+  const { size } = pr;
+  const n = size * size;
+  const key = sc.lights.find((l) => !l.ray.point) ?? sc.lights[0];
+  const l = key.ray;
+  const o = new Float64Array(3);
+  const white = (i: number, k: number): [number, number] => [Math.floor(hash01(i, 101 + k) * 1e6), Math.floor(hash01(i, 202 + k) * 1e6)];
+  const lit = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!(pr.flags[i] & 3)) continue;
+    let lx = l.x, ly = l.y, lz = l.z;
+    if (l.point) { lx -= pr.P[i * 3]; ly -= pr.P[i * 3 + 1]; lz -= pr.P[i * 3 + 2]; }
+    if (pr.N[i * 3] * lx + pr.N[i * 3 + 1] * ly + pr.N[i * 3 + 2] * lz > 0) lit[i] = 1;
+  }
+  const REF = new Float32Array(n), GRID = new Float32Array(n), WHITE = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!lit[i]) continue;
+    lifted(sc, pr, i, o);
+    GRID[i] = rays.areaVisibility(o[0], o[1], o[2], l, i % size, Math.floor(i / size));
+    const [wx, wy] = white(i, 0);
+    WHITE[i] = rays.areaVisibility(o[0], o[1], o[2], l, wx, wy);
+    if (GRID[i] === 0 || GRID[i] === 1) { REF[i] = GRID[i]; continue; }
+    let sum = 0;
+    for (let k = 1; k <= 24; k++) { const [x, y] = white(i, k); sum += rays.areaVisibility(o[0], o[1], o[2], l, x, y); }
+    REF[i] = sum / 24;
+  }
+  const g = guides(pr);
+  const FR = filterVisibility(REF, 1, g, size, sc.cell), FG = filterVisibility(GRID, 1, g, size, sc.cell), FW = filterVisibility(WHITE, 1, g, size, sc.cell);
+  const parts: string[] = [];
+  for (const [kind, label] of [[KIND_FLOOR, "floor"], [KIND_MODEL, "model"]] as const) {
+    let eg = 0, ew = 0, c = 0;
+    for (let i = 0; i < n; i++) {
+      if ((pr.flags[i] & 3) !== kind || pr.flags[i] & FLAG_EDGE || !(REF[i] > 0.02 && REF[i] < 0.98)) continue;
+      eg += (FG[i] - FR[i]) ** 2; ew += (FW[i] - FR[i]) ** 2; c++;
+    }
+    parts.push(`${label} ${c} penumbra pixels: grid pattern ${(Math.sqrt(eg / Math.max(1, c)) * 255).toFixed(2)} levels, hash per pixel ${(Math.sqrt(ew / Math.max(1, c)) * 255).toFixed(2)}`);
+  }
+  return `  noise through the filter (key light, RMS against 24x8 rays): ${parts.join("; ")}`;
 }
 
 // ---- the cube's penumbra ----
@@ -527,7 +586,7 @@ export function cubePenumbra(lightSize: number, res = 64, image = 192, earlyOut 
   for (let row = 0; row < image; row++)
     for (let col = 0; col < image; col++) {
       const i = row * image + col;
-      V[i] = rays.areaVisibility(xs(col), cell, zs(row), light, pixelKey(i), 8, earlyOut);
+      V[i] = rays.areaVisibility(xs(col), cell, zs(row), light, col, row, 0, 8, earlyOut);
     }
   // The filter at the radius a picture of this size gets.
   const F = filterVisibility(V, 1, g, image, cell, undefined, filterRadius(image));
@@ -636,7 +695,7 @@ async function door(size: number, outDir: string): Promise<string> {
       // The unshadowed Lambert term with the bump's normal; visibility from the field's normal side.
       const nl = Math.max(0, nn[0] * lx + nn[1] * ly + nn[2] * lz);
       for (let c3 = 0; c3 < 3; c3++) Dl[(i * NL + li) * 3 + c3] = nl * 0.85 * k * l.color[c3];
-      if (pr.N[i * 3] * lx + pr.N[i * 3 + 1] * ly + pr.N[i * 3 + 2] * lz > 0) V[i * NL + li] = rays.areaVisibility(o[0], o[1], o[2], l.ray, pixelKey(i));
+      if (pr.N[i * 3] * lx + pr.N[i * 3 + 1] * ly + pr.N[i * 3 + 2] * lz > 0) V[i * NL + li] = rays.areaVisibility(o[0], o[1], o[2], l.ray, i % size, Math.floor(i / size));
       else V[i * NL + li] = 0;
     }
   }
@@ -671,20 +730,24 @@ async function door(size: number, outDir: string): Promise<string> {
     { c: crop(visOnly), caption: "visibility only filtered" },
   ]).toPng());
   writeFileSync(join(outDir, `door_filter_full_${size}.png`), panel(`door ${size}px: unfiltered | visibility filtered`, [{ c: raw, caption: "8 rays, unfiltered" }, { c: visOnly, caption: "visibility only filtered" }]).toPng());
-  // How much of the bump survives: the high-pass energy of the stone's luminance in the crop, against the raw.
-  const hp = (src: Canvas) => {
+  // How much of the bump survives: the high-pass energy of the light falling on the wall's stone faces (the
+  // lighting term alone, so the bricks' printed mortar does not count), in the crop, against the unfiltered rays.
+  const stone = shape.hit(pr.P[(cy + ch - 10) * size * 3 + (cx + 12) * 3], pr.P[(cy + ch - 10) * size * 3 + (cx + 12) * 3 + 1], pr.P[(cy + ch - 10) * size * 3 + (cx + 12) * 3 + 2]).mat;
+  const stoneId = mesh.materials.indexOf(stone);
+  const hp = (light: (i: number) => number) => {
     let e = 0, k = 0;
     for (let y = cy + 1; y < cy + ch - 1; y++)
       for (let x = cx + 1; x < cx + cw - 1; x++) {
         const i = y * size + x;
-        if ((pr.flags[i] & 3) !== KIND_MODEL || pr.flags[i] & FLAG_EDGE) continue;
-        const lum = (xx: number, yy: number) => { const v = src.get(xx, yy); return 0.2126 * ((v >> 16) & 255) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255); };
-        const l = lum(x, y) - (lum(x - 1, y) + lum(x + 1, y) + lum(x, y - 1) + lum(x, y + 1)) / 4;
+        const ok = (j: number) => (pr.flags[j] & 3) === KIND_MODEL && !(pr.flags[j] & FLAG_EDGE) && pr.mat[j] === stoneId;
+        if (!ok(i) || !ok(i - 1) || !ok(i + 1) || !ok(i - size) || !ok(i + size)) continue;
+        const l = light(i) - (light(i - 1) + light(i + 1) + light(i - size) + light(i + size)) / 4;
         e += l * l; k++;
       }
-    return Math.sqrt(e / Math.max(1, k));
+    return Math.sqrt(e / Math.max(1, k)) * 255;
   };
-  return `door crop high-pass RMS (bump detail, levels): HEAD ${hp(head).toFixed(2)}, raw ${hp(raw).toFixed(2)}, whole-diffuse filtered ${hp(wholeOnly).toFixed(2)}, visibility filtered ${hp(visOnly).toFixed(2)} -> ${file}`;
+  const lum = (f: (i: number, c3: number) => number) => (i: number) => 0.2126 * f(i, 0) + 0.7152 * f(i, 1) + 0.0722 * f(i, 2);
+  return `door crop, ${stone.name} faces: high-pass RMS of the light on them (bump detail, levels of light): unfiltered ${hp(lum(sumDV(V))).toFixed(2)}, whole diffuse filtered ${hp(lum((i, c3) => wholeF[i * 3 + c3])).toFixed(2)}, visibility filtered ${hp(lum(sumDV(Vf))).toFixed(2)}, unshadowed ${hp(lum(sumDV(new Float32Array(n * NL).fill(1)))).toFixed(2)} -> ${file}`;
 }
 
 // ---- the largest render-set mesh ----
@@ -726,7 +789,7 @@ async function main(): Promise<void> {
   const names = args.length ? args : Object.keys(SCENES);
   const lines: string[] = [];
   const log = (s: string) => { console.log(s); lines.push(s); };
-  if (modes.has("faith") || modes.has("cost") || modes.has("early"))
+  if (modes.has("faith") || modes.has("cost") || modes.has("early") || modes.has("noise"))
     for (const name of names) {
       const c = await capture(SCENES[name], size);
       const sc = scene(name, c);
@@ -743,9 +806,10 @@ async function main(): Promise<void> {
       }
       if (modes.has("cost")) {
         const k = cost(sc, pr, rays, Math.min(...builds));
-        log(`  cost: occlusion beyond NEAR (BVH any-hit) median ${k.farMedianUs.toFixed(3)} us, mean ${k.farMeanUs.toFixed(3)} us over ${k.farRays} rays; occlusion() ${k.occMeanUs.toFixed(2)} us vs field march ${k.fieldOccMeanUs.toFixed(2)} us`);
+        log(`  cost: occlusion beyond NEAR (BVH any-hit) median ${k.farMedianUs.toFixed(3)} us, mean ${k.farMeanUs.toFixed(3)} us over ${k.farRays} rays; with glass crossed ${k.beyondMedianUs.toFixed(3)} us median, ${k.beyondMeanUs.toFixed(3)} us mean; occlusion() ${k.occMeanUs.toFixed(2)} us vs field march ${k.fieldOccMeanUs.toFixed(2)} us`);
         log(`        closest() ${k.closestUs.toFixed(2)} us vs field march (128 steps) ${k.field128Us.toFixed(2)} us = ${(k.closestUs / k.field128Us).toFixed(2)}x (uncapped ${k.fieldFullUs.toFixed(2)} us); areaVisibility ${k.areaUs.toFixed(2)} us, early out ${(100 * k.earlyOutRate).toFixed(1)}%`);
       }
+      if (modes.has("noise")) log(noise(sc, pr, rays));
       if (modes.has("early")) {
         const e = early(sc, pr, rays, out);
         log(`  early out: ${pct(e.over2, e.pixels)} of ${e.pixels} pixels differ from always-8 by > 2 levels after filtering (max ${e.maxLevels.toFixed(1)}); unfiltered ${pct(e.rawOver2, e.pixels)}`);
@@ -761,7 +825,7 @@ async function main(): Promise<void> {
       const { profile: p, pics } = cubePenumbra(s);
       log(`cube, light size ${s} (theta ${lightAngle(s).toFixed(4)} rad): geometric edge z ${p.edge.toFixed(3)}; 50% line analytic ${p.analytic50.toFixed(4)}, rays ${p.measured50.toFixed(4)}, filtered ${p.filtered50.toFixed(4)}; 10-90% width analytic ${p.analyticWidth.toFixed(4)}, rays ${p.measuredWidth.toFixed(4)} (${((p.measuredWidth / p.analyticWidth - 1) * 100).toFixed(1)}%), filtered ${p.filteredWidth.toFixed(4)} (${((p.filteredWidth / p.analyticWidth - 1) * 100).toFixed(1)}%)`);
       rows.push(panel(`light size ${s}: the floor behind a unit cube, seen from above (the cube's top edge's shadow across the middle)`, [
-        { c: pics[0], caption: "8 rays a pixel" }, { c: pics[1], caption: "filtered" }, { c: pics[2], caption: "analytic disc" }, { c: pics[3], caption: "exact black, raw blue, filt red" },
+        { c: pics[0], caption: "8 rays a pixel" }, { c: pics[1], caption: "filtered" }, { c: pics[2], caption: "exact at x = 0" }, { c: pics[3], caption: "exact black, raw blue, filt red" },
       ]));
     }
     const h = rows.reduce((s, r) => s + r.height, 0), w = Math.max(...rows.map((r) => r.width));

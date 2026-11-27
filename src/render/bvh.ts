@@ -86,8 +86,8 @@ export function buildBvh(mesh: Mesh, shared = false): BvhData {
   let nodes = 1, depth = 0;
   // An explicit work list: node index, range start, range end.
   const work: number[] = [0, 0, n];
-  const binCount = new Int32Array(BINS);
-  const binMin = new Float64Array(BINS * 3), binMax = new Float64Array(BINS * 3);
+  const binCount = new Int32Array(BINS * 3);
+  const binMin = new Float64Array(BINS * 9), binMax = new Float64Array(BINS * 9);
   const leftArea = new Float64Array(BINS), leftCount = new Int32Array(BINS);
   const cent = [cx, cy, cz];
   while (work.length) {
@@ -107,42 +107,53 @@ export function buildBvh(mesh: Mesh, shared = false): BvhData {
     bounds[node * 6 + 3] = x1; bounds[node * 6 + 4] = y1; bounds[node * 6 + 5] = z1;
     const m = end - start;
     if (m <= LEAF) { first[node] = start; count[node] = m; continue; }
-    // Binned SAH on each axis; the cheapest split wins (axis order breaks ties).
+    // Binned SAH on each axis; the cheapest split wins (axis order breaks ties). One pass bins every axis.
     let bestCost = Infinity, bestAxis = -1, bestBin = -1;
-    const lo = [c0x, c0y, c0z], hi = [c1x, c1y, c1z];
-    for (let axis = 0; axis < 3; axis++) {
-      const extent = hi[axis] - lo[axis];
-      if (extent <= 1e-12) continue;
-      binCount.fill(0); binMin.fill(Infinity); binMax.fill(-Infinity);
-      const c = cent[axis], scale = BINS / extent;
-      for (let i = start; i < end; i++) {
-        const t = order[i];
-        const b = Math.min(BINS - 1, Math.floor((c[t] - lo[axis]) * scale));
+    const ex = c1x - c0x, ey = c1y - c0y, ez = c1z - c0z;
+    const sx = ex > 1e-12 ? BINS / ex : 0, sy = ey > 1e-12 ? BINS / ey : 0, sz = ez > 1e-12 ? BINS / ez : 0;
+    binCount.fill(0); binMin.fill(Infinity); binMax.fill(-Infinity);
+    for (let i = start; i < end; i++) {
+      const t = order[i], t3 = t * 3;
+      const x0 = bmin[t3], y0 = bmin[t3 + 1], z0 = bmin[t3 + 2], x1 = bmax[t3], y1 = bmax[t3 + 1], z1 = bmax[t3 + 2];
+      for (let axis = 0; axis < 3; axis++) {
+        const sc = axis === 0 ? sx : axis === 1 ? sy : sz;
+        if (sc === 0) continue;
+        const cc = axis === 0 ? cx[t] - c0x : axis === 1 ? cy[t] - c0y : cz[t] - c0z;
+        const b = axis * BINS + Math.min(BINS - 1, Math.floor(cc * sc));
         binCount[b]++;
-        for (let k = 0; k < 3; k++) {
-          if (bmin[t * 3 + k] < binMin[b * 3 + k]) binMin[b * 3 + k] = bmin[t * 3 + k];
-          if (bmax[t * 3 + k] > binMax[b * 3 + k]) binMax[b * 3 + k] = bmax[t * 3 + k];
-        }
+        const o = b * 3;
+        if (x0 < binMin[o]) binMin[o] = x0;
+        if (y0 < binMin[o + 1]) binMin[o + 1] = y0;
+        if (z0 < binMin[o + 2]) binMin[o + 2] = z0;
+        if (x1 > binMax[o]) binMax[o] = x1;
+        if (y1 > binMax[o + 1]) binMax[o + 1] = y1;
+        if (z1 > binMax[o + 2]) binMax[o + 2] = z1;
       }
+    }
+    for (let axis = 0; axis < 3; axis++) {
+      if ((axis === 0 ? sx : axis === 1 ? sy : sz) === 0) continue;
+      const base = axis * BINS;
       // Sweep from the left, then from the right.
       let ax0 = Infinity, ay0 = Infinity, az0 = Infinity, ax1 = -Infinity, ay1 = -Infinity, az1 = -Infinity, cnt = 0;
       for (let b = 0; b < BINS - 1; b++) {
-        if (binCount[b]) {
-          ax0 = Math.min(ax0, binMin[b * 3]); ay0 = Math.min(ay0, binMin[b * 3 + 1]); az0 = Math.min(az0, binMin[b * 3 + 2]);
-          ax1 = Math.max(ax1, binMax[b * 3]); ay1 = Math.max(ay1, binMax[b * 3 + 1]); az1 = Math.max(az1, binMax[b * 3 + 2]);
+        const o = (base + b) * 3;
+        if (binCount[base + b]) {
+          ax0 = Math.min(ax0, binMin[o]); ay0 = Math.min(ay0, binMin[o + 1]); az0 = Math.min(az0, binMin[o + 2]);
+          ax1 = Math.max(ax1, binMax[o]); ay1 = Math.max(ay1, binMax[o + 1]); az1 = Math.max(az1, binMax[o + 2]);
         }
-        cnt += binCount[b];
+        cnt += binCount[base + b];
         leftCount[b] = cnt;
         const dx = ax1 - ax0, dy = ay1 - ay0, dz = az1 - az0;
         leftArea[b] = cnt ? dx * dy + dy * dz + dz * dx : 0;
       }
       ax0 = Infinity; ay0 = Infinity; az0 = Infinity; ax1 = -Infinity; ay1 = -Infinity; az1 = -Infinity; cnt = 0;
       for (let b = BINS - 1; b > 0; b--) {
-        if (binCount[b]) {
-          ax0 = Math.min(ax0, binMin[b * 3]); ay0 = Math.min(ay0, binMin[b * 3 + 1]); az0 = Math.min(az0, binMin[b * 3 + 2]);
-          ax1 = Math.max(ax1, binMax[b * 3]); ay1 = Math.max(ay1, binMax[b * 3 + 1]); az1 = Math.max(az1, binMax[b * 3 + 2]);
+        const o = (base + b) * 3;
+        if (binCount[base + b]) {
+          ax0 = Math.min(ax0, binMin[o]); ay0 = Math.min(ay0, binMin[o + 1]); az0 = Math.min(az0, binMin[o + 2]);
+          ax1 = Math.max(ax1, binMax[o]); ay1 = Math.max(ay1, binMax[o + 1]); az1 = Math.max(az1, binMax[o + 2]);
         }
-        cnt += binCount[b];
+        cnt += binCount[base + b];
         const dx = ax1 - ax0, dy = ay1 - ay0, dz = az1 - az0;
         const rightArea = cnt ? dx * dy + dy * dz + dz * dx : 0;
         const left = leftCount[b - 1];
@@ -151,6 +162,7 @@ export function buildBvh(mesh: Mesh, shared = false): BvhData {
         if (cost < bestCost) { bestCost = cost; bestAxis = axis; bestBin = b; }
       }
     }
+    const lo = [c0x, c0y, c0z], hi = [c1x, c1y, c1z];
     let mid: number;
     if (bestAxis < 0) {
       // Every centroid in one place: split the range in half.
