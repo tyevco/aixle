@@ -270,13 +270,16 @@ export function commentCodeWarnings(program: Program): string[] {
   return out;
 }
 
+/** A library's own name, kept out of its exports: one that starts with an underscore (`_demo_case`). */
+export const isPrivate = (name: string): boolean => name.startsWith("_");
+
 const MAX_LOOP = 20000;
 const MAX_DEPTH = 64;
 
 class Scope {
   private vars = new Map<string, Value>();
   /** On a root scope: the libraries its program used, so a library's defs reach the library's own uses. */
-  modules?: Map<string, { path: string; exports: Map<string, Value> }>;
+  modules?: Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>;
   /** On a def's call scope with a block body: the names its statements assigned, which are the def's own. */
   locals?: Set<string>;
   constructor(private readonly parent?: Scope) {}
@@ -368,7 +371,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let depth = 0;
   let loops = 0;
   /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
-  const modules = new Map<string, { path: string; exports: Map<string, Value> }>();
+  const modules = new Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>();
   global.modules = modules;
   const moduleList: UsedModule[] = [];
   /** Names read while evaluating the current top-level statement. */
@@ -777,6 +780,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       throw new RuntimeError(`'${prefix}' is not a used library${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${prefix}.aix" or use "std/${prefix}" first`, line);
     }
     const v = mod.exports.get(name);
+    if (v === undefined && mod.own?.has(name)) throw new RuntimeError(`'${mod.path}' keeps '${name}' to itself: a name that starts with _ is a library's own; it offers ${[...mod.exports.keys()].join(", ") || "nothing"}`, line);
     if (v === undefined) throw new RuntimeError(`'${mod.path}' has no '${name}'; it has ${[...mod.exports.keys()].join(", ") || "nothing exported"}`, line);
     reads?.add(dotted);
     return v;
@@ -1280,11 +1284,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         }
         for (const [name, v] of Object.entries(options.jointPoses ?? {})) { CURRENT_ANGLES.set(name, v.angles); CURRENT_POSES.set(name, v); }
         const exports = new Map<string, Value>();
-        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
+        // A name that starts with _ is the library's own (its plate's helpers, a def's helper): not exported, not
+        // listed by check's use line or by aixle doc (round 11: demo_case and demo_y were offered to every caller).
+        const own = new Set<string>();
+        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) { if (isPrivate(st.name)) own.add(st.name); else exports.set(st.name, st.value); }
         // A def's body runs where it is called, so an assert in it says which library's line it is.
-        for (const d of lib.defs) { d.file ??= stmt.path; exports.set(d.name, d); }
+        for (const d of lib.defs) { d.file ??= stmt.path; if (isPrivate(d.name)) own.add(d.name); else exports.set(d.name, d); }
         for (const a of lib.asserts) asserts.push({ ...a, file: a.file ?? stmt.path });
-        modules.set(prefix, { path: stmt.path, exports });
+        modules.set(prefix, { path: stmt.path, exports, own });
         moduleList.push({ prefix, path: stmt.path, names: [...exports.keys()] });
         return;
       }

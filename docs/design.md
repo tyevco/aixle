@@ -914,7 +914,14 @@ at the bottom of every shipped library is its preview and its test
 closures. The shipped `std/` is a folder of ordinary `.aix` files beside
 `src/`; there is no registry, and `aixle doc lib.aix` reads the defs and
 the comments above them, so a library documents itself the way the
-builtins do.
+builtins do. Its constants are printed with their values, since a
+record of defaults is the only place that says which fields a part
+reads. A name that starts with an underscore is not exported: a
+library's plate needs helpers of its own, and without a way to keep
+them, round 11's bookcase offered its `demo_case` and `demo_y` to every
+caller. A leading underscore was chosen over a keyword because it
+needs nothing new in the grammar and reads the same in the library
+and in an error.
 
 ## Anchors
 

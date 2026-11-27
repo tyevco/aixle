@@ -472,7 +472,10 @@ f` picks the name, and `std/` is the set shipped with the tool:
 `std/plants` (a potted plant, a bush, a tree, grass). A path is relative
 to the program using it, `.aix` may be left off, and `aixle doc
 std/furniture.aix` prints what a library offers: each def with its
-parameters and defaults and the comment above it. Every shipped part is
+parameters and defaults and the comment above it, then each constant
+with its value (a record as written, so `case_default = {w: 8, d: 3, t:
+0.2}` says what a case record holds; a material as written; a long value
+cut short) and the comment above it. Every shipped part is
 built at the origin standing on y = 0, facing +z, so it is placed with
 `move` or `attach` like anything else:
 
@@ -496,7 +499,12 @@ origin is, which way is front, what the units are), and a `show` of a
 plate of every part so `aixle render` on the file is its test. A part
 that needs intermediates or a loop is a def with a block body (see
 Statements), so a library is one def per part rather than a helper per
-sub-part. `check`
+sub-part. A name that starts with an underscore is the library's own:
+`_demo_case = {...case_default, w: 4}` for the plate, `def _band(b)` for
+a helper its parts call. It works inside the library as any name does,
+and is not exported: `aixle doc` and `check`'s `use` line leave it out,
+and a program that reads `lib._demo_case` is told the library keeps it
+to itself. In a program run on its own an underscore means nothing. `check`
 lists what a program uses and `explain` ends with it. A part's slats,
 rods and walls carry their thickness into the scene, so `check` warns
 when a used part has a member thinner than the scene's cell (a bench's

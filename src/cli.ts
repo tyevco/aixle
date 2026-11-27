@@ -14,8 +14,8 @@ import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { diskCache, type ImportCache } from "./import/cache.js";
-import { assertLine, assertPassLine } from "./lang/interpreter.js";
-import { exprText } from "./lang/ast.js";
+import { assertLine, assertPassLine, isPrivate } from "./lang/interpreter.js";
+import { exprText, type Stmt } from "./lang/ast.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
@@ -63,13 +63,16 @@ function libraryMarkdown(file: string): string {
   const head: string[] = [];
   for (const l of lines) { if (/^\s*#/.test(l)) head.push(l.replace(/^\s*#\s?/, "")); else break; }
   if (head.length) out.push(head.join("\n"), "");
-  // The constants a user sees: the top-level values that are not shapes (materials, numbers, lists), by running it.
+  // The constants a user sees: the top-level values that are not shapes (materials, numbers, lists), by running it;
+  // a name that starts with _ is the library's own, and is left out with its defs.
   const ev = check(source, file);
-  const exports = ev.steps.filter((st) => !isShape3(st.value) && !isShape2(st.value)).map((st) => st.name);
+  const exports = ev.steps.filter((st) => !isShape3(st.value) && !isShape2(st.value) && !isPrivate(st.name));
+  /** The comment lines straight above a line, as one paragraph. */
+  const above = (line: number): string[] => { const doc: string[] = []; for (let i = line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, "")); return doc; };
   for (const st of program.body) {
-    if (st.type !== "def") continue;
+    if (st.type !== "def" || isPrivate(st.name)) continue;
     const doc: string[] = [];
-    for (let i = st.line - 2; i >= 0 && /^\s*#/.test(lines[i]); i--) doc.unshift(lines[i].replace(/^\s*#\s?/, ""));
+    doc.push(...above(st.line));
     // The default as written on the def's line when it is a plain value, found by the parameter's own name (h, not
     // the h of wh=2); a record or a call is printed from its tree, since the text up to the next comma would cut it.
     const written = (name: string): string | undefined => lines[st.line - 1].match(new RegExp(`(?<![\\w.])${name}\\s*=\\s*([^,)]+)`))?.[1]?.trim();
@@ -78,7 +81,18 @@ function libraryMarkdown(file: string): string {
     out.push(`## ${st.name}(${params.join(", ")})`, "");
     if (doc.length) out.push(doc.join("\n"), "");
   }
-  if (exports.length) out.push(`Constants: ${exports.join(", ")}`, "");
+  // Each constant with its value, since a record's fields are what a caller passes (round 11: a case record's
+  // fields were the documentation, and doc listed only the name); a material as it was written, a long value cut.
+  if (exports.length) {
+    out.push("## Constants", "");
+    for (const st of exports) {
+      const written = program.body.find((b): b is Extract<Stmt, { type: "assign" }> => b.type === "assign" && b.name === st.name && b.line === st.line);
+      const value = isMaterial(st.value) && written ? exprText(written.value) : valueText(st.value);
+      const doc = above(st.line);
+      out.push(`- \`${st.name} = ${clip(value, 100)}\`${doc.length ? `  \n  ${doc.join(" ")}` : ""}`);
+    }
+    out.push("");
+  }
   return out.join("\n");
 }
 

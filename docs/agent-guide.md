@@ -12,7 +12,9 @@ the inside is cut open.
    building a bolt, a chair or a tree, `use "std/hardware"`,
    `"std/furniture"` or `"std/plants"` (`aixle doc std/hardware.aix` lists
    what is there) and place the part; keep your own repeated parts in a
-   library file of `def`s next to the program and `use` that. Build each
+   library file of `def`s next to the program and `use` that (a part
+   with intermediates or a loop is `def part(p) { ... return x }`; a
+   name starting with `_` stays the library's own). Build each
    part at the origin, then `rotate`, then `move` into place, or better,
    `anchor` the points where parts meet and `attach` them: `seat |
    attach("bottom", legs, "top")` needs no arithmetic and survives a
@@ -64,7 +66,7 @@ the inside is cut open.
 
 ```
 npx aixle check model.aix                  sizes and warnings, no pictures (--pose NAME: in that pose)
-npx aixle doc std/furniture.aix            what a library offers: each def with its parameters and the comment above it
+npx aixle doc std/furniture.aix            what a library offers: each def with its parameters and the comment above it, each constant with its value
 npx aixle explain model.aix                the program as a tree from the output down: each step's source line, size, material, anchors; read this first on a program you did not write
 npx aixle render model.aix --quick         the sheet only, small grid, fast; --watch re-renders on save
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report

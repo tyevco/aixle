@@ -288,3 +288,33 @@ describe("a loop's own names and named() (round 11: BK on the steps sheet, a loo
     expect(ev.warnings).toEqual(["'peg_0' (line 2) is not part of the output; add it to the model or remove it", "'peg_1' (line 2) is not part of the output; add it to the model or remove it"]);
   });
 });
+
+describe("a library's own names and its constants in aixle doc (round 11: the plate's helpers offered to callers)", () => {
+  const LIB = [
+    "# cases",
+    "",
+    "# The case a caller starts from.",
+    "case_default = {w: 8, d: 3, t: 0.2}",
+    "oak = material(\"oak\", scale=0.3)",
+    "rows = [{n: 3, gap: 0.002}, {n: 2, gap: 2.85}]",
+    "# A board, w wide.",
+    "def board(c) = box(c.w, c.t, c.d)",
+    "def _helper(c) = board(c) | move(0, 1, 0)",
+    "_demo_case = {...case_default, w: 4}",
+    "_demo_y = 0.8",
+    "plate = _helper(_demo_case)",
+    "show plate",
+  ].join("\n");
+  it("keeps a name that starts with _ out of the exports, and says so when a program reads one", () => {
+    const resolve = () => ({ source: LIB, file: "cases.aix" });
+    const e = evaluate(parse('use "cases"\nb = cases.board(cases.case_default)\n'), { resolveModule: resolve });
+    expect(e.modules[0].names).toEqual(["case_default", "oak", "rows", "board"]);
+    expect(() => evaluate(parse('use "cases"\nb = cases._demo_y\n'), { resolveModule: resolve })).toThrow("line 2: 'cases' keeps '_demo_y' to itself: a name that starts with _ is a library's own; it offers case_default, oak, rows, board");
+  });
+  it("prints each constant with its value and the comment above it, and leaves the library's own names out", { timeout: 30000 }, () => {
+    const doc = cli("doc", file("cases.aix", LIB));
+    expect(doc).toContain("## Constants\n\n- `case_default = {w: 8, d: 3, t: 0.2}`  \n  The case a caller starts from.\n- `oak = material(\"oak\", scale=0.3)`\n- `rows = [{n: 3, gap: 0.002}, {n: 2, gap: 2.85}]`\n");
+    expect(doc).toContain("## board(c)\n\nA board, w wide.");
+    expect(doc).not.toMatch(/_helper|_demo/);
+  });
+});

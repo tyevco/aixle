@@ -23,7 +23,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    a tree or the like, `use "std/hardware"`, `"std/furniture"` or
    `"std/plants"` first (`npx aixle doc std/hardware.aix` says what each
    has and how it is placed) rather than building it; put parts you
-   repeat in a library file of `def`s beside the program and `use` it.
+   repeat in a library file of `def`s beside the program and `use` it
+   (a part with intermediates or a loop is `def part(p) { ... return x
+   }`; a name starting with `_` stays the library's own).
    Build each part at the
    origin, then `rotate`, then `move` into place; where two parts meet,
    `anchor` the meeting points and `attach` one to the other instead of
