@@ -156,6 +156,15 @@ export interface Shape3 {
   /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
   bound?: boolean;
   /**
+   * Set on a leaf (a shape with no inner or parts) whose field is known to read at least its distance from its box
+   * everywhere outside the box, as a distance does: the exact primitives, a tube, and an extrusion or a revolve of a
+   * profile with Shape2.boxFloor. A difference skips such a cutter outside its box (boxFloored in ops.ts). Not an
+   * ellipsoid, whose field is an approximation that reads 0.155 by a flat one's rim where its box is 0.224 away; a
+   * halfspace's planes; a sweep, whose pieces read the distance to a tilted mitre plane past it; nor an import,
+   * whose open mesh reads inside above its box. A leaf without it is never trusted to.
+   */
+  boxFloor?: boolean;
+  /**
    * How far this step's own field can stretch its child's, for the mesher's narrow band (fieldBound in ops.ts):
    * |f(p) - f(q)| <= lipschitz x the child's factor x |p - q|. Set where a warp is not an isometry (a twist, a
    * twisted or tapered sweep) and by an import's trilinear samples; Infinity where no bound is worked out (bend,
@@ -239,6 +248,13 @@ export interface Shape2 {
   revolveDist?: DistFn2;
   /** Lettering bent onto an arc: the nearest and farthest the ink comes to the arc's centre, the origin. */
   arcSpan?: [number, number];
+  /**
+   * Set where the field is known to read at least its distance from the box outside the box, as a distance does: a
+   * circle, a rectangle, a polygon, and the unions, differences, moves, turns, uniform scales, offsets and shells of
+   * such profiles. Not an ellipse, whose field reads as little as 0.88 of that a few sizes off on a diagonal, nor an
+   * intersection or an outline's scan. A sweep bounds its pieces across the path by it (sweeps.ts).
+   */
+  boxFloor?: boolean;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

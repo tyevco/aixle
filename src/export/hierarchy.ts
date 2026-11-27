@@ -13,7 +13,7 @@
  */
 import type { Vec3 } from "../core/vec.js";
 import { allJoints, findJoints, move as moveShape, reliefMaterials } from "../sdf/ops.js";
-import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
+import { boundsSize, isEmpty, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
 import { decimateMeshes, faceDeviation } from "../mesh/decimate.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
@@ -96,6 +96,23 @@ export interface HierarchyOptions {
    * normals at their corners.
    */
   fieldNormals?: boolean;
+  /**
+   * A mesh already extracted, and what it was extracted with: an object with no joints and no placed sets whose
+   * shape, box, resolution, sharpness and crease are these takes it instead of meshing again, since the mesher is
+   * deterministic and would give the same bytes. Anything that differs (a tightened box, a resolution one more by
+   * rounding) extracts as before. The mesh is only read: the decimation and the atlas make new meshes from it.
+   */
+  known?: KnownMesh;
+}
+
+/** A mesh and the arguments it was extracted with (see HierarchyOptions.known). */
+export interface KnownMesh {
+  shape: Shape3;
+  mesh: Mesh;
+  resolution: number;
+  bounds: Bounds;
+  sharp?: boolean;
+  crease?: number;
 }
 
 /** The field a mesh was extracted from, and what was hidden to extract it, so the baker can read the same surface. */
@@ -107,12 +124,29 @@ interface MeshSource {
   sets: Shape3[];
 }
 
-function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
+/**
+ * A shape meshed over its own bounds at the export's cell. With `known`, only for a shape extracted with nothing
+ * hidden: that mesh when it was made by the very call this would make.
+ */
+function extract(shape: Shape3, opts: HierarchyOptions, known?: KnownMesh): Mesh {
   const s = boundsSize(shape.bounds);
   const longest = Math.max(s[0], s[1], s[2]);
   if (!(longest > 0) || isEmpty(shape.bounds)) return surfaceNets(shape, { resolution: 8 }).mesh;
   const resolution = Math.max(8, Math.min(opts.maxResolution ?? 512, Math.ceil(longest / opts.cellSize)));
+  if (known && sameExtraction(known, shape, resolution, opts)) return known.mesh;
   return surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
+}
+
+/** Whether surfaceNets(shape, { resolution, sharp, crease }) over the shape's bounds is the call that made `known`. */
+function sameExtraction(known: KnownMesh, shape: Shape3, resolution: number, opts: HierarchyOptions): boolean {
+  const b = shape.bounds, k = known.bounds;
+  return (
+    known.shape === shape &&
+    known.resolution === resolution &&
+    [0, 1, 2].every((i) => b.min[i] === k.min[i] && b.max[i] === k.max[i]) &&
+    (known.sharp !== false) === (opts.sharp !== false) &&
+    (known.crease ?? 35) === (opts.crease ?? 35)
+  );
 }
 
 function shifted(mesh: Mesh, origin: Vec3): Mesh {
@@ -272,7 +306,8 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     const sets = placedIn(obj.shape);
     for (const n of joints) n.joint!.hidden = true;
     for (const s of sets) s.instanced!.hidden = true;
-    const own = extract(obj.shape, opts);
+    // With nothing hidden the object's field is the one the main mesh was cut from, which may serve again.
+    const own = extract(obj.shape, opts, joints.length === 0 && sets.length === 0 ? opts.known : undefined);
     for (const n of joints) n.joint!.hidden = false;
     for (const s of sets) s.instanced!.hidden = false;
     roots.push({

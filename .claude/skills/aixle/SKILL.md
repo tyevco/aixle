@@ -11,7 +11,8 @@ one named step per line. The tool turns the program into pictures you read
 to check the model, and into meshes to ship. Nothing is taken on faith:
 sizes are printed, every step is drawn, and the inside is cut open.
 
-Reference: `docs/reference.md` (every function, generated from the code),
+Reference: `docs/reference.md` (every function, generated from the code;
+`npx aixle doc NAME` prints one entry),
 `docs/language.md` (the language), `examples/*.aix` (ten worked models).
 
 ## The loop
@@ -33,7 +34,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    has and how it is placed) rather than building it; put parts you
    repeat in a library file of `def`s beside the program and `use` it
    (a part with intermediates or a loop is `def part(p) { ... return x
-   }`; a name starting with `_` stays the library's own).
+   }`; a name starting with `_` stays the library's own). Look up a
+   builtin you are unsure of with `npx aixle doc sweep` (its entry:
+   what it does, every signature, each parameter; a misspelt name gets
+   the nearest names) rather than guessing its arguments.
    Build each part at the
    origin, then `rotate`, then `move` into place; where two parts meet,
    `anchor` the meeting points and `attach` one to the other instead of

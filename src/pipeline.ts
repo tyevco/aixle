@@ -16,7 +16,7 @@ import { toStl } from "./export/stl.js";
 import { to3mf } from "./export/threemf.js";
 import { toBedrock, toBedrockAnimations, type BedrockClip } from "./export/bedrock.js";
 import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/roblox.js";
-import { buildHierarchy, flatten } from "./export/hierarchy.js";
+import { buildHierarchy, flatten, type KnownMesh } from "./export/hierarchy.js";
 import { wearProbe } from "./sdf/materials.js";
 import type { Vec3 } from "./core/vec.js";
 import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedPoint, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
@@ -1490,6 +1490,8 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
   let bounds: Bounds | undefined;
   let trueBounds: Bounds | undefined;
   let cellSize = 0;
+  // The main mesh and the call that made it, which the export takes again for an object it would mesh the same way.
+  let mainMesh: KnownMesh | undefined;
   const lines: string[] = [`# ${name}`, "", `Source: \`${sourceName}\`  Output: \`${evaluation.outputName}\``, ""];
 
   if (!output) {
@@ -1515,7 +1517,9 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
         resolutionFor = (b) => Math.min(500, grid * (Math.max(...boundsSize(b)) / restLongest));
       }
     }
-    let nets = time("mesh", () => surfaceNets(output, { resolution: resolutionFor(extractBox), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: extractBox }));
+    // What the main mesh was cut with, so the export can take it again when it would make the same call.
+    let meshedWith = { resolution: resolutionFor(extractBox), bounds: extractBox };
+    let nets = time("mesh", () => surfaceNets(output, { resolution: meshedWith.resolution, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, bounds: extractBox }));
     // The safety net: if the mesh reaches a face of a tightened box, something was cut off there (a part thinner than
     // the rays' spacing), so extract again over the whole bounds rather than ship a clipped model.
     if (extractBox !== output.bounds && triangleCount(nets.mesh) > 0) {
@@ -1524,11 +1528,13 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       const clipped = [0, 1, 2].some((k) => (extractBox.min[k] > output.bounds.min[k] + near && mb.min[k] < extractBox.min[k] + near) || (extractBox.max[k] < output.bounds.max[k] - near && mb.max[k] > extractBox.max[k] - near));
       if (clipped) {
         log(`extent: the surface reaches the tightened box, so extracting over the full bounds instead`);
-        nets = time("mesh", () => surfaceNets(output, { resolution: resolutionFor(output.bounds), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
+        meshedWith = { resolution: resolutionFor(output.bounds), bounds: output.bounds };
+        nets = time("mesh", () => surfaceNets(output, { resolution: meshedWith.resolution, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
       }
     }
     mesh = nets.mesh;
     cellSize = nets.cellSize;
+    mainMesh = { shape: output, mesh, resolution: meshedWith.resolution, bounds: meshedWith.bounds, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease };
     // Past 500 cells along the posed box the rest cell cannot be kept (a folded arm unfolded at set grid 400), and the
     // title and the report say the cell is coarser than at rest rather than "as at rest".
     if (poseCell !== undefined && cellSize > poseCell * 1.001) poseCoarser = true;
@@ -1792,7 +1798,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       // A web export has a budget like a Roblox one: past it the meshes are decimated before the atlas is baked, and
       // the report says by how much and how far the result strays from the model.
       const cap = Math.max(0, Math.round(opts.triangles ?? (typeof evaluation.settings.triangles === "number" ? evaluation.settings.triangles : WEB_TRIANGLES)));
-      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, wearProbe: wearScale, maxTriangles: cap > 0 ? cap : undefined }));
+      const hierarchy = time("hierarchy", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, wearProbe: wearScale, maxTriangles: cap > 0 ? cap : undefined, known: mainMesh }));
       warnings.push(...hierarchy.notes);
       const nodes = flatten(hierarchy).length;
       const extraMaps = [hierarchy.normalMap ? "normal" : "", hierarchy.metalRoughMap ? "metallic-roughness" : "", hierarchy.emissiveMap ? "emissive" : ""].filter(Boolean);
@@ -1869,7 +1875,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
         const budget = accessory ? ACCESSORY_TRIANGLES : MESHPART_TRIANGLES;
         // The colour atlas alone, as before the PBR maps: what Studio's importer makes of a normal or packed
         // metallic-roughness map on a decimated mesh is untested.
-        const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget, maps: false }));
+        const rbHierarchy = time("roblox", () => buildHierarchy(rest.objects, { cellSize, sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease, texture: textureSize > 0 ? Math.max(64, textureSize) : 0, names: stepNames, maxTriangles: budget, maps: false, known: mainMesh }));
         // The Roblox meshes are decimated from the full extraction, not from the web export's capped count.
         const rb = toRoblox(rbHierarchy, name, { anchors, size: bounds ? boundsSize(bounds) : [0, 0, 0], animations: glbAnimations, before: hierarchy.decimated?.before ?? hierarchy.triangles });
         write("model.roblox.glb", rb.glb);

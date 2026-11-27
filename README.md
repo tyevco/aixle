@@ -77,6 +77,7 @@ npx aixle render model.aix --3mf                # also model.3mf for a slicer, a
 npx aixle render model.aix --triangles 50000    # cap the GLB, OBJ and viewer (decimated; default 200000, 0 for all)
 npx aixle check model.aix --no-cache            # sample imports afresh; they are otherwise cached on disk by content
 npx aixle doc                        # the reference, to stdout
+npx aixle doc sweep tube             # those entries of it (a misspelt name gets the nearest names)
 ```
 
 `render` writes:

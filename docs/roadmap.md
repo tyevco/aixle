@@ -942,7 +942,27 @@ three.js, Blender and Babylon read all three. Unity's glTFast approximates trans
 
 **Cost.** A day for the factors with one thickness per material; two to four days for per-material surfaces. No committed render changes.
 
-### 22. Fewer evaluations in a render: reuse the export's mesh, skip a cutter, bound a sweep's pieces
+### 22. Fewer evaluations in a render: reuse the export's mesh, skip a cutter, bound a sweep's pieces: built
+
+Built in the order of safety the proposal gives, with every field, mesh
+and export file the same to the bit. The export takes the main mesh for
+one object with no joints or placed sets cut over its own bounds at the
+same resolution (21 of the 25 examples, 17 of the other 47 programs); a
+resolution one more by rounding, or a tightened box, extracts as
+before. A difference skips a cutter of two primitives or more outside
+its box, but only one built of leaves that say they read at least their
+box distance outside the box (the exact primitives, tubes, and the
+extrusions and revolves of profiles that keep it, lettering among them)
+and holding no bound on the distance, no intersection and no unevenly
+scaled joint: round 10's wrapped inscription read under its box
+distance, and review found an ellipsoid, an open import, a halfspace
+and a sweep that do too. A sweep visits its pieces nearest first under a bound
+proved against each, the part across the path only for a profile that
+reads at least its box distance, which an ellipse and a smooth union do
+not. Tubes were
+left as they were, since a capsule is its own bound, and curve2 is not
+touched. design.md, "Fewer evaluations", has the rest. What follows is
+the proposal as it was written.
 
 **Why.** Once the narrow band is in, what remains is repeated work and the cost per evaluation of a few primitives:
 - **The export meshes the model twice.** buildHierarchy's extract() meshes each object at ceil(longest / cell) over its bounds. For a single object with no joints, that is the main extraction, and it gave back the same positions, indices and normals on six examples. 20 of 24 examples qualify. The second extraction was 8.8 s of the rope's 40 s render, and would be about 3 s after the band.
@@ -1073,7 +1093,7 @@ Questions written from the description before looking beat a free critique. In C
 
 ### Smaller items from the research
 
-- **`aixle doc NAME`** should print one builtin's entry (signature, description, a usage), and the nearest names for an unknown one. Today it prints the whole 886-line reference, because src/cli.ts treats any argument not ending in `.aix` as no argument. Retrieved docs help code generation in unfamiliar libraries (DocPrompting, ICLR 2023; LL3M), though Aixle's 40 thousand tokens of docs fit in context.
+- **`aixle doc NAME`: built.** `aixle doc sweep` prints the entry under its group heading (the description, every signature, which is the usage a failed call prints, and the parameters), `aixle doc joint` a section the reference writes by hand, `aixle doc oak` a preset's row, and several names at once; a name the reference lacks fails with the names nearest it (`cylnder`: cylinder, center). `aixle doc` alone and `aixle doc lib.aix` print what they did. As proposed: `aixle doc NAME` should print one builtin's entry (signature, description, a usage), and the nearest names for an unknown one. Today it prints the whole 886-line reference, because src/cli.ts treats any argument not ending in `.aix` as no argument. Retrieved docs help code generation in unfamiliar libraries (DocPrompting, ICLR 2023; LL3M), though Aixle's 40 thousand tokens of docs fit in context.
 - **Roblox: one primitive per mesh.** The importer makes one MeshPart per glTF primitive, and Merge Meshes is off by default. So the shipped tophat accessory's Handle (felt and silk) arrives as two MeshParts, while the report says one mesh. Merging is safe because that export carries only the colour atlas. Two related fixes: the documented limit per mesh is 20,000 triangles against Aixle's 10,000, and the docs allow one animation track per model, which the Roblox row should say when a program has several clips. A person with Studio checks it.
 - **Bedrock: the block's limit.** Warn when block geometry (the default `--minecraft` output) is over 30 pixels on a side, reaches past ±30 pixels of the origin, or has no pixel inside the base block on some axis (Microsoft's custom block rules). The mug comes out at 60 × 38 × 38 pixels, x from -41 to 19, with no warning. A `.mcaddon` pack written by the existing zip writer could follow. Its UUIDs should hash the content as well as the name, so two models with one name do not collide in the game.
 - **Decimation keeps a manifold mesh manifold.** Refuse a collapse that fails the link condition (Dey et al., 1999). A 2-cell rod cut to 82 triangles gains 3 non-manifold edges; cut to 28, it gains 9 and a pinched vertex. Once 14 is in, the exports are the only outputs that can still lose manifoldness. The export branch has already answered the shading streaks on cut-down meshes, by baking the field's normal for every material.

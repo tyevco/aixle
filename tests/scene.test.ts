@@ -15,6 +15,7 @@ import { run } from "../src/pipeline.js";
 import * as pipelineFns from "../src/pipeline.js";
 import { check } from "../src/pipeline.js";
 import { viewerHtml } from "../src/export/viewer.js";
+import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { preset } from "../src/sdf/materials.js";
 
 describe("joints", () => {
@@ -147,6 +148,41 @@ describe("hierarchy and writers", () => {
     const q = eulerToQuat(0, 0, 90);
     expect(q[2]).toBeCloseTo(Math.SQRT1_2);
     expect(q[3]).toBeCloseTo(Math.SQRT1_2);
+  });
+});
+
+describe("the export takes the main mesh again", () => {
+  const cup = O.difference(O.paint(P.cylinder(1, 2), preset("blue")!), O.move(P.cylinder(0.8, 2), 0, 0.2, 0));
+  const res = 40;
+  const main = surfaceNets(cup, { resolution: res, bounds: cup.bounds });
+  const known = { shape: cup, mesh: main.mesh, resolution: res, bounds: cup.bounds };
+  const bytes = (m: { positions: Float32Array; indices: Uint32Array; normals: Float32Array }) => [Buffer.from(m.positions.buffer).toString("base64"), Buffer.from(m.indices.buffer).toString("base64"), Buffer.from(m.normals.buffer).toString("base64")];
+  it("for one object with nothing hidden, extracted by the same call: the same mesh, not a second extraction", () => {
+    const fresh = buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize, texture: 0 });
+    const again = buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize, texture: 0, known });
+    expect(again.meshes[0]).toBe(main.mesh);
+    expect(bytes(again.meshes[0])).toEqual(bytes(fresh.meshes[0]));
+  });
+  it("misses, and extracts, where any argument differs: a tightened box, another resolution, a joint, another shape", () => {
+    const tight = { ...known, bounds: { min: [-1, -1, -1] as [number, number, number], max: [1, 0.9, 1] as [number, number, number] } };
+    expect(buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize, texture: 0, known: tight }).meshes[0]).not.toBe(main.mesh);
+    expect(buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize * 0.99, texture: 0, known }).meshes[0]).not.toBe(main.mesh);
+    expect(buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize, texture: 0, known, crease: 20 }).meshes[0]).not.toBe(main.mesh);
+    const jointed = O.union([cup, O.joint(O.move(P.box(0.2, 0.2, 0.2), 1.2, 0, 0), "tab", 1, 0, 0)]);
+    const jm = surfaceNets(jointed, { resolution: res, bounds: jointed.bounds });
+    const h = buildHierarchy([{ name: "cup", shape: jointed }], { cellSize: jm.cellSize, texture: 0, known: { shape: jointed, mesh: jm.mesh, resolution: res, bounds: jointed.bounds } });
+    expect(h.meshes[0]).not.toBe(jm.mesh);
+    expect(buildHierarchy([{ name: "cup", shape: O.move(cup, 0, 0, 0) }], { cellSize: main.cellSize, texture: 0, known }).meshes[0]).not.toBe(main.mesh);
+  });
+  it("is copied by the decimation cap and the atlas, never changed in place", () => {
+    const before = bytes(main.mesh);
+    const capped = buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize, texture: 64, maxTriangles: 500, known });
+    const fresh = buildHierarchy([{ name: "cup", shape: cup }], { cellSize: main.cellSize, texture: 64, maxTriangles: 500 });
+    expect(capped.decimated).toBeDefined();
+    expect(bytes(main.mesh)).toEqual(before);
+    expect(capped.meshes[0]).not.toBe(main.mesh);
+    expect(bytes(capped.meshes[0])).toEqual(bytes(fresh.meshes[0]));
+    expect(Buffer.from(capped.uvs![0].buffer).equals(Buffer.from(fresh.uvs![0].buffer))).toBe(true);
   });
 });
 
