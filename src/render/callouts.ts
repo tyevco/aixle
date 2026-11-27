@@ -222,8 +222,8 @@ export function hiddenFraction(mesh: Mesh, within: Bounds, info: ViewInfo, cellS
  * model's box); the vertex is hidden when the ray meets the surface more than three cells short of it. The share
  * hidden is what the render's test measures from its depth buffer, the model itself included, so a ring of stones
  * hides its far side (round 11: a camera on a beater inside a bowl took two beauty runs of minutes each to aim,
- * since only the render said what it saw). `points` is how many vertices at most; a march that runs out of steps
- * counts as not hidden. Pass the same `points` (from focusPoints) to try several azimuths.
+ * since only the render said what it saw). `limit` is how many vertices at most; a march that runs out of steps
+ * counts as not hidden. Pass the same `points` (the focus's coarse mesh) to try several azimuths.
  */
 export function hiddenFractionRays(model: Shape3, modelBounds: Bounds, points: { positions: Float32Array; normals: Float32Array }, cellSize: number, azimuth: number, elevation: number, limit = 1500): number {
   if (isEmpty(modelBounds) || !points.positions.length) return 0;
