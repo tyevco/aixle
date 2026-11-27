@@ -25,7 +25,9 @@ the inside is cut open.
    and which azimuth hides less, so a shot is aimed before any beauty run.
 4. **`npx aixle render model.aix --quick`** while iterating: the sheet
    in a second or two (a rig's pose sheet is drawn too, its strips only by
-   the full render; `--no-poses` while the geometry is still moving). Then
+   the full render; `--no-poses` while the geometry is still moving; the
+   asserts are judged at full cost, and `--no-asserts` leaves them out
+   while placing parts when the run says they took most of it). Then
    the full render: read `out/model/sheet.png`,
    then `slices.png` if anything is hollow or nested, then `steps.png` if a
    part is missing or misplaced, to see which step went wrong,

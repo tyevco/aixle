@@ -1209,14 +1209,16 @@ failing, with that judgement's message, `assert (line 104) holds 33
 times: clearance(bk, board) > -0.002, nearest to failing -3.6e-16 >
 -0.002: book 24 is not sunk into its shelf` (or `is 1 == 1 each time`
 when it came out the same each time). Nearest to failing is the smallest
-margin, how far the comparison passed by: `a - b` for `>` and `>=`, `b -
-a` for `<` and `<=`, `|a - b|` for `!=`; a test that is no comparison
-has no margin, and its first judgement stands for the rest. The failures
+margin, how far the comparison passed by: `a - b` for `>` and `>=`,
+`b - a` for `<` and `<=`, `|a - b|` for `!=` (and `-|a - b|` for `==`,
+which `report.json` keeps as each assert's `margin`); a test that is no
+comparison has no margin, and its first judgement stands for the rest. The failures
 come after the passes, every one in full with its numbers and its place,
 just above the count, so four failures among two hundred promises are
 the last thing printed and need no grep (and no switch for failures
 alone). A pose that is not defined is a warning and the assert is never
-tested.
+tested. A used library's asserts run with it and are reported with the
+library's path.
 
 An assert that takes time says so on the error stream, and a fast run
 says nothing: one that takes over a second is named with its time when
@@ -1224,13 +1226,12 @@ it ends; once the asserts have taken two seconds between them, `check`
 and `render` name one as it starts each second, and `check` ends with
 how long they took and the slowest few lines; one still running two
 seconds after it started is named then, at 10, 30 and 60 seconds and
-each minute after, so a query that does not return shows which promise it is (`still
-judging assert (line 8): overlap(bk, board) < 0.0001 after 2 s`). A
-`--quick` render whose asserts took most of its time says so, with the
-slowest, since a `wall()` or a `pieces()` meshes at the program's grid
-in a quick pass too; `--no-asserts` leaves them out while placing parts,
-and `check` judges them. A used library's asserts run with it and are reported
-with the library's path.
+each minute after, so a query that does not return shows which promise
+it is (`still judging assert (line 8): overlap(bk, board) < 0.0001 after
+2 s`). A `--quick` render whose asserts took most of its time says so,
+with the slowest, since a `wall()` or a `pieces()` meshes at the
+program's grid in a quick pass too; `--no-asserts` leaves them out while
+placing parts, and `check` judges them.
 
 The queries that make it useful: `pieces(shape, resolution)` is the
 number of separate pieces the shape meshes into at that many cells on
