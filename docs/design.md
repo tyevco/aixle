@@ -182,11 +182,24 @@ a lighthouse's three primitives and a hub's 58). The floor the cull
 reads is the one union()'s cull already assumes, and not every field
 keeps it. Round 10's ring wraps its inscription, and a wrap shortens arc
 length outside its radius, so that cutter read under its box distance
-and the cull changed 6 lattice values. A cutter is culled only when
-nothing in it is marked as a bound on the distance (a twist, a bend or
-a wrap, a non-uniform scale, a displacement, a loft, a blend) and it
-holds no intersection, whose box is the overlap of its operands' boxes
-while its field is only the larger of their fields. The cull reads the
+and the cull changed 6 lattice values. Nothing in a cutter may be marked
+as a bound on the distance (a twist, a bend or a wrap, a non-uniform
+scale, a displacement, a loft, a blend), it may hold no intersection,
+whose box is the overlap of its operands' boxes while its field is only
+the larger of their fields, nor a joint a pose scales unevenly. And a
+leaf is trusted only when it says its field keeps the floor
+(`boxFloor`): the exact primitives, a box or a cylinder while its
+rounding fits, tubes along a path or a curve, and the extrusions and
+revolves of profiles that keep it, lettering among them. Review found
+the leaves that do not, each changing the mesh under the first version
+of the gate, which trusted every leaf: Quilez's ellipsoid is an
+approximation that reads 0.155 by a flat one's rim where its box is
+0.224 away, so two flat dimples in a slab moved vertices; an open
+imported sheet reads inside above its box, and cut from a plate it came
+out at 15264 triangles where it had been 14784; a halfspace is a max of
+planes, and a sweep's piece past a mitre reads the distance to a tilted
+plane. The repo's programs keep the same culls, 53 of the 64
+differences with a cutter of two primitives or more. The cull reads the
 base's own value, never more than the difference did, so the band's
 bound holds.
 
@@ -202,15 +215,20 @@ cap) past one. The plain distance to the segment is no bound: between
 the mitre planes, past the segment's end and off the path, the piece
 reads the profile alone, which is less. The bound across the path needs
 the profile to read at least its box distance outside its box. A
-circle, a rectangle and a polygon do, and so does what the booleans and
-transforms that keep it build of them, which a profile now says
-(`boxFloor`). An ellipse does not: its field reads 0.88 of its box
+circle, a rectangle, a polygon and lettering do, and so does what the
+hard booleans and the transforms that keep it build of them, which a
+profile now says (`boxFloor`). A smooth union does not: chained over
+its parts it reads up to k under the least of them, past the k/2 its
+box grows by, and a sweep of ten bars blended at 0.5 read differently at
+thousands of points under the bound. An ellipse does not: its field reads 0.88 of its box
 distance a few sizes off on a diagonal, and with the bound across the
 path the teapot's handle read differently at 4307 points of a lattice at
 half density. A profile without the floor is bounded by its end values
 alone, which hold for any profile. The spatial index bounds the pieces listed in the point's
 cell, evaluates the one with the least bound, then only those whose
-bound is under the best so far; the scans past the cell keep their
+bound is under the best so far, an equal value taking the best from a
+piece later in the list so a tie of 0 and -0 comes out as min()'s; the
+scans past the cell keep their
 order and their box cull, the bound skipping only a piece that cannot
 lower the best, so they give the same bits wherever the bound holds.
 Near the rope's surface that is 2.1 pieces a sample against 21.7 (4.4

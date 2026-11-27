@@ -834,11 +834,16 @@ one object with no joints or placed sets cut over its own bounds at the
 same resolution (21 of the 25 examples, 17 of the other 47 programs); a
 resolution one more by rounding, or a tightened box, extracts as
 before. A difference skips a cutter of two primitives or more outside
-its box, but not one that holds a field that is only a bound on the
-distance or an intersection: round 10's wrapped inscription read under
-its box distance. A sweep visits its pieces nearest first under a bound
+its box, but only one built of leaves that say they read at least their
+box distance outside the box (the exact primitives, tubes, and the
+extrusions and revolves of profiles that keep it, lettering among them)
+and holding no bound on the distance, no intersection and no unevenly
+scaled joint: round 10's wrapped inscription read under its box
+distance, and review found an ellipsoid, an open import, a halfspace
+and a sweep that do too. A sweep visits its pieces nearest first under a bound
 proved against each, the part across the path only for a profile that
-reads at least its box distance, which an ellipse does not. Tubes were
+reads at least its box distance, which an ellipse and a smooth union do
+not. Tubes were
 left as they were, since a capsule is its own bound, and curve2 is not
 touched. design.md, "Fewer evaluations", has the rest. What follows is
 the proposal as it was written.
