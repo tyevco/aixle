@@ -180,6 +180,44 @@ describe("bvh", () => {
     }
   });
 
+  it("agrees with brute force on flat faces: rays from vertices, along the axes, in the faces' planes", () => {
+    // A box's mesh is mostly coplanar axis-aligned triangles, so its leaves' boxes have no thickness on one axis and
+    // rays lying in those planes meet the slabs edge-on (0 times infinity). Measured with the boxes unpadded: 18% of
+    // these queries came back wrong.
+    const iron = materialFromString("iron")!, glassM = materialFromString("glass")!;
+    for (const shape of [box(1, 1, 1), union([paint(box(1, 0.5, 1), iron), paint(move(box(0.5, 0.5, 0.5), 0, 0.5, 0), glassM)]), move(box(1, 1, 1), 100.3, -7.1, 3)]) {
+      const mesh = surfaceNets(shape, { resolution: 16 }).mesh;
+      const tr = new BvhTracer(buildBvh(mesh));
+      const P = mesh.positions, I = mesh.indices, nt = I.length / 3, nv = P.length / 3;
+      const glass = new Uint8Array(nt);
+      for (let t = 0; t < nt; t++) glass[t] = triangleIsGlass(mesh, t) ? 1 : 0;
+      let hits = 0;
+      for (let r = 0; r < 3000; r++) {
+        const v = Math.floor(u(r, 1) * nv) * 3, w = Math.floor(u(r, 2) * nv) * 3;
+        const o: Vec3 = [P[v], P[v + 1], P[v + 2]];
+        let d: Vec3 = [0, 0, 0];
+        const mode = r % 4, ax = r % 3;
+        if (mode === 0) d[ax] = u(r, 3) < 0.5 ? 1 : -1;
+        else if (mode === 1) d = normalize([P[w] - o[0], P[w + 1] - o[1], P[w + 2] - o[2]]);
+        else if (mode === 2) { o[ax] -= 5; d[ax] = 1; }
+        else { d[ax] = Math.SQRT1_2; d[(ax + 1) % 3] = u(r, 4) < 0.5 ? Math.SQRT1_2 : -Math.SQRT1_2; }
+        if (!(Math.abs(d[0]) + Math.abs(d[1]) + Math.abs(d[2]) > 0)) continue;
+        const tmin = r & 1 ? 0 : 1e-4;
+        const refs = brute(mesh, glass, o, d, tmin, Infinity);
+        for (const [which, ref] of [[ALL, refs[0]], [OPAQUE, refs[1]], [GLASS, refs[2]]] as const) {
+          tr.ray.set([o[0], o[1], o[2], d[0], d[1], d[2], tmin, Infinity]);
+          const id = tr.closestRay(which);
+          expect(id, `ray ${r} which ${which}`).toBe(ref.id);
+          if (id >= 0) expect(tr.hit[0]).toBe(ref.t);
+          tr.ray.set([o[0], o[1], o[2], d[0], d[1], d[2], tmin, Infinity]);
+          expect(tr.occludedRay(which), `ray ${r} any-hit ${which}`).toBe(ref.id >= 0);
+          if (id >= 0 && which === ALL) hits++;
+        }
+      }
+      expect(hits).toBeGreaterThan(500);
+    }
+  });
+
   it("marks glass triangles and the subtrees that hold them", () => {
     const { mesh } = meshes[1];
     const bvh = buildBvh(mesh);
