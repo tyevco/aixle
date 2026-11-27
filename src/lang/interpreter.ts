@@ -9,7 +9,7 @@ import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } f
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
-import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
+import { regionTouches, voidWitness, outsideWitness, insideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
 import { loosePiece, type MeshCache } from "../mesh/pieces.js";
 import { thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
@@ -796,12 +796,21 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A failing void, inside or overlap says where (round 9: three agents bisected a bare 0 by hand).
     if (assertDepth > 0 && (callee === "void" || callee === "inside" || callee === "overlap") && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const a = values[0].value, b = values[1].value;
-      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? outsideWitness(a, b) : result === 0 ? undefined : overlapWitness(a, b);
+      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? undefined : result === 0 ? undefined : overlapWitness(a, b);
       if (p) {
         const at = `(${p.map(fmt3).join(", ")})`;
-        const first = args[0].value, second = args[1].value;
-        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
-        witness = what;
+        const first = args[0].value;
+        witness = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : `they overlap at ${at}`;
+      }
+      // A failing inside() says where a is outside b, for a promise that it is all in, and where it is inside, for
+      // one that it is all out (round 11: inside(cable, stand) == 0 failing said where the cable was outside).
+      if (callee === "inside" && typeof result === "number") {
+        const pt = (q: Vec3) => `(${q.map(fmt3).join(", ")})`;
+        const out = result < 1 ? outsideWitness(a, b) : undefined, inn = result > 0 ? insideWitness(a, b) : undefined;
+        const A = exprText(args[0].value), B = exprText(args[1].value);
+        const outside = out && `outside ${B} at ${pt(out)}`, inside = inn && `inside ${B} at ${pt(inn)}${stepAt(inn, [], b)}`;
+        const said = (result < 0.5 ? [inside, outside] : [outside, inside]).filter(Boolean) as string[];
+        if (said.length) witness = `${A} is ${said[0]}${said[1] ? `, and ${said[1].replace(` ${B} `, " it ")}` : ""}`;
       }
       // An overlap of nothing says whether the two touch, stand apart, or overlap by less than the lattice can see
       // (round 10: a sign board's back face exactly on the wall read 0 with no place, and a rim sunk 0.02 read 0).

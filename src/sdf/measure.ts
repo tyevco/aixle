@@ -120,19 +120,32 @@ export function overlapWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
  */
 export function insideFraction(a: Shape3, b: Shape3, n = 24): number {
   if (isEmpty(a.bounds)) return 0;
-  const bb = a.bounds, size = boundsSize(bb);
-  const cell = Math.max(size[0], size[1], size[2]) / n;
-  const nx = Math.max(1, Math.ceil(size[0] / cell)), ny = Math.max(1, Math.ceil(size[1] / cell)), nz = Math.max(1, Math.ceil(size[2] / cell));
-  let all = 0, within = 0;
-  for (let i = 0; i < nx; i++)
-    for (let j = 0; j < ny; j++)
-      for (let k = 0; k < nz; k++) {
-        const x = bb.min[0] + ((i + 0.5) * size[0]) / nx, y = bb.min[1] + ((j + 0.5) * size[1]) / ny, z = bb.min[2] + ((k + 0.5) * size[2]) / nz;
-        if (a.dist(x, y, z) >= 0) continue;
-        all++;
-        if (isEmpty(b.bounds) ? false : b.dist(x, y, z) < 0) within++;
-      }
-  return all ? within / all : 0;
+  const size = boundsSize(a.bounds);
+  const count = (cell: number) => {
+    const bb = a.bounds;
+    const nx = Math.max(1, Math.ceil(size[0] / cell)), ny = Math.max(1, Math.ceil(size[1] / cell)), nz = Math.max(1, Math.ceil(size[2] / cell));
+    let all = 0, within = 0;
+    for (let i = 0; i < nx; i++)
+      for (let j = 0; j < ny; j++)
+        for (let k = 0; k < nz; k++) {
+          const x = bb.min[0] + ((i + 0.5) * size[0]) / nx, y = bb.min[1] + ((j + 0.5) * size[1]) / ny, z = bb.min[2] + ((k + 0.5) * size[2]) / nz;
+          if (a.dist(x, y, z) >= 0) continue;
+          all++;
+          if (isEmpty(b.bounds) ? false : b.dist(x, y, z) < 0) within++;
+        }
+    return { all, within };
+  };
+  const first = count(Math.max(size[0], size[1], size[2]) / n);
+  if (!first.all) return 0;
+  // A 0 is what a promise that a part stays out is made of, and a skin thinner than the lattice gives it falsely: a
+  // 3.6 cable along a 3 slot, 0.3 into both walls, read 0 (round 11), its box 3.6 across sampled twice. When b's
+  // solid is inside a after all, found as void() finds it, walking the surface, the fraction is read again on the
+  // finer lattice overlap() uses, and is never 0: a skin no finer lattice sees reads as half a sample. A 1 is left
+  // as the lattice reads it: a flame blended into a smooth union bulges 0.003 below the floor of the hearth it
+  // must sit in (round 9), and a promise that a part stays in is judged by its volume, not by such a sliver.
+  if (first.within > 0 || voidWitness(a, b, n) === undefined) return first.within / first.all;
+  const fine = count(latticeCell(size, n));
+  return Math.max(fine.all ? fine.within / fine.all : 0, 0.5 / Math.max(fine.all, first.all));
 }
 
 /** The point of `a` farthest outside `b`, or undefined when every sample of `a` is inside `b`: for a failed inside(). */
@@ -151,6 +164,11 @@ export function outsideWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
   return best;
 }
 
+/** The point of `a` deepest inside `b`, or a point of b's surface inside a when the overlap is a skin thinner than the lattice: for an inside() that should be 0. */
+export function insideWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
+  return overlapWitness(a, b, n) ?? voidWitness(a, b, n);
+}
+
 /**
  * Whether `region` holds no solid of `shape` at all: no lattice sample inside both, and no point of the shape's
  * surface inside the region (which catches an intrusion thinner than the lattice). For `assert void(cavity, mug)`.
@@ -167,9 +185,12 @@ export function voidWitness(region: Shape3, shape: Shape3, n = 24): Vec3 | undef
   if (isEmpty(region.bounds) || isEmpty(shape.bounds)) return undefined;
   if (!sharedBox(region, shape)) return undefined;
   const bb = region.bounds, size = boundsSize(bb);
-  // The region's own boundary does not count: a cavity's wall is the cup's inner surface, exactly on it.
-  const tol = Math.max(size[0], size[1], size[2], 1e-6) * 0.005;
-  let best: Vec3 | undefined, bd = 0;
+  // The region's own boundary does not count: a cavity's wall is the cup's inner surface, exactly on it. That is a
+  // matter of floating point and of how close a projection lands, not of the region's size: at half a percent of the
+  // region's longest side, a cable probe 77 long let a 3 slot press 0.3 into it for 60 along its length and held
+  // (round 11), the skin lying inside the band taken for the boundary.
+  const tol = Math.max(size[0], size[1], size[2], 0.1) * 1e-5;
+  let best: Vec3 | undefined, bd = -tol;
   let thin: Vec3 | undefined;
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++)

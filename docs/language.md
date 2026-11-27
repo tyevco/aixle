@@ -1213,6 +1213,17 @@ own, never the cutter: a cutter's volume is empty by construction, so
 `void(slot, plate)` holds whether or not the slot went through; "the
 hole goes through" is a thinner rod reaching past both faces,
 `rod = cylinder(0.04, 0.3) | move(...)` and `assert void(rod, plate)`.
+The lattice over the region is 25 points a side, so along a long probe
+(a cable 77 long) its points are 3 apart, and `void` also slides every
+point in the void onto the shape's surface: a skin of the shape pressed
+into the region is found that way however thin, down to a
+hundred-thousandth of the region's longest side (what is taken for the
+region's own boundary, where a cavity's wall lies exactly). A 3.6 cable
+probe along a 3 slot, 0.3 into both walls, fails `void(cable, stand)`
+with the place in the wall. What it can still miss is an intrusion both
+thinner and smaller across than the lattice spacing that no point in the
+void has as its nearest surface; `clearance(probe, shape) > 0` beside it
+measures the gap itself.
 `overlap(a, b)` is the volume two parts share, zero when they only
 touch: `assert overlap(frog, pad) < 0.001` keeps a frog on its pad
 rather than sunk into it, and `assert overlap(handle, body) > 0.001`
@@ -1233,7 +1244,16 @@ stand apart by so much, or they overlap by less than the lattice can
 measure over their shared box (promise that on a chunk of the part, `rim
 & box(...)`, or as `clearance(a, b) < 0`). `inside(a, b)` is the fraction of a's volume inside b: `== 1`
 for a spring that must stay in its housing, `== 0` for a handle that
-must stay out of the cavity, and a failure says where a is outside b.
+must stay out of the cavity, and a failure says where a is inside b
+(and in which step) and where it is outside. A skin of `b` thinner than
+the lattice inside `a` does not read 0: when the lattice reads 0 the
+surfaces are walked as `void` walks them, and if `b` reaches into `a`
+the fraction is read again on a finer lattice and is never 0, so
+`inside(cable, stand) == 0` fails for a cable 0.3 into a slot's walls.
+The other way is not walked: a sliver of `a` outside `b` thinner than
+the lattice can still read 1 (a flame blended with `union(k=)` bulges
+0.003 below the floor of the hearth it sits in, and reads 1), so a
+promise that nothing pokes out is `void(outside_region, part)`.
 `b` is the solid volume: a mantle hangs in the air inside a shelled
 shade, so `inside(mantle, shade)` is 0; keep the un-shelled shape as a
 step (`shade = shade_space | shell(0.05)`) and test against that; that

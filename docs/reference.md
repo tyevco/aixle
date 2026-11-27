@@ -485,7 +485,7 @@ The thinnest wall of the shape: from every vertex of its mesh at `resolution` ce
 
 ### void
 
-1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught; a failure says where the solid is and in which step.
+1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught, down to a skin a hundred-thousandth of the region's longest side deep (a 3.6 cable pressed 0.3 into both walls of a 3 slot fails); a failure says where the solid is and in which step.
 
     void(region, shape) -> number
 
@@ -497,7 +497,7 @@ The volume two shapes share, in cubic units: zero when they only touch, the sunk
 
 ### inside
 
-The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; a failure says where `a` is outside.
+The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; when that reads 0 the surfaces are walked as void() walks them, so a skin thinner than the lattice (a 3.6 cable 0.3 into both walls of a 3 slot) reads a small fraction, never 0. A sliver of `a` outside `b` thinner than the lattice can still read 1. A failure says where `a` is inside `b` and where it is outside.
 
     inside(a, b) -> number
 

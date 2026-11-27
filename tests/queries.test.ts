@@ -80,3 +80,28 @@ describe("clearance (round 11)", () => {
     expect(C_.clearance(O.move(lean, 0.01, 0, 0), prev)).toBeCloseTo(0.01, 4);
   });
 });
+
+describe("void and inside on a skin thinner than the lattice (round 11)", () => {
+  it("catch a tube a little wider than the slot it runs along, as clearance does", async () => {
+    const P = await import("../src/sdf/primitives.js"), O = await import("../src/sdf/ops.js");
+    const C = await import("../src/sdf/curves.js");
+    // dogfood/round-11/stand.aix with slot_w = 3: a 3.6 cable along a 3 slot, 0.3 into both walls for 60 along it,
+    // first straight, then along a path that turns up out of the slot like the stand's.
+    const slab = O.difference(O.move(P.box(20, 10, 60), 0, 5, 0), O.move(P.box(3, 10, 70), 0, 7, 0));
+    const straight = (r: number) => O.move(O.rotate(P.cylinder(r, 70), 90, 0, 0), 0, 5, 0);
+    const bent = (r: number) => C.tubeCurve(C.curveThrough([[0, 5, -40], [0, 5, 20], [0, 12, 30], [0, 25, 32]]), r);
+    for (const cable of [straight, bent]) {
+      expect(C_.clearance(cable(1.8), slab)).toBeCloseTo(-0.3, 3);
+      expect(C_.isVoid(cable(1.8), slab)).toBe(false);
+      expect(C_.insideFraction(cable(1.8), slab)).toBeGreaterThan(0);
+      // A cable that fits keeps both promises.
+      expect(C_.isVoid(cable(1.4), slab)).toBe(true);
+      expect(C_.insideFraction(cable(1.4), slab)).toBe(0);
+    }
+    // In the language, both failures say where the cable is in the slab, and in which step.
+    const ev = run('slab = box(20, 10, 60) | move(0, 5, 0)\nslot = box(3, 10, 70) | move(0, 7, 0)\nplate = slab - slot\ncable = cylinder(1.8, 70) | rotate(x=90) | move(0, 5, 0)\nassert void(cable, plate)\nassert inside(cable, plate) == 0\nshow plate');
+    expect(ev.asserts.map((a) => a.passed)).toEqual([false, false]);
+    expect(ev.asserts[0].where).toMatch(/^solid at \(-?1\.[5-8]\d*, [\d.]+, -?[\d.]+\) in 'slab'$/);
+    expect(ev.asserts[1].where).toMatch(/^cable is inside plate at \(-?1\.[5-8]\d*, [\d.]+, -?[\d.]+\) in 'slab'/);
+  });
+});
