@@ -171,9 +171,22 @@ export function outsideWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
   return best;
 }
 
-/** The point of `a` deepest inside `b`, or a point of b's surface inside a when the overlap is a skin thinner than the lattice: for an inside() that should be 0. */
+/**
+ * The point of `a` deepest inside `b` on the lattice outsideWitness() reads, or a point of b's surface inside a when
+ * the overlap is a skin thinner than the lattice: for a failed inside() that should have been 0.
+ */
 export function insideWitness(a: Shape3, b: Shape3, n = 24): Vec3 | undefined {
-  return overlapWitness(a, b, n) ?? voidWitness(a, b, n);
+  if (isEmpty(a.bounds) || isEmpty(b.bounds)) return undefined;
+  const bb = a.bounds, size = boundsSize(bb);
+  let best: Vec3 | undefined, bd = 0;
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      for (let k = 0; k < n; k++) {
+        const x = bb.min[0] + ((i + 0.5) * size[0]) / n, y = bb.min[1] + ((j + 0.5) * size[1]) / n, z = bb.min[2] + ((k + 0.5) * size[2]) / n;
+        const d = Math.max(a.dist(x, y, z), b.dist(x, y, z));
+        if (d < bd) { bd = d; best = [x, y, z]; }
+      }
+  return best ?? voidWitness(a, b, n);
 }
 
 /**
@@ -250,7 +263,7 @@ function fieldGradient(s: Shape3, x: number, y: number, z: number, e: number): V
  * failure. Bounded: a fixed number of iterations whatever the geometry.
  */
 function descend(from: Shape3, into: Shape3, p: Vec3, d: number, step: number, scale: number): { d: number; p: Vec3 } {
-  const onSurface = Math.max(scale * 1e-6, Math.abs(from.dist(p[0], p[1], p[2])));
+  const onSurface = Math.max(scale * 1e-6, 2e-7, Math.abs(from.dist(p[0], p[1], p[2])));
   for (let i = 0; i < 12; i++) {
     const onInto = surfacePoint(into, p[0], p[1], p[2]);
     const back = surfacePoint(from, onInto[0], onInto[1], onInto[2]);
@@ -290,7 +303,7 @@ export function clearanceAt(a: Shape3, b: Shape3, n = 12): { d: number; at?: Vec
   // that is only a bound and stalls (a cut's field on the ridge between two of its faces), the best that came within
   // a twentieth of the lattice step of it. A stalled point read in the other field is off by as far as it stalled:
   // a cable probe read -1.3 for a 0.3 intrusion from a point stalled 0.5 above a groove.
-  const onSurface = scale * 1e-6;
+  const onSurface = Math.max(scale * 1e-6, 2e-7);
   const best: { d: number; p?: Vec3; step: number }[] = [{ d: Infinity, step: 0 }, { d: Infinity, step: 0 }];
   const loose: { d: number; p?: Vec3; step: number }[] = [{ d: Infinity, step: 0 }, { d: Infinity, step: 0 }];
   const shapes: [Shape3, Shape3][] = [[a, b], [b, a]];
