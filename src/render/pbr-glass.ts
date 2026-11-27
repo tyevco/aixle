@@ -12,8 +12,8 @@
  * Beer's law, σ = BEER(1 − c)/reach per channel (photometry.ts), the law the shadows through glass use too.
  *
  * A glass that does not let all its light through (transmit < 1) mixes with the surface shaded as a smooth
- * dielectric of its colour, as the old renderer did; the lights' highlights are analytic, each with one occlusion
- * ray, and a directional light's is left to the traced reflection, which sees its softbox.
+ * dielectric of its colour, as the old renderer did; a point light's highlight is analytic, with one occlusion ray,
+ * and a directional light's is left to the reflection, which sees its softbox, traced or not.
  *
  * Glass seen through glass is shaded to a chain of two in full quality (the tumbler's drink, inside its glass, shows
  * no contour bands at two, so the chain is not cut to one) and one in draft; past it, the sky behind,
@@ -50,8 +50,8 @@ export interface GlassCore {
   gradient(x: number, y: number, z: number, out: Float64Array): void;
   /** Shade the surface at depth as an opaque smooth dielectric of the glass's colour, without tracing, into COL at depth. */
   shadeOpaque(depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, r: number, g: number, b: number, rough: number, dx: number, dy: number, dz: number): void;
-  /** Add each light's GGX highlight on a smooth dielectric, times k, with one occlusion ray each, into COL at depth; directional lights are left out when `traced`. */
-  highlights(depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k: number, traced: boolean, reuse: boolean): void;
+  /** Add each point light's GGX highlight on a smooth dielectric, times k, with one occlusion ray each, into COL at depth; a directional light's is the softbox the reflection sees. */
+  highlights(depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k: number, reuse: boolean): void;
 }
 
 /** The glass shader over a kernel's core: shade(depth, hit point, the field's normal there, the material, the ray, its linear colour) into COL at depth. */
@@ -60,7 +60,9 @@ export function createGlass(core: GlassCore): (depth: number, px: number, py: nu
   // Per depth: the reflection, what was seen through, the opaque shade.
   const GR = new Float64Array(MAXD * W), GT = new Float64Array(MAXD * W), GO = new Float64Array(MAXD * W);
   const G = new Float64Array(3);
-  const ABS = new Float64Array(3);
+  // The absorption along the refracted ray, per depth: the exit's trace can meet glass again (the chain), whose own
+  // shade must not overwrite this one's (an amber slab seen in front of a clear pane lost its amber).
+  const ABS = new Float64Array(MAXD * 3);
 
   return (depth, px, py, pz, nx, ny, nz, m, dx, dy, dz, cr, cg, cb) => {
     const o = depth * W, q = (depth + 1) * W;
@@ -79,7 +81,8 @@ export function createGlass(core: GlassCore): (depth: number, px: number, py: nu
       for (let k = 0; k < W; k++) GR[o + k] = COL[q + k];
     } else core.sky(mx, my, mz, SEE_MIRROR, GR, o);
     // Refraction: into the solid, across it (reflecting inside where it cannot leave), and out.
-    ABS[0] = 0; ABS[1] = 0; ABS[2] = 0;
+    const a3 = depth * 3;
+    ABS[a3] = 0; ABS[a3 + 1] = 0; ABS[a3 + 2] = 0;
     let seen = false;
     const eta = 1 / IOR;
     const k1 = 1 - eta * eta * (1 - cos * cos);
@@ -93,7 +96,7 @@ export function createGlass(core: GlassCore): (depth: number, px: number, py: nu
       for (let ev = 0; ev <= TIR_EVENTS; ev++) {
         const t = rays.insideMarch(ox, oy, oz, ix, iy, iz, m);
         if (t < 0) break;
-        ABS[0] += rays.abs[0]; ABS[1] += rays.abs[1]; ABS[2] += rays.abs[2];
+        ABS[a3] += rays.abs[0]; ABS[a3 + 1] += rays.abs[1]; ABS[a3 + 2] += rays.abs[2];
         const qx = ox + ix * t, qy = oy + iy * t, qz = oz + iz * t;
         core.gradient(qx, qy, qz, G);
         const gx = G[0], gy = G[1], gz = G[2];
@@ -118,7 +121,7 @@ export function createGlass(core: GlassCore): (depth: number, px: number, py: nu
     }
     if (seen) for (let k = 0; k < W; k++) GT[o + k] = COL[q + k];
     else core.sky(ix, iy, iz, SEE_BACKDROP, GT, o);
-    const ar = Math.exp(-ABS[0]), ag = Math.exp(-ABS[1]), ab = Math.exp(-ABS[2]);
+    const ar = Math.exp(-ABS[a3]), ag = Math.exp(-ABS[a3 + 1]), ab = Math.exp(-ABS[a3 + 2]);
     for (let k = 0; k < W; k += 3) { GT[o + k] *= ar; GT[o + k + 1] *= ag; GT[o + k + 2] *= ab; }
     // The glass's own surface for the light it does not let through, as a smooth dielectric of its colour.
     if (tr < 1) {
@@ -127,6 +130,6 @@ export function createGlass(core: GlassCore): (depth: number, px: number, py: nu
     } else for (let k = 0; k < W; k++) GO[o + k] = 0;
     for (let k = 0; k < W; k++) COL[o + k] = (GT[o + k] * (1 - fres) + GR[o + k] * fres) * tr + GO[o + k] * (1 - tr);
     // The lights' highlights on the glass, which the mix above scaled by its transmission.
-    core.highlights(depth, px, py, pz, nx, ny, nz, dx, dy, dz, m.rough, tr, traced, tr < 1);
+    core.highlights(depth, px, py, pz, nx, ny, nz, dx, dy, dz, m.rough, tr, tr < 1);
   };
 }

@@ -9,7 +9,7 @@ import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
 import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
 import { pbr, type PbrTables } from "../src/render/pbr.js";
-import type { Camera } from "../src/render/camera.js";
+import { project, toView, type Camera } from "../src/render/camera.js";
 import { buildEnvironment, prefilterLevels, projectSh, type EnvironmentState } from "../src/render/environment.js";
 import { FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
 import { openBeautyPool } from "../src/render/beauty-pool.js";
@@ -39,6 +39,24 @@ function shade(shape: Shape3, opts: Omit<BeautyOptions, "cellSize">, resolution 
   const hdr = new Float32Array(size * size * 3);
   for (const s of slots) for (let k = 0; k < hdr.length; k++) hdr[k] += s[k];
   return { hdr, slots, buffers, size, camera };
+}
+
+/**
+ * The kernel's first pass alone, no edge pass and no filter: each pixel's one centre sample, its radiance per slot
+ * (R, 3 floats a slot) as it leaves the rows. Two renders that differ only in a budget the centre samples share can be
+ * compared pixel for pixel.
+ */
+function primaryOnly(shape: Shape3, opts: Omit<BeautyOptions, "cellSize">, resolution = 40): { R: Float32Array; size: number; W: number } {
+  const nets = surfaceNets(shape, { resolution });
+  const mesh = nets.mesh, bounds = shape.bounds, size = opts.size;
+  const o: BeautyOptions = { ...opts, cellSize: nets.cellSize };
+  const camera = beautyCamera(mesh, bounds, o);
+  const prime = beautyPrime(mesh, camera, size);
+  const tables = pbr.prepare!({ shape, mesh, bounds, opts: o, camera, prime, size, cell: nets.cellSize, cache: beautyCache(), shared: false }) as PbrTables;
+  const buffers = allocBuffers(pbr.layout(o, size), size, false);
+  const rows = pbr.rows({ shape, mesh, bounds, opts: o, camera, prime, size, cell: nets.cellSize, buffers, tables, ids: materialIds(mesh.materials.map(materialKey)) });
+  for (let y = 0; y < size; y++) rows.primary(y);
+  return { R: buffers.R as Float32Array, size, W: (buffers.R as Float32Array).length / (size * size) };
 }
 
 /** The studio's tables with the sky replaced by a constant radiance L everywhere: no structure, cards, sun or stars. */
@@ -164,15 +182,21 @@ describe("shading: glass", () => {
     const shape = check(src, "tumbler.aix").output!;
     const size = 256;
     const nets = surfaceNets(shape, { resolution: 64 });
-    const r = renderBeautyResult(shape, nets.mesh, shape.bounds, { size, cellSize: nets.cellSize, lightSize: 2.5 });
+    const opts = { size, cellSize: nets.cellSize, lightSize: 2.5 };
+    const r = renderBeautyResult(shape, nets.mesh, shape.bounds, opts);
     const c = r.canvas;
+    // The drink seen through the side wall starts below where its surface meets the near wall: above that row the
+    // camera looks down through the glass onto the drink's surface, a face of its own (lighter for the sky it reflects),
+    // and the step between the two is the drink's front rim, not a contour band.
+    const a = (35 * Math.PI) / 180, cam = beautyCamera(nets.mesh, shape.bounds, opts);
+    const rim = Math.ceil(project(cam, toView(cam, [1.32 * Math.sin(a), 0.26 + 2.4, 1.32 * Math.cos(a)]))!.y) + 4;
     const rgbAt = (x: number, y: number) => { const p = c.get(x, y); return [(p >> 16) & 255, (p >> 8) & 255, p & 255]; };
     const lum = (x: number, y: number) => { const [R, G, B] = rgbAt(x, y); return 0.2126 * R + 0.7152 * G + 0.0722 * B; };
     // The drink's body seen through the wall: orange, mid-bright. Down the middle column, its longest run of rows.
     const body = (x: number, y: number) => { const [R, , B] = rgbAt(x, y); const l = lum(x, y); return R - B > 50 && l > 60 && l < 200; };
     const cx = size / 2 - 4;
     let best = [0, 0], run = -1;
-    for (let y = 0; y <= size; y++) {
+    for (let y = rim; y <= size; y++) {
       if (y < size && body(cx, y)) { if (run < 0) run = y; continue; }
       if (run >= 0 && y - run > best[1] - best[0]) best = [run, y];
       run = -1;
@@ -218,5 +242,49 @@ describe("shading: glass", () => {
     };
     expect(ratio(materialFromString("amber")!)).toBeGreaterThan(1.3);
     expect(Math.abs(ratio(customMaterial({ color: [1, 1, 1], transmit: 0.9, rough: 0.05 })) - 1)).toBeLessThan(0.05);
+  });
+
+  it("keeps the absorption of glass seen through glass: a clear pane behind an amber slab leaves it amber", () => {
+    // A thick amber slab in front of the camera, and behind it, in the line of sight or not, a thin clear pane. Two
+    // small opaque balls fix the model's box, so the reach Beer's law is measured in is the same in both.
+    const amber = customMaterial({ color: [1, 0.55, 0.1], transmit: 1, rough: 0.05 });
+    const clear = customMaterial({ color: [1, 1, 1], transmit: 1, rough: 0.05 });
+    const grey = customMaterial({ color: [0.6, 0.6, 0.6], rough: 0.8 });
+    const centre = (paneBehind: boolean) => {
+      const parts = [
+        O.paint(O.move(P.box(2, 2, 1), 0, 3, 1), amber),
+        paneBehind ? O.paint(O.move(P.box(2, 2, 0.2), 0, 3, -1), clear) : O.paint(O.move(P.box(0.2, 0.2, 0.2), 1.2, 2.2, -1.2), clear),
+        O.paint(O.move(P.sphere(0.1), -1.3, 2.1, -1.4), grey), O.paint(O.move(P.sphere(0.1), 1.3, 3.9, 1.6), grey),
+      ];
+      // Off the line of sight, the pane is a small block in a corner of the same box.
+      const r = shade(O.union(parts), { size: 48, azimuth: 0, elevation: 0, lights: [dark] }, 48);
+      const i = 24 * 48 + 24;
+      return [r.hdr[i * 3], r.hdr[i * 3 + 1], r.hdr[i * 3 + 2]];
+    };
+    const alone = centre(false), behind = centre(true);
+    // Through the amber, green and blue are mostly absorbed; a clear pane behind it takes a little more, never less.
+    expect(alone[1] / alone[0]).toBeLessThan(0.4);
+    for (let c = 1; c < 3; c++) expect(behind[c], `channel ${c}: ${behind} against ${alone}`).toBeLessThan(alone[c] * 1.1);
+  });
+
+  it("lights a glass seen past the reflection budget once: its reflection's softbox is its highlight", () => {
+    // A glass ball in front of a mirror, lit from straight above; the camera sees it in the mirror, at depth 1. In
+    // full quality its reflection is traced (depth 1 < 2), in draft it is not (1 = the draft's budget) and takes the
+    // sky a mirror sees, the key's softbox included. Pixel for pixel the centre samples must then agree in the key's
+    // slot: an analytic highlight added on top in draft lit the ball's highlight half as bright again.
+    const mirror = customMaterial({ color: [1, 1, 1], metal: 1, rough: 0.03 });
+    const glass = customMaterial({ color: [1, 1, 1], transmit: 1, rough: 0.05 });
+    const scene = O.union([O.paint(O.move(P.box(5, 4, 0.2), 0, 2, 0), mirror), O.paint(O.move(P.sphere(0.5), 0, 2.6, 1.3), glass)]);
+    const opts = { size: 200, azimuth: 28, elevation: 8, splitLights: true, lights: [{ azimuth: 0, elevation: 90, size: 1, color: [1, 1, 1], power: 1 } as BeautyLight] };
+    const peak = (quality: "full" | "draft") => {
+      const { R, size, W } = primaryOnly(scene, { ...opts, quality }, 64);
+      // The ball's reflection: right of the ball itself, from a camera to its right.
+      let p = 0;
+      for (let y = 50; y < 100; y++) for (let x = 105; x < 145; x++) p = Math.max(p, R[(y * size + x) * W + 4]);
+      return p;
+    };
+    const full = peak("full"), draft = peak("draft");
+    expect(full).toBeGreaterThan(1);
+    expect(Math.abs(draft - full) / full).toBeLessThan(0.05);
   });
 });

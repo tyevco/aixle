@@ -528,17 +528,19 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   };
 
   /**
-   * Each light's GGX highlight on a smooth dielectric (glass), times k, with one occlusion ray, into COL at depth;
-   * directional lights left to a traced reflection. With `reuse`, the glass's own surface was just shaded at this
-   * point and depth, and a light's ray it traced is taken rather than traced again.
+   * Each point light's GGX highlight on a smooth dielectric (glass), times k, with one occlusion ray, into COL at
+   * depth. A directional light's is left to the glass's reflection, which sees its softbox whether it is traced or,
+   * past the depth budget, the sky a mirror sees (adding its analytic highlight there lit a glass seen in a mirror
+   * twice, in draft quality and at the second bounce in full). With `reuse`, the glass's own surface was just shaded at
+   * this point and depth, and a light's ray it traced is taken rather than traced again.
    */
-  const highlights = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k0: number, traced: boolean, reuse: boolean): void => {
+  const highlights = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, rough: number, k0: number, reuse: boolean): void => {
     const o = depth * W;
     const alpha = Math.max(0.03, rough) ** 2, a2 = alpha * alpha;
     const nv = Math.max(1e-3, -(nx * dx + ny * dy + nz * dz));
     for (let i = 0; i < NL; i++) {
       const q = i * LS;
-      if (!LP[q + 15] || (traced && !LP[q + 6])) continue;
+      if (!LP[q + 15] || !LP[q + 6]) continue;
       const att = lightAt(i, px, py, pz);
       const lx = L3[0], ly = L3[1], lz = L3[2], far = L3[3];
       const nl = nx * lx + ny * ly + nz * lz;
