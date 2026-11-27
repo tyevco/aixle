@@ -275,7 +275,9 @@ then y then z, right-handed: a positive `x` angle turns +y towards +z, so
 `rotate(x=-15)` leans a backrest's top towards -z; a positive `y` angle
 turns +z towards +x; a positive `z` angle turns +x towards +y), `scale(s)`
 or `scale(x, y, z)`, `mirror("x")` (keeps both halves: model one arm,
-mirror it), `flip("x")` (reflects only), `ground()`, `center()`.
+mirror it), `flip("x")` (reflects only), `ground()`, `center()`, and
+`rest(on)` and `lean(on, pivot, axis)`, which move or turn a part until
+it touches another (Contact, below).
 
 Transforms are about the origin, so the order matters: build a part at the
 origin, rotate it, then move it into place.
@@ -306,6 +308,80 @@ arm2 = arm | rotate(z=30) | attach("root", post, "top")   # root lands on the po
 lamp = sphere(0.15) | attach("bottom", arm2, "tip")        # and the lamp on the arm's tip
 rod = tube(0.05, [at(post, "top"), at(arm2, "tip")])       # a list is a point
 ```
+
+**Contact**: `rest` and `lean` place a part against another by their
+surfaces, where an anchor would need the contact point worked out first.
+`rest(part, on, dir=[0, -1, 0], sink=0)` moves the part along `dir`
+until it touches `on`: `bowl | rest(plate)` sets a bowl on its plate,
+`book | rest(prev, dir=[-1, 0, 0])` slides a book along its shelf
+against its neighbour. `lean(part, on, pivot, axis)` turns the part
+about the line through `pivot` along `axis` until it touches: `book |
+lean(prev, pivot="heel", axis=[0, 0, 1])` leans a book against its
+neighbour, turned about the anchor on its bottom edge. Both carry
+anchors along, as `move` and `rotate` do, and `check` prints a line for
+each call, how far it moved or turned the part and the gap it left
+(`rest (line 14)  bowl onto plate: moved 0.15 along [0, -1, 0]; gap 0`;
+a call a loop makes 33 times is one line, with the range). The contact
+holds by construction: `clearance(part, on)` afterwards is within a
+millionth of the part's size of 0 (measured on round 11's bookcase: its
+33 books at most 1.3e-6 from touching where they lean or stand, against
+0.0065 to 0.0076 left by the hand-worked placement), and `overlap` reads
+0. That holds at any scale: the search runs at the part's own size, so a
+cube a centimetre across in a model in metres slides to its wall as a
+cube of 1 does. A displaced skin's field is not a distance, and there
+`clearance` and the contact are good to about a ten-thousandth of the
+part (round 3's frog on its pad: 3e-4). What they do at the edges:
+
+- **A face on a face meshes as one piece**, so `sink` is 0: it reads
+  `pieces() == 1` and meshes watertight at every grid tried. A corner on
+  a face touches at a point and can mesh as two pieces at some grids (a
+  cube standing on its corner, at 128 cells). Give `sink=` a cell for a
+  print that must overlap or a promise of one piece, or a negative one to
+  stop short: `rest(prev, dir=[-1, 0, 0], sink=-0.06)` stands a book 0.06
+  from its neighbour.
+- **A part that starts inside `on`** is backed out against the motion to
+  the first place it is clear, so a part built at the origin rests on a
+  shelf above it (`check` says it was backed out). A part sunk only a
+  sliver, under a ten-thousandth of its size (`ground()` leaves a turned
+  part up to 5e-5 in the floor), is lifted out of it first, so it can
+  slide along what it stands on.
+- **A part that never touches** along the direction, or in half a turn,
+  is an error that says where both are; an empty part or `on` is an
+  error that says it is empty.
+- **`lean` turns the right-handed way** about `axis`, as `rotate` turns
+  about x, y and z: thumb along the axis, the fingers curl the way it
+  turns, so `axis=[0, 0, 1]` tips +y towards -x and a book whose heel is
+  its bottom-left edge leans left; `axis=[0, 0, -1]` turns it the other
+  way. It does not pick the shorter of the two turns: the other way is
+  often a turn of nothing, into the shelf the part already stands on. A
+  turn of more than a quarter is usually the wrong sign, and its `check`
+  line says so.
+- **`on` can be several things** joined with `+` (the shelf, the books so
+  far, the panels): each is read on its own, so the shelf a book slides
+  along, which it touches the whole way, is not taken for the neighbour
+  it slides into.
+- **A rounded edge** stays on what it stands on as it turns when the
+  pivot is its rounding's centre: `anchor("heel", 0.02, 0.02, 0)` on a
+  book built from x = 0 and y = 0 with `round=0.02`. Turned about the
+  sharp corner instead, it lifts off by up to the rounding.
+
+```
+shelf = box(4, 0.2, 2) | move(0, 0.7, 0)
+def book(w, h) = box(w, h, 1.4, round=0.02) | anchor("heel", -w / 2 + 0.02, -h / 2 + 0.02, 0) | move(0, h / 2, 0)
+prev = book(0.3, 2.2) | move(-1, 3, 0) | rest(shelf)                                   # dropped onto the shelf
+upright = book(0.4, 2.4) | move(1.5, 0.8, 0) | rest(prev, dir=[-1, 0, 0], sink=-0.06)  # slid to 0.06 short of prev
+leaning = book(0.3, 2.5) | move(-0.1, 0.8, 0) | lean(upright, pivot="heel", axis=[0, 0, 1])  # tipped left onto it
+```
+
+`check` prints `lean (line 5)  leaning onto upright: turned 3.393
+degrees about [0, 0, 1] through (-0.23, 0.82, 0); gap 0.0000013`, and
+the leaning book is still 1e-7 from the shelf: its heel is its
+rounding's centre.
+
+A call costs 10 to 60 ms for parts like these (the readings of
+`clearance` most of it), one to two seconds for a frog with displaced skin;
+round 11's bookcase placed by 34 calls checked in 5.6 s against 3.7 s by
+hand.
 
 **Modifiers**: `round(r)` grows the surface outward and rounds edges;
 `offset(r)` the same, negative to shrink; `shell(t)` hollows leaving a wall

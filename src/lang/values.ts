@@ -54,9 +54,30 @@ export interface Param {
   doc?: string;
 }
 
+/** What a rest() or lean() call did, for check's line: how far the part moved or turned, and what the contact left. */
+export interface ContactNote {
+  /** Units moved along `along`, or degrees turned about it; negative when the part started inside and was backed out. */
+  amount: number;
+  /** The unit direction moved along, or the unit axis turned about. */
+  along: [number, number, number];
+  /** lean's pivot, a world point. */
+  pivot?: [number, number, number];
+  /** clearance(part, on) at the contact, before the sink. */
+  gap: number;
+  /** True when the part started inside `on`. */
+  backed: boolean;
+  /** How deep a sliver of `on` it started in and was lifted out of first. */
+  lifted: number;
+  sink: number;
+}
+
 /** What one evaluation lends a builtin: a mesh of a shape at a resolution, shared by every query that meshes it. */
 export interface CallContext {
   meshes?: MeshCache;
+  /** The source text of the argument bound to a parameter, for a message that names the part (rest, lean). */
+  text?: (param: string) => string | undefined;
+  /** Where a placing call says what it did, for check. */
+  placed?: (note: ContactNote) => void;
 }
 
 export interface Overload {

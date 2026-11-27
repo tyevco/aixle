@@ -488,7 +488,7 @@ function pipeBase(e: Expr): Expr {
 }
 
 /** Transforms and placements whose result on the right of '+' alone is rarely meant. */
-const PLACING = new Set(["move", "rotate", "scale", "flip", "mirror", "ground", "center", "attach", "twist", "bend", "wrap"]);
+const PLACING = new Set(["move", "rotate", "scale", "flip", "mirror", "ground", "center", "attach", "rest", "lean", "twist", "bend", "wrap"]);
 
 function describe(t: Token): string {
   if (t.type === "eof") return "end of file";

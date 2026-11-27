@@ -9,7 +9,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { AssertClock, assertLabel, assertsRow, BEAUTY_ONLY, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
+import { AssertClock, assertLabel, assertsRow, BEAUTY_ONLY, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, contactLines, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -362,6 +362,8 @@ function main(argv: string[]): number {
             console.log(`${`  posed ${st.name}`.padEnd(18)} ${spanBox(placed)}`);
         }
       }
+      // What each rest() and lean() did: how far it moved or turned its part, a line per call (a loop's calls on one).
+      if (!opts.brief) for (const l of contactLines(ev.contacts)) console.log(l);
       // In a pose the output's box is the box of turned boxes; its surface is the size the sheet shows (round 8: a
       // sitting dog's output line said 1.84 tall for a 1.18 surface).
       // The program's own defs, with their parameters, so a program's vocabulary is on the terminal with its steps.

@@ -16,7 +16,7 @@ import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
 import { boundsSize, boundsUnion, EMPTY_BOUNDS, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
-import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type CallContext, type ContactNote, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
 const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "units", "slice"]);
@@ -222,6 +222,20 @@ export interface Evaluation {
    * (round 11: a 0.1 back panel built inside a library's case() was named only as the step that called case()).
    */
   origins: WeakMap<object, ShapeOrigin>;
+  /** Every rest() and lean() call the run made, in order: how far each moved or turned its part, for check. */
+  contacts: ContactRecord[];
+}
+
+/** One rest() or lean() call: where it was, what it placed on what (as the program wrote them), and what it did. */
+export interface ContactRecord {
+  callee: "rest" | "lean";
+  line: number;
+  /** The def it ran in and that def's library, as for a shape's origin. */
+  def?: string;
+  file?: string;
+  part: string;
+  on: string;
+  note: ContactNote;
 }
 
 /** The call that made a shape: `box` at line 48, inside def `back_panel` of the library `shelf_lib`. */
@@ -290,7 +304,9 @@ function assertWhere(a: AssertResult): string {
 }
 
 /** The builtins that move a shape's surface somewhere else: a step read only through one is not where it was built. */
-const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
+const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "rest", "lean", "twist", "bend", "wrap"]);
+/** The builtins that place a part by contact, which name the parts in their errors and say in check what they did. */
+const CONTACTS = new Set(["rest", "lean"]);
 
 /** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
 const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "stands"]);
@@ -464,6 +480,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let lastShape: { name: string } | undefined;
   let depth = 0;
   const origins = new WeakMap<object, ShapeOrigin>();
+  const contacts: ContactRecord[] = [];
   let loops = 0;
   /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
   const modules = new Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>();
@@ -1046,7 +1063,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // part costs no more than the model's mesh (round 11: the program's grid laid across a bowl 2.4 wide meshed it at
     // a 0.012 cell where the whole mixer meshes at 0.019, and one wall(bowl) took 5.3 s of a 6.2 s check).
     if (MESHED_QUERIES.has(callee) && values.length === 1 && isShape3(values[0].value)) values.push({ name: "resolution", value: defaultResolution(values[0].value) });
-    const result = callBuiltin(builtin, values, line);
+    const result = callBuiltin(builtin, values, line, CONTACTS.has(callee) ? args : undefined);
     // The first call to make a shape is where it came from; one that hands back its input unchanged keeps the input's.
     if ((isShape3(result) || isShape2(result)) && !origins.has(result)) {
       const fn = calling[calling.length - 1];
@@ -1213,13 +1230,36 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
   }
 
-  function callBuiltin(b: Builtin, args: { name?: string; value: Value }[], line: number): Value {
+  /**
+   * `exprs`, the call's arguments as written, for a builtin that names its parts in a message and says what it did
+   * (rest, lean): the text bound to each parameter, by name or by position among those not named.
+   */
+  function callBuiltin(b: Builtin, args: { name?: string; value: Value }[], line: number, exprs?: Arg[]): Value {
     const failures: string[] = [];
     for (const ov of b.overloads) {
       const bound = bind(ov, args);
       if (typeof bound === "string") { failures.push(bound); continue; }
+      const ctx: CallContext = { meshes };
+      if (exprs) {
+        const text = (param: string): string | undefined => {
+          const byName = exprs.find((a) => a.name === param);
+          if (byName) return exprText(byName.value);
+          const free = ov.params.filter((p) => !exprs.some((a) => a.name === p.name));
+          const k = free.findIndex((p) => p.name === param), positional = exprs.filter((a) => !a.name);
+          return k >= 0 && k < positional.length ? exprText(positional[k].value) : undefined;
+        };
+        const fn = calling[calling.length - 1];
+        // The part as the program wrote it, or, for a pipeline too long to read in a line, the name it is assigned to.
+        const part = (): string => {
+          const t = text("part") ?? "the part";
+          const step = !fn && currentStep?.name;
+          return t.length > 24 && step ? step : t.length > 48 ? `${t.slice(0, 45)}...` : t;
+        };
+        ctx.text = (param) => (param === "part" ? part() : text(param));
+        ctx.placed = (note) => contacts.push({ callee: b.name as ContactRecord["callee"], line, def: fn?.name, file: fn?.file, part: part(), on: text("on") ?? "the target", note });
+      }
       try {
-        return ov.impl(bound.values, bound.rest, { meshes });
+        return ov.impl(bound.values, bound.rest, ctx);
       } catch (err) {
         const msg = (err as Error).message;
         throw new RuntimeError(msg.startsWith(`${b.name}(): `) ? msg : `${b.name}(): ${msg}`, line);
@@ -1812,7 +1852,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images, origins };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images, origins, contacts };
 }
 
 export function signature(name: string, ov: Overload): string {
@@ -1820,8 +1860,9 @@ export function signature(name: string, ov: Overload): string {
     const base = p.rest ? `${p.name}...` : p.name;
     if (p.default === undefined || p.rest) return base;
     const d = p.default;
+    // A point or a direction as the program would write it: dir=[0, -1, 0].
     const shown =
-      typeof d === "number" ? (d === -1 || d === -1e9 || Number.isNaN(d) ? undefined : String(d)) : typeof d === "string" ? `"${d}"` : undefined;
+      typeof d === "number" ? (d === -1 || d === -1e9 || Number.isNaN(d) ? undefined : String(d)) : typeof d === "string" ? `"${d}"` : Array.isArray(d) && d.every((x) => typeof x === "number") ? `[${d.join(", ")}]` : undefined;
     return shown === undefined ? `${base}=?` : `${base}=${shown}`;
   });
   return `${name}(${parts.join(", ")}) -> ${ov.returns}`;

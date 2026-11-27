@@ -311,6 +311,26 @@ Move the shape so the lowest point of its surface rests on y = 0 (the surface, f
 
     ground(shape) -> shape
 
+### rest
+
+Move `part` along `dir` (straight down by default) until it touches `on`, then `sink` further: bowl | rest(plate) sets a bowl on its plate, book | rest(shelf) a book on its shelf, book | rest(prev, dir=[-1, 0, 0]) slides it along the shelf against its neighbour, all without the arithmetic. The contact is found from both surfaces' fields, the small parts of each at their own scale (a bowl's tab lands on a hook's lip 0.05 thick), and tightened on clearance(), so a promise of contact holds by construction: afterwards clearance(part, on) is within a millionth of the part's size of 0 (round 11's 33 books: 1.3e-6 at most) and overlap() reads 0, at any scale (the search runs at the part's own size, so a centimetre part in a model in metres places as a part of 1 does); on a displaced skin, whose field is not a distance, to about a ten-thousandth (round 3's frog on its pad: 3e-4). `on` may be several things joined with +: each is read on its own, so a shelf the part slides along does not pass for the neighbour it slides into. A part that starts inside `on` is first backed out against `dir` to the first place it is clear, so a part built at the origin rests on a shelf above it; one sunk a sliver into something (ground() leaves a turned part up to 5e-5 in the floor) is lifted out of it first; one that never touches `on` along `dir` is an error that says where both are. A face on a face meshes as one piece (pieces() reads 1 at every grid tried), but a corner on a face can mesh as two at some grids (a cube on its corner, at 128 cells): sink=0.02 pushes the part that far on into `on`, for a print or a promise of one piece, and a negative sink stops that far short (a gap between books). Anchors move with the part; check prints how far each call moved it. 10 to 60 ms a call for parts like these, one to two seconds for a frog with displaced skin
+
+    rest(part, on, dir=[0, -1, 0], sink=0) -> shape
+
+- `on`: what it comes to rest on: a shape, or several joined with +
+- `dir`: the direction it moves in, [x, y, z]
+- `sink`: how far to go on past the touch, into `on` (negative: stop that far short)
+
+### lean
+
+Turn `part` about the line through `pivot` along `axis` until it touches `on`: book | lean(prev, pivot="heel", axis=[0, 0, 1]) leans a book standing on its shelf against its neighbour, turned about its bottom edge. The pivot is a point [x, y, z] or the name of one of the part's anchors (a named one, or a free one: bottom, left, ...); a rounded edge stays on what it stands on when the pivot is its rounding's centre (0.02 in from both faces for round=0.02). It turns the right-handed way about `axis`, as rotate() turns about x, y and z: axis=[0, 0, 1] tips +y towards -x, so a book whose heel is its bottom-left edge leans left; axis=[0, 0, -1] turns the other way. Up to 180 degrees: an axis that turns the part away from `on` is an error, or a turn of more than a quarter, which check's line points out. The contact is tightened on clearance() as rest()'s is: clearance(part, on) afterwards is within a millionth of the part's size of 0 (round 11's three leaning books: 1.9e-6 at most, where the hand-worked placement left 0.0065 to 0.0076). A part that starts inside `on` is turned back the other way to the first angle it is clear. Anchors turn with the part; check prints the angle each call turned
+
+    lean(part, on, pivot, axis) -> shape
+
+- `on`: what it leans against
+- `pivot`: the point it turns about: [x, y, z], or the name of one of the part's anchors
+- `axis`: the direction of the line it turns about, [x, y, z]; it turns the right-handed way about it
+
 ### center
 
 Move the shape so its bounding box is centred on the origin; `axes` picks which of x, y, z.
@@ -424,7 +444,7 @@ A step of its own for a value made in a loop: `books = books + named("book_" + n
 
 A joint's pose in one value, for pose(): xform(rotate=[x, y, z] degrees or one angle about the joint's axis, move=[dx, dy, dz] in world units after the turn, scale=s or [sx, sy, sz] about the pivot). pose("hop", body=xform(move=[0, 0.3, 0]), lungs=xform(scale=[1, 1.02, 1])); a plain [x, y, z] in a pose is still just the angles.
 
-    xform(rotate=?, move=?, scale=1) -> transform
+    xform(rotate=[0, 0, 0], move=[0, 0, 0], scale=1) -> transform
 
 - `rotate`: [x, y, z] degrees, or one angle for a joint with axis=
 - `move`: [dx, dy, dz]

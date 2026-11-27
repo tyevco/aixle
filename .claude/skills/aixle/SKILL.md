@@ -37,8 +37,13 @@ Reference: `docs/reference.md` (every function, generated from the code),
    Build each part at the
    origin, then `rotate`, then `move` into place; where two parts meet,
    `anchor` the meeting points and `attach` one to the other instead of
-   computing the move (`lamp | attach("bottom", arm, "tip")`), and use
-   `at(part, "name")` as the end of a `tube`. Paint parts before
+   computing the move (`lamp | attach("bottom", arm, "tip")`); where a
+   part rests on, slides against or leans on another, let the surfaces
+   place it instead of the arithmetic: `bowl | rest(plate)`, `book |
+   rest(prev, dir=[-1, 0, 0], sink=-0.06)` (0.06 short of it), `book |
+   lean(prev, pivot="heel", axis=[0, 0, 1])` (`check` prints how far each
+   moved or turned; the contact then holds to a millionth of the part).
+   Use `at(part, "name")` as the end of a `tube`. Paint parts before
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
    size (profiles and numbers too), every warning, in a second, and for
@@ -179,6 +184,7 @@ a + b   a - b   a & b            # union, difference, intersection; union(a, b, 
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x") | round(r) | shell(t)
   | twist(deg) | bend(deg) | wrap(r) | displace(amp, size) | array(n, dx, dy, dz) | grid(nx, nz, dx, dz)
   | ring(n, radius, axis="y") | ground() | center() | paint("wood") | decal(region, "black")
+  | rest(on, dir=[0, -1, 0], sink=0) | lean(on, pivot="heel", axis=[0, 0, 1])   # moved or turned until it touches `on`
 ```
 
 y is up, angles are degrees, primitives are centred on the origin and stand
@@ -261,6 +267,9 @@ show arm
 | a small point light cannot be judged in `lights.png` | it changes a few pixels of the whole picture | the bottom row is what each light adds on its own, brightened |
 | `overlap(a, b)` fails at 0 | they only touch, stand apart, or overlap thinner than the lattice: the failure says which | sink one into the other, or promise a chunk of the part |
 | a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
+| a part meant to sit on or lean on another floats, sinks a hair, or needs trigonometry | the contact is worked out by hand | `rest(on)` / `lean(on, pivot, axis)`: moved or turned until it touches, a millionth of its size from touching (a ten-thousandth on a displaced skin), at any scale |
+| `lean` turns the long way round, or never touches | it turns the right-handed way about `axis`, as `rotate` does | the other sign, `axis=[0, 0, -1]`; check's line flags a turn past a quarter |
+| `rest` lands a part on what it should pass, or backs it out | `on` holds what it falls past, or it started inside `on` (check's line says) | leave that out of `on`; start the part clear |
 | a copy should be left out of a loop, or a value differ by a test | there is no `if`; a comparison is 1 or 0 | a number `(t > 0) * a + (t <= 0) * b`; a shape, a material or a record `[if_false, if_true][t > 0]`; leave a copy out with `[part, empty()][i == k]` (a copy scaled to 0 collapses onto the origin) |
 | one copy a loop made cannot be sliced, focused or found in a warning | a name first assigned in a loop is the loop's own, not a step | `books = books + named("book_" + i, bk)`: a step per copy, `--slice book_9` |
 
