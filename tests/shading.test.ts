@@ -12,7 +12,7 @@ import { pbr, type PbrTables } from "../src/render/pbr.js";
 import { project, toView, type Camera } from "../src/render/camera.js";
 import { buildEnvironment, prefilterLevels, projectSh, type EnvironmentState } from "../src/render/environment.js";
 import { FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
-import { openBeautyPool } from "../src/render/beauty-pool.js";
+import { lastPoolRows, openBeautyPool } from "../src/render/beauty-pool.js";
 import { check } from "../src/pipeline.js";
 
 /**
@@ -97,16 +97,18 @@ describe("shading: units and energy", () => {
     expect(Math.abs(got - KEY) / KEY).toBeLessThan(0.03);
   });
 
-  it("keeps the energy of a constant sky: a white sphere of any roughness, dielectric or metal, returns L within 5%", () => {
-    const L = 0.6;
+  it("keeps the energy of a constant sky: a white sphere of any roughness, dielectric or metal, returns E·L within 5%", () => {
+    // The sky's intensity E is `set ambient` times the palette's, neither of them 1 here, so a kernel that dropped
+    // either from its diffuse or its reflected light, or took one of them twice, is out by far more than 5%.
+    const L = 0.8, ambient = 0.5, palette = 1.3, EL = L * ambient * palette;
     for (const metal of [0, 1])
-      for (const rough of [0.2, 0.5, 1]) {
+      for (const rough of [0.2, 0.3, 0.5, 1]) {
         // High above the floor, so nothing but the sky is round it.
         const ball = O.paint(O.move(P.sphere(1), 0, 6, 0), white(rough, metal));
-        const r = shade(ball, { size: 64, lights: [dark] }, 32, constantSky(L));
+        const r = shade(ball, { size: 64, ambient, lights: [dark] }, 32, { ...constantSky(L), ambient: palette });
         const { flags } = r.buffers as { flags: Uint8Array };
         const got = meanOver(r.hdr, (i) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE), 64 * 64);
-        expect(Math.abs(got - L) / L, `rough ${rough} metal ${metal}: ${got}`).toBeLessThan(0.05);
+        expect(Math.abs(got - EL) / EL, `rough ${rough} metal ${metal}: ${got}`).toBeLessThan(0.05);
       }
   });
 
@@ -157,6 +159,23 @@ describe("shading: units and energy", () => {
     expect(worst).toBeLessThan(1e-5);
     // Each light's slot holds light where that light reaches and nothing it cannot: the sky's slot is not the whole.
     for (const s of split.slots) expect(s.some((v) => v > 0.01)).toBe(true);
+    // And all of it: the point light's slot is what the render gains by it, directly, on the floor, through the amber
+    // and in the chrome. (The point light is the one the floor's albedo does not depend on, and no surface here takes
+    // the glossy rays' clamp, so the light adds linearly; edge pixels, which the brightness test picks from the total,
+    // are left out.)
+    const dark = shade(scene, { size: 64, lights: lights.map((l, i) => (i === 2 ? { ...l, power: 0 } : l)) }, 36);
+    const fa = split.buffers.flags as Uint8Array, fb = dark.buffers.flags as Uint8Array;
+    let added = 0, gap = 0;
+    for (let i = 0; i < 64 * 64; i++) {
+      if ((fa[i] | fb[i]) & FLAG_EDGE) continue;
+      for (let c = 0; c < 3; c++) {
+        const gain = one.hdr[i * 3 + c] - dark.hdr[i * 3 + c];
+        added += gain;
+        gap = Math.max(gap, Math.abs(split.slots[3][i * 3 + c] - gain) / Math.max(1e-2, one.hdr[i * 3 + c]));
+      }
+    }
+    expect(added).toBeGreaterThan(1);
+    expect(gap).toBeLessThan(1e-4);
   });
 
   it("draws the same bytes on one thread and on four", () => {
@@ -172,6 +191,30 @@ describe("shading: units and energy", () => {
     const four = sha(renderBeauty(shape, nets.mesh, shape.bounds, { ...opts, pool }).data);
     pool.close();
     expect(four).toBe(one);
+  });
+
+  it("draws the same linear light, bit for bit, on one thread and on three, at an odd size, twice on one pool", () => {
+    // Glass seen through glass, a mirror, a glossy metal, a point light and a glow, the light split per slot: every
+    // float of every slot, not only the bytes the tone curve and the dither keep. An odd size gives the threads rows of
+    // uneven work, and the second render on the same pool finds whatever the first one left.
+    const src = 'cup = revolve(polygon(0,0, 0.45,0, 0.55,1.1, 0.48,1.1, 0.38,0.08, 0,0.08)) | paint("glass")\ntea = cylinder(0.37, 0.6) | move(0, 0.33, 0) | paint("amber")\norb = sphere(0.3) | move(0.8, 0.3, 0.3) | paint("chrome")\nnut = sphere(0.25) | move(-0.8, 0.25, 0.2) | paint("gold")\nember = sphere(0.08) | move(0.3, 0.08, 0.6) | paint(material("#ffb050", glow=2))\nshow cup + tea + orb + nut + ember';
+    const shape = check(src, "cup.aix").output!;
+    const nets = surfaceNets(shape, { resolution: 48 });
+    const opts: BeautyOptions = { size: 77, cellSize: nets.cellSize, splitLights: true, lights: [{ azimuth: -40, elevation: 50, size: 1.5, color: [1, 1, 1], power: 1 }, { azimuth: 0, elevation: 0, size: 1, color: [1, 0.7, 0.4], power: 1.2, position: [0.3, 0.5, 0.6], range: 1.2 }] };
+    const bits = (r: { canvas: { data: Uint8Array }; hdr?: Float32Array[] }) => createHash("sha256").update(r.canvas.data).update(new Uint8Array(r.hdr!.flatMap((h) => Array.from(new Uint8Array(h.buffer))))).digest("hex");
+    const one = bits(renderBeautyResult(shape, nets.mesh, shape.bounds, opts));
+    const pool = openBeautyPool(3)!;
+    pool.warm({ source: src, sourceName: "cup.aix" });
+    expect(pool.waitReady()).toBe(true);
+    const a = bits(renderBeautyResult(shape, nets.mesh, shape.bounds, { ...opts, pool }));
+    const b = bits(renderBeautyResult(shape, nets.mesh, shape.bounds, { ...opts, pool }));
+    // The workers drew rows of it, not the main thread alone.
+    const rows = lastPoolRows();
+    pool.close();
+    expect(rows.length).toBe(3);
+    expect(rows.slice(1).some((n) => n > 0)).toBe(true);
+    expect(a).toBe(one);
+    expect(b).toBe(one);
   });
 });
 
