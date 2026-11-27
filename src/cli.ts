@@ -92,7 +92,7 @@ function usage(): never {
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
-      "                          [--3mf]                             also write model.3mf (written anyway when the program sets units or a bed)",
+      "                          [--3mf]                             also write model.3mf and judge the model as a print (both anyway when the program sets units or a bed)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--slice NAME]                     slices.png through one step, framed on it, the rest of the model faint",
       "                          [--camera NAME] [--environment NAME|A,B|all]  one declared shot only (the sheet takes its view); a sky over the program's, or several into environments.png",

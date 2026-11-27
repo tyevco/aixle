@@ -35,7 +35,7 @@ import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
-import { bedFit, contactArea, supportVolume, UNIT_3MF, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
+import { bedFit, contactArea, supportVolume, threemfUnit, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
@@ -95,7 +95,7 @@ export interface RunOptions {
   sharp?: boolean;
   /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
   crease?: number;
-  /** Also write model.3mf beside model.stl (it is written anyway when the program sets units or a bed). */
+  /** Also write model.3mf beside model.stl and judge the model as a print (both happen anyway when the program sets units or a bed). */
   threemf?: boolean;
   /** Also write model.roblox.glb: the GLB turned to face -Z with a Handle node and `_Att` attachment nodes from the anchors, sized against Roblox's accessory limits (or `set roblox 1`). */
   roblox?: boolean;
@@ -849,12 +849,12 @@ export function printBed(settings: Settings): number[] | undefined {
   return Array.isArray(b) && b.length === 3 && b.every((v) => v > 0) ? b : undefined;
 }
 
-const UNIT_WORDS: Record<string, string> = { mm: "a millimetre", cm: "a centimetre", m: "a metre", in: "an inch" };
-const UNIT_PLURALS: Record<string, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches" };
+const UNIT_WORDS: Record<string, string> = { mm: "a millimetre", cm: "a centimetre", dm: "a decimetre", m: "a metre", in: "an inch", ft: "a foot" };
+const UNIT_PLURALS: Record<string, string> = { mm: "millimetres", cm: "centimetres", dm: "decimetres", m: "metres", in: "inches", ft: "feet" };
 
 /** The Units row, and the first words of check's print line. */
 export function unitsText(u: { units: string; mm: number; assumed: boolean }, heightMm?: number): string {
-  if (u.assumed) return `not set: a slicer reads a unit as a millimetre${heightMm !== undefined ? `, so this prints ${fmtMm(heightMm)} mm tall` : ""}; \`set units cm\` (or mm, m, in) says what a unit is`;
+  if (u.assumed) return `not set: a slicer reads a unit as a millimetre${heightMm !== undefined ? `, so this prints ${fmtMm(heightMm)} mm tall` : ""}; \`set units cm\` (or mm, dm, m, in, ft) says what a unit is`;
   return `${u.units}: one unit is ${UNIT_WORDS[u.units]}${u.mm !== 1 ? ` (${fmt(u.mm)} mm)` : ""}`;
 }
 
@@ -920,7 +920,9 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
   rows.push(`| On the plate | ${fmtMm(contact)} mm² of the base rests flat on the bed${contact < 0.02 * sizeMm[0] * sizeMm[1] ? " (a small foothold for its size: a brim, or a flat cut under it, holds it down)" : ""} |`);
   const volMm3 = Math.abs(physics.volume) * mm * mm * mm;
   rows.push(`| Material | ${fmtMm(volMm3 / 1000)} cm³ solid, about ${fmtMm((volMm3 / 1000) * 1.24)} g of PLA (1.24 g/cm³) at full infill; a slicer's infill uses less |`);
-  rows.push(`| Files | ${[files.stl ? "model.stl in millimetres" : "", files.threemf ? `model.3mf in ${UNIT_PLURALS[u.units]} with the materials' colours` : ""].filter(Boolean).join(", ") || "none (exports off)"}${files.stl || files.threemf ? ", z up as a slicer's plate is" : ""} |`);
+  const t3 = threemfUnit(u.units);
+  const in3mf = t3.scale === 1 ? UNIT_PLURALS[u.units] : `millimetres (3MF has no ${UNIT_PLURALS[u.units].replace(/s$/, "")}: the coordinates are scaled by ${fmt(t3.scale)})`;
+  rows.push(`| Files | ${[files.stl ? "model.stl in millimetres" : "", files.threemf ? `model.3mf in ${in3mf} with the materials' colours` : ""].filter(Boolean).join(", ") || "none (exports off)"}${files.stl || files.threemf ? ", z up as a slicer's plate is" : ""} |`);
   Object.assign(json, { contactMm2: contact, volumeMm3: volMm3 });
   // Turned on the plate is no problem (a slicer turns it); lying down changes the supports, and not fitting is a warning.
   const problems = [pieces > 1 ? `${pieces} pieces` : "", !watertight ? "not watertight" : "", bed && !fit.fits && fit.turned === undefined ? (fit.lying ? "fits the bed only lying down" : "does not fit the bed") : ""].filter(Boolean);
@@ -969,6 +971,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // on a rig failed in its jump pose) unless one names its pose, which is tested in that pose's evaluation.
   const asserts = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? evalAt(p.joints, pn) : undefined; });
   const warnings = [...evaluation.warnings, ...asserts.filter((a) => !a.passed).map(assertLine)];
+  // A model is judged as a print only when the program says it is one (a unit or a bed) or the run asks for a print's
+  // file (--3mf): a door for a game engine was told it prints 2.6 mm tall and its summary opened on a 0.0144 mm wall
+  // (round 11). The STL is written for every model, so it does not count.
+  const asPrint = !!opts.threemf || evaluation.settings.units !== undefined || evaluation.settings.bed !== undefined;
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // Set when the shown pose has lifted the whole model off the floor: standing is then not judged.
@@ -1381,9 +1387,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         // slicer reads millimetres, so it is written in millimetres from `set units` (a unit is a millimetre without).
         write("model.stl", toStl(mesh!, name, printUnits(evaluation.settings).mm));
         // The 3MF carries the unit and the colours, for a program that says it is a print (units or a bed) or --3mf.
-        if (opts.threemf || evaluation.settings.units !== undefined || evaluation.settings.bed !== undefined) {
-          const u = printUnits(evaluation.settings);
-          write("model.3mf", time("3mf", () => to3mf(mesh!, { name, unit: UNIT_3MF[u.units] })));
+        if (asPrint) {
+          // 3MF has no decimetre: such a model is written in millimetres, its coordinates scaled.
+          const t3 = threemfUnit(printUnits(evaluation.settings).units);
+          write("model.3mf", time("3mf", () => to3mf(mesh!, { name, unit: t3.unit, scale: t3.scale })));
         }
       }
       if (opts.glb !== false) {
@@ -1663,16 +1670,22 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         `| Centre of mass | (${physics.centre.map(fmt).join(", ")}) |`,
         `| Base footprint${shownPose ? ` (in pose ${shownPose})` : ""} | ${offFloor ? `none: the pose lifts the model off the floor (lowest point y = ${fmt(physics.floor)})` : physics.footprint.length >= 3 ? `${physics.footprint.length}-sided hull of the points within ${fmt(cellSize * 1.5)} of y = ${fmt(physics.floor)}` : "none (fewer than three contact points)"} |`,
         `| Stands${shownPose ? ` (in pose ${shownPose})` : ""} | ${offFloor ? "not judged: off the floor in this pose" : physics.footprint.length < 3 ? "unknown" : physics.stable ? `yes, centre of mass ${fmt(physics.stabilityMargin)} inside the footprint` : `no, centre of mass ${fmt(-physics.stabilityMargin)} outside the footprint`} |`,
-        `| Overhangs | ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface faces down more than 45° above the floor${physics.overhang > 0.005 ? " (a printer would need support there)" : ""} |`,
+        `| Overhangs | ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface faces down more than 45° above the floor${physics.overhang > 0.005 && asPrint ? " (a printer would need support there)" : ""} |`,
         `| Pieces | ${quickDropped ? `not judged on this quick pass (${quickDropped} thin step${quickDropped === 1 ? "" : "s"} dropped; the full render counts them)` : piecesRow(physics, evaluation, cellSize)} |`,
         `| Cavities | ${cavitiesRow(physics, cellSize)} |`,
         "",
       );
       // What a slicer's user wants first: the unit, the size in millimetres, the bed, the thinnest wall, the supports.
-      const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics!, cellSize)).length;
-      const pr = printSection(evaluation, output!, mesh, cellSize, physics, quickDropped ? 0 : solid, wt.ok, !!opts.quick, time, { stl: files.includes("model.stl"), threemf: files.includes("model.3mf") });
-      lines.push(...pr.lines);
-      printJson = pr.json;
+      // A model that is not a print gets one line saying how to make it one, and no wall or support passes.
+      if (asPrint) {
+        const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics!, cellSize)).length;
+        const pr = printSection(evaluation, output!, mesh, cellSize, physics, quickDropped ? 0 : solid, wt.ok, !!opts.quick, time, { stl: files.includes("model.stl"), threemf: files.includes("model.3mf") });
+        lines.push(...pr.lines);
+        printJson = { judged: true, ...pr.json };
+      } else {
+        lines.push(`Not judged as a print: \`set units mm\` (or cm, dm, m, in, ft) or \`set bed 220 220 250\` judges it as one, as \`--3mf\` does${files.includes("model.stl") ? "; model.stl is written all the same, a unit read as a millimetre" : ""}.`, "");
+        printJson = { judged: false };
+      }
     }
   }
   if (evaluation.objects.length > 1 || joints.length > 0 || evaluation.poses.length > 0) {

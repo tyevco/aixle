@@ -26,8 +26,9 @@ const num = (v: number): string => {
 const hex2 = (v: number): string => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0").toUpperCase();
 
 /** The model part on its own, for a test to read without the zip. */
-export function model3mf(mesh: Mesh, opts: { name: string; unit: string }): string {
+export function model3mf(mesh: Mesh, opts: { name: string; unit: string; scale?: number }): string {
   const p = mesh.positions;
+  const k = opts.scale ?? 1;
   // The crease copies share a position; a slicer wants one vertex there, or it sees the mesh as open.
   const welded = weldIndices(mesh);
   const remap = new Int32Array(p.length / 3).fill(-1);
@@ -36,7 +37,7 @@ export function model3mf(mesh: Mesh, opts: { name: string; unit: string }): stri
     if (remap[v] >= 0) continue;
     remap[v] = verts.length;
     // Turned to z up: (x, y, z) becomes (x, -z, y), a rotation, so the winding is kept.
-    verts.push(`<vertex x="${num(p[v * 3])}" y="${num(-p[v * 3 + 2])}" z="${num(p[v * 3 + 1])}"/>`);
+    verts.push(`<vertex x="${num(p[v * 3] * k)}" y="${num(-p[v * 3 + 2] * k)}" z="${num(p[v * 3 + 1] * k)}"/>`);
   }
   const mats = mesh.materials;
   const withMats = mats.length > 0;
@@ -81,8 +82,11 @@ export function model3mf(mesh: Mesh, opts: { name: string; unit: string }): stri
   return lines.join("\n");
 }
 
-/** A 3MF package of the mesh, its coordinates in `unit` (millimeter, centimeter, meter, inch) as they are. */
-export function to3mf(mesh: Mesh, opts: { name: string; unit: string }): Buffer {
+/**
+ * A 3MF package of the mesh in `unit` (micron, millimeter, centimeter, inch, foot, meter), its coordinates
+ * multiplied by `scale` (1 when the model's unit is one 3MF has; a decimetre model is written in millimetres, 100).
+ */
+export function to3mf(mesh: Mesh, opts: { name: string; unit: string; scale?: number }): Buffer {
   const types = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`,

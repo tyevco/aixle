@@ -52,13 +52,16 @@ the inside is cut open.
 6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
    For a print, say what a unit is and what the printer holds (`set units
-   mm`, `set bed 220 220 250` in millimetres): `check` then prints the
-   size in millimetres and whether it fits the bed, and the report's
-   Print section has the thinnest wall and where it is, the support
-   under the overhangs and what rests on the plate; `model.stl` is in
-   millimetres with z up and `model.3mf` carries the unit and the
+   mm`, or cm, dm, m, in, ft; `set bed 220 220 250` in millimetres): only
+   then is the model judged as a print (or with `--3mf`). `check` then
+   prints the size in millimetres and whether it fits the bed, and the
+   report's Print section has the thinnest wall and where it is, the
+   support under the overhangs and what rests on the plate; `model.stl`
+   is in millimetres with z up and `model.3mf` carries the unit and the
    colours. Promise the walls with `assert wall(model) > 0.8` (model
-   units: 0.8 mm is two lines of a 0.4 mm nozzle).
+   units: 0.8 mm is two lines of a 0.4 mm nozzle). A game asset or a
+   piece of furniture sets neither, and its report says in one line
+   that it was not judged as a print.
 
 ## The commands
 
@@ -80,7 +83,7 @@ npx aixle render model.aix --beauty-only --camera hero   one shot and the sheet,
 npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all)
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
-npx aixle render model.aix --3mf           also model.3mf (written anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
+npx aixle render model.aix --3mf           also model.3mf, and the report judges it as a print (both anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
 npx aixle render model.aix --triangles 50000   a lighter GLB, OBJ and viewer, decimated (default cap 200000; 0 keeps every triangle)
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side

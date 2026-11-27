@@ -13,8 +13,9 @@ This document is the language around them.
   front view. `ground()` rests a shape on `y = 0`.
 - Units are unitless; pick one (metres, centimetres, "one unit is a brick")
   and stay with it. The renders draw grids in whole units. For a print,
-  `set units cm` (or `mm`, `m`, `in`) says which, and the exports and the
-  report's Print section use it (see Settings).
+  `set units mm` (or `cm`, `dm`, `m`, `in`, `ft`) says which, and the
+  exports and the report's Print section use it (see Settings); a model
+  is judged as a print only then.
 - **Angles are degrees**, in `rotate`, `twist`, `bend` and in `sin`/`cos`.
 - Every primitive is centred on the origin. Anything with an axis
   (cylinder, cone, capsule, prism, capsule) stands along y; a torus lies
@@ -964,24 +965,37 @@ the model stands a hair below the floor), which the voxeliser rounds
 away again; `check` warns about a part thinner than a voxel as `render`
 does.
 
-For a print, `set units mm` (or `cm`, `m`, `in`; `set units in` works
-though `in` is a keyword) says what one unit is, and `set bed 220 220
-250` (or `set bed [220, 220, 250]`) is the printer's build volume in
-millimetres: width along x, depth along z, height along y. Without
-units a unit is taken as a millimetre, which is what a slicer reads an
-STL as, and the report says how tall that would print, so a 2.4-unit
-mug is told it prints 2.4 mm tall. `model.stl` is always written in
-millimetres and with z up, the way a slicer's plate is (the model
-stands on it as it stands on the sheet, its front towards the front of
-the plate). A program that sets units or a bed also gets `model.3mf`
-(`--3mf` asks for it without them): the same mesh in the program's own
+For a print, `set units mm` (or `cm`, `dm`, `m`, `in`, `ft`; `set
+units in` works though `in` is a keyword) says what one unit is, and
+`set bed 220 220 250` (or `set bed [220, 220, 250]`) is the printer's
+build volume in millimetres: width along x, depth along z, height along
+y. A model is judged as a print only when the program says it is one,
+with `set units` or `set bed`, or the run asks for a print's file with
+`--3mf`. Then the report has its Print section, `check` its `print:`
+line and the render a `model.3mf`. Otherwise the report says in one
+line that it was not judged as a print and how to make it one, and
+nothing else in it speaks of millimetres, grams of PLA or a slicer: a
+door for a game engine, a kitchen mixer drawn in decimetres and a
+bookcase are not prints, and a Print section telling them they print
+2.6 mm tall, with a summary that opens on a 0.0144 mm wall, was the
+report's longest section and none of it applied (round 11). The STL is
+written for every model and so does not make one a print. With `--3mf`
+and no units a unit is taken as a millimetre, which is what a slicer
+reads an STL as, and the report says how tall that would print, so a
+2.4-unit mug is told it prints 2.4 mm tall. `model.stl` is always
+written in millimetres and with z up, the way a slicer's plate is (the
+model stands on it as it stands on the sheet, its front towards the
+front of the plate). `model.3mf` is the same mesh in the program's own
 unit, welded so a slicer sees it closed, with each material's colour
-on its triangles. With units set, the sheet's title gives the size in
-them (`3.76 × 2.4 × 2.4 cm`). With a bed set, a model that fits the bed
-neither square nor turned about the vertical is a warning. With units or
-a bed set, `check` prints a `print:` line with the size in millimetres
-and the bed's verdict, from the surface's extent, in no time; when that
-box does not fit square, the outline is judged turned and lying from a
+on its triangles; 3MF has no decimetre, so a model in `dm` is written
+in millimetres, its coordinates multiplied by 100 (a slicer reads the
+same size either way), and the Print section's Files row says so. With
+units set, the sheet's title gives the size in them (`3.76 × 2.4 × 2.4
+cm`). With a bed set, a model that fits the bed neither square nor
+turned about the vertical is a warning. With units or a bed set,
+`check` prints a `print:` line with the size in millimetres and the
+bed's verdict, from the surface's extent, in no time; when that box
+does not fit square, the outline is judged turned and lying from a
 coarse mesh, as the render judges its own, so the two agree.
 
 ## The fast loop
@@ -1113,7 +1127,8 @@ the report prints, negative for an overlap. A focused render adds a
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
 overhangs (faces down more than 45°, which a printer would need support
-under). The Print section has what a slicer's user asks first: a
+under). The Print section, for a model judged as a print (above), has
+what a slicer's user asks first: a
 summary line, the unit (or that it was assumed), the size in
 millimetres, the bed (fits; does not fit square, but turned so many
 degrees on the plate it does, the smallest turn, in degrees as

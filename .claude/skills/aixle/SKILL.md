@@ -79,13 +79,15 @@ Reference: `docs/reference.md` (every function, generated from the code),
    is for Roblox Studio: `model.roblox.glb` facing -Z with an
    `anchor(m, "HatAttachment", ...)` as the attachment, one mesh under
    4000 triangles for an accessory (`set grid 40`), a unit a stud. For a
-   print, `set units mm` (what one unit is; a millimetre is assumed
-   without) and `set bed 220 220 250` (the build volume in millimetres):
-   `check` prints the size in millimetres and whether it fits, the
-   report's Print section has the thinnest wall and where, the support
-   under the overhangs and what rests on the plate, `model.stl` is in
-   millimetres with z up, and `model.3mf` carries the unit and the
-   materials' colours (`--3mf` without units).
+   print, `set units mm` (what one unit is: mm, cm, dm, m, in or ft)
+   and `set bed 220 220 250` (the build volume in millimetres): only
+   then is the model judged as a print (or with `--3mf`, a unit then
+   taken as a millimetre); `check` prints the size in millimetres and
+   whether it fits, the report's Print section has the thinnest wall
+   and where, the support under the overhangs and what rests on the
+   plate, `model.stl` is in millimetres with z up, and `model.3mf`
+   carries the unit and the materials' colours. A model that is not a
+   print gets one line in the report saying so, and no Print section.
    The GLB, OBJ and viewer are decimated past 200 thousand triangles
    (`--triangles N` or `set triangles N`, 0 for all; the report's
    Exports row says how far they stray; below a quarter of the mesh
