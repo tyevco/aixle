@@ -25,6 +25,8 @@ export const NEAR_CELLS = 3;
 export const BOX_CELLS = 2;
 /** Area-light rays per light: four on the outer half of the disc's area, four on the inner. */
 export const AREA_RAYS = 8;
+/** The widest angular radius a directional light's disc is given, in radians: just short of a right angle. */
+const MAX_ANGLE = 1.5;
 
 /** A hashed uniform in [0, 1) from two integers (murmur-style finaliser). */
 export function hash01(a: number, b: number): number {
@@ -461,8 +463,12 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
       tanA = s / Math.sqrt(1 - s * s);
       ST[6] = softnessFor(Math.asin(s));
     } else {
-      tanA = Math.tan(light.radius);
-      ST[6] = softnessFor(light.radius);
+      // A light's size has no upper bound in the language, and size/18 passes a right angle at 28: its tangent
+      // turns negative there, which turned the cone test's grown boxes into shrunk ones and let its early out call
+      // a shadowed point clear. No disc is wider than a hemisphere.
+      const ang = light.radius < MAX_ANGLE ? light.radius : MAX_ANGLE;
+      tanA = Math.tan(ang);
+      ST[6] = softnessFor(ang);
     }
     ST[5] = far - r;
     // The field near p, towards the centre.

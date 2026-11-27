@@ -444,6 +444,9 @@ describe("areaVisibility", () => {
     const lights: RayLight[] = [
       { point: false, x: L[0], y: L[1], z: L[2], radius: 1.5 / 18, index: 0 },
       { point: true, x: 0.1, y: 1.0, z: 0.4, radius: 0.02 * 1.4 * 1, index: 1 },
+      // A size the language allows but no lamp has (54, three radians): past a right angle the disc's tangent turned
+      // negative, and the early out called points clear that eight rays found shadowed (45% of a cube's floor).
+      { point: false, x: L[0], y: L[1], z: L[2], radius: 54 / 18, index: 2 },
     ];
     let early = 0, partial = 0;
     for (let i = 0; i < 64 * 64; i++) {
