@@ -1093,7 +1093,8 @@ Warnings cover: a shape computed but never assigned; a step that is not part
 of the output (a step an assert, a decal or a camera reads is a region
 and is not warned about; `check` tags each step `(cut)`, `(region)` or
 `(not in output)`; a step only asserts read is a region with
-`--no-asserts` too, and in a pose that does not judge them); an empty output (a difference that removed everything, an
+`--no-asserts` too, and in a pose that does not judge them, as is one
+an assert hands to a `def` or reads inside a def's body); an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
 still catch it, below it they may not; between 1.2 and 2 cells a tube

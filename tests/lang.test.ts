@@ -706,6 +706,18 @@ describe("round 11: what check says about its asserts", () => {
     expect(open.asserts.map((a) => [a.line, a.pending ?? false])).toEqual([[6, false]]);
     expect(open.roles.get("probe")).toBe("region");
   });
+  it("keeps a probe a region when the assert reads it through a def, judged or not", () => {
+    // One probe named inside a def's body, one handed to a def: both are read only by asserts, so both are regions,
+    // whether the asserts are judged, skipped (--no-asserts) or another pose's.
+    const src = 'm = box(1)\nprobe = sphere(0.1) | move(0, 2, 0)\nprobe2 = sphere(0.1) | move(0, 3, 0)\ndef gap() = clearance(probe, m)\ndef gap_to(p) = clearance(p, m)\nassert gap() > 0.5\nassert gap_to(probe2) > 0.5\nassert gap_to(probe2) > 0.5, pose=open\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nshow m + lid';
+    const judged = run(src);
+    const open = evaluate(parse(src), { jointPoses: judged.poses[0].joints, poseName: "open" });
+    for (const ev of [judged, evaluate(parse(src), { skipAsserts: true }), open]) {
+      expect(ev.roles.get("probe")).toBe("region");
+      expect(ev.roles.get("probe2")).toBe("region");
+      expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    }
+  });
   it("says which assert is slow, from an injected clock: named as it starts once they have taken two seconds, timed when one takes over one", () => {
     let t = 0;
     const said: string[] = [];

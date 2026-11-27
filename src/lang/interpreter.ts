@@ -762,16 +762,36 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   /**
+   * The steps a call inside an assert reads as regions: the names given to a builtin, and every name handed to a
+   * def (a probe passed to `def fits(p) = ...` is read by the assert as surely as one passed to clearance()).
+   */
+  function markRegionArgs(args: Arg[], toDef: boolean): void {
+    for (const a of args) { const nm = a.name && !toDef ? undefined : stepNameOf(a.value); if (nm) regionNames.add(nm); }
+  }
+
+  /** The defs whose bodies assertRegions has read, once each: a def that calls itself is read once. */
+  const regionDefs = new Set<UserFn>();
+
+  /**
    * The steps an assert's test reads as regions, found in its text rather than by judging it: the names given to a
-   * builtin's call, as a judged assert marks them. For an assert skipped here (--no-asserts, another pose's, a
-   * promise at rest in a posed evaluation), so its probes are regions all the same.
+   * builtin's call or a def's, and those the def's own body gives a builtin, as a judged assert marks them. For an
+   * assert skipped here (--no-asserts, another pose's, a promise at rest in a posed evaluation), so its probes are
+   * regions all the same (round 11: a probe read through a def was a region only while the asserts were judged).
    */
   function assertRegions(e: Expr): void {
     switch (e.type) {
       case "call": {
-        const user = e.callee.includes(".") ? undefined : global.get(e.callee);
-        if (!e.callee.includes(".") && BUILTIN_MAP.has(e.callee) && !(user !== undefined && isUserFn(user)))
-          for (const a of e.args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm) regionNames.add(nm); }
+        const dotted = e.callee.includes(".");
+        const user = dotted ? undefined : global.get(e.callee);
+        const def = user !== undefined && isUserFn(user) ? user : undefined;
+        if (dotted || def || BUILTIN_MAP.has(e.callee)) markRegionArgs(e.args, dotted || !!def);
+        // A def of this program reads the program's steps in its body, as it does when the assert is judged; a
+        // library's def reads its own.
+        if (def && !regionDefs.has(def)) {
+          regionDefs.add(def);
+          assertRegions(def.body);
+          for (const p of def.params) if (p.default) assertRegions(p.default);
+        }
         for (const a of e.args) assertRegions(a.value);
         return;
       }
@@ -807,6 +827,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee.includes(".")) {
       const v = dottedValue(callee, line, scope);
       if (!isUserFn(v)) throw new RuntimeError(`'${callee}' is a ${typeName(v)}, not a function`, line);
+      if (assertDepth > 0) markRegionArgs(args, true);
       return callUser(v, args, scope, line);
     }
     if (callee === "import") return callImport(args, scope, line);
@@ -816,7 +837,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "light") return callLight(args, scope, line);
     if (callee === "camera") return callCamera(args, scope, line);
     const user = scope.get(callee);
-    if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
+    if (user !== undefined && isUserFn(user)) {
+      // A step handed to a def inside an assert is read by the assert, as one handed to a builtin is.
+      if (assertDepth > 0) markRegionArgs(args, true);
+      return callUser(user, args, scope, line);
+    }
     const builtin = BUILTIN_MAP.get(callee);
     // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
     // reaches the builtin, and the program says so once (round 4 asked; a name alone, never called, is fine).
@@ -858,7 +883,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
     if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
-    if (assertDepth > 0) for (const a of args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm) regionNames.add(nm); }
+    if (assertDepth > 0) markRegionArgs(args, false);
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
