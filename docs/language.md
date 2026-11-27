@@ -772,7 +772,7 @@ What the lights and the skies can and cannot do, measured in round 9:
   it, the render warns with the fraction and the better azimuth (a
   stone enclosed in its setting is hidden from every side alike and
   gets no warning). `check` runs the same test before any render, in a
-  tenth of a second: the focus alone is meshed coarsely and a ray is
+  few tenths of a second a camera: the focus alone is meshed coarsely and a ray is
   marched from each of its points towards the camera through the field,
   where the render reads a depth buffer of the model's mesh, so its
   share can come out a few points lower than the render's (a ring of

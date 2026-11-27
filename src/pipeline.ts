@@ -1916,12 +1916,13 @@ export function cameraSight(evaluation: Evaluation, cellSize: number): { lines: 
   const shot = typeof evaluation.settings.camera === "string" ? evaluation.cameras.find((c) => c.name === evaluation.settings.camera) : undefined;
   const baseAz = shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const baseEl = shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
-  let modelBounds: Bounds | undefined;
+  // The camera framed on the model's box, not its surface's extent, which would cost half a second on a big
+  // model: the eye moves a little, and the shares measured on the mixer did not.
+  const modelBounds = output.bounds;
   for (const c of evaluation.cameras) {
     if (!c.focus) continue;
     const r = resolveFocusOf(evaluation, output, c.focus);
     if (!r) continue;
-    modelBounds ??= tightBounds(output);
     const az = c.azimuth ?? baseAz, el = c.elevation ?? baseEl;
     // The focus's own surface, coarsely: the points whose view of the camera is tested.
     const points = surfaceNets(r.shape, { resolution: 48, bounds: r.frame }).mesh;
