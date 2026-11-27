@@ -432,7 +432,7 @@ export const BUILTINS: Builtin[] = [
       if (!p) throw new Error(`at(): no anchor "${a[1]}"; this shape has ${Object.keys(O.anchorsOf(s3(a[0]))).map((k) => `"${k}"`).join(", ") || "no named anchors"}, and every shape has ${O.FREE_ANCHORS.join(", ")}`);
       return [p[0], p[1], p[2]];
     })),
-  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which a fine grid meshes as two pieces: `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, so the two overlap.",
+  def("attach", "Anchors", "Move `part` so its anchor lands on the target's anchor: attach(arm, \"root\", post, \"top\") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which meshes as one piece at any grid; a corner or an edge on a face touches at a point or a line and may mesh apart. `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, for an overlap a print or a promise needs.",
     ov([shape("part"), str("anchor", "the part's anchor"), shape("target"), str("targetAnchor", "the target's anchor"), num("sink", "how far to push the part into the target", 0)], "shape", (a) => {
       const part = s3(a[0]);
       const from = O.anchorAt(part, a[1] as string), to = O.anchorAt(s3(a[2]), a[3] as string);
