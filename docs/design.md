@@ -758,12 +758,15 @@ A lathe profile's run up the axis is an edge of the outline but not of
 the solid: spun, it is inside. With the plain distance the revolved field
 is zero all along the axis, which the cross-sections draw as a line and
 the glass march takes for a surface (measured: a liquid revolved from a
-polygon, as in the tumbler, shows its two halves through the glass). So a
-`curve2` or `bezier2` whose outline has straight runs on x = 0 also
-carries the distance without them, and a full revolve with no offset uses
-that one; the sign still counts them. A transform or a boolean drops it,
-and a partial revolve keeps the plain distance, since there the axis is
-an edge of the wedge's flat ends.
+polygon, as in the tumbler, shows its two halves through the glass), and
+which `shell()` turned into a hollow rod of the wall's thickness up the
+middle (measured: the teapot carried one in every slice from the first
+round until this was found). So a `curve2`, a `bezier2` or a `polygon`
+on x >= 0 whose outline has straight runs on x = 0 also carries the
+distance without them, and a full revolve with no offset uses that one;
+the sign still counts them. A transform or a boolean drops it, and a
+partial revolve keeps the plain distance, since there the axis is an
+edge of the wedge's flat ends.
 
 A closed outline carries a feature size, its thinnest wall: from sixteen
 points per piece (fewer past a hundred pieces: a thousand-point outline

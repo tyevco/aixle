@@ -208,10 +208,9 @@ note when a revolve's profile overshoots past the axis (the box `check`
 prints shows it); an open outline closed along the axis by a straight
 line for `curve2` (corners on the axis do it). A revolve of one leaves
 its runs on the axis out of the distance, so no line runs up the axis in
-the slices and glass or a liquid has no surface there; polygons still
-have that line (the tumbler's drink shows it), and the same few lines in
-`polygon` would answer it, at the cost of every polygon lathe example's
-renders.
+the slices and glass or a liquid has no surface there; after the merge
+`polygon` got the same few lines, since the line was worse than a line:
+`shell()` made it a hollow rod up the teapot's middle.
 
 ## 6. `assert`: built
 

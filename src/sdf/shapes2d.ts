@@ -57,7 +57,7 @@ export function polygon(points: readonly number[]): Shape2 {
     minx = Math.min(minx, vx[i]); maxx = Math.max(maxx, vx[i]);
     miny = Math.min(miny, vy[i]); maxy = Math.max(maxy, vy[i]);
   }
-  return shape2((px, py) => {
+  const out = shape2((px, py) => {
     let d = (px - vx[0]) * (px - vx[0]) + (py - vy[0]) * (py - vy[0]);
     let s = 1;
     for (let i = 0, j = n - 1; i < n; j = i, i++) {
@@ -71,6 +71,34 @@ export function polygon(points: readonly number[]): Shape2 {
     }
     return s * Math.sqrt(d);
   }, { min: [minx, miny], max: [maxx, maxy] }, n);
+  // A lathe profile's edges on x = 0 are inside the solid once it is spun, so a full revolve measures the outline
+  // without them (see Shape2.revolveDist), as curve2 does. With the plain distance the revolved field is zero all up
+  // the axis, and `shell()` of it left a hollow rod up the middle of the teapot (measured: every slice showed it).
+  // Only for an outline on x >= 0, where those edges are the axis and not a boundary facing open space.
+  const tol = 1e-9 * (1 + Math.max(Math.abs(minx), Math.abs(maxx), Math.abs(miny), Math.abs(maxy)));
+  const axisEdge = new Uint8Array(n);
+  let onAxis = 0;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) if (Math.abs(vx[i]) <= tol && Math.abs(vx[j]) <= tol) { axisEdge[i] = 1; onAxis++; }
+  if (onAxis > 0 && onAxis < n && minx >= -tol) {
+    out.revolveDist = (px, py) => {
+      let d = Infinity;
+      let s = 1;
+      for (let i = 0, j = n - 1; i < n; j = i, i++) {
+        const ex = vx[j] - vx[i], ey = vy[j] - vy[i];
+        const wx = px - vx[i], wy = py - vy[i];
+        if (!axisEdge[i]) {
+          const t = Math.max(0, Math.min(1, (wx * ex + wy * ey) / (ex * ex + ey * ey)));
+          const bx = wx - ex * t, by = wy - ey * t;
+          d = Math.min(d, bx * bx + by * by);
+        }
+        // The sign still counts every edge: the axis runs close the outline.
+        const c1 = py >= vy[i], c2 = py < vy[j], c3 = ex * wy > ey * wx;
+        if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
+      }
+      return s * Math.sqrt(d);
+    };
+  }
+  return out;
 }
 
 /** A regular polygon with `sides` sides and circumradius `r`, a vertex on +y. */

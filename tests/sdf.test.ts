@@ -779,6 +779,26 @@ describe("smooth profiles", () => {
     const ox = 0.953, oy = -1.301, ol = Math.hypot(ox, oy);
     expect(cup.dist(0.9 + (0.07 * ox) / ol, 0.05 + (0.07 * oy) / ol)).toBeCloseTo(0.02, 3);
   });
+  it("a polygon's edge on the axis is left out of a full revolve too, so a shelled lathe has no rod up its middle", () => {
+    // The teapot's body: shell() of a revolved polygon closed along x = 0 left a hollow rod of the wall's thickness up
+    // the axis, in every slice, since the plain distance is zero all along it.
+    const body = S.polygon([0, 0, 1.6, 0, 2.1, 0.7, 2.05, 1.5, 1.4, 2.3, 1.15, 2.5, 0, 2.5]);
+    expect(body.dist(0, 1)).toBeCloseTo(0, 9);
+    const solid = S.revolve(body);
+    expect(solid.dist(0, 1, 0)).toBeCloseTo(-1, 6);
+    expect(solid.dist(0.01, 1.2, 0)).toBeCloseTo(-1.2, 6);
+    const pot = O.shell(solid, 0.08);
+    expect(pot.dist(0, 1.25, 0)).toBeGreaterThan(0.5);
+    // Outside the solid it is the same distance as before; a partial revolve keeps the axis as its wedge's edge.
+    expect(solid.dist(3, 1, 0)).toBeCloseTo(S.revolve(S.move2(body, 0, 0), 0, 360).dist(3, 1, 0), 9);
+    expect(solid.dist(3, 1, 0)).toBeCloseTo(body.dist(3, 1), 9);
+    expect(S.revolve(body, 0, 180).dist(0, 1, 0.001)).toBeCloseTo(body.dist(0.001, 1), 9);
+    // An outline reaching past the axis is not a lathe profile: its edge on x = 0 is kept.
+    expect(S.polygon([-1, 0, 0, 0, 0, 1, -1, 1]).revolveDist).toBeUndefined();
+    expect(S.polygon([0, 0, 1, 0, 0, 1]).revolveDist).toBeDefined();
+    // A wall a few cells thick meshes as two closed surfaces and nothing up the middle.
+    expect(isWatertight(surfaceNets(O.shell(solid, 0.3), { resolution: 64 }).mesh)).toBe(true);
+  });
   it("works wherever a profile does, and a revolve of one is exact and meshes watertight", () => {
     const vase = C2.curve2(vasePts);
     const solid = S.revolve(vase);
