@@ -305,6 +305,11 @@ round each stud's foot, absent from the full export). On such a face each
 texel now slides to the surface along the interpolated normal and takes
 the material and paint point the field has there; the rest keep the
 corner rule, which is exact inside one material and costs no `hit()`.
+Measured on the door's capped mesh baked both ways: texels that the
+metallic-roughness map makes metal where the surface is oak went from
+385 to 105, all of those within a quarter of a cell of the iron, and
+about 4300 texels of oak on the studs' iron domes, the light blocks a
+viewer close-up showed, went with them.
 Keeping the band a cell wide in the decimator, by letting a seam vertex
 move only along the seam, was tried and measured: the band's triangles
 stretched along the seam all the same and the misplaced area did not
