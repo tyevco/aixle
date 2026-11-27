@@ -24,13 +24,22 @@
  * tangent plane along the chart's axis, so the ±y charts, whose projection is
  * mirrored, carry a handedness of -1.
  *
+ * A texel takes the material and the paint frame's point of the triangle's
+ * nearest corner, interpolated, which is exact inside one material. A
+ * triangle whose corners are of two materials straddles a seam, and there
+ * the corner rule paints a third or more of the triangle with whichever
+ * corner is nearest (round 11: once decimation had stretched the band
+ * round a door's studs, iron blocks a stud's width across on the oak). So
+ * on such a triangle each texel slides to the surface and takes the
+ * material and the point the field itself has there.
+ *
  * The one thing a planar chart cannot do is a surface that folds back on
  * itself along its axis inside one connected patch (a very deep undercut);
  * such texels are written twice and the later triangle wins. It is rare in
  * practice and visible only there.
  */
 import { albedo, bumpSlope, fieldCurvature, surface } from "../sdf/materials.js";
-import type { DistFn3, Material } from "../sdf/types.js";
+import type { DistFn3, HitFn3, Material } from "../sdf/types.js";
 import type { Vec3 } from "../core/vec.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { Canvas, rgb, rgbDithered } from "../render/canvas.js";
@@ -82,6 +91,11 @@ export interface AtlasResult {
   /** Per entry of `mesh.materials`. */
   maps: MaterialMaps[];
   normalStats?: NormalStats;
+  /**
+   * Texels on triangles whose corners are of two materials, each painted from the surface under it, and how many of
+   * them took a material other than their nearest corner's (what the corner rule would have painted wrong).
+   */
+  seams: { texels: number; differ: number };
 }
 
 /** One field the mesh was extracted from, for a range of its triangles. */
@@ -89,6 +103,8 @@ export interface BakeField {
   /** First triangle and one past the last that came from this field. */
   range: [number, number];
   dist: DistFn3;
+  /** The field's material and paint-frame point at a point, for texels on a triangle across a material seam. */
+  hit?: HitFn3;
   /** Added to a mesh point to give the point in the field's frame (a joint's mesh is stored relative to its pivot). */
   offset: Vec3;
   /** Called around the range's texels: the hierarchy hides a joint's children here, as it did to mesh it. */
@@ -111,6 +127,11 @@ export interface AtlasOptions {
   maps?: boolean;
   /** Run the normal map's sampled test even without relief, for measuring it (the result still bakes no map). */
   testNormals?: boolean;
+  /**
+   * Bake the field's own normal for every material, not only a bumped or displaced one: for an export decimated past
+   * its flat faces, whose merged curved faces no longer carry the surface's normals at their corners.
+   */
+  fieldNormals?: boolean;
 }
 
 /** A texel is bent when the field's normal leans this far from the mesh's: well past the 8-bit encoding's half a degree. */
@@ -197,7 +218,7 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
   const P = mesh.positions, N = mesh.normals, I = mesh.indices;
   const triCount = I.length / 3;
   const noMaps = (): MaterialMaps[] => mesh.materials.map(() => ({ normal: false, metalRough: false, emissive: false }));
-  const empty = (): AtlasResult => ({ mesh, uv: new Float32Array((P.length / 3) * 2), image: new Canvas(4, 4, 0x000000), charts: 0, texelsPerUnit: 0, maps: noMaps() });
+  const empty = (): AtlasResult => ({ mesh, uv: new Float32Array((P.length / 3) * 2), image: new Canvas(4, 4, 0x000000), charts: 0, texelsPerUnit: 0, maps: noMaps(), seams: { texels: 0, differ: 0 } });
   if (triCount === 0) return empty();
 
   // Dominant axis per triangle from the summed vertex normals.
@@ -300,8 +321,10 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
   });
 
   const mats = mesh.materials;
+  const matOf = new Map<Material, number>(mats.map((m, i) => [m, i]));
   const withMaps = opts.maps !== false;
-  const fields = withMaps ? opts.fields ?? [] : [];
+  // The fields are read for the seams in either case, and for the maps only with them.
+  const fields = opts.fields ?? [];
   const cell = Math.max(opts.cellSize ?? 0, 1e-6);
   const probe = opts.wearProbe ?? cell * 1.5;
   // Each vertex's bitangent as a shader builds it from the tangent, cross(normal, tangent) * w, so the bake
@@ -412,15 +435,19 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
 
   // Whether the normal map is worth baking: always for a bump; for a displaced surface a sparse lattice of its
   // texels (one in sixteen) is tested, and the map is baked when enough of them lean past BENT_DEGREES; never for a
-  // model with neither, whose mesh is its shape. Only those materials' texels carry the field's normal: the rest
-  // stay flat, so the mesh's own error at a plain part's creases is neither baked nor paid for.
+  // whole model with neither, whose mesh is its shape. Only those materials' texels carry the field's normal: the rest
+  // stay flat, so the mesh's own error at a plain part's creases is neither baked nor paid for. An export decimated
+  // past its flat faces (`fieldNormals`) is the exception: its merged curved faces no longer carry the surface's
+  // normals at their corners, so every material's texels carry the field's, and the faces shade as the field does
+  // (measured: a vase capped at 12 thousand of 188 thousand triangles, its GLB 0.84 MB to 1.28 and its bake 4.8 s
+  // longer; on the full vase the same would cost 5.9 MB to 7.8 for the mesher's own error at creases).
   let normalStats: NormalStats | undefined;
   let bakeNormals = false;
-  const relief = fields.some((f) => f.relief && f.relief.size > 0);
-  const detailed = (f: BakeField | undefined, m: Material): boolean => (m.bump ?? 0) > 0 || (!!f && (opts.testNormals || !!f.relief?.has(m)));
-  if (fields.length) {
+  const relief = withMaps && fields.some((f) => f.relief && f.relief.size > 0);
+  const detailed = (f: BakeField | undefined, m: Material): boolean => (m.bump ?? 0) > 0 || (!!f && (opts.testNormals || opts.fieldNormals || !!f.relief?.has(m)));
+  if (withMaps && fields.length) {
     let count = 0, bent = 0, maxDeg = 0, sumDeg = 0;
-    if (!anyBump && (relief || opts.testNormals))
+    if (!anyBump && !opts.fieldNormals && (relief || opts.testNormals))
       texels((t, _px, _py, w0, w1, w2) => {
         const f = fieldOf(t);
         if (!f) return;
@@ -437,11 +464,11 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
         sumDeg += deg; maxDeg = Math.max(maxDeg, deg);
         if (dot < cosBent) bent++;
       }, 4);
-    bakeNormals = anyBump || (relief && count > 0 && bent / count >= BENT_SHARE);
+    bakeNormals = anyBump || !!opts.fieldNormals || (relief && count > 0 && bent / count >= BENT_SHARE);
     const share = count ? `${((bent / count) * 100).toFixed(1)}% of sampled texels lean past ${BENT_DEGREES} degrees` : "no texels";
     normalStats = {
       texels: count, bent, maxDeg, meanDeg: count ? sumDeg / count : 0, written: bakeNormals,
-      reason: anyBump ? "a material has a bump" : !relief ? "no displace and no bump: the mesh is the shape" : bakeNormals ? `the displace: ${share}` : `the displace is shallow: only ${share}`,
+      reason: opts.fieldNormals ? "the export is decimated past its flat faces, so every material carries the field's normal" : anyBump ? "a material has a bump" : !relief ? "no displace and no bump: the mesh is the shape" : bakeNormals ? `the displace: ${share}` : `the displace is shallow: only ${share}`,
     };
   }
 
@@ -471,13 +498,38 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
     const l2 = Math.hypot(p2[0], p2[1], p2[2]) || 1e-12;
     for (let k = 0; k < 3; k++) { e2[k] = p2[k] / l2; u2[k] = (L2[k] - u1[k] * along) / l2; }
   };
+  let seamTexels = 0, seamDiffer = 0;
   texels((t, px, py, w0, w1, w2) => {
     const a = newIdx[t * 3], b = newIdx[t * 3 + 1], c = newIdx[t * 3 + 2];
-    const lx = newLoc[a * 3] * w0 + newLoc[b * 3] * w1 + newLoc[c * 3] * w2;
-    const ly = newLoc[a * 3 + 1] * w0 + newLoc[b * 3 + 1] * w1 + newLoc[c * 3 + 1] * w2;
-    const lz = newLoc[a * 3 + 2] * w0 + newLoc[b * 3 + 2] * w1 + newLoc[c * 3 + 2] * w2;
+    let lx = newLoc[a * 3] * w0 + newLoc[b * 3] * w1 + newLoc[c * 3] * w2;
+    let ly = newLoc[a * 3 + 1] * w0 + newLoc[b * 3 + 1] * w1 + newLoc[c * 3 + 1] * w2;
+    let lz = newLoc[a * 3 + 2] * w0 + newLoc[b * 3 + 2] * w1 + newLoc[c * 3 + 2] * w2;
     const nearest = w0 >= w1 && w0 >= w2 ? a : w1 >= w2 ? b : c;
-    const mi = newMat[nearest];
+    let mi = newMat[nearest];
+    const f = fields.length ? fieldOf(t) : undefined;
+    // Across a seam, the material and the paint point of the surface under the texel, not of a corner: the corners'
+    // points are in two materials' frames, and their blend is in neither.
+    if (f?.hit && (newMat[a] !== newMat[b] || newMat[b] !== newMat[c])) {
+      interpNormal(a, b, c, w0, w1, w2, mn);
+      const sx = newPos[a * 3] * w0 + newPos[b * 3] * w1 + newPos[c * 3] * w2 + f.offset[0];
+      const sy = newPos[a * 3 + 1] * w0 + newPos[b * 3 + 1] * w1 + newPos[c * 3 + 1] * w2 + f.offset[1];
+      const sz = newPos[a * 3 + 2] * w0 + newPos[b * 3 + 2] * w1 + newPos[c * 3 + 2] * w2 + f.offset[2];
+      let st = 0;
+      for (let i = 0; i < 4; i++) {
+        const v = f.dist(sx + mn[0] * st, sy + mn[1] * st, sz + mn[2] * st);
+        st -= v;
+        if (Math.abs(v) < cell * 1e-3) break;
+      }
+      if (Math.abs(st) < cell * 2) {
+        const h = f.hit(sx + mn[0] * st, sy + mn[1] * st, sz + mn[2] * st);
+        const hi = matOf.get(h.mat);
+        if (hi !== undefined) {
+          seamTexels++;
+          if (hi !== mi) seamDiffer++;
+          mi = hi; lx = h.lx; ly = h.ly; lz = h.lz;
+        }
+      }
+    }
     const m = mats[mi];
     covered[py * size + px] = 1;
     if (!withMaps) {
@@ -485,7 +537,6 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
       image.set(px, py, rgbDithered(col[0], col[1], col[2], px, py));
       return;
     }
-    const f = fields.length ? fieldOf(t) : undefined;
     let qx = 0, qy = 0, qz = 0;
     if (f) {
       qx = newPos[a * 3] * w0 + newPos[b * 3] * w1 + newPos[c * 3] * w2 + f.offset[0];
@@ -597,7 +648,8 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
     // Without a map, one value the texels all took stands as the factor when it is not the material's own.
     const factor = (lo: number, hi: number, own: number): number | undefined => (!metalRough && r.n > 0 && Math.abs((lo + hi) / 2 - own) > step ? Number(((lo + hi) / 2).toFixed(4)) : undefined);
     return {
-      // Only a bumped or displaced material's texels were baked, so any bent texel is relief.
+      // Only a bumped or displaced material's texels were baked (or every one, for a decimated export), so a bent
+      // texel is relief or a merged face's lean; a material with none shades the same without the map.
       normal: !!normalImg && ((m.bump ?? 0) > 0 || r.bent > 0),
       metalRough,
       emissive: glows && !constant,
@@ -630,5 +682,6 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
     emissive: anyEm ? emImg : undefined,
     maps: matMaps,
     normalStats,
+    seams: { texels: seamTexels, differ: seamDiffer },
   };
 }

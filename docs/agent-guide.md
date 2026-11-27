@@ -226,11 +226,23 @@ plays a rig's animations (loop, speed, a scrub bar, all in turn), and
 `model.glb` carries the materials as a baked texture (`model.png`), with
 a normal map for bumps and fine `displace` relief, a metallic-roughness
 map for wear and rust and an emissive one for a patterned glow where the
-program has them, so it looks the same wherever it is loaded. Past 200
-thousand triangles the GLB, OBJ and viewer are decimated (the report's
-Exports row says from how many and how far they stray); below a quarter
-of the mesh (`--triangles`) curved bands shade in streaks, so read the
-viewer.
+program has them, and with the program's lights (glTF's
+`KHR_lights_punctual`), so an engine lights it near what `beauty.png`
+shows. The materials travel exactly; the picture does not: an engine has
+its own sky, exposure and tone mapping, and its lights fall off by the
+inverse square where the beauty render's do not, and a part a few cells
+across keeps the mesh's polygon outline where the beauty render draws it
+round. `viewer.html` shows the GLB under its own grey studio, for
+judging the maps, or under the program's scene (Scene: the GLB's lights,
+the sky and ambient, the named cameras as buttons), which it opens in
+when the program declares lights or a sky: compare that with
+`beauty.png`. Past 200 thousand triangles the GLB, OBJ and viewer are
+decimated, the cap shared by error over every mesh so flat faces go
+first (the report's Exports row says from how many, how far they stray,
+each mesh's share, and the cap below which detail starts to go); past
+the flat faces, the normal map carries the field's normal for every
+material so merged faces shade as the surface does, but their outlines
+are coarser, so read the viewer.
 
 ## Rigs
 

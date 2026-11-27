@@ -1,6 +1,7 @@
 /**
  * Mesh decimation by quadric error, for a budget a target enforces (a
- * Roblox rigid accessory: four thousand triangles; a MeshPart: ten).
+ * Roblox rigid accessory: four thousand triangles; a MeshPart: ten; the web
+ * export's cap).
  *
  * Half-edge collapses: an edge's two ends are candidates to move onto the
  * other, at the cost of the mover's quadric (the sum of its faces' plane
@@ -12,6 +13,16 @@
  * material boundary or fold a face over (a face's normal turning more
  * than a right angle), so seams and the outline survive.
  *
+ * A material seam is a band of triangles whose corners are of two
+ * materials. Collapses along it stretch those triangles along the seam, so
+ * the atlas baker paints such a triangle from the surface under each texel,
+ * not from its corners (see atlas.ts).
+ *
+ * Several meshes share one budget through one queue: the cheapest collapse
+ * anywhere goes first, so a flat wall gives up its triangles before a
+ * curved stud gives up any (round 11: each mesh gave up the same share,
+ * and a flat wall kept 35196 of 54996). Each mesh keeps at least four.
+ *
  * The mesher splits vertices at creases, so the mesh is welded by position
  * first and the result re-split by the same rule, each copy taking its
  * side's mean face normal. Every layer here is pure.
@@ -20,18 +31,67 @@ import { splitCreases } from "./creases.js";
 import { weldIndices, type Mesh } from "./mesh.js";
 
 export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35): Mesh {
-  const triCount = mesh.indices.length / 3;
-  if (triCount <= targetTriangles || triCount === 0) return mesh;
-  // Weld the crease copies: one vertex per position, the first copy's attributes.
-  const welded = weldIndices(mesh);
-  const nv = mesh.positions.length / 3;
-  const P = new Float64Array(mesh.positions);
+  return decimateMeshes([mesh], targetTriangles, creaseAngle).meshes[0];
+}
+
+/** The fewest triangles a mesh keeps under a shared budget: a closed mesh cannot go below a tetrahedron. */
+const MIN_TRIANGLES = 4;
+
+/**
+ * A collapse costs nothing when the vertex stays on every plane of its faces to within this share of an edge: a flat
+ * face's own triangles, which the mesher lays exactly on the plane (to float precision, a ten-millionth of an edge),
+ * where a vertex on a curve three cells round moves a sixth of an edge off it.
+ */
+const FLAT = 1e-4;
+
+export interface Decimated {
+  /** Per mesh given, the decimated mesh, or the same object when the queue never reached it. */
+  meshes: Mesh[];
+  /**
+   * How many triangles merging only flat faces (collapses that cost nothing, by FLAT) comes to: a cap at or above
+   * it loses nothing to decimation but what the mesher already lost. Counted past the target without keeping those
+   * collapses, so a reader can see how far the cap could come down for free.
+   */
+  flat: number;
+}
+
+/**
+ * Decimate meshes to at most `targetTriangles` in all, by one queue over all of them: the flattest parts go first,
+ * wherever they are. A mesh already under the budget with the rest comes back as it was (the same object); so does
+ * every mesh when the total is under it.
+ */
+export function decimateMeshes(meshes: Mesh[], targetTriangles: number, creaseAngle = 35): Decimated {
+  let tris = 0, nv = 0;
+  for (const m of meshes) { tris += m.indices.length / 3; nv += m.positions.length / 3; }
+  if (tris <= targetTriangles || tris === 0) return { meshes, flat: tris };
+  // Weld each mesh's crease copies (one vertex per position, the first copy's attributes) and lay the meshes end to
+  // end: a vertex index and a triangle index each run over all of them, and no edge joins two meshes.
+  const P = new Float64Array(nv * 3);
+  const T = new Int32Array(tris * 3);
   const alive = new Uint8Array(nv);
-  for (let i = 0; i < welded.length; i++) alive[welded[i]] = 1;
-  const mat = mesh.materialIndex;
-  // Triangles as mutable index triples; a dead triangle has -1.
-  const T = Int32Array.from(welded);
-  const tris = triCount;
+  const mat = new Int32Array(nv);
+  const vStart: number[] = [], tStart: number[] = [];
+  const triMesh = new Int32Array(tris);
+  const matId = new Map<unknown, number>();
+  {
+    let vo = 0, to = 0;
+    meshes.forEach((m, mi) => {
+      vStart.push(vo); tStart.push(to);
+      const welded = weldIndices(m);
+      const n = m.positions.length / 3;
+      for (let i = 0; i < n * 3; i++) P[vo * 3 + i] = m.positions[i];
+      for (let v = 0; v < n; v++) {
+        const mm = m.materials[m.materialIndex[v]];
+        let id = matId.get(mm);
+        if (id === undefined) { id = matId.size; matId.set(mm, id); }
+        mat[vo + v] = id;
+      }
+      for (let i = 0; i < welded.length; i++) { T[to * 3 + i] = welded[i] + vo; alive[welded[i] + vo] = 1; }
+      for (let t = 0; t < welded.length / 3; t++) triMesh[to + t] = mi;
+      vo += n; to += welded.length / 3;
+    });
+    vStart.push(vo); tStart.push(to);
+  }
   // Vertex to triangles.
   const star: number[][] = Array.from({ length: nv }, () => []);
   for (let t = 0; t < tris; t++) for (let c = 0; c < 3; c++) star[T[t * 3 + c]].push(t);
@@ -86,11 +146,11 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
     }
     hCost[i] = cost; hA[i] = a; hB[i] = b; hStamp[i] = st;
   };
-  // The popped entry is left in topA, topB, topStamp; the heap shrinks by one.
-  let topA = -1, topB = -1, topStamp = 0;
+  // The popped entry is left in topA, topB, topStamp, topCost; the heap shrinks by one.
+  let topA = -1, topB = -1, topStamp = 0, topCost = 0;
   const pop = (): boolean => {
     if (size === 0) return false;
-    topA = hA[0]; topB = hB[0]; topStamp = hStamp[0];
+    topA = hA[0]; topB = hB[0]; topStamp = hStamp[0]; topCost = hCost[0];
     const last = --size;
     const cost = hCost[last], a = hA[last], b = hB[last], st = hStamp[last];
     // Sift down the last entry from the root, the smaller child moving up each step (the left one on a tie).
@@ -121,17 +181,30 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
       offer(a, b); offer(b, a);
     }
 
+  // A free collapse's cost, from the meshes' mean edge: area (an edge squared) times the distance squared.
+  let edgeSum = 0;
+  for (let t = 0; t < tris; t++) {
+    const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3;
+    edgeSum += Math.hypot(P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]);
+  }
+  const edge = edgeSum / tris;
+  const free = (FLAT * edge) ** 2 * edge * edge;
   let live = tris;
+  const meshLive = meshes.map((m) => m.indices.length / 3);
   const before = new Float64Array(3), after = new Float64Array(3);
   // Scratch reused by every collapse: the triangles that move and die, and the survivor's neighbours in the order
   // first met (a mark per vertex instead of a Set per collapse).
   const moving: number[] = [], dying: number[] = [], around: number[] = [];
   const mark = new Int32Array(nv).fill(-1);
   let collapse = 0;
-  while (live > targetTriangles) {
-    if (!pop()) break;
+  // The live count when the first collapse that costs something was made: the flat faces' floor.
+  let flat = -1;
+  /** One collapse from the queue, if it is still valid; false when the queue is empty or `limit` stops it. */
+  const step = (limit: number): boolean => {
+    if (!pop()) return false;
+    if (topCost > limit) return false;
     const a = topA, b = topB;
-    if (topStamp !== stamp[a] + stamp[b] || !alive[a] || !alive[b] || a === b) continue;
+    if (topStamp !== stamp[a] + stamp[b] || !alive[a] || !alive[b] || a === b) return true;
     // The triangles that vanish share both ends; the rest of a's star moves to b, unless a face would fold.
     let folds = false;
     moving.length = 0; dying.length = 0;
@@ -148,8 +221,13 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
       if (!(area > 0) || before[0] * after[0] + before[1] * after[1] + before[2] * after[2] < 0.1) { folds = true; break; }
       moving.push(t);
     }
-    if (folds) { stamp[a]++; continue; }
+    if (folds) { stamp[a]++; return true; }
+    // A mesh keeps a few triangles whatever the others need: the queue moves on to another collapse.
+    const mi = dying.length ? triMesh[dying[0]] : -1;
+    if (mi >= 0 && meshLive[mi] - dying.length < MIN_TRIANGLES) return true;
+    if (flat < 0 && topCost > free) flat = live;
     for (const t of dying) { T[t * 3] = T[t * 3 + 1] = T[t * 3 + 2] = -1; live--; }
+    if (mi >= 0) meshLive[mi] -= dying.length;
     const sb = star[b];
     for (const t of moving) { for (let c = 0; c < 3; c++) if (T[t * 3 + c] === a) T[t * 3 + c] = b; sb.push(t); }
     alive[a] = 0;
@@ -169,32 +247,55 @@ export function decimate(mesh: Mesh, targetTriangles: number, creaseAngle = 35):
     }
     sb.length = w;
     for (const v of around) { offer(v, b); offer(b, v); }
+    return true;
+  };
+  while (live > targetTriangles && step(Infinity)) { /* collapse */ }
+  // The meshes as the cap leaves them; past it, only to count how far the free collapses alone would go.
+  const kept = T.slice();
+  const keptLive = meshLive.slice();
+  if (flat < 0) {
+    while (step(free)) { /* count */ }
+    flat = live;
   }
+  T.set(kept);
 
-  // Compact: the live vertices and triangles, then the crease split for normals per side.
-  const remap = new Int32Array(nv).fill(-1);
-  const positions: number[] = [], local: number[] = [], materialIndex: number[] = [];
-  const indices: number[] = [];
-  for (let t = 0; t < tris; t++) {
-    if (T[t * 3] < 0) continue;
-    for (let c = 0; c < 3; c++) {
-      const v = T[t * 3 + c];
-      if (remap[v] < 0) {
-        remap[v] = positions.length / 3;
-        positions.push(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]);
-        local.push(mesh.local[v * 3], mesh.local[v * 3 + 1], mesh.local[v * 3 + 2]);
-        materialIndex.push(mat[v]);
+  // Each mesh compacted on its own: its live vertices and triangles, then the crease split for normals per side. A
+  // mesh the queue never touched comes back as it was.
+  const out = meshes.map((mesh, mi) => {
+    if (keptLive[mi] === mesh.indices.length / 3) return mesh;
+    const vo = vStart[mi];
+    const remap = new Map<number, number>();
+    const positions: number[] = [], local: number[] = [], materialIndex: number[] = [];
+    const indices: number[] = [];
+    for (let t = tStart[mi]; t < tStart[mi + 1]; t++) {
+      if (T[t * 3] < 0) continue;
+      for (let c = 0; c < 3; c++) {
+        const v = T[t * 3 + c];
+        let r = remap.get(v);
+        if (r === undefined) {
+          r = positions.length / 3;
+          remap.set(v, r);
+          const lv = v - vo;
+          positions.push(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]);
+          local.push(mesh.local[lv * 3], mesh.local[lv * 3 + 1], mesh.local[lv * 3 + 2]);
+          materialIndex.push(mesh.materialIndex[lv]);
+        }
+        indices.push(r);
       }
-      indices.push(remap[v]);
     }
-  }
+    return resplit(mesh, positions, local, materialIndex, indices, creaseAngle);
+  });
+  return { meshes: out, flat };
+}
+
+/** The crease split of a decimated mesh, each copy taking its side's mean face normal (area-weighted). */
+function resplit(mesh: Mesh, positions: number[], local: number[], materialIndex: number[], indices: number[], creaseAngle: number): Mesh {
   const ix = new Uint32Array(indices);
   const split = splitCreases(positions, ix, creaseAngle > 0 ? creaseAngle : 180);
   const outN = split.positions.length / 3;
   const normals = new Float32Array(outN * 3);
   const outLocal = new Float32Array(outN * 3);
   const outMat = new Uint16Array(outN);
-  // Mean face normals for every vertex (creases split, the rest area-weighted over their faces).
   const fn = new Float64Array(outN * 3);
   for (let t = 0; t < split.indices.length; t += 3) {
     const a = split.indices[t] * 3, b = split.indices[t + 1] * 3, c = split.indices[t + 2] * 3;

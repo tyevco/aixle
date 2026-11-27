@@ -7,11 +7,14 @@ import * as O from "../src/sdf/ops.js";
 import { parse } from "../src/lang/parser.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { buildHierarchy, flatten } from "../src/export/hierarchy.js";
-import { eulerToQuat, toGlbScene } from "../src/export/glb.js";
+import { eulerToQuat, glbLights, toGlbScene } from "../src/export/glb.js";
 import { toObjScene } from "../src/export/obj.js";
 import { easeBlend, interpolatePose, keyAt, renderAnimation, renderPoses, type PoseCache, type PoseView } from "../src/render/views.js";
 import { REST_POSE, type JointPose } from "../src/sdf/types.js";
 import { run } from "../src/pipeline.js";
+import * as pipelineFns from "../src/pipeline.js";
+import { check } from "../src/pipeline.js";
+import { viewerHtml } from "../src/export/viewer.js";
 import { preset } from "../src/sdf/materials.js";
 
 describe("joints", () => {
@@ -392,6 +395,28 @@ describe("a triangle cap on the exports", () => {
     expect(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x - 5, y, z) - 1, [5, 0, 0])).toBeCloseTo(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x, y, z) - 1), 9);
     expect(triangleCount(h.meshes[0]) + triangleCount(h.meshes[1])).toBe(h.triangles);
   });
+  it("shares the cap by error over every mesh: a flat box gives up its triangles and a sphere beside it keeps them", () => {
+    // Round 11: each mesh kept the same share of its own count, so a flat wall kept 35196 of a 54996 cap.
+    const cell = 0.025;
+    const slab = O.move(P.box(2, 1, 0.5), 0, 0.5, 0);
+    const ball = O.move(P.sphere(0.4), 2, 0.4, 0);
+    const full = buildHierarchy([{ name: "slab", shape: slab }, { name: "ball", shape: ball }], { cellSize: cell, texture: 0 });
+    const [slabN, ballN] = full.meshes.map((m) => m.indices.length / 3);
+    const cap = Math.round(ballN * 1.2);
+    const h = buildHierarchy([{ name: "slab", shape: slab }, { name: "ball", shape: ball }], { cellSize: cell, texture: 0, maxTriangles: cap });
+    expect(h.triangles).toBeLessThanOrEqual(cap);
+    const [slabD, ballD] = h.meshes.map((m) => m.indices.length / 3);
+    // The flat box keeps a few percent; the sphere, all but a few.
+    expect(slabD).toBeLessThan(slabN * 0.1);
+    expect(ballD).toBeGreaterThan(ballN * 0.95);
+    // Nothing curved was given up for the cap, so the export strays no further than the full mesh.
+    expect(h.decimated!.deviation).toBeLessThanOrEqual(h.decimated!.fullDeviation * 1.05);
+    // How it was shared, by node, for the report, and how far the flat faces alone could go.
+    expect(h.decimated!.meshes).toEqual([{ name: "slab", before: slabN, after: slabD }, { name: "ball", before: ballN, after: ballD }]);
+    // The flat faces alone come down to the sphere and a few hundred of the box's.
+    expect(h.decimated!.flat).toBeLessThan(ballN + slabN * 0.1);
+    expect(h.decimated!.flat).toBeGreaterThanOrEqual(ballN);
+  });
   it("caps the GLB, OBJ and viewer at set triangles, says so in the report, and leaves the sheet and the STL whole", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
@@ -415,12 +440,34 @@ describe("a triangle cap on the exports", () => {
       expect(data.exports.triangles).toBe(tris);
       expect(data.exports.cap).toBe(3000);
       expect(data.triangles).toBe(full);
+      // How the cap was shared, by mesh, and how far merging flat faces alone would go.
+      expect(data.exports.meshes).toEqual([{ name: "v", before: data.exports.before, after: tris }]);
+      expect(report).toMatch(new RegExp(`By error, the flattest faces first: v ${data.exports.before} to ${tris}; merging flat faces alone (comes|came) to ${data.exports.flat}`));
       // 0 is the full mesh, and the run's option wins over the program's setting.
       const whole = run(src, "cup.aix", join(dir, "whole"), { ...opts, triangles: 0 });
       expect(whole.report).not.toMatch(/\| Exports \|/);
       const g2 = readFileSync(join(dir, "whole", "model.glb"));
       const j2 = JSON.parse(g2.toString("utf8", 20, 20 + g2.readUInt32LE(12)));
       expect(j2.meshes[0].primitives.reduce((s: number, p: { indices: number }) => s + j2.accessors[p.indices].count / 3, 0)).toBeGreaterThan(3000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("says merged faces carry the field's normal past the flat faces only when a normal map was baked to carry it", () => {
+    // Review of round 11's fixes: with --no-texture there is no normal map, and the row claimed one all the same.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = 'b = sphere(0.5) | paint("red")\nset triangles 300\nshow b';
+      const opts = { grid: 40, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false };
+      const mapped = run(src, "ball.aix", join(dir, "mapped"), { ...opts, texture: 64 });
+      const data = JSON.parse(readFileSync(join(dir, "mapped", "report.json"), "utf8"));
+      expect(data.exports.triangles).toBeLessThan(data.exports.flat);
+      expect(mapped.files).toContain("model_normal.png");
+      expect(mapped.report).toMatch(/past the flat faces, so every material's texels carry the field's normal in the normal map/);
+      const plain = run(src, "ball.aix", join(dir, "plain"), { ...opts, texture: 0 });
+      expect(plain.files).not.toContain("model_normal.png");
+      expect(plain.report).not.toMatch(/carry the field's normal in the normal map/);
+      expect(plain.report).toMatch(/past the flat faces, and with no texture atlas there is no normal map to carry the field's normal, so merged curved faces shade flatter/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -453,5 +500,229 @@ describe("a triangle cap on the exports", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the program's lights and scene in the exports", () => {
+  it("writes each light as a KHR_lights_punctual light on its own node, and the viewer a scene mode with the sky and cameras", () => {
+    // Round 11: a torch that lit a door in beauty.png lit nothing in an engine, and the viewer had only its studio.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = [
+        'door = box(1, 2, 0.1) | move(0, 1, 0) | paint("oak")',
+        "set environment night",
+        "set ambient 1.3",
+        'light("torch", position=[0.6, 1.8, 0.4], range=1.5, color="#ff8800", power=2)',
+        'light("moon", azimuth=-50, elevation=40, power=0.5, color="#9fb4ff")',
+        'camera("hero", azimuth=20, elevation=10, zoom=1.2)',
+        "set camera hero",
+        "show door",
+      ].join("\n");
+      run(src, "door.aix", dir, { grid: 32, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      const glb = readFileSync(join(dir, "model.glb"));
+      const json = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
+      expect(json.extensionsUsed).toContain("KHR_lights_punctual");
+      const lights = json.extensions.KHR_lights_punctual.lights;
+      expect(lights.map((l: { name: string; type: string }) => [l.name, l.type])).toEqual([["torch", "point"], ["moon", "directional"]]);
+      // A point light in candela, agreeing with the beauty render at its range on a face turned 60 degrees from it;
+      // glTF's range is the cutoff, three times it.
+      expect(lights[0].intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.2125 * 2, 2.2) * 1.5 * 1.5, 3);
+      expect(lights[0].range).toBeCloseTo(4.5, 6);
+      // Colours are linear: #ff8800's green is 0.533 in sRGB, 0.246 linear.
+      expect(lights[0].color[0]).toBeCloseTo(1, 4);
+      expect(lights[0].color[1]).toBeCloseTo(0.2462, 3);
+      expect(lights[0].color[2]).toBeCloseTo(0, 6);
+      expect(lights[1].intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425 * 0.5, 2.2), 3);
+      expect(lights[1].range).toBeUndefined();
+      // Each on a root node of the scene; the point light at its position, the directional one turned so its -z runs
+      // from the light towards the model.
+      const nodeOf = (i: number) => json.nodes.find((n: { extensions?: { KHR_lights_punctual?: { light: number } } }) => n.extensions?.KHR_lights_punctual?.light === i);
+      expect(json.scenes[0].nodes).toContain(json.nodes.indexOf(nodeOf(0)));
+      expect(nodeOf(0).translation).toEqual([0.6, 1.8, 0.4]);
+      const q = nodeOf(1).rotation as number[];
+      const rot = (v: number[]) => {
+        // v' = v + 2w (q × v) + 2 q × (q × v)
+        const [x, y, z, w] = q;
+        const c1 = [y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]];
+        const c2 = [y * c1[2] - z * c1[1], z * c1[0] - x * c1[2], x * c1[1] - y * c1[0]];
+        return v.map((vi, k) => vi + 2 * w * c1[k] + 2 * c2[k]);
+      };
+      const travels = rot([0, 0, -1]);
+      const az = (-50 * Math.PI) / 180, el = (40 * Math.PI) / 180;
+      const toward = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+      for (let k = 0; k < 3; k++) expect(travels[k]).toBeCloseTo(-toward[k], 5);
+      // The viewer: a scene mode with the night sky, the ambient as the beauty render takes it, the hero camera, and it
+      // opens in the scene from that camera.
+      const html = readFileSync(join(dir, "viewer.html"), "utf8");
+      const scene = JSON.parse(/const SCENE = (.*);\n/.exec(html)![1]);
+      expect(scene.environment).toBe("night");
+      expect(scene.ambient).toBeCloseTo(0.42 * 1.3 * 0.4, 4);
+      expect(scene.key).toBeUndefined();
+      expect(scene.start).toBe(true);
+      expect(scene.camera).toBe("hero");
+      expect(scene.cameras.map((c: { name: string }) => c.name)).toEqual(["hero"]);
+      expect(html).toContain('<button id="scene">Scene: night</button>');
+      expect(html).toContain("◎ hero");
+      // Without lights the GLB carries none, and the viewer's scene has the beauty render's default key, opening in the studio.
+      const plain = run('show box(1, 1, 1) | paint("red")', "box.aix", join(dir, "plain"), { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      expect(plain.files).toContain("model.glb");
+      const g2 = readFileSync(join(dir, "plain", "model.glb"));
+      const j2 = JSON.parse(g2.toString("utf8", 20, 20 + g2.readUInt32LE(12)));
+      expect(j2.extensions).toBeUndefined();
+      const s2 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "plain", "viewer.html"), "utf8"))![1]);
+      expect(s2.start).toBe(false);
+      expect(s2.key.intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425, 2.2), 3);
+      // That key is where the beauty render puts it: `set light_azimuth` and `set light_elevation` move it there too.
+      run('set light_azimuth 90\nset light_elevation 0\nshow box(1, 1, 1) | paint("red")', "box.aix", join(dir, "keyed"), { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      const s3 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "keyed", "viewer.html"), "utf8"))![1]);
+      expect(s3.key.direction[0]).toBeCloseTo(1, 4);
+      expect(s3.key.direction[1]).toBeCloseTo(0, 4);
+      expect(s3.key.direction[2]).toBeCloseTo(0, 4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the viewer's scene", () => {
+  it("keeps a camera named with markup inside its script", () => {
+    // A camera's name is any string the program gives; "</script>" in it ended the page's script, and the viewer died.
+    const name = 'a</script><b>"x';
+    const html = viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], {
+      environment: "studio", sky: [1, 1, 1], ground: [1, 1, 1], floor: [1, 1, 1], ambient: 0.42, cameras: [{ name, eye: [0, 0, 3], target: [0, 0, 0], fov: 30 }], start: true,
+    });
+    const line = /const SCENE = (.*);\n/.exec(html)![1];
+    expect(line).not.toMatch(/<\//);
+    expect(JSON.parse(line).cameras[0].name).toBe(name);
+    // The page's own script is closed once, at its end.
+    expect(html.split("</script>").length - 1).toBe(2);
+  });
+});
+
+describe("the GLB's light intensities against the beauty render", () => {
+  it("agree at 60 degrees, and an engine is darker square on, brighter at a slant and brighter nearer a point light", () => {
+    // What design.md says of them. An engine shows albedo x intensity x cos / pi (over d squared) in linear light,
+    // about the display value to the power 2.2; the beauty render shows 0.85 p cos, times range^2 / (range^2 + d^2).
+    const [sun, lamp] = glbLights([
+      { name: "sun", azimuth: 0, elevation: 90, color: [1, 1, 1], power: 1 },
+      { name: "lamp", azimuth: 0, elevation: 0, color: [1, 1, 1], power: 1, position: [0, 0, 0], range: 2 },
+    ], [0, 0, 0], 1);
+    const display = (linear: number) => Math.pow(linear, 1 / 2.2);
+    const cos = (deg: number) => Math.cos((deg * Math.PI) / 180);
+    const sunRatio = (deg: number) => display((sun.intensity * cos(deg)) / Math.PI) / (0.85 * cos(deg));
+    expect(sunRatio(60)).toBeCloseTo(1, 3);
+    expect(sunRatio(0)).toBeLessThan(0.75);
+    expect(sunRatio(0)).toBeGreaterThan(0.6);
+    expect(sunRatio(80)).toBeGreaterThan(1.2);
+    const lampRatio = (d: number, deg: number) => display((lamp.intensity * cos(deg)) / (Math.PI * d * d)) / ((0.85 * cos(deg) * 4) / (4 + d * d));
+    expect(lampRatio(2, 60)).toBeCloseTo(1, 3);
+    expect(lampRatio(1, 60)).toBeGreaterThan(1.1);
+  });
+});
+
+describe("the report's material rows", () => {
+  it("lists a name shared by several materials once, with their count, and keeps every material in the GLB", () => {
+    // Round 11: a bookcase's page paper, a decal per book, was listed 35 times in a row of 70.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = [
+        "books = empty()",
+        "for i in range(4) {",
+        '  books = books + decal(box(0.3, 1, 0.8) | move(i * 0.5, 0.5, 0) | paint("red"), box(0.4, 0.8, 0.1) | move(i * 0.5, 0.5, 0.4), "#efe6cf")',
+        "}",
+        "show books",
+      ].join("\n");
+      const r = run(src, "books.aix", dir, { grid: 48, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false, texture: 64 });
+      const row = /\| Materials \| (.*) \|/.exec(r.report)![1];
+      expect(row).toMatch(/#efe6cf ×4/);
+      expect(row.split(", ").filter((n) => n.startsWith("#efe6cf"))).toHaveLength(1);
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.materials.filter((n: string) => n === "#efe6cf")).toHaveLength(4);
+      const glb = readFileSync(join(dir, "model.glb"));
+      const json = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
+      expect(json.materials.filter((m: { name: string }) => m.name === "#efe6cf")).toHaveLength(4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a loose piece in the report", () => {
+  it("is named by the steps on its own surface, with its joint, and its volume to two figures", () => {
+    // Round 11: a knocker's ring, hanging clear of its eye in its own joint, was put down to the wall and the door
+    // leaf it hung in front of, and its volume of about 0.0003 printed as 0.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = [
+        "post = box(0.2, 1, 0.2) | move(0, 0.5, 0)",
+        "pin = cylinder(0.03, 0.4) | rotate(x=90) | move(0, 0.9, 0.2)",
+        "ring = torus(0.2, 0.03) | rotate(x=90) | move(0, 0.81, 0.3)",
+        'knocker = joint(ring, "knocker", 0, 0.93, 0.3, axis=[0, 0, 1])',
+        "small = sphere(0.05) | move(0.6, 0.5, 0)",
+        "show post + pin + knocker + small",
+      ].join("\n");
+      const r = run(src, "knocker.aix", dir, { grid: 80, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, glb: false, obj: false });
+      const row = /\| Pieces \| (.*) \|/.exec(r.report)![1];
+      expect(row).toMatch(/^3 \(/);
+      expect(row).toMatch(/in 'ring', the part of joint 'knocker', clear of what it turns on/);
+      expect(row).not.toMatch(/in 'pin'/);
+      // The small sphere's volume, 0.00052, is printed to two figures, where three decimals printed 0.001.
+      expect(row).toMatch(/; 0\.0005\d at \(0\.6, 0\.5, 0\) in 'small'/);
+      // The warning names them the same way.
+      expect(r.warnings.find((w) => /separate pieces/.test(w))).toMatch(/'ring', the part of joint 'knocker'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("open edges in a scene's report", () => {
+  const opts = { grid: 40, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, glb: false, obj: false } as const;
+  it("places each object's own open edges in its Assembly row, under the table, and in report.json under the object", () => {
+    // Round 11: "bowl | no: 17 edges" with no place, though the tool had found them all on one plane in the bowl.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A plate 0.06 thick, about a cell, tilted into a block: the pair meshes with open edges, the ball without.
+      const src = "left = box(1, 1, 1)\nright = box(1, 0.06, 1) | rotate(z=30) | move(0.9, 0.3, 0)\npair = left + right\nball = sphere(0.5) | move(0, 0, 2)\nscene pair, ball";
+      const r = run(src, "pair.aix", dir, opts);
+      expect(r.report).toMatch(/\| pair \| no: \d+ edges?; \d+ at \([-\d.]+, [-\d.]+, [-\d.]+\) in '(left|right)', '(left|right)', below \|/);
+      expect(r.report).toMatch(/\| ball \| yes \|/);
+      expect(r.report).toMatch(/^- pair's own mesh: \d+ open edges?, mostly \d+ at \([-\d., ]+\) in '(left|right)', '(left|right)', '(left|right)' only [\d.]+ into '(left|right)' there/m);
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      const pair = data.objects.find((o: { name: string }) => o.name === "pair");
+      expect(pair.watertight.ok).toBe(false);
+      expect(pair.watertight.clusters.length).toBeGreaterThan(0);
+      expect(pair.watertight.clusters[0].steps.sort()).toEqual(["left", "right"]);
+      expect(data.objects.find((o: { name: string }) => o.name === "ball").watertight).toEqual({ ok: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("says when every object is watertight alone and the fused scene's edges are only where they meet", () => {
+    // Round 11: a mixer's fused scene kept one edge though its body and bowl were each watertight.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // Two blocks a hundredth apart, turned off the lattice: each meshes whole, the fused scene not where they meet.
+      const r = run("left = box(1, 1, 1) | rotate(z=17)\nright = box(1, 1, 1) | move(1.01, 0, 0) | rotate(z=17)\nscene left, right", "two.aix", dir, opts);
+      expect(r.report).toMatch(/\| Watertight \| no: .*Each object is watertight on its own \(the Assembly table\), so these edges are only in the fused scene/);
+      expect(r.report).toMatch(/\| left \| yes \|/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("names the blend when an edge lies in its fillet, not the gap between the parts it joins", () => {
+    // Round 11: "in 'head_round', 'head_knuckle', 'head_round' only 0.000825 into 'head_knuckle'" under a k=0.03 blend.
+    const { watertightNote } = pipelineFns;
+    const cluster = (at: [number, number, number]) => ({ centre: at, at, box: { min: [at[0] - 0.01, at[1] - 0.01, at[2] - 0.01] as [number, number, number], max: [at[0] + 0.01, at[1] + 0.01, at[2] + 0.01] as [number, number, number] }, count: 1 });
+    const w = (at: [number, number, number]) => ({ ok: false, holes: 0, nonManifold: 1, note: "no: 1 edge.", where: cluster(at).box, clusters: [cluster(at)] });
+    // A post blended onto a plate: the fillet is round the post's foot, at y = 0.1 a little out from its side.
+    const src = (k: number) => `plate = box(2, 0.2, 2)\npost = cylinder(0.2, 1) | move(0, 0.6, 0)\njoined = union(plate, post, k=${k})\nshow joined`;
+    const at: [number, number, number] = [0.21, 0.11, 0];
+    const blended = watertightNote(w(at), check(src(0.1)), 0.02);
+    expect(blended).toMatch(/in '(plate|post)', '(plate|post)', in the fillet where 'joined' blends them \(k 0\.1, 5\.0 cells\)/);
+    expect(blended).not.toMatch(/only [\d.]+ into/);
+    expect(blended).toMatch(/An edge in a blend's fillet is the mesher's/);
+    const hard = watertightNote(w(at), check(src(0)), 0.02);
+    expect(hard).not.toMatch(/fillet/);
   });
 });

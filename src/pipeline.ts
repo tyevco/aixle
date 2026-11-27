@@ -12,7 +12,7 @@ import { parseGlb } from "./import/glb.js";
 import { fieldFromSamples, sampleMesh, type MeshSamples } from "./mesh/meshSdf.js";
 import { importKey, type ImportCache } from "./import/cache.js";
 import { box, primitive } from "./sdf/primitives.js";
-import { axisAngleToQuat, eulerToQuat, toGlbScene, type GlbAnimation } from "./export/glb.js";
+import { axisAngleToQuat, eulerToQuat, glbLights, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
 import { to3mf } from "./export/threemf.js";
@@ -25,8 +25,10 @@ import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, pl
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
-import { viewerHtml } from "./export/viewer.js";
-import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { viewerHtml, type ViewerScene } from "./export/viewer.js";
+import { BENT_DEGREES } from "./export/atlas.js";
+import { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, lightDirection, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { perspective } from "./render/camera.js";
 import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
@@ -705,15 +707,89 @@ export function assertsRow(asserts: AssertResult[]): string {
   return `${passed} pass, ${failed.length} fail: ${failed.map((a) => assertLine(a).replace(/^assert /, "")).join("; ")}`;
 }
 
-/** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and step. */
+/**
+ * Names listed once each, in the order first met, with how many share the name: `custom ×6`. The Materials and Maps
+ * rows list a material per entry of the mesh's list, and a decal painted per book is a material per book (round 11: a
+ * row of 70 with the page paper 35 times). The GLB keeps one material per entry; only the row folds them.
+ */
+export function countedNames(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(", ");
+}
+
+/**
+ * How the export's triangle cap was shared out, for the Exports row (round 11: "nothing says how the cap is shared
+ * out between objects"): one queue over every mesh takes the flattest collapse wherever it is, so each mesh's count
+ * before and after, the largest first, and how far merging only flat faces would go.
+ */
+export function capShare(note: { meshes: { name: string; before: number; after: number }[]; flat: number; triangles: number }): string {
+  const each = [...note.meshes].sort((a, b) => b.before - a.before);
+  const list = each.slice(0, 6).map((m) => (m.after === m.before ? `${m.name} ${m.before} (whole)` : `${m.name} ${m.before} to ${m.after}`)).join(", ") + (each.length > 6 ? `, and ${each.length - 6} more (report.json under exports)` : "");
+  const shared = note.meshes.length > 1 ? `The cap is shared by error, one queue over every mesh taking the flattest faces first: ${list}` : `By error, the flattest faces first: ${list}`;
+  const flat = note.flat < note.triangles ? `; merging flat faces alone comes to ${note.flat}, so a cap of that or more strays no further than the full mesh` : `; merging flat faces alone came to ${note.flat}, and the rest of the cut came from curved ones`;
+  return shared + flat;
+}
+
+/** A volume to two significant figures: a loose ring's 0.00031, which three decimals print as 0 (round 11). */
+const fmtVolume = (v: number): string => (v === 0 ? "0" : String(Number(Math.abs(v).toPrecision(2))));
+
+/**
+ * The steps a loose piece is made of, named where its own surface is (a few of its vertices), not at its centre,
+ * which for a ring is in the air beside whatever passes there (round 11: a knocker's ring, clear of its eye in its
+ * own joint, was put down to the wall and the door leaf). The innermost steps whose surfaces pass within two cells
+ * of most of those points; and the joint they all turn with, when they do, since a joint's part clear of its parent
+ * is a loose piece by design (a ring hanging in an eye, a wheel on an axle).
+ */
+export function pieceSteps(evaluation: Evaluation, pc: Piece, cellSize: number): { names: string[]; joint?: string } {
+  const tally = new Map<string, number>();
+  for (const q of pc.points) for (const n of namesAt(evaluation, q, cellSize)) tally.set(n.name, (tally.get(n.name) ?? 0) + 1);
+  const ranked = [...tally].sort((a, b) => b[1] - a[1]);
+  const names = ranked.filter(([, c], i) => i === 0 || c * 2 >= pc.points.length).slice(0, 2).map(([n]) => n);
+  if (!names.length) return { names };
+  const joints = jointsOfSteps(evaluation);
+  const js = new Set(names.map((n) => joints.get(n)));
+  const joint = js.size === 1 ? [...js][0] : undefined;
+  return { names, ...(joint ? { joint } : {}) };
+}
+
+/** Per step name, the innermost joint it turns with (none for a step outside every joint), read from the tree. */
+function jointsOfSteps(evaluation: Evaluation): Map<string, string | undefined> {
+  const names = new Map<Shape3, string>();
+  for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
+  const out = new Map<string, string | undefined>();
+  const seen = new Set<Shape3>();
+  const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
+  const walk = (n: Shape3, joint: string | undefined) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    // A joint's own name is a step of the joint above it; what it turns is its own.
+    const nm = names.get(n);
+    if (nm !== undefined && !out.has(nm)) out.set(nm, joint);
+    const inner = n.joint ? n.joint.name : joint;
+    for (const k of n.parts ?? n.inner ?? []) walk(k, inner);
+    if (n.instanced) walk(n.instanced.base, inner);
+  };
+  for (const r of roots) walk(r, undefined);
+  return out;
+}
+
+/** A loose piece as the report says it: its volume, where, the steps it is made of, and its joint when it has one. */
+function looseText(evaluation: Evaluation, pc: Piece, cellSize: number): string {
+  const { names, joint } = pieceSteps(evaluation, pc, cellSize);
+  const own = names.length ? ` in ${names.map((n) => `'${n}'`).join(", ")}` : "";
+  const turns = joint ? `, the part of joint '${joint}', clear of what it turns on` : "";
+  return `${fmtVolume(pc.volume)} at (${pc.centre.map(fmt).join(", ")})${own}${turns}`;
+}
+
+/** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and steps. */
 function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): string {
   const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics, cellSize));
   if (solid.length <= 1) return `${solid.length}`;
-  const rest = solid.slice(1, 5).map((pc) => {
-    const at = stepsNear(evaluation, pc.centre, Math.max(pc.size * 0.5, Math.cbrt(Math.abs(pc.volume))) + cellSize * 2);
-    return `${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})${at.length ? ` in ${at.join(", ")}` : ""}`;
-  });
-  return `${solid.length} (the largest ${fmt(Math.abs(solid[0].volume))}; then ${rest.join("; ")}${solid.length > 5 ? "; ..." : ""})`;
+  const rest = solid.slice(1, 5).map((pc) => looseText(evaluation, pc, cellSize));
+  const jointed = solid.slice(1, 5).filter((pc) => pieceSteps(evaluation, pc, cellSize).joint).length;
+  const note = jointed && jointed === Math.min(4, solid.length - 1) ? `; a joint's part that turns clear of its parent is a piece of its own by design` : "";
+  return `${solid.length} (the largest ${fmt(Math.abs(solid[0].volume))}; then ${rest.join("; ")}${solid.length > 5 ? "; ..." : ""}${note})`;
 }
 
 /**
@@ -799,6 +875,46 @@ export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec
 }
 
 /**
+ * The smooth boolean whose fillet a point lies in: a `union(..., k=)` (or a smooth difference or intersection) with
+ * two of its operands' surfaces within k and two cells of the point, the innermost such, by its name or its nearest
+ * named parent's (round 11: an edge in a head blended to its hinge knuckle with k=0.03 was put down to the two parts
+ * under the blend, "only 0.000825 into 'head_knuckle'", as if no blend were there).
+ */
+export function blendAt(evaluation: Evaluation, at: Vec3, cellSize: number): { name: string; k: number } | undefined {
+  const names = new Map<Shape3, string>();
+  for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
+  const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
+  let found: { name: string; k: number; depth: number } | undefined;
+  let budget = 20000;
+  const walk = (n: Shape3, x: number, y: number, z: number, t: number, depth: number, named: string | undefined): void => {
+    if (--budget < 0 || isEmpty(n.bounds)) return;
+    const b = n.bounds, r = t + (n.blend ?? 0);
+    if (x < b.min[0] - r || x > b.max[0] + r || y < b.min[1] - r || y > b.max[1] + r || z < b.min[2] - r || z > b.max[2] + r) return;
+    if (Math.abs(n.dist(x, y, z)) > r) return;
+    const here = names.get(n) ?? named;
+    if (n.blend && n.inner && n.inner.length >= 2 && here && (!found || depth >= found.depth)) {
+      let near = 0;
+      for (const c of n.inner) if (Math.abs(c.dist(x, y, z)) < n.blend + t) near++;
+      if (near >= 2) found = { name: here, k: n.blend, depth };
+    }
+    let cx = x, cy = y, cz = z, ct = t;
+    if (n.unwarp) {
+      const q = n.unwarp(x, y, z);
+      let stretch = 0;
+      for (const [ex, ey, ez] of [[t, 0, 0], [0, t, 0], [0, 0, t]]) {
+        const w = n.unwarp(x + ex, y + ey, z + ez);
+        stretch = Math.max(stretch, Math.hypot(w[0] - q[0], w[1] - q[1], w[2] - q[2]));
+      }
+      cx = q[0]; cy = q[1]; cz = q[2]; ct = stretch > 0 && Number.isFinite(stretch) ? stretch : t;
+    }
+    for (const k of n.parts ?? n.inner ?? []) walk(k, cx, cy, cz, ct, depth + 1, here);
+    if (n.instanced && !n.parts) walk(n.instanced.base, cx, cy, cz, ct, depth + 1, here);
+  };
+  for (const r of roots) walk(r, at[0], at[1], at[2], cellSize * 2, 0, undefined);
+  return found ? { name: found.name, k: found.k } : undefined;
+}
+
+/**
  * The watertight line, with where the bad edges are and which steps hold
  * them, so it can be acted on. Each cluster names the steps whose surface
  * passes there; when only one step does, two of its own surfaces cross
@@ -811,9 +927,11 @@ export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec
 export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [], posed = false): string {
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
   const tally = new Map<string, number>();
-  let planar = 0, gaps = 0;
+  let planar = 0, gaps = 0, blends = 0;
   let planeAxis: number | undefined;
   const all = w.clusters ?? [];
+  let joints: Map<string, string | undefined> | undefined;
+  const jointOf = () => (joints ??= jointsOfSteps(evaluation));
   const spots = all.map((cl, index) => {
     // Named at an edge that is on the model, not at the cluster's mean, which for a ring of edges is inside the part.
     const names = namesAt(evaluation, cl.at, cellSize);
@@ -824,13 +942,21 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
     // One name alone: the step's own surface folds or creases there, or a sample-plane coincidence; a straight
     // tube has no second surface to cross, so it is not called "with itself" (round 6: that read as nonsense).
     // Two steps meeting: how far apart their surfaces are there, which says which way to move one (round 4).
-    const g = names.length === 2 && index < 3 ? surfaceGap(evaluation, names[0].name, names[1].name, cl.at, cellSize) : undefined;
+    // Inside a blend's fillet the two parts' own surfaces are not the surface, so their gap says nothing: the blend is
+    // named instead.
+    const blend = names.length === 2 && index < 3 ? blendAt(evaluation, cl.at, cellSize) : undefined;
+    if (blend) blends++;
+    const g = names.length === 2 && index < 3 && !blend ? surfaceGap(evaluation, names[0].name, names[1].name, cl.at, cellSize) : undefined;
     if (g) gaps++;
     const gapText = !g ? "" : g.into ? `, '${g.into[0]}' only ${fmt(-g.gap)} ${g.cut ? `past the face '${g.into[1]}' cut` : `into '${g.into[1]}'`} there (${(-g.gap / cellSize).toFixed(1)} of a cell)` : `, their surfaces ${fmt(g.gap)} apart there (${(g.gap / cellSize).toFixed(1)} of a cell)`;
     // A cutter named there is the face it cut in its part, which is tagged, or a reader looks for the cutter itself
     // (round 10: a recess named at a pebble band's edges sent the reader to the base's own shape).
     const q = (nm: string) => `'${nm}'${evaluation.roles.get(nm) === "cut" ? " (cut: the face it cut)" : ""}`;
-    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in ${q(names[0].name)} twice, as '${twice[0]}' and '${twice[1]}'` : ` in ${q(names[0].name)} alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => q(n.name)).join(", ")}${gapText}`;
+    const blendText = blend ? `, in the fillet where '${blend.name}' blends them (k ${fmt(blend.k)}, ${(blend.k / cellSize).toFixed(1)} cells)` : "";
+    // A joint's part against what it turns on is two meshes in the GLB, so a seam between them is the fused mesh's only.
+    const ja = names.length === 2 ? jointOf().get(names[0].name) : undefined, jb = names.length === 2 ? jointOf().get(names[1].name) : undefined;
+    const jointText = names.length === 2 && ja !== jb ? `, the joint '${(ja ?? jb)!}''s part against what it turns on, which the GLB carries as separate meshes` : "";
+    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in ${q(names[0].name)} twice, as '${twice[0]}' and '${twice[1]}'` : ` in ${q(names[0].name)} alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => q(n.name)).join(", ")}${blendText}${gapText}${jointText}`;
     edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name), ...(g ? { gap: g.gap } : {}) });
     if (index >= 3) return "";
     // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
@@ -848,7 +974,8 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
   // Measured over ten placements on the lattice: two curved faces (a round leaf in a round opening, a ball in a pocket)
   // left open edges up to 1.4 cells apart and none from 1.5; a door's arch kept 5 at 1.35 cells (round 11).
   const gapNote = gaps ? " Two parts closer than a cell and a half, or sunk into each other by less than a cell, leave a seam: overlap them by a cell or more, or part them by a cell and a half (curved faces still seam at 1.4)." : "";
-  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${planeNote}`;
+  const blendNote = blends ? " An edge in a blend's fillet is the mesher's, where the blended surface turns within a cell or two, not a gap between the parts the blend joins." : "";
+  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${blendNote}${planeNote}`;
 }
 
 /**
@@ -1341,7 +1468,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let robloxNote: string | undefined;
   let mapsNote: string | undefined;
   // Set when the GLB, OBJ and viewer were decimated to the web cap, for the report.
-  let exportsNote: { triangles: number; cap: number; cell: number; before: number; deviation: number; fullDeviation: number } | undefined;
+  let exportsNote: { triangles: number; cap: number; cell: number; before: number; deviation: number; fullDeviation: number; where?: string; meshes: { name: string; before: number; after: number }[]; flat: number; seams?: { texels: number; differ: number }; fieldNormals: boolean; atlas: boolean } | undefined;
   // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
   const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
@@ -1611,6 +1738,35 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // viewer shows as its first frame. Not on a quick pass.
     if (opts.turntable !== false && !opts.quick) time("turntable:apng", () => { const fr = turntableFrames(mesh!, info, Math.round(size / 2)); write("turntable.apng", encodeApng(fr[0].width, fr[0].height, fr.map((c) => c.data), 80)); });
     const textureSize = Math.round(opts.texture ?? (evaluation.settings.texture as number | undefined) ?? 1024);
+    // The program's scene for the viewer's Scene mode: its sky and ambient as the beauty render takes them, its default
+    // key when it declares no light, and its named cameras framed as their beauty shots are.
+    // With no light declared, the beauty render's one key, placed by `set light_azimuth` and `set light_elevation` when
+    // the program sets either, as renderBeauty places it.
+    const keyDirection = (): Vec3 => {
+      const az = typeof evaluation.settings.light_azimuth === "number" ? evaluation.settings.light_azimuth : undefined;
+      const el = typeof evaluation.settings.light_elevation === "number" ? evaluation.settings.light_elevation : undefined;
+      return az === undefined && el === undefined ? DEFAULT_LIGHT_DIRECTION : lightDirection(az ?? -40, el ?? 55);
+    };
+    const viewerScene = (lit: Bounds): ViewerScene => {
+      const pal = environmentPalette(environment);
+      const setAmbient = typeof evaluation.settings.ambient === "number" ? Math.max(0, evaluation.settings.ambient) : 1;
+      const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      const cameras = evaluation.cameras.map((c) => {
+        const r = c.focus ? resolveFocus(c.focus) : undefined;
+        const b = r ? r.frame : focusName ? frame : lit;
+        const cam = perspective(b, 512, 512, c.azimuth ?? azimuth, c.elevation ?? elevation, 30, c.zoom ?? zoom ?? 1, r || focusName ? pointsWithin(mesh!, b) ?? mesh!.positions : mesh!.positions);
+        return { name: c.name, eye: cam.eye.map((v) => Number(v.toFixed(5))) as Vec3, target: boundsCenter(b).map((v) => Number(v.toFixed(5))) as Vec3, fov: 30 };
+      });
+      return {
+        environment: environment ?? "studio",
+        sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground, floor: pal.floor,
+        ambient: Number((0.42 * setAmbient * pal.ambient).toFixed(4)),
+        ...(evaluation.lights.length ? {} : { key: { direction: keyDirection().map((v) => Number(v.toFixed(5))) as Vec3, intensity: Number((2 * Math.PI * Math.pow(0.425, 2.2)).toFixed(4)) } }),
+        cameras,
+        start: evaluation.lights.length > 0 || evaluation.settings.environment !== undefined,
+        ...(shot ? { camera: shot.name } : {}),
+      };
+    };
     // Wear reads curvature over a distance set by the model's size, the same in the bake and the beauty render, so
     // the GLB's worn edges are the picture's and a quick pass shows the band the full render will.
     const wearScale = triangleCount(mesh!) > 0 ? wearProbe(Math.max(...boundsSize(meshBounds(mesh!)))) : undefined;
@@ -1628,21 +1784,22 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       log(`exports: ${hierarchy.meshes.length} mesh${hierarchy.meshes.length === 1 ? "" : "es"} in ${nodes} node${nodes === 1 ? "" : "s"}, ${hierarchy.triangles} triangles${hierarchy.decimated ? ` (decimated from ${hierarchy.decimated.before})` : ""}${hierarchy.atlas ? `, atlas ${textureSize}px with ${hierarchy.atlasCharts} charts${extraMaps.length ? ` and ${extraMaps.join(", ")} map${extraMaps.length === 1 ? "" : "s"}` : ""}` : ""}, in ${timings.hierarchy} ms`);
       if (hierarchy.decimated) {
         const dz = hierarchy.decimated;
-        exportsNote = { triangles: hierarchy.triangles, cap, cell: cellSize, ...dz };
+        exportsNote = { triangles: hierarchy.triangles, cap, cell: cellSize, ...dz, ...(hierarchy.seams ? { seams: hierarchy.seams } : {}), fieldNormals: !!hierarchy.fieldNormals, atlas: !!hierarchy.atlas };
         // Past a cell, and further than the full mesh already was, the decimation is visible: say so and how to stop it.
         if (dz.deviation > cellSize && dz.deviation > dz.fullDeviation * 1.05)
           warnings.push(`The exports are decimated from ${dz.before} to ${hierarchy.triangles} triangles and stray up to ${fmt(dz.deviation)} from the surface at a face centre, ${fmt(dz.deviation / cellSize)} of the ${fmt(cellSize)} cell (the full mesh: ${fmt(dz.fullDeviation)}): raise the cap (set triangles ${Math.min(dz.before, Math.max(cap, hierarchy.triangles) * 2)}), or set triangles 0 for the full mesh.`);
       }
       if (hierarchy.normalStats) log(`normal map: ${hierarchy.normalStats.written ? "baked" : "not baked"}, ${hierarchy.normalStats.reason}`);
+      if (hierarchy.seams?.texels) log(`material seams: ${hierarchy.seams.texels} texels on faces across a seam painted from the surface (${hierarchy.seams.differ} differ from the nearest corner)`);
       // Which materials the GLB's maps carry, so the finish can be checked without opening the PNGs.
       if (hierarchy.materialMaps) {
         const who = (k: "normal" | "metalRough" | "emissive") => [...hierarchy.materialMaps!].filter(([, mm]) => mm[k]).map(([m]) => m.name);
         const glows = [...hierarchy.materialMaps].filter(([m, mm]) => m.glow > 0 && !mm.emissive).map(([m]) => m.name);
         const parts = [
-          ...(who("normal").length ? [`normal map (model_normal.png) for ${who("normal").join(", ")}`] : []),
-          ...(who("metalRough").length ? [`metallic-roughness map (model_mr.png) for ${who("metalRough").join(", ")}`] : []),
-          ...(who("emissive").length ? [`emissive map (model_emissive.png) for ${who("emissive").join(", ")}`] : []),
-          ...(glows.length ? [`an emissive colour for ${glows.join(", ")}`] : []),
+          ...(who("normal").length ? [`normal map (model_normal.png) for ${countedNames(who("normal"))}`] : []),
+          ...(who("metalRough").length ? [`metallic-roughness map (model_mr.png) for ${countedNames(who("metalRough"))}`] : []),
+          ...(who("emissive").length ? [`emissive map (model_emissive.png) for ${countedNames(who("emissive"))}`] : []),
+          ...(glows.length ? [`an emissive colour for ${countedNames(glows)}`] : []),
         ];
         if (parts.length) mapsNote = `${parts.join("; ")}; every material has the colour atlas (model.png)`;
       }
@@ -1681,9 +1838,13 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         }
       }
       if (opts.glb !== false) {
-        const glb = toGlbScene(hierarchy, name, glbAnimations);
+        // The program's lights go into the GLB, so an engine lights the model as the beauty render does (round 11).
+        const lit = triangleCount(mesh!) > 0 ? meshBounds(mesh!) : bounds;
+        const litSize = boundsSize(lit);
+        const punctual = glbLights(evaluation.lights, boundsCenter(lit), Math.max(0.5 * Math.hypot(litSize[0], litSize[1], litSize[2]), 1e-3));
+        const glb = toGlbScene(hierarchy, name, glbAnimations, punctual);
         write("model.glb", glb);
-        if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name)));
+        if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name), viewerScene(lit)));
       }
       // Roblox: the meshes decimated to the budget (an accessory's 4000 when an Attachment anchor is present, a
       // MeshPart's 10000 otherwise), their own atlas, under a root turned to face -Z with the attachments as nodes.
@@ -1919,9 +2080,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // Name the steps whose surface is near each loose piece's centre, smallest first (by the field, not the box:
       // measured, a blended step's box named the wrong part). A piece's centre can be inside a hollow, so the
       // tolerance is the piece's own size.
-      const stepsAt = (pc: Piece) => stepsNear(evaluation, pc.centre, Math.cbrt(Math.abs(pc.volume)) + cellSize * 2);
       const loose = physics.pieces.filter((pc) => !specks.includes(pc) && !pc.cavity && pc !== main).slice(0, 4);
-      const where = loose.map((pc) => `volume ${fmt(Math.abs(pc.volume))} at (${pc.centre.map(fmt).join(", ")})${stepsAt(pc).length ? ` in ${stepsAt(pc).join(", ")}` : ""}`).join("; ");
+      const where = loose.map((pc) => `volume ${looseText(evaluation, pc, cellSize)}`).join("; ");
       // A quick pass that dropped thin steps has probably dropped the joins too (round 4: every quick sheet of a
       // railed excavator said "4 pieces"); the note above says so instead.
       if (!quickDropped) warnings.push(`The model is ${parts} separate pieces: the largest is ${fmt(Math.abs(main.volume))}, the loose ${loose.length === 1 ? "piece is" : "pieces are"} ${where}${parts - 1 > loose.length ? ", ..." : ""}. A piece not touching the rest floats free: overlap parts slightly, or use scene for separate objects.`);
@@ -1942,6 +2102,39 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       warnings.push(`The centre of mass is only ${fmt(physics.stabilityMargin)} units inside the base's footprint: the model would balance, barely.`);
   }
 
+  // Each object of a scene meshed on its own, for the Assembly table and for the Watertight row, which says when
+  // every object is watertight alone and the fused scene's edges are only where they meet.
+  type ObjectRow = { name: string; row: string; ok: boolean; edges?: string; json: Record<string, unknown> };
+  let objectRows: ObjectRow[] | undefined;
+  if (evaluation.objects.length > 1 && mesh && !opts.quick && cellSize > 0) {
+    objectRows = [];
+    for (const o of evaluation.objects) {
+      const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
+      if (isEmpty(shape.bounds)) { objectRows.push({ name: o.name, row: `| ${o.name} | empty | | | |`, ok: true, json: { empty: true } }); continue; }
+      const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
+      if (triangleCount(own.mesh) === 0) { objectRows.push({ name: o.name, row: `| ${o.name} | no surface | | | |`, ok: true, json: { empty: true } }); continue; }
+      const w = watertightReport(own.mesh);
+      const ph = analyse(own.mesh, own.cellSize);
+      const solid = ph.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, ph, own.cellSize)).length;
+      const label = o.shape.instanced ? `${o.name} (each of ${o.shape.instanced.placements.length} copies)` : o.name;
+      // The object's edges named among its own steps only, as the Watertight row names the scene's.
+      const list: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [];
+      const alone: Evaluation = { ...evaluation, objects: [{ name: o.name, shape }] };
+      const edges = w.ok ? undefined : watertightNote(w, alone, own.cellSize, list).slice(w.note.length).trim().replace(/^The edges are mostly /, `${w.nonManifold + w.holes} open edge${w.nonManifold + w.holes === 1 ? "" : "s"}, mostly `).replace("(every one is in report.json under watertight)", "(every one is in report.json under the object's watertight)");
+      const first = list[0];
+      const where = first ? `; ${first.count} at (${first.at.map(fmt).join(", ")})${first.steps.length ? ` in ${first.steps.map((n) => `'${n}'`).join(", ")}` : ""}, below` : "";
+      objectRows.push({
+        name: o.name, ok: w.ok, edges,
+        row: `| ${label} | ${w.ok ? "yes" : `no: ${w.nonManifold + w.holes} edges${where}`} | ${solid} | ${ph.footprint.length < 3 ? "unknown" : ph.stable ? `yes, ${fmt(ph.stabilityMargin)} inside` : `no, ${fmt(-ph.stabilityMargin)} outside`} | ${(ph.overhang * 100).toFixed(ph.overhang < 0.095 ? 1 : 0)}% |`,
+        json: { watertight: w.ok ? { ok: true } : { ok: false, edges: w.nonManifold + w.holes, clusters: list }, pieces: solid },
+      });
+    }
+  }
+  // The scene's fused mesh has edges no object has alone: where objects meet, or where its lattice falls otherwise.
+  const fusedOnly = !!objectRows && objectRows.every((r) => r.ok)
+    ? " Each object is watertight on its own (the Assembly table), so these edges are only in the fused scene, where objects meet or where its sample lattice falls otherwise; they are not in the objects' own meshes, which are what the GLB carries, and matter only for printing the scene as one piece."
+    : "";
+
   // The report.
   let printJson: Record<string, unknown> | undefined;
   if (mesh && bounds) {
@@ -1956,12 +2149,12 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Bounds | x ${fmt(bounds.min[0])}..${fmt(bounds.max[0])}, y ${fmt(bounds.min[1])}..${fmt(bounds.max[1])}, z ${fmt(bounds.min[2])}..${fmt(bounds.max[2])} (a box; loose after a cut, a rotation or a twist) |`,
       ...(trueBounds ? (() => { const e = clampBounds(trueBounds!, bounds!); return [`| Surface extent | x ${fmt(e.min[0])}..${fmt(e.max[0])}, y ${fmt(e.min[1])}..${fmt(e.max[1])}, z ${fmt(e.min[2])}..${fmt(e.max[2])} (from the mesh, within the bounds) |`]; })() : []),
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
-      ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}; the sheet and the STL are the full mesh |`] : []),
+      ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre${exportsNote.where && exportsNote.meshes.length > 1 ? ` (in ${exportsNote.where})` : ""}, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.flat ? (exportsNote.fieldNormals ? `; past the flat faces, so every material's texels carry the field's normal in the normal map and merged curved faces shade as the surface does, though their outlines are the coarser mesh's: read viewer.html` : exportsNote.atlas ? `; past the flat faces, though no merged face leans past ${BENT_DEGREES} degrees from the field's normal under it, so no normal map was written: read viewer.html` : `; past the flat faces, and with no texture atlas there is no normal map to carry the field's normal, so merged curved faces shade flatter than on the sheet though the surface is in place: read viewer.html`) : ""}. ${capShare(exportsNote)}${exportsNote.seams?.texels ? `. ${exportsNote.seams.texels} texels lie on faces that span two materials, each painted with the material of the surface under it (${exportsNote.seams.differ} of them took another material than the face's nearest corner)` : ""}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units${poseCell !== undefined ? poseCoarser ? ` (pose ${shownPose}: the rest pose's cell, ${fmt(poseCell)}, would be more than the 500 cells the extractor takes along the posed model, so this one is coarser than at rest)` : ` (the rest pose's cell, kept for pose ${shownPose}: ${Math.round(Math.max(...boundsSize(trueBounds ?? bounds)) / cellSize)} cells along its longest side)` : ""} |`,
-      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
+      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : fusedOnly || nearlyThin(evaluation, cellSize))} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
-      `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
+      `| Materials | ${countedNames(mesh.materials.map((m) => m.name)) || "none"} |`,
       ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),
       ...(mapsNote ? [`| Maps | ${mapsNote} |`] : []),
       ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),
@@ -2002,21 +2195,16 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (evaluation.objects.length > 1) lines.push(`Objects: ${evaluation.objects.map((o) => `${o.name}${o.shape.instanced ? ` (${o.shape.instanced.placements.length} copies)` : ""}`).join(", ")}`, "");
     // A print-ready set is judged one object at a time: the scene's rows above are for the fused union, in which
     // thirty-two chess pieces resting on their board count as one piece (measured). Each object is meshed on its
-    // own at the scene's cell (a placed set once, its base) and gets the same rows; a quick pass skips this.
-    if (evaluation.objects.length > 1 && mesh && !opts.quick && cellSize > 0) {
+    // own at the scene's cell (a placed set once, its base) and gets the same rows; a quick pass skips this. Where an
+    // object's own mesh has open edges, they are placed and named under the table as the Watertight row's are, since
+    // its own mesh is what the GLB carries, its joints' parts aside (round 11: "bowl | no: 17 edges" with no place
+    // cost a render on a guess).
+    if (objectRows) {
       lines.push("Each object on its own, at the scene's cell:", "", "| Object | Watertight | Pieces | Stands | Overhangs |", "| --- | --- | --- | --- | --- |");
-      for (const o of evaluation.objects) {
-        const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
-        if (isEmpty(shape.bounds)) { lines.push(`| ${o.name} | empty | | | |`); continue; }
-        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
-        if (triangleCount(own.mesh) === 0) { lines.push(`| ${o.name} | no surface | | | |`); continue; }
-        const w = watertightReport(own.mesh);
-        const ph = analyse(own.mesh, own.cellSize);
-        const solid = ph.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, ph, own.cellSize)).length;
-        const label = o.shape.instanced ? `${o.name} (each of ${o.shape.instanced.placements.length} copies)` : o.name;
-        lines.push(`| ${label} | ${w.ok ? "yes" : `no: ${w.nonManifold + w.holes} edges`} | ${solid} | ${ph.footprint.length < 3 ? "unknown" : ph.stable ? `yes, ${fmt(ph.stabilityMargin)} inside` : `no, ${fmt(-ph.stabilityMargin)} outside`} | ${(ph.overhang * 100).toFixed(ph.overhang < 0.095 ? 1 : 0)}% |`);
-      }
+      for (const r of objectRows) lines.push(r.row);
       lines.push("");
+      for (const r of objectRows) if (r.edges) lines.push(`- ${r.name}'s own mesh: ${r.edges}`);
+      if (objectRows.some((r) => r.edges)) lines.push("");
     }
     if (joints.length && output) lines.push("Joints, each under the joint it turns with:", "", "```", ...jointTreeLines(output, fmt), "```", "");
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
@@ -2052,7 +2240,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "turntable.png": "eight views around the model",
     "turntable.apng": "the model turning, an animated PNG of 24 frames (a browser plays it)",
     "model.obj": "Wavefront mesh (with model.mtl and UVs)", "model.stl": "binary STL for a slicer, the model as shown, in millimetres with z up",
-    "model.3mf": "3MF for a slicer: the model in the program's unit with z up, a colour per triangle from the materials", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": "binary glTF with the texture atlas embedded",
+    "model.3mf": "3MF for a slicer: the model in the program's unit with z up, a colour per triangle from the materials", "model.mtl": "materials for the OBJ, mapped to model.png", "model.glb": `binary glTF with the texture atlas embedded${evaluation.lights.length ? ", and the program's lights as KHR_lights_punctual lights on nodes of their own" : ""}`,
     "model.png": "the texture atlas: the materials baked per chart",
     "model_normal.png": "the GLB's tangent-space normal map on the atlas's UVs: the field's detail finer than the mesh and the bumps (lavender is flat)",
     "model_mr.png": "the GLB's metallic-roughness map on the atlas's UVs (green roughness, blue metalness), where wear or rust varies them",
@@ -2062,7 +2250,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     "model.geo.png": "the Bedrock geometry's texture: one window per cube face, painted with the materials",
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
-    "viewer.html": "orbit the GLB in a browser (self-contained; loads three.js from a CDN)",
+    "viewer.html": `orbit the GLB in a browser (self-contained; loads three.js from a CDN), under its own studio or the program's scene (the GLB's lights, the ${environment ?? "studio"} sky and ambient${evaluation.cameras.length ? ", the cameras as viewpoints" : ""}), opening in the ${evaluation.lights.length || evaluation.settings.environment !== undefined ? "scene" : "studio"}`,
     "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}`,
     "lights.png": "the beauty render under each declared light alone, then all of them; under each, what that light adds on its own, brightened, and the picture under no light at all",
     "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}`,
@@ -2081,11 +2269,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         bounds,
         size: bounds ? boundsSize(bounds) : undefined,
         triangles: mesh ? triangleCount(mesh) : 0,
-        exports: exportsNote ? { triangles: exportsNote.triangles, before: exportsNote.before, cap: exportsNote.cap, deviation: exportsNote.deviation, fullDeviation: exportsNote.fullDeviation } : undefined,
+        exports: exportsNote ? { triangles: exportsNote.triangles, before: exportsNote.before, cap: exportsNote.cap, deviation: exportsNote.deviation, fullDeviation: exportsNote.fullDeviation, where: exportsNote.where, meshes: exportsNote.meshes, flat: exportsNote.flat, seams: exportsNote.seams } : undefined,
         cellSize,
         grid,
         materials: mesh?.materials.map((m) => m.name) ?? [],
-        objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
+        objects: evaluation.objects.map((o, i) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1, ...(objectRows?.[i]?.json ?? {}) })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
         print: printJson,
         watertight: edgeList.length ? { clusters: edgeList } : undefined,

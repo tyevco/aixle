@@ -137,6 +137,81 @@ export interface GlbAnimation {
   scales?: Record<string, [number, number, number][]>;
 }
 
+/** A light the program declares, as the beauty render takes it. */
+export interface SceneLight {
+  name?: string;
+  azimuth: number;
+  elevation: number;
+  /** 0..1, sRGB as written. */
+  color: [number, number, number];
+  power: number;
+  position?: [number, number, number];
+  range?: number;
+}
+
+/** A KHR_lights_punctual light and the node that places it. */
+export interface GlbLight {
+  name: string;
+  type: "point" | "directional";
+  /** Linear RGB. */
+  color: [number, number, number];
+  /** Candela for a point light, lux for a directional one. */
+  intensity: number;
+  /** A point light's cutoff, where an engine takes it to zero. */
+  range?: number;
+  translation: [number, number, number];
+  /** A directional light's node turned so its -z points the way the light travels. */
+  rotation?: [number, number, number, number];
+}
+
+/**
+ * The program's lights as glTF punctual lights (round 11: a torch that lit a door in beauty.png lit nothing in an
+ * engine). The beauty render works in display values: a white surface whose normal is at angle θ to a light of power
+ * p reads 0.85 p cos θ, and a point light's strength is range² / (range² + d²) of that at distance d. A physically
+ * lit engine (three.js, Blender, Godot) shows albedo × intensity × cos θ / π (over d² for a point light) in linear
+ * light, and a display value is about the linear one to the power 1 / 2.2. The two laws cannot agree everywhere, so
+ * they are made to agree on a surface turned 60 degrees from the light, at `range` from it for a point light: a
+ * directional light is 2π (0.425 p)^2.2 lux and a point light 2π (0.2125 p)^2.2 range² candela. Measured over a wall
+ * beside a point light at 0.3 to 1 range from it, that is within 0.04 to 0.10 of the beauty render's display value
+ * (rms), where agreeing on a face turned to the light is 0.07 to 0.23 off, brighter. The engine takes the cosine in
+ * linear light, so its light is flatter across angles: on a face turned square to the light it is about two thirds
+ * of the beauty render's display value, at 60 degrees the same, at a slant brighter (measured in the viewer, grey
+ * plates under a directional light: 97 against 159 square on, 70 against 73 at 60 degrees, 42 against 32 at 80);
+ * and nearer a point light than `range` it is brighter. Its cutoff, which glTF's range is, is three
+ * times the program's range, where the beauty render's strength is a tenth. Colours go from sRGB to linear. The
+ * apparent size (soft shadows) has no glTF counterpart and is left out. A directional light's node sits three radii
+ * out from the model's centre along its direction, for an engine whose shadow camera needs a place.
+ */
+export function glbLights(lights: SceneLight[], centre: [number, number, number], radius: number): GlbLight[] {
+  return lights.map((l, i) => {
+    const color = l.color.map((c) => Number(srgbToLinear(c).toFixed(5))) as [number, number, number];
+    const name = l.name ?? `light_${i + 1}`;
+    if (l.position) {
+      const range = l.range ?? 2;
+      return { name, type: "point" as const, color, intensity: Number((2 * Math.PI * Math.pow(0.2125 * Math.max(0, l.power), 2.2) * range * range).toPrecision(5)), range: Number((range * 3).toPrecision(6)), translation: [l.position[0], l.position[1], l.position[2]] };
+    }
+    const az = (l.azimuth * Math.PI) / 180, el = (l.elevation * Math.PI) / 180;
+    // Towards the light; the light travels the other way, which is the node's -z.
+    const to: [number, number, number] = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    return {
+      name, type: "directional" as const, color,
+      intensity: Number((2 * Math.PI * Math.pow(0.425 * Math.max(0, l.power), 2.2)).toPrecision(5)),
+      translation: [centre[0] + to[0] * radius * 3, centre[1] + to[1] * radius * 3, centre[2] + to[2] * radius * 3],
+      rotation: rotationFromZ(to),
+    };
+  });
+}
+
+/** The quaternion that turns +z onto `d` (a unit vector), the shorter way round. */
+export function rotationFromZ(d: [number, number, number]): [number, number, number, number] {
+  // q = (z × d, 1 + z · d), normalised; opposite vectors turn half a turn about x.
+  const w = 1 + d[2];
+  if (w < 1e-9) return [1, 0, 0, 0];
+  const x = -d[1], y = d[0], z = 0;
+  const l = Math.hypot(x, y, z, w);
+  return [x / l, y / l, z / l, w / l];
+}
+
 /** sRGB-encoded 0..1 to linear, for a factor where the texture it stands in for would have been sRGB. */
 export const srgbToLinear = (v: number): number => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
 
@@ -164,7 +239,7 @@ export function eulerToQuat(x: number, y: number, z: number): [number, number, n
   return mul(qz, mul(qy, qx));
 }
 
-export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnimation[] = []): Buffer {
+export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnimation[] = [], lights: GlbLight[] = []): Buffer {
   const chunks: Buffer[] = [];
   const bufferViews: object[] = [];
   const accessors: object[] = [];
@@ -291,6 +366,13 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     return index;
   };
   const rootIndices = h.roots.map(addNode);
+  // The program's lights, each on a node of its own at the scene's root.
+  for (const [i, l] of lights.entries()) {
+    const node: Record<string, unknown> = { name: l.name, translation: l.translation, extensions: { KHR_lights_punctual: { light: i } } };
+    if (l.rotation) node.rotation = l.rotation;
+    rootIndices.push(nodes.length);
+    nodes.push(node);
+  }
 
   // Animations.
   const anims: object[] = [];
@@ -346,6 +428,10 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     json.images = images;
     json.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 }];
     json.textures = images.map((_, i) => ({ sampler: 0, source: i }));
+  }
+  if (lights.length) {
+    json.extensions = { KHR_lights_punctual: { lights: lights.map((l) => ({ name: l.name, type: l.type, color: l.color, intensity: l.intensity, ...(l.range !== undefined ? { range: l.range } : {}) })) } };
+    extensionsUsed.add("KHR_lights_punctual");
   }
   if (extensionsUsed.size) json.extensionsUsed = [...extensionsUsed];
   if (anims.length) json.animations = anims;

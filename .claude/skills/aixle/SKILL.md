@@ -116,9 +116,17 @@ Reference: `docs/reference.md` (every function, generated from the code),
    carries the unit and the materials' colours. A model that is not a
    print gets one line in the report saying so, and no Print section.
    The GLB, OBJ and viewer are decimated past 200 thousand triangles
-   (`--triangles N` or `set triangles N`, 0 for all; the report's
-   Exports row says how far they stray; below a quarter of the mesh
-   curved bands shade in streaks, so read the viewer). An `import()`
+   (`--triangles N` or `set triangles N`, 0 for all; the cap is shared
+   by error over every mesh, flat faces first, and the report's Exports
+   row says how far they stray, each mesh's share and the cap below
+   which detail starts to go; past it merged faces carry the field's
+   normal in the normal map but their outlines are coarser, so read the
+   viewer). The GLB carries the program's lights; `viewer.html` opens
+   in the program's scene (its lights, sky and cameras) when it declares
+   lights or a sky, with a Studio button for judging the maps, and that
+   is the picture to set beside `beauty.png`. Small round parts keep the
+   mesh's polygon outline in the export where the beauty render draws
+   them round. An `import()`
    is sampled once and cached on disk for the next `check` or `render`
    (`--no-cache` samples afresh).
 

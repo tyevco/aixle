@@ -605,7 +605,15 @@ mesh). `--focus pawns_3` frames the third copy of a placed set on its
 own. A scene's report has, under Assembly, a row per object (a placed
 set once, for its base): watertight, pieces, stands, overhangs, since
 the rows above are for the fused union, in which thirty-two pieces
-resting on their board are one piece.
+resting on their board are one piece. An object with open edges of its
+own has its largest cluster in its row and every cluster under the
+table, placed and named among its own steps as the Watertight row's are
+(`report.json` has them under the object's `watertight`); a cluster
+between a joint's part and what it turns on is said to be one, since the
+GLB carries those as separate meshes. When every object is watertight
+alone, the Watertight row says its edges are only in the fused scene,
+where objects meet: they are not in the meshes the GLB carries, and
+matter only for printing the scene as one piece.
 
 `ground()` moves one shape, so in a `scene` it moves that object alone
 and the others stay where their numbers put them: ground the whole
@@ -939,6 +947,19 @@ near-white glows differ only in the channels not already full, so a
 flame a light barely touches came out bright green once brightened. The
 frames are half the beauty render's size.
 
+The lights go into `model.glb` as well, each a `KHR_lights_punctual`
+light on a node of its own (a point light at its position, an azimuth
+light as a directional one), so an engine lights the model with them;
+the intensities are chosen so an engine agrees with the beauty render on
+a face turned 60 degrees from the light, at `range` from a point light;
+it is darker than `beauty.png` on faces turned square to a light (about
+two thirds), brighter on faces at a slant, and brighter nearer a point
+light than its range (the design notes have the numbers). The cameras and the sky stay out of the GLB, but
+`viewer.html` has them: its Scene button lights the GLB with its own
+lights under the program's sky and ambient, the cameras are buttons, and
+it opens that way when the program declares a light or a sky; its Studio
+button is a grey backdrop and a white key for judging the maps.
+
 What the lights and the skies can and cannot do, measured in round 9:
 
 - A light with an azimuth is a direction, not a place: `elevation=8`
@@ -1131,11 +1152,28 @@ export is decimated before the atlas is baked, keeping material seams
 and creases, and the report's Exports row says from how many and how far
 the result strays from the model at a face centre, beside the full
 mesh's own; a decimation that strays more than a cell and further than
-the full mesh warns. The sheet and the STL are never decimated. Down to
-about a quarter of the mesh the export reads as the full one; below
-that, curved bands between soft corners (a lathe profile's bends) shade
-in streaks though the surface is in place, and the row says so: read
-`viewer.html` before shipping a cap that low. `set minecraft 16` also writes Minecraft Bedrock
+the full mesh warns. The cap is for the whole export and is shared by
+error, not by count: one queue over every mesh of a scene takes the
+flattest faces first wherever they are, so a flat wall gives up its
+triangles before the studs on the door beside it give up any, and a
+part the cap does not need keeps its full mesh. The Exports row lists
+each mesh's count before and after, and how far merging flat faces alone
+would go: a cap at or above that number strays no further than the full
+mesh, so it is the cap to ask for when the file should be small. There
+is no cap per object; the shared queue already spends the triangles
+where the surface curves. The sheet and the STL are never decimated. A
+cap under the flat faces' count merges curved faces too, and then every
+material's texels in the normal map carry the field's own normal, so a
+merged band shades as the surface does rather than in streaks between
+its corners; the row says so (with `--no-texture` there is no normal
+map, the band shades in streaks, and the row says that instead). A face across a material seam (the band
+round a stud where iron meets oak) is painted texel by texel with the
+material of the surface under it, not of its nearest corner, and the row
+counts those texels. What no map changes is the outline: a part a few
+cells across (a stud, a ring's tube) has the mesh's polygon silhouette
+in the GLB and in any engine, where `beauty.png`, which marches the
+field, draws it round; judge small round parts in `viewer.html`, and
+raise the grid where their outline matters. `set minecraft 16` also writes Minecraft Bedrock
 geometry (`--minecraft` on the command line, with an optional pixel
 count): the field is sampled at that many pixels per unit, a unit being
 one block, every filled voxel is a pixel of solid, and the voxels are
@@ -1166,8 +1204,8 @@ the Normal body scale (the reference lists every attachment name the
 export knows with its limit: a hat 1.87 × 2.5 × 1.87 studs, a face piece
 1.87 × 1.25 × 1.25, a back piece 9.86 × 8.59 × 4.87), and decimates the
 mesh to the budget: a rigid accessory's 4000 triangles when there is an
-Attachment anchor (shared across the meshes of a jointed model, each
-giving up the same share), a MeshPart's 10000 per mesh otherwise, by
+Attachment anchor (shared across the meshes of a jointed model by the
+same queue as the web cap, the flattest faces first), a MeshPart's 10000 otherwise, by
 quadric edge collapses that never cross a material seam or fold a face,
 so a hat meshed at grid 96 goes out at 4000 with its brim, band and
 crown. A jointed model exports its joints as nodes under `Handle` and
@@ -1429,7 +1467,11 @@ when the other is a cutter, whose inside is air), from points of each
 surface within a cell and a half of the edge read in the other's field,
 so the fix is a number: the gap closed to an overlap of a cell, or
 opened to a cell and a half; `report.json` has it as `gap` on the three clusters
-the report prints, negative for an overlap. A focused render adds a
+the report prints, negative for an overlap. An edge inside the fillet
+of a smooth `union(..., k=)` (or a smooth difference or intersection)
+names the blend instead of a gap, `in the fillet where 'head_hinged'
+blends them (k 0.03, 1.6 cells)`, since inside the fillet the two parts'
+own surfaces are not the surface. A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
@@ -1533,7 +1575,12 @@ number of separate pieces the shape meshes into at that many cells on
 its longest side, as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
-chair's floating back once passed). With no resolution given, the
+chair's floating back once passed). The row gives each loose piece's
+volume to two figures, where it is, and the steps it is made of, named
+at its own surface rather than at its centre (a ring's centre is in the
+air); a piece that is a joint's part, turning clear of what it hangs on
+(a knocker's ring in its eye), is said to be one, since it is loose by
+design and a print would print it so. With no resolution given, the
 queries that mesh (`pieces`, `overhang`, `wall`, `support`, `stands`)
 mesh at the model's own cell, the shown model's longest side over `set
 grid`, so a part is meshed as the report meshes it and costs no more
@@ -1771,7 +1818,10 @@ the shapes.
 - A preset with overrides (`material("glass", transmit=0.95)`) is listed
   in the report as the preset's name with a star, `glass*`, unless it is
   assigned to a name, which it then takes (in a loop, `name_2`, `name_3`
-  for the later ones; see Materials).
+  for the later ones; see Materials). The Materials and Maps rows
+  list a name that several materials share once, with their count
+  (`#efe6cf ×35` for a decal painted on each of 35 books); the GLB and
+  `report.json` keep one material per entry.
 - A cross-section draws the surface's outline a cell or so behind the cut
   plane as a thin line, so a plate just behind the plane shows as a dashed
   line across an opening that is open. Move the slice (`set slice_x`),

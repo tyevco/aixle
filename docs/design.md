@@ -257,6 +257,25 @@ grid 300 still makes a file a browser opens. The sheet and the STL are
 never decimated: the sheet is how the model is checked, and the STL is
 for a printer, which wants every cell.
 
+The budget is the export's, not each mesh's, and it is spent by error:
+the meshes of a scene go into one queue and the cheapest collapse goes
+first wherever it is. Round 11 shipped a dungeon door at a cap of 55
+thousand when every mesh gave up the same share of its own count: the
+flat stone wall kept 35196 triangles and the whole torch 1226, with the
+studs and the ring faceted. With one queue the wall's flat faces go
+first; at the same cap the ring and the torch keep their full meshes and
+the largest deviation is the full mesh's own; at 15 thousand the wall is
+down to 3570 and the ring still whole, and at 8 thousand the largest
+deviation has grown by 1%. The queue also
+counts how far merging only flat faces would go (a collapse that moves a
+vertex less than a ten-thousandth of an edge off its planes), without
+keeping those collapses, so the report can name the cap below which the
+export starts to cost detail. A per-object cap was considered and not
+built: what it would buy, triangles where a part needs them, is what the
+shared queue does without being asked; an object that must look better
+than its error says (a hero prop beside the camera) is the case it
+would serve, and none has come up.
+
 How far a decimated export strays is measured where it strays most:
 the vertices are the mesher's own and lie on the surface, so the
 error is in the middle of the widest faces, and the report gives the
@@ -269,12 +288,85 @@ planes, so a band between two soft corners (a lathe profile's bends,
 under the crease angle) becomes slivers from one corner to the next,
 whose normals are both blends of the two bands, and the band shades in
 streaks: measured on a vase at 12 thousand of 188 thousand triangles
-and a teapot at 11 of 108, both fine at a quarter. The default never
-goes that far on the examples; a program that asks for it is told. A
-decimated export is also a slower import: the sampler's nearest-face
+and a teapot at 11 of 108, both fine at a quarter. So once the queue has
+gone past the flat faces, the normal map is baked for every material,
+each texel carrying the field's normal under it in the merged face's
+tangent frame (the bake inverts the frame the shader builds), and the
+vase at 12 thousand shades as the full mesh does in the viewer; its
+GLB grows from 0.84 MB to 1.28 and the bake by 4.8 s. A whole model
+with no bump and no relief still gets no map: on the full vase it would
+add a third to the file (5.9 MB to 7.8) for the mesher's own error at
+creases. A bumped or displaced material always carried the field's
+normal, not the bump alone: on a stud three cells across, the mesh's
+normals lean 8.6 degrees from the field's on average and 29 at most, the
+map's 1.2 and 3. What a normal map cannot change is a silhouette, which
+is why a door's studs looked faceted in round 11's viewer and round in
+its beauty render.
+
+A face whose corners are of two materials straddles a seam. The baker
+took a texel's material and paint point from the triangle's nearest
+corner, which on the mesher's own band, a cell wide, misplaces the seam
+by under half a cell; once decimation stretched those triangles along
+the seam, an iron corner claimed a stud's width of oak (round 11: dark
+blocks beside a door's clavos, iron texels in the metallic-roughness map
+round each stud's foot, absent from the full export). On such a face each
+texel now slides to the surface along the interpolated normal and takes
+the material and paint point the field has there; the rest keep the
+corner rule, which is exact inside one material and costs no `hit()`.
+Measured on the door's capped mesh baked both ways: texels that the
+metallic-roughness map makes metal where the surface is oak went from
+385 to 105, all of those within a quarter of a cell of the iron, and
+about 4300 texels of oak on the studs' iron domes, the light blocks a
+viewer close-up showed, went with them.
+Keeping the band a cell wide in the decimator, by letting a seam vertex
+move only along the seam, was tried and measured: the band's triangles
+stretched along the seam all the same and the misplaced area did not
+shrink (873 cells² against 858), so it was not kept. A face is still in
+one material's primitive in the GLB, so a texel of the other material
+there takes its primitive's factors where that material has no map.
+
+A decimated export is also a slower import: the sampler's nearest-face
 search prunes by boxes, and a sliver up a tin's wall has a box the
 height of the wall, so a point inside is near every box (the tin's
 capped GLB at resolution 64: 25 s, the full one 5 s).
+
+## Lights in the export
+
+The program's lights are part of the model as shipped: a torch is why a
+scene is at night. The GLB writes each as a `KHR_lights_punctual` light
+on a node of its own, a point light at its position and a directional
+one turned so its -z runs from the light to the model. The beauty render
+works in display values (a white face turned θ from a light of power p
+reads 0.85 p cos θ, a point light's strength is range² / (range² + d²) of
+that) and an engine in linear light with the inverse square, so the two
+cannot agree everywhere. They are made to agree on a face turned 60
+degrees from the light, at `range` from a point light: 2π (0.425 p)^2.2
+lux for a directional light and 2π (0.2125 p)^2.2 range² candela for a
+point light. Over a wall beside a point light at 0.3 to 1 range from it
+that is within 0.04 to 0.10 of the beauty render's display value (rms),
+where agreeing on a face turned to the light was 0.07 to 0.23 off,
+brighter. An engine takes the cosine in linear light, so its light is
+flatter across angles than the beauty render's: on a face turned square
+to the light it is about two thirds as bright as `beauty.png`, at 60
+degrees the same, and at a slant brighter (grey plates under a
+directional light, read in the viewer's scene and in `beauty.png`: 97
+against 159 square on, 70 against 73 at 60 degrees, 42 against 32 at
+80); nearer a point light than its range it is brighter. glTF's range is a cutoff, not a
+half-strength distance, so it is written as three times the program's,
+where the beauty render's strength is a tenth. The apparent size has no
+glTF counterpart. The cameras stay out of the GLB, since an engine
+imports them as objects in the level; the viewer page has them.
+
+The viewer page has two lightings. Its studio (a grey backdrop, a room
+environment for the metals, a white key) is for judging the maps; its
+scene is the program's: the GLB's own lights, or the beauty render's
+one key when the program declares none (where `set light_azimuth` and
+`set light_elevation` put it), the program's sky drawn
+behind as the beauty render's backdrop and, scaled by the ambient as the
+beauty render scales it, standing in for the light from all round, a
+floor of the sky's floor colour, and each named camera as a button that
+puts the view where the beauty shot's eye is. It opens in the scene when
+the program declares lights or a sky, and from `set camera`'s shot.
 
 ## Imported meshes
 

@@ -149,6 +149,35 @@ describe("texture atlas", () => {
     // than when the faces sat on sample planes); most must agree.
     expect(agree / checked).toBeGreaterThan(0.8);
   });
+  it("paints a triangle across a material seam from the surface under each texel, not from its nearest corner", () => {
+    // Round 11: once decimation had stretched the triangles round a door's studs, their iron corners painted iron a
+    // stud's width onto the oak. Here one quad, its left corners red and its right blue, lies on a plate whose
+    // surface is red only along its left tenth: the corner rule paints half the quad red, the surface a tenth.
+    const red = materialFromString("#ff0000")!, blue = materialFromString("#0000ff")!;
+    const plate = O.union([O.paint(O.move(P.box(0.2, 0.2, 2), -0.9, -0.1, 0), red), O.paint(O.move(P.box(1.8, 0.2, 2), 0.1, -0.1, 0), blue)]);
+    const positions = new Float32Array([-1, 0, -1, -1, 0, 1, 1, 0, 1, 1, 0, -1]);
+    const quad = {
+      positions, local: new Float32Array(positions), normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
+      materialIndex: new Uint16Array([0, 0, 1, 1]), materials: [red, blue], indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    };
+    const share = (img: { data: Uint8ClampedArray | Uint8Array }) => {
+      let r = 0, b = 0;
+      for (let i = 0; i < img.data.length; i += 4) {
+        if (img.data[i] > 200 && img.data[i + 2] < 60) r++;
+        else if (img.data[i + 2] > 200 && img.data[i] < 60) b++;
+      }
+      return r / (r + b);
+    };
+    const field = [{ range: [0, 2] as [number, number], dist: plate.dist, hit: plate.hit, offset: [0, 0, 0] as [number, number, number] }];
+    const byCorner = bakeAtlas(quad, { size: 128, padding: 2, maps: false });
+    const bySurface = bakeAtlas(quad, { size: 128, padding: 2, maps: false, fields: field, cellSize: 0.05 });
+    expect(share(byCorner.image)).toBeGreaterThan(0.4);
+    expect(share(bySurface.image)).toBeGreaterThan(0.07);
+    expect(share(bySurface.image)).toBeLessThan(0.14);
+    // Every texel of the quad is on the seam's triangles, and most of the left half took the surface's blue.
+    expect(bySurface.seams.texels).toBeGreaterThan(1000);
+    expect(bySurface.seams.differ / bySurface.seams.texels).toBeGreaterThan(0.3);
+  });
   it("writes UVs and the texture into the GLB and OBJ", () => {
     const glb = toGlb(atlas.mesh, "t", { uv: atlas.uv, png: atlas.image.toPng() });
     const jsonLen = glb.readUInt32LE(12);

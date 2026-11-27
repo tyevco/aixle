@@ -4,12 +4,43 @@
  * a CDN, so it needs a network connection once. The GLB's own materials are
  * shown as they are, with the colour atlas and whichever normal,
  * metallic-roughness and emissive maps it carries (vertex colours stand in
- * only for a GLB without an atlas), in a room environment for the metals to
- * reflect.
+ * only for a GLB without an atlas).
+ *
+ * Two ways to light it. The studio is the page's own: a grey backdrop, a
+ * room environment for the metals to reflect, a hemisphere light and a white
+ * key, for judging the maps. The scene is the program's: the GLB's own
+ * lights (KHR_lights_punctual), or the beauty render's default key when the
+ * program declares none, under the program's sky as a backdrop and as the
+ * ambient light, on a floor of the sky's floor colour, with the program's
+ * named cameras as viewpoints; it is what beauty.png shows, drawn from the
+ * export (round 11: a night scene lit by a torch was shown in a daylight
+ * studio, so the viewer could judge the maps but not the look).
  */
 import type { Bounds } from "../sdf/types.js";
+import type { Vec3 } from "../core/vec.js";
 
-export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles: number, animations: string[] = []): string {
+/** The program's scene, for the viewer's Scene mode. */
+export interface ViewerScene {
+  /** The sky's name, for the button. */
+  environment: string;
+  /** The sky's colours, 0..1 as the beauty render draws them. */
+  sky: Vec3;
+  horizon?: Vec3;
+  ground: Vec3;
+  floor: Vec3;
+  /** The ambient light's strength as the beauty render takes it: its 0.42, times `set ambient`, times the sky's own. */
+  ambient: number;
+  /** The beauty render's one key light (a direction towards it, and lux), when the program declares no light: the default, or where `set light_azimuth` and `set light_elevation` put it. */
+  key?: { direction: Vec3; intensity: number };
+  /** The program's named cameras as the beauty render frames them: the eye, the point it looks at, the vertical field of view. */
+  cameras: { name: string; eye: Vec3; target: Vec3; fov: number }[];
+  /** Open in the scene rather than the studio: the program declares lights or a sky. */
+  start: boolean;
+  /** Open from this camera (`set camera`). */
+  camera?: string;
+}
+
+export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles: number, animations: string[] = [], scene?: ViewerScene): string {
   const b64 = glb.toString("base64");
   const size = [bounds.max[0] - bounds.min[0], bounds.max[1] - bounds.min[1], bounds.max[2] - bounds.min[2]];
   const dims = size.map((v) => v.toFixed(2)).join(" × ");
@@ -41,14 +72,15 @@ export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles:
 </head>
 <body>
 <div id="bar"><b>${escapeHtml(name)}</b><span>${dims} units · ${triangles} triangles</span>
-  <button data-view="persp">Perspective</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-view="top">Top</button>
-  <button id="wire">Wireframe</button><button id="grid">Grid</button>${animations.map((a, i) => `<button data-anim="${i}">▶ ${escapeHtml(a)}</button>`).join("")}<span>drag to orbit · wheel to zoom · right-drag to pan</span></div>
+  <button data-view="persp">Perspective</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-view="top">Top</button>${(scene?.cameras ?? []).map((c, i) => `<button data-cam="${i}">◎ ${escapeHtml(c.name)}</button>`).join("")}
+  <button id="wire">Wireframe</button><button id="grid">Grid</button>${scene ? `<button id="studio">Studio</button><button id="scene">Scene: ${escapeHtml(scene.environment)}</button>` : ""}${animations.map((a, i) => `<button data-anim="${i}">▶ ${escapeHtml(a)}</button>`).join("")}<span>drag to orbit · wheel to zoom · right-drag to pan</span></div>
 ${animations.length ? `<div id="anim"><button id="all">▶ All</button><button id="pause">❚❚</button><label><input type="checkbox" id="loop" checked> loop</label><label>speed <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><input type="range" id="scrub" min="0" max="1" step="0.001" value="0"><span id="time">no animation</span></div>` : ""}
 <div id="err">three.js could not be loaded from the CDN; this page needs a network connection the first time.</div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
 const GLB = "${b64}";
 const centre = ${JSON.stringify(centre)}, radius = ${radius}, floorY = ${floorY};
+const SCENE = ${JSON.stringify(scene ?? null).replace(/</g, "\\u003c")};
 let THREE, GLTFLoader, OrbitControls, RoomEnvironment;
 try {
   THREE = await import("three");
@@ -63,7 +95,8 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe4e6ea);
+const studioBackground = new THREE.Color(0xe4e6ea);
+scene.background = studioBackground;
 // A room for the metals to reflect: without one a metal shows only the key's highlight and reads black (measured on
 // the lantern's bare iron), and a metallic-roughness map has nothing to vary. It lights everything a little, so the
 // hemisphere light is lower than it was before the environment.
@@ -88,6 +121,67 @@ const step = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50].find((v) => (radius * 4) / v <
 const grid = new THREE.GridHelper(step * 40, 40, 0xbfbbb0, 0xd8d5cc);
 grid.position.y = floorY + radius * 0.001; scene.add(grid);
 const axes = new THREE.AxesHelper(radius * 0.5); axes.position.y = floorY; scene.add(axes);
+const studioEnv = scene.environment;
+// The program's scene, built when first asked for: its sky as the backdrop and, scaled to the ambient, as the light
+// the surfaces get from all round; a floor of its floor colour; the beauty render's key when the GLB brings no light.
+let sceneBits = null, glbLights = [], mode = "studio";
+function skyColour(dy) {
+  const mix = (a, b, u) => a.map((v, i) => v + (b[i] - v) * u);
+  if (dy < 0) return mix(SCENE.floor.map((v) => v * 0.95), SCENE.ground, 0.6);
+  const k = Math.min(1, dy * 2.5);
+  if (SCENE.horizon) return k < 0.3 ? mix(SCENE.ground, SCENE.horizon, k / 0.3) : mix(SCENE.horizon, SCENE.sky, (k - 0.3) / 0.7);
+  return mix(SCENE.ground, SCENE.sky, k);
+}
+function skyTexture(scale) {
+  const c = document.createElement("canvas"); c.width = 4; c.height = 256;
+  const g = c.getContext("2d");
+  for (let y = 0; y < 256; y++) {
+    const col = skyColour(Math.cos((Math.PI * (y + 0.5)) / 256)).map((v) => Math.round(Math.min(1, Math.max(0, v * scale)) * 255));
+    g.fillStyle = "rgb(" + col.join(",") + ")"; g.fillRect(0, y, 4, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping;
+  return t;
+}
+function buildScene() {
+  const background = skyTexture(1);
+  const environment = pmrem.fromEquirectangular(skyTexture(SCENE.ambient)).texture;
+  const floorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(...SCENE.floor, THREE.SRGBColorSpace), roughness: 0.95 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(radius * 40, radius * 40), floorMat);
+  ground.rotation.x = -Math.PI / 2; ground.position.y = floorY - radius * 0.0005; ground.receiveShadow = true; ground.visible = false; scene.add(ground);
+  let keyLight = null;
+  if (SCENE.key) {
+    keyLight = new THREE.DirectionalLight(0xffffff, SCENE.key.intensity);
+    const d = SCENE.key.direction;
+    keyLight.position.set(centre[0] + d[0] * radius * 3, centre[1] + d[1] * radius * 3, centre[2] + d[2] * radius * 3);
+    keyLight.target.position.set(...centre);
+    keyLight.castShadow = true; keyLight.shadow.mapSize.set(2048, 2048);
+    Object.assign(keyLight.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: radius * 0.1, far: radius * 12 });
+    keyLight.visible = false; scene.add(keyLight, keyLight.target);
+  }
+  return { background, environment, ground, keyLight };
+}
+function setMode(m) {
+  if (!SCENE) m = "studio";
+  mode = m;
+  if (m === "scene" && !sceneBits) sceneBits = buildScene();
+  const inScene = m === "scene";
+  scene.background = inScene ? sceneBits.background : studioBackground;
+  scene.environment = inScene ? sceneBits.environment : studioEnv;
+  // The scene is the beauty render's: no grid or axes until asked for.
+  hemi.visible = key.visible = floor.visible = !inScene;
+  grid.visible = axes.visible = !inScene;
+  if (sceneBits) { sceneBits.ground.visible = inScene; if (sceneBits.keyLight) sceneBits.keyLight.visible = inScene; }
+  for (const l of glbLights) l.visible = inScene;
+  for (const id of ["studio", "scene"]) el(id)?.classList.toggle("on", id === m);
+}
+function shot(i) {
+  const c = SCENE?.cameras[i];
+  if (!c) return;
+  camera.fov = c.fov; camera.updateProjectionMatrix();
+  camera.position.set(...c.eye); camera.up.set(0, 1, 0);
+  controls.target.set(...c.target); controls.update();
+}
 const bytes = Uint8Array.from(atob(GLB), (c) => c.charCodeAt(0));
 let model, mixer, clips = [], action, queue = [];
 // The action's own flags conflate paused with finished (clampWhenFinished pauses it), so the page keeps its own.
@@ -97,13 +191,24 @@ const el = (id) => document.getElementById(id);
 const animBar = el("anim"), buttons = [...document.querySelectorAll("[data-anim]")];
 new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
   model = gltf.scene;
-  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.material.map) o.material.vertexColors = true; } });
+  model.traverse((o) => {
+    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (!o.material.map) o.material.vertexColors = true; }
+    // The GLB's own lights light the scene mode only; the studio has its own.
+    if (o.isLight) {
+      glbLights.push(o);
+      o.castShadow = true;
+      if (o.shadow) { o.shadow.mapSize.set(1024, 1024); o.shadow.bias = -0.0005; }
+      if (o.isDirectionalLight) Object.assign(o.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: radius * 0.1, far: radius * 12 });
+      o.visible = mode === "scene";
+    }
+  });
   scene.add(model);
   clips = gltf.animations || [];
   mixer = new THREE.AnimationMixer(model);
   mixer.timeScale = animBar ? Number(el("speed").value) : 1;
   // "All" plays each animation once in turn; the finished event only fires for a once-through action.
   mixer.addEventListener("finished", () => { if (queue.length) play(queue.shift(), true); else done = true; });
+  document.body.dataset.ready = "1";
 });
 function looping() { return animBar && el("loop").checked && !once; }
 function play(clip, inTurn = false) {
@@ -153,6 +258,7 @@ function tick() {
   el("pause").textContent = paused || done ? "▶" : "❚❚";
 }
 function view(name) {
+  camera.fov = 30; camera.updateProjectionMatrix();
   const d = radius / Math.sin(THREE.MathUtils.degToRad(15)) * 1.1;
   const p = { persp: [Math.sin(0.61) * Math.cos(0.44), Math.sin(0.44), Math.cos(0.61) * Math.cos(0.44)], front: [0, 0, 1], right: [1, 0, 0], top: [0, 1, 0.0001] }[name];
   camera.position.set(centre[0] + p[0] * d, centre[1] + p[1] * d, centre[2] + p[2] * d);
@@ -163,7 +269,14 @@ document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("clic
 document.getElementById("wire").addEventListener("click", () => model?.traverse((o) => { if (o.isMesh) o.material.wireframe = !o.material.wireframe; }));
 document.getElementById("grid").addEventListener("click", () => { grid.visible = !grid.visible; axes.visible = grid.visible; });
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+document.querySelectorAll("[data-cam]").forEach((b) => b.addEventListener("click", () => shot(Number(b.dataset.cam))));
+el("studio")?.addEventListener("click", () => setMode("studio"));
+el("scene")?.addEventListener("click", () => setMode("scene"));
 view("persp");
+setMode(SCENE && SCENE.start ? "scene" : "studio");
+if (SCENE && SCENE.camera) shot(SCENE.cameras.findIndex((c) => c.name === SCENE.camera));
+// For scripts that drive the page (a headless screenshot): the scene, the camera and the two switches.
+window.aixleViewer = { THREE, scene, camera, controls, renderer, setMode, shot, view };
 renderer.setAnimationLoop(() => { controls.update(); if (mixer) mixer.update(clock.getDelta()); tick(); renderer.render(scene, camera); });
 </script>
 </body>
