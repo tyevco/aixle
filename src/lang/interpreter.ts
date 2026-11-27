@@ -1626,7 +1626,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         let lib: Evaluation;
         try {
           const onAssert = options.onAssert;
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, moduleName: stmt.path, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
+          lib = evaluate(parse(resolved.source), { ...options, show: undefined, moduleFrom: resolved.file, moduleName: stmt.path, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }

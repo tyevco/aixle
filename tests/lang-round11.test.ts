@@ -280,6 +280,12 @@ describe("a loop's own names and named() (round 11: BK on the steps sheet, a loo
     expect(above.outputName).toBe("part");
     expect(above.warnings).toEqual(["'a' (line 1) is not part of the output; add it to the model or remove it"]);
   });
+  it("draws --show's steps with the output of a program that uses a library, which has no such steps", () => {
+    // The library's evaluation was handed the program's show list and failed: 'use "lib": --show probe: no such step'.
+    const lib = "def seat(w) = box(w)\n";
+    const e = evaluate(parse('use "stand"\nplate = box(2, 0.2, 1)\nprobe = sphere(0.2) | move(0, 0.5, 0)\nshow plate\n'), { resolveModule: () => ({ source: lib, file: "stand.aix" }), show: ["probe"] });
+    expect(e.outputName).toBe("plate+probe");
+  });
   it("keeps a loop's own names out of a library's exports", () => {
     const lib = "for i in range(1, 3) {\n  a = i * 22.5\n}\nlean = 65\ndef seat(w) = box(w)\n";
     const e = evaluate(parse('use "stand"\nx = stand.lean\n'), { resolveModule: () => ({ source: lib, file: "stand.aix" }) });
