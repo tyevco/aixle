@@ -1,4 +1,4 @@
-import { move, rotateBy, surfacePoint } from "./ops.js";
+import { move, rotateBy, scale, surfacePoint } from "./ops.js";
 import { boundsSize, boundsUnion, isEmpty, type Bounds, type Shape3 } from "./types.js";
 import { rotAxis, type Vec3 } from "../core/vec.js";
 
@@ -553,8 +553,9 @@ const DEG = Math.PI / 180;
  * The first t in (0, limit] at which the point p, carried by the motion (or, with `inverse`, the world point p seen
  * from the moving part), reaches `field`'s surface going in; Infinity when it does not by `limit` or `best`. Sphere
  * tracing: a step as long as the field reads, over the point's speed, cannot pass the surface. Near the surface a
- * short probe ahead says whether the point is going in; sliding along a face (a box slid along the ledge it stands
- * on, or 0.01 above it), steps of the field's reading would stall, so the step is at least `graze`. A probe or a
+ * short probe ahead says whether the point is going in, and while the probe finds it closing on the surface at a
+ * slant the trace goes on from there; sliding along a face (a box slid along the ledge it stands on, or 0.01 above
+ * it), steps of the field's reading would stall, so the step is at least `graze`. A probe or a
  * step that lands inside is bisected back to the surface. A feature thinner than `graze` that the point meets only
  * while sliding along a face can be stepped over; the seeds on the other surface, traced the other way, still meet
  * it.
@@ -587,7 +588,12 @@ function traceContact(field: Shape3, p: Vec3, inverse: boolean, m: Motion, speed
     // has the surface between too. The short step first, or a hook's lip as thick as `graze` was stepped clean
     // through by a tab dropped onto it, the step landing on its underside (round 11's mixer).
     const near = t + Math.max(d, probe) / speed;
-    if (read(near) < -inside) return cross(t, near);
+    const dn = read(near);
+    if (dn < -inside) return cross(t, near);
+    // Still closing on the surface at a slant, not sliding along it: on from the probe, as far as the field reads,
+    // the way it came. A step of `graze` from here can cross a wall thinner than that unseen: a card 0.002 thick
+    // dropped edge first onto a sheet as thin tilted 30 degrees went through it onto the floor 3 below.
+    if (d - dn > 0.1 * Math.max(d, probe)) { t = near; continue; }
     const ahead = Math.min(t + Math.max(d, graze) / speed, stop + graze / speed);
     if (read(ahead) < -inside) return cross(near, ahead);
     t = ahead;
@@ -652,13 +658,22 @@ function leafParts(s: Shape3, cap = 64): Shape3[] | undefined {
   const out: Shape3[] = [];
   type Map3 = (x: number, y: number, z: number) => Vec3;
   let over = false;
-  const walk = (node: Shape3, depth: number, back: Map3[], fwd: Map3[]) => {
+  // `factor`: what the maps above a leaf multiply its field by, a scale's factor (a board made four times the size
+  // and scaled by 0.25 reads a quarter of its own field there; read without it, a block sunk 8e-5 into the board
+  // read 3.2e-4 deep, was not lifted out, and was backed out the wrong way along its slide).
+  const walk = (node: Shape3, depth: number, back: Map3[], fwd: Map3[], factor: number) => {
     if (over) return;
     if (depth > 48 || out.length >= cap) { over = true; return; }
-    if (node.parts && !node.instanced) { for (const p of node.parts) walk(p, depth + 1, back, fwd); return; }
+    if (node.parts && !node.instanced) { for (const p of node.parts) walk(p, depth + 1, back, fwd, factor); return; }
     const only = node.inner?.length === 1 ? node.inner[0] : undefined;
-    if (only && !node.cut && node.unwarp && node.warp && (node.transform || node.joint)) { walk(only, depth + 1, [...back, node.unwarp], [node.warp, ...fwd]); return; }
-    if (only && !node.cut && node.dist === only.dist) { walk(only, depth + 1, back, fwd); return; }
+    if (only && !node.cut && node.unwarp && node.warp && (node.transform || node.joint)) {
+      // A joint a pose scales holds a scale node that sets the factor; the walk goes past it by the joint's maps.
+      const js = node.joint?.scale;
+      const f = node.valueScale ?? (js ? Math.min(Math.abs(js[0]), Math.abs(js[1]), Math.abs(js[2])) : 1);
+      walk(only, depth + 1, [...back, node.unwarp], [node.warp, ...fwd], factor * f);
+      return;
+    }
+    if (only && !node.cut && node.dist === only.dist) { walk(only, depth + 1, back, fwd, factor); return; }
     if (isEmpty(node.bounds)) return;
     if (!back.length) { out.push(node); return; }
     const corners: Vec3[] = [];
@@ -670,9 +685,14 @@ function leafParts(s: Shape3, cap = 64): Shape3[] | undefined {
     const bounds: Bounds = { min: [0, 1, 2].map((k) => Math.min(...corners.map((c) => c[k]))) as Vec3, max: [0, 1, 2].map((k) => Math.max(...corners.map((c) => c[k]))) as Vec3 };
     const d = node.dist, h = node.hit;
     const pull = (x: number, y: number, z: number): Vec3 => { let q: Vec3 = [x, y, z]; for (const b of back) q = b(q[0], q[1], q[2]); return q; };
-    out.push({ kind: "shape3", dist: (x, y, z) => { const q = pull(x, y, z); return d(q[0], q[1], q[2]); }, hit: (x, y, z) => { const q = pull(x, y, z); return h(q[0], q[1], q[2]); }, bounds, cost: node.cost, feature: node.feature });
+    out.push({
+      kind: "shape3",
+      dist: factor === 1 ? (x, y, z) => { const q = pull(x, y, z); return d(q[0], q[1], q[2]); } : (x, y, z) => { const q = pull(x, y, z); return d(q[0], q[1], q[2]) * factor; },
+      hit: factor === 1 ? (x, y, z) => { const q = pull(x, y, z); return h(q[0], q[1], q[2]); } : (x, y, z) => { const q = pull(x, y, z); const r = h(q[0], q[1], q[2]); return { ...r, d: r.d * factor }; },
+      bounds, cost: node.cost, feature: node.feature === undefined ? undefined : node.feature * factor,
+    });
   };
-  walk(s, 0, [], []);
+  walk(s, 0, [], [], 1);
   return over ? undefined : out;
 }
 
@@ -719,7 +739,7 @@ function smallParts(leaves: Shape3[] | undefined, step: number): Shape3[] {
  * only slides along, which reads zero all the way, cannot pass for the contact. A part that starts inside `on` is
  * first backed out against the motion to the first place it is clear, and that is the contact.
  */
-function firstContact(part: Shape3, on: Shape3, onLeaves: Shape3[] | undefined, m: Motion, limit: number, onBox: Bounds, keepPart: (x: number, y: number, z: number, near: number) => boolean, keepOn: (x: number, y: number, z: number, near: number) => boolean, speedOf: (p: Vec3) => number, start: { gap: number; leaf?: Shape3 }): Contact | NoContact {
+function firstContact(part: Shape3, on: Shape3, onLeaves: Shape3[] | undefined, m: Motion, limit: number, backLimit: number, onBox: Bounds, keepPart: (x: number, y: number, z: number, near: number) => boolean, keepOn: (x: number, y: number, z: number, near: number) => boolean, speedOf: (p: Vec3) => number, start: { gap: number; leaf?: Shape3 }): Contact | NoContact {
   const scale = Math.max(1e-6, ...boundsSize(part.bounds));
   const tol = scale * 1e-6;
   const eps = scale * 1e-7;
@@ -730,6 +750,22 @@ function firstContact(part: Shape3, on: Shape3, onLeaves: Shape3[] | undefined, 
   const at = (t: number): Shape3 => { let p = placedAt.get(t); if (!p) { p = m.place(t); placedAt.set(t, p); } return p; };
   const readAt = (t: number) => clearanceNear(at(t), on, onLeaves, margin, count);
   const leafAt = (t: number, leaf: Shape3): number => { count.n++; return clearanceAt(at(t), leaf).d; };
+  // A reading to step on: the clearance where it is under `margin`, and past that a lower bound on it, the least of
+  // the near leaves' readings and the far leaves' box gaps, rather than `margin` itself. Capped at margin, the 24 steps
+  // the search takes when no seed meets went 1.2 of the part's size and no farther: two crossed wires a drop of 0.6
+  // apart were said never to touch.
+  const farAt = (t: number) => {
+    const r = readAt(t);
+    if (r.d < margin || !onLeaves) return r;
+    const p = at(t);
+    let lb = Infinity;
+    for (const leaf of onLeaves) {
+      const g = boxGap(leaf.bounds, p.bounds);
+      // A near leaf's reading is the one readAt took, kept by clearance()'s memo.
+      lb = Math.min(lb, g > margin ? g : clearanceAt(p, leaf).d);
+    }
+    return { ...r, d: Math.max(margin, lb) };
+  };
   // clearance()'s own reading of a touch: -3e-17 for a face on the ledge it slides along, -5e-8 for an edge's
   // point that its walk left that far off the surface.
   const touch = scale * 1e-7;
@@ -802,7 +838,7 @@ function firstContact(part: Shape3, on: Shape3, onLeaves: Shape3[] | undefined, 
     // go to the surface, and the first clear place is no nearer), so they never pass it. Once clear, settle between.
     let inT = 0, inC = start.gap, key = start.leaf;
     let out = 0;
-    for (const sd of seeds) if (sd.lb * sd.speed < -(eps + sd.off)) out = Math.min(out, traceExit(sd.inverse ? part : on, sd.p, sd.inverse, m, sd.speed, limit, eps, sd.off));
+    for (const sd of seeds) if (sd.lb * sd.speed < -(eps + sd.off)) out = Math.min(out, traceExit(sd.inverse ? part : on, sd.p, sd.inverse, m, sd.speed, backLimit, eps, sd.off));
     const tryAt = (t: number): Contact | undefined => {
       const r = readAt(t);
       if (clear(r.d)) return settle(t, inT, inC, key);
@@ -812,7 +848,7 @@ function firstContact(part: Shape3, on: Shape3, onLeaves: Shape3[] | undefined, 
     if (out < 0 && Number.isFinite(out)) { const r = tryAt(out); if (r) return r; }
     for (let i = 0; i < 64; i++) {
       const t = inT - floor(-inC) * (i < 16 ? 1 : 2 ** (i - 15));
-      if (-t > limit) return { reach: -limit, inside: -start.gap };
+      if (-t > backLimit) return { reach: -backLimit, inside: -start.gap };
       const r = tryAt(t);
       if (r) return r;
     }
@@ -856,13 +892,14 @@ function firstContact(part: Shape3, on: Shape3, onLeaves: Shape3[] | undefined, 
   }
   let clearT = 0, clearC = start.gap;
   // The seeds found nothing (a contact narrower than their spacing, or none): conservative advancement on the
-  // clearance alone, a few steps, each no longer than the gap can close in.
+  // clearance alone, each step no longer than the gap can close in, up to 64 of them (a gap that closes by less than
+  // a fifth a step, a slant of more than 78 degrees between the motion and the contact's normal, can run out).
   if (!Number.isFinite(best)) {
-    if (!(clearC > tol)) clearC = readAt(0).d;
-    for (let i = 0; i < 24; i++) {
+    clearC = farAt(0).d;
+    for (let i = 0; i < 64; i++) {
       const t = clearT + floor(clearC);
       if (t > limit) break;
-      const r = readAt(t);
+      const r = farAt(t);
       if (!clear(r.d)) return settle(clearT, t, r.d, r.leaf);
       if (r.d <= tol) return done(t, r.d);
       clearT = t; clearC = r.d;
@@ -929,8 +966,9 @@ function intersectBoxes(a: Bounds, b: Bounds): Bounds {
  * point is pushed out along the normal of the surface it is inside, up to four times. A deeper overlap, or none,
  * leaves the part as it is.
  */
-function liftSliver(part: Shape3, on: Shape3, leaves: Shape3[] | undefined, touch: number, sliver: number): { part: Shape3; lifted: number; gap: number; leaf?: Shape3; reads: number } {
+function liftSliver(part: Shape3, on: Shape3, leaves: Shape3[] | undefined, touch: number, sliver: number): { part: Shape3; by: Vec3; lifted: number; gap: number; leaf?: Shape3; reads: number } {
   let p = part, lifted = 0, gap = Infinity;
+  const by: Vec3 = [0, 0, 0];
   let leaf: Shape3 | undefined;
   const count = { n: 0 };
   const g: Vec3 = [0, 0, 0];
@@ -952,47 +990,68 @@ function liftSliver(part: Shape3, on: Shape3, leaves: Shape3[] | undefined, touc
     if (!(gl > 0)) break;
     const k = ((inOn ? 1 : -1) * (-c.d + touch)) / gl;
     p = move(p, g[0] * k, g[1] * k, g[2] * k);
+    by[0] += g[0] * k; by[1] += g[1] * k; by[2] += g[2] * k;
     lifted = Math.max(lifted, -c.d);
   }
-  return { part: p, lifted, gap, leaf, reads: count.n };
+  return { part: p, by, lifted, gap, leaf, reads: count.n };
+}
+
+/**
+ * A power of two that brings a part's size to about 1, for rest() and lean() to search at: clearance() and the
+ * surface slide under it work to fixed tolerances (a gradient step of 1e-4, a surface within 1e-7, a point within
+ * 2e-7), and the gradient step alone is a hundredth of a part a centimetre across in metres. A cube 0.007 across
+ * standing on its board read as inside it and was backed out the wrong way along its slide, 3.8 times its size; a
+ * book 0.02 tall stopped 1.1e-5 of its size short. A power of two scales every point and every reading exactly.
+ */
+function unitScale(b: Bounds): number {
+  const size = Math.max(...boundsSize(b));
+  if (!(size > 0 && Number.isFinite(size))) return 1;
+  return 2 ** -Math.round(Math.log2(size));
 }
 
 /**
  * Move `part` along the unit direction `dir` until it touches `on`, then `sink` further: what a bowl on its plate
  * or a book on its shelf needs, without the arithmetic. A part that starts inside `on` is backed out against `dir`
  * to the first place it is clear (so a part built at the origin can be rested onto a shelf above it). The move
- * stops on the near side of the contact, at most a millionth of the part's size clear.
+ * stops on the near side of the contact, at most a millionth of the part's size clear. The search runs on the two
+ * scaled by unitScale(), so it is the same at every size.
  */
 export function restOn(part: Shape3, on: Shape3, dir: Vec3, sink = 0): Contact | NoContact {
   if (isEmpty(part.bounds) || isEmpty(on.bounds)) return { reach: 0 };
   const len = Math.hypot(dir[0], dir[1], dir[2]);
   const d: Vec3 = [dir[0] / len, dir[1] / len, dir[2] / len];
-  const size = Math.max(1e-6, ...boundsSize(part.bounds));
-  const leaves = leafParts(on);
-  const start = liftSliver(part, on, leaves, size * 1e-7, size * 1e-4);
-  part = start.part;
-  // Far enough that the part's box has passed the whole of on's along d, and back as far for a part inside it.
+  const k = unitScale(part.bounds);
+  const P = k === 1 ? part : scale(part, k, k, k), O = k === 1 ? on : scale(on, k, k, k);
+  const size = Math.max(1e-6, ...boundsSize(P.bounds));
+  const leaves = leafParts(O);
+  const start = liftSliver(P, O, leaves, size * 1e-7, size * 1e-4);
+  const p = start.part;
+  // Far enough that the part's box has passed the whole of on's along d; back, far enough that it is wholly behind it.
   const proj = (b: Bounds, sign: number) => {
     let best = -Infinity;
     for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) best = Math.max(best, sign * (x * d[0] + y * d[1] + z * d[2]));
     return best;
   };
-  const limit = Math.max(0, proj(on.bounds, 1) + proj(part.bounds, -1)) + Math.max(...boundsSize(part.bounds)) * 1e-3;
+  const extra = Math.max(...boundsSize(p.bounds)) * 1e-3;
+  const limit = Math.max(0, proj(O.bounds, 1) + proj(p.bounds, -1)) + extra;
+  const backLimit = Math.max(limit, proj(p.bounds, 1) + proj(O.bounds, -1) + extra);
   const m: Motion = {
-    place: (t) => (t === 0 ? part : move(part, d[0] * t, d[1] * t, d[2] * t)),
-    map: (p, t, inverse, out) => { const s = inverse ? -t : t; out[0] = p[0] + d[0] * s; out[1] = p[1] + d[1] * s; out[2] = p[2] + d[2] * s; },
+    place: (t) => (t === 0 ? p : move(p, d[0] * t, d[1] * t, d[2] * t)),
+    map: (q, t, inverse, out) => { const s = inverse ? -t : t; out[0] = q[0] + d[0] * s; out[1] = q[1] + d[1] * s; out[2] = q[2] + d[2] * s; },
     maxSpeed: 1,
   };
-  const swept = boundsUnion(part.bounds, boxAlong(part.bounds, d, limit));
+  const swept = boundsUnion(p.bounds, boxAlong(p.bounds, d, limit));
   const back: Vec3 = [-d[0], -d[1], -d[2]];
-  const r = firstContact(part, on, leaves, m, limit, intersectBoxes(on.bounds, swept),
-    (x, y, z, near) => rayMeetsBox([x, y, z], d, on.bounds, near),
-    (x, y, z, near) => rayMeetsBox([x, y, z], back, part.bounds, near),
+  const r = firstContact(p, O, leaves, m, limit, backLimit, intersectBoxes(O.bounds, swept),
+    (x, y, z, near) => rayMeetsBox([x, y, z], d, O.bounds, near),
+    (x, y, z, near) => rayMeetsBox([x, y, z], back, p.bounds, near),
     () => 1, start);
-  if (!r.shape) return r;
-  const lifted = start.lifted, readings = r.readings + start.reads;
-  if (sink === 0) return { ...r, lifted, readings };
-  return { ...r, lifted, readings, shape: move(part, d[0] * (r.amount + sink), d[1] * (r.amount + sink), d[2] * (r.amount + sink)) };
+  if (!r.shape) return { reach: r.reach / k, inside: r.inside === undefined ? undefined : r.inside / k };
+  // The part itself, moved by the lift and the move found, unscaled.
+  const go = (r.amount + sink * k) / k;
+  const by: Vec3 = [start.by[0] / k + d[0] * go, start.by[1] / k + d[1] * go, start.by[2] / k + d[2] * go];
+  const shape = by[0] === 0 && by[1] === 0 && by[2] === 0 ? part : move(part, by[0], by[1], by[2]);
+  return { shape, amount: r.amount / k, gap: r.gap / k, backed: r.backed, lifted: start.lifted / k, readings: r.readings + start.reads };
 }
 
 /**
@@ -1004,10 +1063,23 @@ export function leanOn(part: Shape3, on: Shape3, pivot: Vec3, axis: Vec3): Conta
   if (isEmpty(part.bounds) || isEmpty(on.bounds)) return { reach: 0 };
   const al = Math.hypot(axis[0], axis[1], axis[2]);
   const u: Vec3 = [axis[0] / al, axis[1] / al, axis[2] / al];
-  const size = Math.max(1e-6, ...boundsSize(part.bounds));
-  const leaves = leafParts(on);
-  const start = liftSliver(part, on, leaves, size * 1e-7, size * 1e-4);
-  part = start.part;
+  // Searched at unitScale(), as rest() is; a turn is an angle at any size.
+  const k = unitScale(part.bounds);
+  const P = k === 1 ? part : scale(part, k, k, k), O = k === 1 ? on : scale(on, k, k, k);
+  const size = Math.max(1e-6, ...boundsSize(P.bounds));
+  const leaves = leafParts(O);
+  const start = liftSliver(P, O, leaves, size * 1e-7, size * 1e-4);
+  const r = turnSearch(start.part, O, leaves, [pivot[0] * k, pivot[1] * k, pivot[2] * k], u, start);
+  if (!r.shape) return r;
+  // The part itself, lifted and turned by the angle found about the pivot, unscaled.
+  const lifted = start.lifted > 0 ? move(part, start.by[0] / k, start.by[1] / k, start.by[2] / k) : part;
+  const [cx, cy, cz] = pivot;
+  const shape = r.amount === 0 ? lifted : move(rotateBy(move(lifted, -cx, -cy, -cz), rotAxis(u, r.amount)), cx, cy, cz);
+  return { shape, amount: r.amount, gap: r.gap / k, backed: r.backed, lifted: start.lifted / k, readings: r.readings + start.reads };
+}
+
+/** lean()'s search: the first angle about the line through `pivot` along the unit `u` at which `part` touches `on`. */
+function turnSearch(part: Shape3, on: Shape3, leaves: Shape3[] | undefined, pivot: Vec3, u: Vec3, start: { gap: number; leaf?: Shape3 }): Contact | NoContact {
   const [cx, cy, cz] = pivot;
   // The farthest the part's box reaches from the axis: the fastest point's radius.
   let radius = 0, reach = 0;
@@ -1050,9 +1122,8 @@ export function leanOn(part: Shape3, on: Shape3, pivot: Vec3, axis: Vec3): Conta
     }
     return r >= Math.sqrt(lo) && r <= Math.sqrt(hi);
   };
-  const r = firstContact(part, on, leaves, m, 180, intersectBoxes(on.bounds, around),
+  return firstContact(part, on, leaves, m, 180, 180, intersectBoxes(on.bounds, around),
     (x, y, z, g) => near(on.bounds, x, y, z, g),
     (x, y, z, g) => near(part.bounds, x, y, z, g),
     speedOf, start);
-  return r.shape ? { ...r, lifted: start.lifted, readings: r.readings + start.reads } : r;
 }

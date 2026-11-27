@@ -3,7 +3,7 @@ import { parse } from "../src/lang/parser.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { contactLines } from "../src/pipeline.js";
 import { clearance, leanOn, overlapVolume, restOn, type Contact } from "../src/sdf/measure.js";
-import { anchorsOf } from "../src/sdf/ops.js";
+import { anchorsOf, move } from "../src/sdf/ops.js";
 import type { Shape3 } from "../src/sdf/types.js";
 
 // Roadmap 16: rest() and lean() place a part by contact. The exact answers below are worked out by hand; the
@@ -127,6 +127,9 @@ show board + sunk`);
   it("is an error naming the part, the target and the direction when nothing is in the way", () => {
     expect(() => run("board = box(4, 0.2, 2)\nbowl = sphere(0.5) | move(0, 2, 0)\nb = bowl | rest(board, dir=[0, 1, 0])\nshow b")).toThrow(/line 3: rest\(\): bowl \(x -0\.5\.\.0\.5 {2}y 1\.5\.\.2\.5 {2}z -0\.5\.\.0\.5\) never touches board \(x -2\.\.2 {2}y -0\.1\.\.0\.1 {2}z -1\.\.1\) moving along \[0, 1, 0\]/);
     expect(() => run("board = box(4, 0.2, 2)\nb = sphere(0.5) | rest(board, dir=[0, 0, 0])\nshow b")).toThrow(/dir is \[0, 0, 0\], which points nowhere/);
+    // An empty part or target says so, not that its box runs from Infinity to -Infinity.
+    expect(() => run("hole = box(1) & (box(1) | move(5, 0, 0))\nb = sphere(0.5) | move(0, 2, 0) | rest(hole)\nshow b")).toThrow(/line 2: rest\(\): hole is empty: there is nothing for the part to touch/);
+    expect(() => run("board = box(4, 0.2, 2)\nb = empty() | lean(board, pivot=[0, 0, 0], axis=[0, 0, 1])\nshow board")).toThrow(/line 2: lean\(\): empty\(\) is empty: there is nothing to turn/);
   });
 
   it("meshes a face resting on a face as one piece, so sink defaults to 0", () => {
@@ -216,5 +219,96 @@ show board + leaned + prev + row`);
   it("warn of a rest piped after a union without parentheses, as for move", () => {
     const ev = run("a = box(1)\nb = box(1) | move(2, 0, 0)\nfloor = box(5, 0.1, 5) | move(0, -2, 0)\nc = a + b | rest(floor)\nshow c + floor");
     expect(ev.warnings.join("\n")).toMatch(/applies rest to the right side only/);
+  });
+});
+
+describe("rest() and lean() where the seeds miss, the sheets are thin, and the scale is not 1", () => {
+  it("finds two crossed wires when no seed lies on the crossing, however far apart they start", () => {
+    // Two rods 0.001 thick through the y axis, one turned a degrees about x, the other b about z: their lines are
+    // 0.002 apart when the upper one's centre is 0.002 |n| / |n_y| up, n the cross of their directions. No seed of
+    // either meets the other, and the search falls back on the clearance; read capped at a twentieth of the part,
+    // its 24 steps went 1.2 and no farther, and drops of 0.6 to 1.4 were said never to touch.
+    const rad = Math.PI / 180;
+    for (const [a, b] of [[60, 20], [30, 70]]) {
+      const ev = run(`lower = cylinder(0.001, 4) | rotate(x=${a})\nupper = cylinder(0.001, 1) | rotate(z=${b})\nshow lower + upper`);
+      const u1 = [0, Math.cos(a * rad), Math.sin(a * rad)], u2 = [-Math.sin(b * rad), Math.cos(b * rad), 0];
+      const nrm = [u1[1] * u2[2] - u1[2] * u2[1], u1[2] * u2[0] - u1[0] * u2[2], u1[0] * u2[1] - u1[1] * u2[0]];
+      const up = (0.002 * Math.hypot(nrm[0], nrm[1], nrm[2])) / Math.abs(nrm[1]);
+      for (const h of [0.6, 1.4]) {
+        const r = contact(restOn(move(step(ev, "upper"), 0, h, 0), step(ev, "lower"), [0, -1, 0]));
+        // The gap the error leaves: the lines close at |n_y| / |n| of the motion.
+        expect((Math.abs(r.amount - (h - up)) * 0.002) / up).toBeLessThan(2e-6);
+      }
+    }
+  });
+
+  it("does not pass through a thin sheet met at a slant, onto the floor below it", () => {
+    // A card 0.002 thick turned 60 degrees, dropped onto a sheet as thin tilted 30 degrees with a floor 3 below: the
+    // slant steps of the trace jumped both sheets, and from 2 up the card landed on the floor, silently.
+    const ev = run(`plate = box(4, 0.002, 4) | rotate(x=30)
+floor = box(8, 0.2, 8) | move(0, -3, 0)
+on = plate + floor
+card = box(1, 0.002, 1) | rotate(z=60) | move(0.3, 0, 0.2)
+show on + card`);
+    const card = step(ev, "card"), on = step(ev, "on"), plate = step(ev, "plate");
+    const near = contact(restOn(move(card, 0, 1.6, 0), on, [0, -1, 0]));
+    for (const h of [1.7074, 2, 2.3]) {
+      const r = contact(restOn(move(card, 0, h, 0), on, [0, -1, 0]));
+      expect(Math.abs(clearance(r.shape, plate))).toBeLessThan(3e-6);
+      expect(Math.abs(r.amount - h - (near.amount - 1.6))).toBeLessThan(3e-6);
+    }
+  });
+
+  it("gives the same placement at any scale: a model in metres with parts a centimetre across", () => {
+    // A cube standing on a board slid into a wall, and a turned book dropped onto the board, at s times the size.
+    // At 0.007 the cube, touching the board, read as inside it by clearance's fixed tolerances and was backed out the
+    // wrong way, 3.8 of its size; at 0.01 the book stopped 1.1e-5 of its size short.
+    const per: number[][] = [];
+    for (const s of [0.007, 0.01, 1, 1000, 2, 0.5]) {
+      const ev = run(`s = ${s}
+board = box(4 * s, 0.2 * s, 2 * s) | move(0, -0.1 * s, 0)
+wall = box(0.2 * s, 2 * s, 2 * s) | move(-1.9 * s, 1 * s, 0)
+base = board + wall
+cube = box(1 * s, 1 * s, 1 * s) | move(0.5 * s, 0.5 * s, 0)
+book = box(0.3 * s, 2 * s, 1.4 * s) | rotate(z=18) | move(0.3 * s, 3 * s, 0)
+neighbour = box(0.2 * s, 2.2 * s, 1.4 * s) | move(-0.2 * s, 1.1 * s, 0)
+upright = box(0.3 * s, 2 * s, 1.4 * s) | move(0.15 * s, 1 * s, 0)
+show base + cube`);
+      const slid = contact(restOn(step(ev, "cube"), step(ev, "base"), [-1, 0, 0]));
+      expect(Math.abs(slid.amount / s - 1.8)).toBeLessThan(1e-6);
+      const drop = contact(restOn(step(ev, "book"), step(ev, "board"), [0, -1, 0]));
+      expect(Math.abs(drop.amount / s - (3 - Math.cos((18 * Math.PI) / 180) - 0.15 * Math.sin((18 * Math.PI) / 180)))).toBeLessThan(2e-6);
+      // Leaned about its bottom-left edge, the upright's top-left corner (0, 2s) meets the neighbour at x = -0.1s.
+      const lean = contact(leanOn(step(ev, "upright"), step(ev, "neighbour"), [0, 0, 0], [0, 0, 1]));
+      expect(Math.abs(lean.amount - deg(Math.asin(0.05)))).toBeLessThan(1e-4);
+      per.push([slid.amount / s, drop.amount / s, lean.amount]);
+    }
+    // Searched at a power of two of the part's size, a model built at twice or half the size places the same to the bit.
+    expect(per[4]).toEqual(per[2]);
+    expect(per[5]).toEqual(per[2]);
+  });
+
+  it("backs a part out of the near half of `on` all the way, not only as far as the forward search goes", () => {
+    // A ball low in a tall post, dropped: backed out up through the post to rest on its top, 19.3 back. The back-out
+    // range was the forward one, 1.3 here, and the call said the ball was sunk into something it slides along.
+    const ev = run("post = box(1, 20, 1)\nball = sphere(0.3) | move(0, -9, 0)\nshow post + ball");
+    const r = contact(restOn(step(ev, "ball"), step(ev, "post"), [0, -1, 0]));
+    expect(r.backed).toBe(true);
+    expect(Math.abs(r.amount + 19.3)).toBeLessThan(2e-6);
+  });
+
+  it("reads a scaled part of `on` at its true distance", () => {
+    // A block sunk 8e-5 into a board made at four times the size and scaled by 0.25: read through the scale without
+    // its factor, the board's field read four times the depth, the sliver was not lifted, and the block was backed
+    // out the wrong way along the slide, 2 to the right.
+    const ev = run(`board = box(16, 0.8, 8) | scale(0.25) | move(0, -0.1, 0)
+wall = box(0.2, 2, 2) | move(-2.1, 1, 0)
+base = board + wall
+block = box(1, 1, 1) | move(0.5, 0.5 - 0.00008, 0)
+show base + block`);
+    const r = contact(restOn(step(ev, "block"), step(ev, "base"), [-1, 0, 0]));
+    expect(r.backed).toBe(false);
+    expect(Math.abs(r.amount - 2)).toBeLessThan(2e-6);
+    expect(Math.abs(clearance(r.shape, step(ev, "wall")))).toBeLessThan(2e-6);
   });
 });

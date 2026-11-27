@@ -1090,10 +1090,9 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
   return { focus, ghost };
 }
 
-/** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 /**
  * check's lines for the rest() and lean() calls, one per call in the source: `rest (line 14)  bowl onto plate:
- * moved 0.15 along [0, -1, 0], gap 1e-06`, or for a call a loop or a def made several times, the count and the
+ * moved 0.15 along [0, -1, 0]; gap 0`, or for a call a loop or a def made several times, the count and the
  * range moved. A gap is how far from touching the contact was left, either way (a millionth of the part or less).
  */
 export function contactLines(contacts: ContactRecord[]): string[] {
@@ -1135,6 +1134,7 @@ export function contactLines(contacts: ContactRecord[]): string[] {
   return out;
 }
 
+/** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 /** Parse and evaluate a program, nothing rendered; `cache` keeps an import's samples between runs (see importResolver). */
 export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache, onAssert?: (phase: "start" | "end", a: AssertInfo) => void): Evaluation {
   return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts, onAssert });

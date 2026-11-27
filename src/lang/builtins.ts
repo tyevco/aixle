@@ -20,7 +20,7 @@ import { clearance, insideFraction, isVoid, leanOn, overlapVolume, restOn, type 
 import { countPieces, overhangFraction, standing } from "../mesh/pieces.js";
 import { supportOf, thinnestWall } from "../mesh/print.js";
 import type { Material, PatternKind, Placement, Shape2, Shape3 } from "../sdf/types.js";
-import { boundsCenter } from "../sdf/types.js";
+import { boundsCenter, isEmpty } from "../sdf/types.js";
 import { isMaterial, isRecord, isShape2, isShape3, type Builtin, type CallContext, type Overload, type Param, type Value } from "./values.js";
 
 /** The pose being evaluated, set by the interpreter before a run so angle() can read it. */
@@ -80,6 +80,12 @@ function boxText(b: { min: ArrayLike<number>; max: ArrayLike<number> }): string 
 function partNames(ctx: CallContext | undefined): { part: string; on: string } {
   const clip = (t: string | undefined, fallback: string) => (t === undefined ? fallback : t.length > 48 ? `${t.slice(0, 45)}...` : t);
   return { part: clip(ctx?.text?.("part"), "the part"), on: clip(ctx?.text?.("on"), "the target") };
+}
+
+/** An empty part or target, named: its box would print as Infinity..-Infinity. */
+function emptyCheck(part: Shape3, on: Shape3, names: { part: string; on: string }, verb: string): void {
+  if (isEmpty(part.bounds)) throw new Error(`${names.part} is empty: there is nothing to ${verb}`);
+  if (isEmpty(on.bounds)) throw new Error(`${names.on} is empty: there is nothing for the part to touch`);
 }
 
 /** What rest() and lean() hand back: the part in contact, said to check; an error naming both when there is none. */
@@ -285,10 +291,11 @@ export const BUILTINS: Builtin[] = [
     ov([shape(), axis()], "shape", (a) => O.flip(s3(a[0]), a[1] as O.Axis)),
     ov([shape2(), axis()], "shape2", (a) => S.flip2(s2(a[0]), a[1] as "x" | "y"))),
   def("ground", "Transforms", "Move the shape so the lowest point of its surface rests on y = 0 (the surface, found by rays from below, not the bounding box, which a blend or a cut can leave loose).", ov([shape()], "shape", (a) => O.ground(s3(a[0])))),
-  def("rest", "Transforms", "Move `part` along `dir` (straight down by default) until it touches `on`, then `sink` further: bowl | rest(plate) sets a bowl on its plate, book | rest(shelf) a book on its shelf, book | rest(prev, dir=[-1, 0, 0]) slides it along the shelf against its neighbour, all without the arithmetic. The contact is found from both surfaces' fields, the small parts of each at their own scale (a bowl's tab lands on a hook's lip 0.05 thick), and tightened on clearance(), so a promise of contact holds by construction: afterwards clearance(part, on) is within a millionth of the part's size of 0 (round 11's 33 books: 1.2e-6 at most) and overlap() reads 0. `on` may be several things joined with +: each is read on its own, so a shelf the part slides along does not pass for the neighbour it slides into. A part that starts inside `on` is first backed out against `dir` to the first place it is clear, so a part built at the origin rests on a shelf above it; one sunk a sliver into something (ground() leaves a turned part up to 5e-5 in the floor) is lifted out of it first; one that never touches `on` along `dir` is an error that says where both are. The touch meshes as one piece (pieces() reads 1 for a face on a face at every grid tried); sink=0.02 pushes the part that far on into `on` for a print that must overlap, and a negative sink stops that far short (a gap between books). Anchors move with the part; check prints how far each call moved it. 10 to 60 ms a call for parts like these, about a second for a frog with displaced skin",
+  def("rest", "Transforms", "Move `part` along `dir` (straight down by default) until it touches `on`, then `sink` further: bowl | rest(plate) sets a bowl on its plate, book | rest(shelf) a book on its shelf, book | rest(prev, dir=[-1, 0, 0]) slides it along the shelf against its neighbour, all without the arithmetic. The contact is found from both surfaces' fields, the small parts of each at their own scale (a bowl's tab lands on a hook's lip 0.05 thick), and tightened on clearance(), so a promise of contact holds by construction: afterwards clearance(part, on) is within a millionth of the part's size of 0 (round 11's 33 books: 1.3e-6 at most) and overlap() reads 0, at any scale (the search runs at the part's own size, so a centimetre part in a model in metres places as a part of 1 does); on a displaced skin, whose field is not a distance, to about a ten-thousandth (round 3's frog on its pad: 3e-4). `on` may be several things joined with +: each is read on its own, so a shelf the part slides along does not pass for the neighbour it slides into. A part that starts inside `on` is first backed out against `dir` to the first place it is clear, so a part built at the origin rests on a shelf above it; one sunk a sliver into something (ground() leaves a turned part up to 5e-5 in the floor) is lifted out of it first; one that never touches `on` along `dir` is an error that says where both are. A face on a face meshes as one piece (pieces() reads 1 at every grid tried), but a corner on a face can mesh as two at some grids (a cube on its corner, at 128 cells): sink=0.02 pushes the part that far on into `on`, for a print or a promise of one piece, and a negative sink stops that far short (a gap between books). Anchors move with the part; check prints how far each call moved it. 10 to 60 ms a call for parts like these, one to two seconds for a frog with displaced skin",
     ov([shape("part"), shape("on", "what it comes to rest on: a shape, or several joined with +"), { name: "dir", type: "list", default: [0, -1, 0], doc: "the direction it moves in, [x, y, z]" }, num("sink", "how far to go on past the touch, into `on` (negative: stop that far short)", 0)], "shape", (a, _r, ctx) => {
       const dir = direction(a[2], "dir"), sink = n(a[3]);
       const names = partNames(ctx);
+      emptyCheck(s3(a[0]), s3(a[1]), names, "move");
       return contactResult(restOn(s3(a[0]), s3(a[1]), dir, sink), ctx,
         (r) => ({ amount: r.amount, along: dir, gap: r.gap, backed: r.backed, lifted: r.lifted, sink }),
         () => `${names.part} (${boxText(s3(a[0]).bounds)}) never touches ${names.on} (${boxText(s3(a[1]).bounds)}) moving along ${vecText(dir)}: ${names.on} is not in its way. Move the part so ${names.on} is ahead of it along dir, or give the dir that leads there`,
@@ -298,6 +305,7 @@ export const BUILTINS: Builtin[] = [
     ov([shape("part"), shape("on", "what it leans against"), { name: "pivot", type: "any", doc: "the point it turns about: [x, y, z], or the name of one of the part's anchors" }, { name: "axis", type: "list", doc: "the direction of the line it turns about, [x, y, z]; it turns the right-handed way about it" }], "shape", (a, _r, ctx) => {
       const part = s3(a[0]);
       const axisV = direction(a[3], "axis");
+      emptyCheck(part, s3(a[1]), partNames(ctx), "turn");
       let pivot: [number, number, number];
       if (typeof a[2] === "string") {
         const p = O.anchorAt(part, a[2]);
