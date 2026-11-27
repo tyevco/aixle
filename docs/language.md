@@ -51,8 +51,8 @@ def chair() =
 ```
 
 A block body is for a part that needs its own intermediates or a loop:
-the book's cover, its pages and its bands all read `b.w`, `b.h` and
-`b.d`, and a case's shelves are a `for`:
+a book's cover and its bands all read `b.w`, `b.h` and `b.d`, and its
+bands are a `for` (as a case's shelves would be):
 
 ```
 def book(b) {
