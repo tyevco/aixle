@@ -35,9 +35,11 @@ function pictures(src: string, name: string, threads: number, extra: RunOptions 
   return Object.fromEntries(files.map((f) => [f, readFileSync(join(out, f))]));
 }
 
-// A jointed model shown in a pose, with a slice named, two lights (one a point light) and a second camera.
+// A jointed model shown in a pose, with a slice named, a probe step shown beside it (--show), two lights (one a point
+// light) and a second camera.
 const POSED = `shell = box(1, 0.6, 2) | move(0, 1.3, 0) | paint("red")
 nose = sphere(0.3) | move(0, 1.3, 1.1) | paint("chrome")
+probe = sphere(0.25) | move(1.2, 0.25, 0.9) | paint("blue")
 head = joint(shell + nose, "tilt", 0, 1, -1, axis=[1, 0, 0])
 base = box(1.2, 1, 2.4) | move(0, 0.5, 0) | paint("oak")
 pose("up", tilt=-30)
@@ -58,17 +60,20 @@ show crate + ball`;
 
 describe("the beauty render on the pool", () => {
   it("draws beauty.png, a camera's shot and lights.png the same on 1, 2 and 4 threads, for a posed and sliced program", () => {
-    const opts = { slice: "nose" };
+    const opts = { slice: "nose", show: ["probe"] };
     // The first run on four threads starts the workers; the later ones find the program already built.
-    const cold = pictures(POSED, "posed.aix", 4, opts);
+    const lines: string[] = [];
+    const cold = pictures(POSED, "posed.aix", 4, opts, lines);
     const before = poolWorkerRows();
     const one = pictures(POSED, "posed.aix", 1, opts);
     expect(Object.keys(one)).toEqual(["beauty.png", "beauty_side.png", "lights.png"]);
-    for (const [t, got] of [[4, cold], [2, pictures(POSED, "posed.aix", 2, opts)], [4, pictures(POSED, "posed.aix", 4, opts)]] as const) {
+    for (const [t, got] of [[4, cold], [2, pictures(POSED, "posed.aix", 2, opts, lines)], [4, pictures(POSED, "posed.aix", 4, opts, lines)]] as const) {
       expect(Object.keys(got), `${t} threads`).toEqual(Object.keys(one));
       for (const f of Object.keys(one)) expect(sha(got[f]), `${f} on ${t} threads`).toBe(sha(one[f]));
     }
-    // The workers, built under the test runner through tsx, drew rows of those pictures.
+    // The workers, built under the test runner through tsx, drew rows of those pictures: none built another shape
+    // (the pose, the shown probe), which would have it claim no rows and the main thread say so.
+    expect(lines.filter((l) => /^beauty: /.test(l))).toEqual([]);
     expect(lastPoolRows().length).toBe(4);
     expect(poolWorkerRows()).toBeGreaterThan(before);
   });
@@ -78,10 +83,15 @@ describe("the beauty render on the pool", () => {
     mkdirSync(at, { recursive: true });
     writeFileSync(join(at, "cube.obj"), CUBE_OBJ);
     const name = join(at, "crate.aix");
-    const cold = pictures(IMPORTED, name, 4);
+    const lines: string[] = [];
+    const cold = pictures(IMPORTED, name, 4, {}, lines);
+    const before = poolWorkerRows();
     const one = pictures(IMPORTED, name, 1);
     expect(Object.keys(one)).toEqual(["beauty.png", "beauty_low.png", "lights.png"]);
-    for (const got of [cold, pictures(IMPORTED, name, 2), pictures(IMPORTED, name, 4)]) for (const f of Object.keys(one)) expect(sha(got[f]), f).toBe(sha(one[f]));
+    for (const got of [cold, pictures(IMPORTED, name, 2, {}, lines), pictures(IMPORTED, name, 4, {}, lines)]) for (const f of Object.keys(one)) expect(sha(got[f]), f).toBe(sha(one[f]));
+    // Built from the recorded samples, the workers' field is the main thread's, and they drew.
+    expect(lines.filter((l) => /^beauty: /.test(l))).toEqual([]);
+    expect(poolWorkerRows()).toBeGreaterThan(before);
   });
 
   it("draws what the files say now: a picture and a library changed between two runs of the same program", () => {
