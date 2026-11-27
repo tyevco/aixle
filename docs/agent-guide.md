@@ -230,7 +230,9 @@ cylinder written out. Sizes printed by `check` and
 shown on the sheet are for the pose being shown: a step built at rest and
 turned by a joint above it keeps its rest box and gets a `posed` line
 saying where it ends up, and a step whose box is a turned box gets a
-`surface` line with the true extent. The exports are at rest
+`surface` line with its surface's own extent (from rays: a union's thin
+parts are measured on their own box, a thin plate inside a cut part can
+slip between them). The exports are at rest
 and carry the joints and animations. Loose pieces and open edges are
 named by the innermost step whose surface passes there, in the pose
 shown, so a lug welded to a boom is blamed as the lug, not the boom.

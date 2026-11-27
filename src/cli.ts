@@ -5,7 +5,7 @@
  *   aixle fmt    <file.aix>... [--write | --check]
  *   aixle doc    [--write FILE]
  */
-import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, surfaceBottom, surfaceExtent } from "./sdf/ops.js";
+import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, surfaceBottom, surfaceExtent, surfaceExtentDeep } from "./sdf/ops.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
@@ -241,7 +241,7 @@ function main(argv: string[]): number {
         // and print that when it is tighter (measured: a boom's box read 5.9 tall for a 5.2 surface).
         let own = b;
         if (hasLooseBounds(st.value)) {
-          const e = surfaceExtent(st.value, 48);
+          const e = surfaceExtentDeep(st.value);
           const tighter = [0, 1, 2].some((k) => (e.max[k] - e.min[k]) < (b.max[k] - b.min[k]) * 0.95);
           if (!isEmpty(e) && tighter) { own = e; console.log(`${"  surface".padEnd(18)} ${spanBox(e)}`); }
         }
@@ -260,7 +260,7 @@ function main(argv: string[]): number {
         // through the joints' inverses, so a turned wheel's posed line says whether it still touches the floor.
         if (pose && ev.output) {
           const placedS = placedShape(ev.output, st.value);
-          const placed = placedS ? surfaceExtent(placedS, 48) : undefined;
+          const placed = placedS ? surfaceExtentDeep(st.value, ev.output) : undefined;
           if (placed && !isEmpty(placed) && [0, 1, 2].some((k) => Math.abs(placed.min[k] - own.min[k]) > 1e-6 || Math.abs(placed.max[k] - own.max[k]) > 1e-6))
             console.log(`${`  posed ${st.name}`.padEnd(18)} ${spanBox(placed)}`);
         }

@@ -1043,11 +1043,18 @@ joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the
 joints above it have turned, since a part built at rest and turned by a
-joint keeps its rest box. A joint step itself is already turned in a
-pose, so its box is the box of the turned box and its `surface` line is
-where it is; it gets no `posed` line of its own. Both lines come from rays marched in from the
-box's faces, so a plate thinner than the rays' spacing can slip between
-them; the render's "Surface extent" row reads the mesh and does not. `aixle render`
+joint keeps its rest box (a step assigned twice is measured as it last
+was, and a union folded into a larger one, `head = shell + knuckle` read
+by `joint(head + nose, ...)`, is placed where its parts are). A joint
+step itself is already turned in a pose, so its box is the box of the
+turned box and its `surface` line is where it is; it gets no `posed`
+line of its own. Both lines come from rays marched in from the box's
+faces, 48 a side. A part of a union thinner than twice their spacing on
+some axis (a beater's 0.06 paddle under a head 3 long) is measured again
+on its own box, where the rays are dense, so it is in the line; a plate
+inside a cut part (the left side of a difference) can still slip between
+the rays, and the render's "Surface extent" row reads the mesh and does
+not. `aixle render`
 also writes the warnings into `report.md` and counts them on the sheet's title bar,
 and beside `turntable.png` writes `turntable.apng`, the same turn as an
 animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).

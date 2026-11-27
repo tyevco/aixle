@@ -587,6 +587,49 @@ export function surfaceExtent(s: Shape3, rays = 48): Bounds {
   return out;
 }
 
+/**
+ * surfaceExtent with the thin parts put back that its rays can slip between. The rays are a 48th of the box apart,
+ * so a plate thinner than that (a beater's 0.06 paddle in a head 3 units long) can lie between them and drop out of
+ * the extent (round 11: a joint's surface line was the head without its beater). Every part of a hard union under
+ * `s`, through the moves, turns, joints, paint and decals above it (which keep its surface on s's), that is thinner
+ * than twice the rays' spacing on some axis, or carries a feature that thin, is measured again on its own box,
+ * where the rays are dense, and its extent added: a hard union's extent is its parts' together, so nothing is added
+ * that is not on the surface. A thin plate inside a cut part (a difference's left side) is still only seen by the
+ * rays. Measured where `root` puts s, through the joints and transforms above it (a posed line), or as s is.
+ */
+export function surfaceExtentDeep(s: Shape3, root: Shape3 = s, rays = 48): Bounds {
+  const top = root === s ? s : (placedShape(root, s) ?? s);
+  const out = surfaceExtent(top, rays);
+  if (isEmpty(out)) return out;
+  const size = boundsSize(top.bounds);
+  const longest = Math.max(size[0], size[1], size[2]);
+  // The parts whose surface is on s's: down through hard unions and the wrappers that only move or paint a part.
+  const units: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const walk = (n: Shape3, depth: number) => {
+    if (seen.has(n) || depth > 64 || units.length > 256) return;
+    seen.add(n);
+    if (n.parts && !n.instanced) { for (const p of n.parts) walk(p, depth + 1); return; }
+    if (n.inner?.length === 1 && !n.cut && (n.transform || n.joint || n.material !== undefined || n.decal !== undefined)) { walk(n.inner[0], depth + 1); return; }
+    if (n !== s) units.push(n);
+  };
+  walk(s, 0);
+  for (const u of units) {
+    if (isEmpty(u.bounds)) continue;
+    const placed = placedShape(root, u) ?? u;
+    const us = boundsSize(placed.bounds);
+    const thin = [0, 1, 2].some((k) => us[k] < (2 * size[k]) / rays) || (u.feature ?? Infinity) < (2 * longest) / rays;
+    if (!thin) continue;
+    const e = surfaceExtent(placed, 24);
+    if (isEmpty(e)) continue;
+    for (let k = 0; k < 3; k++) {
+      out.min[k] = Math.max(top.bounds.min[k], Math.min(out.min[k], e.min[k]));
+      out.max[k] = Math.min(top.bounds.max[k], Math.max(out.max[k], e.max[k]));
+    }
+  }
+  return out;
+}
+
 /** The lowest y of the surface itself (see surfaceExtent); the bounds' bottom when no ray from below hits. */
 export function surfaceBottom(s: Shape3, rays = 48): number {
   return surfaceExtent(s, rays).min[1];
@@ -900,7 +943,16 @@ function placementChain(root: Shape3, target: Shape3): Shape3[] | undefined {
     chain.pop();
     return false;
   };
-  if (!find(root)) return undefined;
+  if (!find(root)) {
+    // A hard union folded into a larger one (`head = shell + knuckle`, then `joint(head + nose, ...)`) is no node of
+    // the tree any more, only its parts are: it is placed where they are, when they all sit under the same maps
+    // (round 11: a posed line went missing for such a step while the asserts measured it posed).
+    if (!target.parts || target.instanced || !target.parts.length) return undefined;
+    const each = target.parts.map((p) => placementChain(root, p));
+    const first = each[0];
+    if (!first || each.some((c) => !c || c.length !== first.length || c.some((m, i) => m !== first[i]))) return undefined;
+    return first;
+  }
   const maps = chain.filter((n) => n.unwarp || n.warp);
   return maps.some((n) => !n.warp || !n.unwarp) ? undefined : maps;
 }

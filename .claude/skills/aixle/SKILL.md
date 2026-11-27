@@ -32,9 +32,11 @@ Reference: `docs/reference.md` (every function, generated from the code),
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
    size (profiles and numbers too), every warning, in a second. Sizes
-   that look wrong are wrong. A `surface` line under a step is the true
-   extent of a turned box; with `--pose`, a `posed` line is where a step
-   ends up once the joints above it have turned.
+   that look wrong are wrong. A `surface` line under a step is its surface's
+   own extent where the box is the box of a turned box (from rays, a
+   union's thin parts each on its own box; a thin plate inside a cut part
+   can still slip between them); with `--pose`, a `posed` line is where a
+   step ends up once the joints above it have turned.
 4. **`npx aixle render model.aix --quick`** while iterating (the sheet in
    a second or two; on a rig add `--no-poses` until the geometry settles,
    the strips come with the full render), then read `out/model/sheet.png`. Drop `--quick` for
