@@ -105,3 +105,18 @@ describe("void and inside on a skin thinner than the lattice (round 11)", () => 
     expect(ev.asserts[1].where).toMatch(/^cable is inside plate at \(-?1\.[5-8]\d*, [\d.]+, -?[\d.]+\) in 'slab'/);
   });
 });
+
+describe("the decal region test (round 11)", () => {
+  it("finds a union of thin bands on the surface, and still warns of one beside it", () => {
+    // dogfood/round-11/shelf_probe_band.aix: two gold bands 0.06 tall across a book's spine, 1.6 apart.
+    const book = 'set grid 44\nb = {w: 0.35, h: 2.2, d: 1.7}\nbase = box(b.w, b.h, b.d, round=0.02) | paint("navy")\n';
+    const warned = (src: string) => run(book + src + "\nshow m").warnings.filter((w) => /paints nothing/.test(w));
+    expect(warned('m = decal(base, box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2), "gold")')).toEqual([]);
+    expect(warned('m = decal(base, (box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2)) + (box(b.w + 0.1, 0.06, 0.2) | move(0, -0.8, b.d / 2)), "gold")')).toEqual([]);
+    expect(warned('def bands(r) = (box(r.w + 0.1, 0.06, 0.2) | move(0, r.h * 0.36, r.d / 2)) + (box(r.w + 0.1, 0.06, 0.2) | move(0, -r.h * 0.36, r.d / 2))\nm = decal(base, bands(b), "gold")')).toEqual([]);
+    // The union moved as a whole, which hides its parts from a walk of the union's members.
+    expect(warned('m = decal(base, ((box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, 0)) + (box(b.w + 0.1, 0.06, 0.2) | move(0, -0.8, 0))) | move(0, 0, b.d / 2), "gold")')).toEqual([]);
+    // The same bands 0.2 in front of the spine paint nothing, and are said to.
+    expect(warned('m = decal(base, (box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2 + 0.2)) + (box(b.w + 0.1, 0.06, 0.2) | move(0, -0.8, b.d / 2 + 0.2)), "gold")')).toHaveLength(1);
+  });
+});

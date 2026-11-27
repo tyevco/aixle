@@ -5,21 +5,28 @@ import type { Vec3 } from "../core/vec.js";
 /**
  * Whether any point of `shape`'s surface lies inside `region`: what a decal needs to paint anything. Sampled on a
  * lattice over the region's box, each sample slid onto the surface (round 8: a tag region beside the wrong part
- * painted nothing and nothing said so).
+ * painted nothing and nothing said so). A sample outside the region is first slid onto the region's own surface:
+ * a region of two bands 0.06 tall and 1.6 apart has a box whose 13 lattice planes fall 0.14 apart, none of them
+ * inside a band, and was said to paint nothing while it painted both (round 11, 32 times on one bookcase).
  */
 export function regionTouches(shape: Shape3, region: Shape3, n = 12): boolean {
   if (isEmpty(shape.bounds) || isEmpty(region.bounds)) return false;
   for (let k = 0; k < 3; k++) if (region.bounds.max[k] < shape.bounds.min[k] || region.bounds.min[k] > shape.bounds.max[k]) return false;
   const bb = region.bounds, size = boundsSize(bb);
   const tol = Math.max(size[0], size[1], size[2], 1e-6) * 0.02;
-  for (let i = 0; i <= n; i++)
-    for (let j = 0; j <= n; j++)
-      for (let k = 0; k <= n; k++) {
-        const x = bb.min[0] + (size[0] * i) / n, y = bb.min[1] + (size[1] * j) / n, z = bb.min[2] + (size[2] * k) / n;
-        if (region.dist(x, y, z) > 0) continue;
-        const q = surfacePoint(shape, x, y, z);
-        if (Math.abs(shape.dist(q[0], q[1], q[2])) <= tol && region.dist(q[0], q[1], q[2]) <= 0) return true;
-      }
+  const edge = Math.max(size[0], size[1], size[2], 1e-6) * 1e-6;
+  const touches = (x: number, y: number, z: number) => {
+    const q = surfacePoint(shape, x, y, z);
+    return Math.abs(shape.dist(q[0], q[1], q[2])) <= tol && region.dist(q[0], q[1], q[2]) <= edge;
+  };
+  for (let pass = 0; pass < 2; pass++)
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++)
+        for (let k = 0; k <= n; k++) {
+          const x = bb.min[0] + (size[0] * i) / n, y = bb.min[1] + (size[1] * j) / n, z = bb.min[2] + (size[2] * k) / n;
+          const inside = region.dist(x, y, z) <= 0;
+          if (pass === 0 ? inside && touches(x, y, z) : !inside && touches(...surfacePoint(region, x, y, z))) return true;
+        }
   return false;
 }
 
