@@ -3,20 +3,21 @@
  * checking views draw the extracted mesh because that is the file you get; this one draws the field because that is
  * the model you meant, at full sharpness.
  *
- * This file is the orchestrator. The shading is a kernel (kernel.ts: the classic one is classic.ts), which draws a
+ * This file is the orchestrator. The shading is a kernel (kernel.ts; the one every render uses is pbr.ts), which draws a
  * picture in rows, two passes and a finish; here the camera is fitted, the mesh rasterised for the depth every
  * primary ray starts from, the kernel's buffers allocated and its rows run, on this thread or shared out among the
  * run's worker pool (beauty-pool.ts). Every pixel is a pure function of its position and the scene, so the bytes are
  * the same on any number of threads.
  */
-import { normalize, type Vec3 } from "../core/vec.js";
+import type { Vec3 } from "../core/vec.js";
 import { boundsSize, type Bounds, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { perspective, type Camera } from "./camera.js";
 import { Canvas, rgbf } from "./canvas.js";
 import { createTarget, renderMesh } from "./raster.js";
 import type { BeautyPool } from "./beauty-pool.js";
-import { classic } from "./classic.js";
+import { pbr } from "./pbr.js";
+import type { Environment } from "./environment.js";
 import { allocBuffers, beautyCache, materialIds, materialKey, type BeautyCache, type Kernel, type KernelContext, type KernelResult } from "./kernel.js";
 
 export { beautyCache, type BeautyCache, type Kernel, type KernelResult } from "./kernel.js";
@@ -37,39 +38,7 @@ export interface BeautyLight {
   range?: number;
 }
 
-/** The procedural skies the metals reflect and the floor sits in. */
-export type Environment = "studio" | "overcast" | "sunset" | "night";
-export const ENVIRONMENTS: Environment[] = ["studio", "overcast", "sunset", "night"];
-
-interface Palette {
-  sky: Vec3;
-  /** A band at the horizon between ground and sky; absent, the sky fades straight from the ground colour. */
-  horizon?: Vec3;
-  ground: Vec3;
-  floor: Vec3;
-  /** Multiplier on the sky and ground light. */
-  ambient: number;
-}
-
-const PALETTES: Record<Environment, Palette> = {
-  // The studio: the grey-white backdrop every render has had.
-  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], ambient: 1 },
-  // A white sky: soft, even light with little shadow contrast.
-  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], ambient: 1.25 },
-  // Evening: a warm band at the horizon under a blue sky, warm ground.
-  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], ambient: 0.9 },
-  // Night: a dark blue sky and a dark floor, so a glow material carries the picture.
-  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], ambient: 0.4 },
-};
-
-/** A sky's colours and its ambient strength, 0..1 as the beauty render draws them: what the viewer's scene mode builds its sky from. */
-export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Vec3; ground: Vec3; floor: Vec3; ambient: number } {
-  const p = PALETTES[env ?? "studio"];
-  return { sky: [...p.sky], ...(p.horizon ? { horizon: [...p.horizon] as Vec3 } : {}), ground: [...p.ground], floor: [...p.floor], ambient: p.ambient };
-}
-
-/** The default key light's direction (towards the light), for a viewer that lights the program's scene without declared lights. */
-export const DEFAULT_LIGHT_DIRECTION: Vec3 = normalize([-0.55, 0.9, 0.65]);
+export { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightDirection, type Environment } from "./environment.js";
 
 export interface BeautyOptions {
   size: number;
@@ -100,7 +69,7 @@ export interface BeautyOptions {
   wearProbe?: number;
   /** size * size flags, set to 1 where the surface a pixel sees glows (left as they are elsewhere): what lights.png's frames of what a light adds leave out. */
   glowMask?: Uint8Array;
-  /** How much a kernel samples: full for beauty.png and the shots, draft for the strips. The classic kernel has one budget. */
+  /** How much a kernel samples: full for beauty.png and the shots, draft for the strips (one reflection bounce, one glossy ray, one glass deep, no contrast pass). */
   quality?: "draft" | "full";
   /** Keep what each light brings apart, for lights.png (a kernel without slots ignores it). */
   splitLights?: boolean;
@@ -112,19 +81,13 @@ export interface BeautyOptions {
   kernel?: string;
 }
 
-/** A light's direction from its azimuth about y (0 is +z, 90 is +x) and elevation, in degrees. */
-export function lightDirection(azimuth: number, elevation: number): Vec3 {
-  const az = (azimuth * Math.PI) / 180, el = (elevation * Math.PI) / 180;
-  return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
-}
-
 /** The kernels by name. The registry is read when a render starts, so a kernel's module may import this one. */
 function kernels(): Record<string, Kernel> {
-  return { classic: classic as Kernel };
+  return { pbr: pbr as Kernel };
 }
 
 /** The kernel every render uses unless its options name another. */
-export const DEFAULT_KERNEL = "classic";
+export const DEFAULT_KERNEL = "pbr";
 
 /** A kernel by name (the default when none is given); a worker finds the job's kernel here. */
 export function kernelByName(name: string = DEFAULT_KERNEL): Kernel {
