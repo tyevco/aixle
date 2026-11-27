@@ -516,6 +516,14 @@ describe("round-11 renders", () => {
     expect(only.files).toEqual(["sheet.png", "beauty.png", "report.md", "report.json"]);
     expect(bytes(c, "beauty.png").equals(bytes(a, "beauty.png"))).toBe(true);
     expect(only.report).toMatch(/knob \([^)]*\) → not rendered \(one shot\)/);
+    // --camera naming no camera renders every shot, as its warning says; in the one-shot loop beauty.png is the
+    // render's own view and the warning says that instead.
+    const none = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "nope" });
+    expect(none.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_hero.png", "beauty_knob.png"]);
+    expect(none.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; every shot is rendered$/)]));
+    const noneOnly = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, camera: "nope" });
+    expect(noneOnly.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
+    expect(noneOnly.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; beauty\.png takes the render's own view$/)]));
     // --lights asks for the study in the loop; --no-lights leaves it off a full run.
     expect(run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, lights: true }).files).toContain("lights.png");
     expect(run(lit + "show both", "lit.aix", c, { ...opts, lights: false }).files).not.toContain("lights.png");

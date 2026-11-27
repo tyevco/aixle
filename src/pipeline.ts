@@ -1070,7 +1070,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // `set camera hero` makes a declared shot the sheet's and the beauty render's view; the CLI still overrides.
   const shotName = opts.camera ?? (typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined);
   const shot = shotName ? evaluation.cameras.find((c) => c.name === shotName) : undefined;
-  if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; every shot is rendered`);
+  if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? "beauty.png takes the render's own view" : "every shot is rendered"}`);
   const azimuth = opts.azimuth ?? shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
   const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
   // `--environment all`, or a list `--environment studio,overcast`, renders the shot under each of those skies into
@@ -1633,7 +1633,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       shotFiles = new Map();
       for (const c of evaluation.cameras) {
         const isShot = !!shot && c.name === shot.name;
-        if (!isShot && (opts.camera || opts.shots === false)) continue;
+        // --camera naming no camera leaves every shot to be rendered, as its warning says.
+        if (!isShot && ((opts.camera && shot) || opts.shots === false)) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         const b = r ? r.frame : beautyFrame;
         const az = c.azimuth ?? azimuth, el = c.elevation ?? elevation, zm = c.zoom ?? zoom, df = c.dof ?? dof;
