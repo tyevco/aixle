@@ -173,8 +173,11 @@ export interface GlbLight {
  * they are made to agree on a surface turned 60 degrees from the light, at `range` from it for a point light: a
  * directional light is 2π (0.425 p)^2.2 lux and a point light 2π (0.2125 p)^2.2 range² candela. Measured over a wall
  * beside a point light at 0.3 to 1 range from it, that is within 0.04 to 0.10 of the beauty render's display value
- * (rms), where agreeing on a face turned to the light is 0.07 to 0.23 off, brighter: the engine's light is
- * brighter on faces turned to it and near it, and darker at a slant. Its cutoff, which glTF's range is, is three
+ * (rms), where agreeing on a face turned to the light is 0.07 to 0.23 off, brighter. The engine takes the cosine in
+ * linear light, so its light is flatter across angles: on a face turned square to the light it is about two thirds
+ * of the beauty render's display value, at 60 degrees the same, at a slant brighter (measured in the viewer, grey
+ * plates under a directional light: 97 against 159 square on, 70 against 73 at 60 degrees, 42 against 32 at 80);
+ * and nearer a point light than `range` it is brighter. Its cutoff, which glTF's range is, is three
  * times the program's range, where the beauty render's strength is a tenth. Colours go from sRGB to linear. The
  * apparent size (soft shadows) has no glTF counterpart and is left out. A directional light's node sits three radii
  * out from the model's centre along its direction, for an engine whose shadow camera needs a place.

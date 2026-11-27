@@ -337,8 +337,13 @@ lux for a directional light and 2π (0.2125 p)^2.2 range² candela for a
 point light. Over a wall beside a point light at 0.3 to 1 range from it
 that is within 0.04 to 0.10 of the beauty render's display value (rms),
 where agreeing on a face turned to the light was 0.07 to 0.23 off,
-brighter; the engine's light is still brighter on faces turned to it
-and near it, and darker at a slant. glTF's range is a cutoff, not a
+brighter. An engine takes the cosine in linear light, so its light is
+flatter across angles than the beauty render's: on a face turned square
+to the light it is about two thirds as bright as `beauty.png`, at 60
+degrees the same, and at a slant brighter (grey plates under a
+directional light, read in the viewer's scene and in `beauty.png`: 97
+against 159 square on, 70 against 73 at 60 degrees, 42 against 32 at
+80); nearer a point light than its range it is brighter. glTF's range is a cutoff, not a
 half-strength distance, so it is written as three times the program's,
 where the beauty render's strength is a tenth. The apparent size has no
 glTF counterpart. The cameras stay out of the GLB, since an engine

@@ -7,7 +7,7 @@ import * as O from "../src/sdf/ops.js";
 import { parse } from "../src/lang/parser.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { buildHierarchy, flatten } from "../src/export/hierarchy.js";
-import { eulerToQuat, toGlbScene } from "../src/export/glb.js";
+import { eulerToQuat, glbLights, toGlbScene } from "../src/export/glb.js";
 import { toObjScene } from "../src/export/obj.js";
 import { easeBlend, interpolatePose, keyAt, renderAnimation, renderPoses, type PoseCache, type PoseView } from "../src/render/views.js";
 import { REST_POSE, type JointPose } from "../src/sdf/types.js";
@@ -578,6 +578,27 @@ describe("the program's lights and scene in the exports", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the GLB's light intensities against the beauty render", () => {
+  it("agree at 60 degrees, and an engine is darker square on, brighter at a slant and brighter nearer a point light", () => {
+    // What design.md says of them. An engine shows albedo x intensity x cos / pi (over d squared) in linear light,
+    // about the display value to the power 2.2; the beauty render shows 0.85 p cos, times range^2 / (range^2 + d^2).
+    const [sun, lamp] = glbLights([
+      { name: "sun", azimuth: 0, elevation: 90, color: [1, 1, 1], power: 1 },
+      { name: "lamp", azimuth: 0, elevation: 0, color: [1, 1, 1], power: 1, position: [0, 0, 0], range: 2 },
+    ], [0, 0, 0], 1);
+    const display = (linear: number) => Math.pow(linear, 1 / 2.2);
+    const cos = (deg: number) => Math.cos((deg * Math.PI) / 180);
+    const sunRatio = (deg: number) => display((sun.intensity * cos(deg)) / Math.PI) / (0.85 * cos(deg));
+    expect(sunRatio(60)).toBeCloseTo(1, 3);
+    expect(sunRatio(0)).toBeLessThan(0.75);
+    expect(sunRatio(0)).toBeGreaterThan(0.6);
+    expect(sunRatio(80)).toBeGreaterThan(1.2);
+    const lampRatio = (d: number, deg: number) => display((lamp.intensity * cos(deg)) / (Math.PI * d * d)) / ((0.85 * cos(deg) * 4) / (4 + d * d));
+    expect(lampRatio(2, 60)).toBeCloseTo(1, 3);
+    expect(lampRatio(1, 60)).toBeGreaterThan(1.1);
   });
 });
 

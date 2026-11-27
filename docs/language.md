@@ -734,9 +734,10 @@ The lights go into `model.glb` as well, each a `KHR_lights_punctual`
 light on a node of its own (a point light at its position, an azimuth
 light as a directional one), so an engine lights the model with them;
 the intensities are chosen so an engine agrees with the beauty render on
-a face turned 60 degrees from the light, at `range` from a point light,
-and is brighter nearer and on faces turned to it (the design notes have
-the numbers). The cameras and the sky stay out of the GLB, but
+a face turned 60 degrees from the light, at `range` from a point light;
+it is darker than `beauty.png` on faces turned square to a light (about
+two thirds), brighter on faces at a slant, and brighter nearer a point
+light than its range (the design notes have the numbers). The cameras and the sky stay out of the GLB, but
 `viewer.html` has them: its Scene button lights the GLB with its own
 lights under the program's sky and ambient, the cameras are buttons, and
 it opens that way when the program declares a light or a sky; its Studio
