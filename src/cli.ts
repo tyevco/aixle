@@ -9,12 +9,13 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { AssertClock, assertLabel, assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
 import { diskCache, type ImportCache } from "./import/cache.js";
-import { assertLine, assertPassLine } from "./lang/interpreter.js";
+import { assertReport, type AssertInfo } from "./lang/interpreter.js";
+import { Worker } from "node:worker_threads";
 import { exprText } from "./lang/ast.js";
 import { watch } from "node:fs";
 import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
@@ -84,7 +85,7 @@ function usage(): never {
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-poses] [--no-export] [--no-viewer]",
       "                          [--no-anims | --anim NAME[,NAME]]  skip the animation strips, or draw only these (poses.png stays)",
       "                          [--no-callouts]                    skip callouts.png, the perspective view with its visible steps named",
-      "                          [--no-asserts]                     skip the program's asserts (a pieces() promise on a big rig can cost more than the render)",
+      "                          [--no-asserts]                     skip the program's asserts while placing parts (a quick pass that spent most of its time on them says so)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
       "                          [--triangles N]                    the most triangles the GLB, OBJ and viewer carry, decimated past it (default 200000; 0 for all)",
       "                          [--beauty-only]                    the beauty render, its shots and the sheet alone (no steps, slices, turntable, callouts, exports): a lighting loop",
@@ -97,7 +98,7 @@ function usage(): never {
       "                          [--slice NAME]                     slices.png through one step, framed on it, the rest of the model faint",
       "                          [--camera NAME] [--environment NAME|A,B|all]  one declared shot only (the sheet takes its view); a sky over the program's, or several into environments.png",
       "                          [--no-steps] [--no-slices] [--no-turntable] [--no-export] [--no-viewer]",
-      "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes)",
+      "  aixle check  <file.aix> [--pose NAME] [--no-asserts] [--brief]   parse and evaluate; print sizes and warnings, render nothing (--brief: no sizes, a library by its count)",
       "  --no-cache   (check, render, explain, diff) sample every import afresh and store nothing; imports are otherwise cached by content",
       "               in ~/.cache/aixle/imports (or $AIXLE_CACHE_DIR), at most 512 MB, least recently used first out",
       "  aixle explain <file.aix> [--pose NAME]  the program as a tree from the output down: each step's line, size, material and anchors",
@@ -136,6 +137,64 @@ function fmt(args: string[]): number {
     } else process.stdout.write(formatted);
   }
   return status;
+}
+
+/**
+ * A thread that names an assert still running two seconds after it started, and again at 10, 30 and 60 seconds and
+ * each minute after, so a query that never returns shows where it is (round 11: a check printed nothing for twelve
+ * minutes). The evaluation holds the main thread while it runs, so the watchdog is a worker reading a shared buffer
+ * and writing straight to the terminal's error stream. Undefined where a worker cannot start; nothing is lost then
+ * but the naming of a hang.
+ */
+function assertWatchdog(): ((a: AssertInfo | undefined) => void) | undefined {
+  try {
+    const TEXT = 1024;
+    const shared = new SharedArrayBuffer(16 + TEXT);
+    const head = new Int32Array(shared, 0, 4);
+    const text = new Uint8Array(shared, 16, TEXT);
+    const base = Date.now();
+    const worker = new Worker(
+      `const { workerData } = require("node:worker_threads");
+       const { writeSync } = require("node:fs");
+       const head = new Int32Array(workerData.shared, 0, 4), text = new Uint8Array(workerData.shared, 16, ${TEXT});
+       const marks = [2, 10, 30, 60];
+       let seq = 0, next = 0;
+       setInterval(() => {
+         const s = Atomics.load(head, 0);
+         if (s !== seq) { seq = s; next = 0; }
+         if (Atomics.load(head, 1) === 0) return;
+         const ran = (Date.now() - workerData.base - Atomics.load(head, 2)) / 1000;
+         const due = next < marks.length ? marks[next] : 60 * (next - marks.length + 2);
+         if (ran < due) return;
+         next++;
+         const label = new TextDecoder().decode(text.slice(0, Atomics.load(head, 3)));
+         try { writeSync(2, "still judging " + label + " after " + Math.floor(ran) + " s\\n"); } catch {}
+       }, 250);`,
+      { eval: true, workerData: { shared, base } },
+    );
+    worker.unref();
+    // A watchdog that fails to start or stops is no reason to fail the run.
+    worker.on("error", () => {});
+    const encoder = new TextEncoder();
+    return (a) => {
+      if (!a) { Atomics.store(head, 1, 0); return; }
+      const bytes = encoder.encode(assertLabel(a)).slice(0, TEXT);
+      text.set(bytes);
+      Atomics.store(head, 3, bytes.length);
+      Atomics.store(head, 2, Date.now() - base);
+      Atomics.store(head, 1, a.line);
+      Atomics.add(head, 0, 1);
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+let watchdog: { watch?: (a: AssertInfo | undefined) => void } | undefined;
+/** The CLI's assert clock: slow asserts named on the error stream, a hang named by the watchdog (one per process). */
+function cliAssertClock(): AssertClock {
+  watchdog ??= { watch: assertWatchdog() };
+  return new AssertClock(() => performance.now(), (l) => process.stderr.write(`${l}\n`), { watch: watchdog.watch });
 }
 
 function flags(argv: string[]): { positional: string[]; opts: Record<string, string | boolean> } {
@@ -185,11 +244,12 @@ function main(argv: string[]): number {
   const importCache: ImportCache | undefined = opts["no-cache"] ? undefined : diskCache();
   if (cmd === "check") {
     try {
-      const rest = check(source, file, (l) => console.log(l), undefined, undefined, !!opts["no-asserts"], importCache);
+      const clock = cliAssertClock();
+      const rest = check(source, file, (l) => console.log(l), undefined, undefined, !!opts["no-asserts"], importCache, clock.hook);
       // Sizes are printed for the pose the sheet would show, so a posed rig's numbers match its pictures.
       const poseName = typeof opts.pose === "string" ? opts.pose : typeof rest.settings.pose === "string" ? rest.settings.pose : undefined;
       const pose = poseName ? rest.poses.find((p) => p.name === poseName) : undefined;
-      const ev = pose ? check(source, file, undefined, pose.joints, pose.name, !!opts["no-asserts"], importCache) : rest;
+      const ev = pose ? check(source, file, undefined, pose.joints, pose.name, !!opts["no-asserts"], importCache, clock.hook) : rest;
       if (poseName && !pose && poseName !== "rest") console.log(`warning: pose ${poseName}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); sizes are at rest`);
       if (pose) console.log(`pose: ${pose.name} (sizes below are in this pose; poses: ${rest.poses.map((p) => p.name).join(", ")})`);
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
@@ -197,7 +257,9 @@ function main(argv: string[]): number {
       if (rest.output) { const tree = jointTreeLines(rest.output, short); if (tree.length) console.log(`joints:\n${tree.map((l) => `  ${l}`).join("\n")}`); }
       const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
       const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
-      for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${m.names.join(", ")}`);
+      // --brief names each library and how much it exports; the full check lists the names (round 11: a library's 24
+      // names opened every brief check).
+      for (const m of ev.modules) console.log(`use ${m.prefix.padEnd(14)} ${m.path}: ${opts.brief ? `${m.names.length} name${m.names.length === 1 ? "" : "s"} (check without --brief lists them)` : m.names.join(", ")}`);
       // --brief: the verdicts alone (output, warnings, notes, asserts), for a promise loop on a big program.
       for (const st of opts.brief ? [] : ev.steps) {
         // Numbers too: an agent sizing a member from a computed distance wants to see the distance.
@@ -307,20 +369,26 @@ function main(argv: string[]): number {
       const minecraftPx = typeof rest.settings.minecraft === "number" ? rest.settings.minecraft : 0;
       const warnings = [...ev.warnings, ...(cellSize > 0 ? foldThinWarnings(thinWarnings(ev, cellSize, grid)) : []), ...paintWarnings(ev), ...cutWarnings(ev, cellSize), ...glassWarnings(ev), ...(minecraftPx > 0 ? minecraftThinWarnings(rest, minecraftPx, grid) : []), ...(bedWarning ? [bedWarning] : [])];
       for (const w of warnings) console.log(`warning: ${w}`);
-      if (warnings.length === 0) console.log("no warnings");
-      // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike.
+      // The report's own note on parts between 1.2 and 2 cells, so check and the report judge thinness alike; with no
+      // warnings it shares their line, so "no warnings" is never read as the whole verdict (round 11: a 1.6-cell wall's
+      // note under it went unread).
       const nearly = cellSize > 0 ? nearlyThin(ev, cellSize).trim() : "";
-      if (nearly) console.log(`note: ${nearly}`);
+      if (warnings.length === 0) console.log(nearly ? `no warnings; note: ${nearly}` : "no warnings");
+      else if (nearly) console.log(`note: ${nearly}`);
       // The lights, the shots and the sky, as the report will list them: a typo in a name is a warning above.
       for (const l of presentationLines(ev, typeof ev.settings.camera === "string" ? ev.settings.camera : undefined, ENVIRONMENTS.includes(ev.settings.environment as never) ? String(ev.settings.environment) : undefined)) console.log(l);
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
-      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"], importCache)) : undefined; });
+      const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"], importCache, clock.hook)) : undefined; });
       const failed = all.filter((a) => !a.passed);
       // A passing promise prints its numbers too, so how close it came is on the terminal and not only in
-      // report.json (round 8: the gap between closed fingers), in line order, failures among the passes.
-      for (const a of [...all].sort((x, y) => (x.file ?? "").localeCompare(y.file ?? "") || x.line - y.line)) console.log(a.passed ? assertPassLine(a) : assertLine(a));
+      // report.json (round 8: the gap between closed fingers), in line order; one judged many times in a loop is one
+      // line with the judgement nearest to failing, and the failures come last, in full (round 11).
+      for (const l of assertReport(all)) console.log(l);
       if (all.length) console.log(`asserts: ${failed.length ? `${all.length - failed.length} pass, ${failed.length} fail` : `${all.length} pass`}${all.some((a) => a.pose) ? " (at rest, or in the pose each names)" : pose ? " (judged at rest)" : ""}`);
+      // Where the time went, when the promises took more than a couple of seconds; on the error stream, as the clock's lines are.
+      const slow = clock.summary();
+      if (slow) process.stderr.write(`${slow}\n`);
       return failed.length ? 1 : 0;
     } catch (err) {
       console.error(`${file}: ${(err as Error).message}`);
@@ -392,7 +460,9 @@ function main(argv: string[]): number {
       if (unused.length) console.log(`\nnot in the output: ${unused.join(", ")}`);
       if (ev.poses.length) console.log(`\nposes: ${ev.poses.map((p) => p.name).join(", ")}`);
       for (const m of ev.modules) console.log(`\nuse ${m.prefix} (${m.path}): ${m.names.join(", ")}`);
-      if (ev.asserts.length) console.log(`\nasserts: ${assertsRow(ev.asserts)}`);
+      // The promises as check judges them: at rest, and each pose's in its pose (a posed evaluation judges only its own).
+      const judged = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? check(source, file, undefined, p.joints, pn, false, importCache) : undefined; });
+      if (judged.length) console.log(`\nasserts: ${assertsRow(judged)}`);
       return 0;
     } catch (e) {
       console.error(e instanceof Error ? e.message : String(e));
@@ -483,7 +553,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       environment: typeof opts.environment === "string" ? opts.environment : undefined,
     };
     for (const k of Object.keys(given)) if (given[k] === undefined) delete given[k];
-    const result = run(source, file, outDir, { ...quick, ...given, importCache, log: (l) => console.log(l) });
+    const result = run(source, file, outDir, { ...quick, ...given, importCache, log: (l) => console.log(l), onAssert: cliAssertClock().hook });
     console.log(`wrote ${result.files.length} files to ${outDir}`);
     for (const w of result.warnings) console.log(`warning: ${w}`);
     console.log(opts.quick ? `look at ${resolve(outDir, "sheet.png")}` : `look at ${resolve(outDir, "sheet.png")} first, then slices.png and steps.png; details in report.md`);

@@ -29,7 +29,7 @@ import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
+import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
@@ -122,6 +122,8 @@ export interface RunOptions {
   caption?: boolean;
   /** Where an import's samples are kept between runs (the CLI's is on disk, `--no-cache` for none); none by default. */
   importCache?: ImportCache;
+  /** Called as each assert starts and ends, in every evaluation of the run (the CLI's AssertClock says what is slow). */
+  onAssert?: (phase: "start" | "end", a: AssertInfo) => void;
 }
 
 export interface RunResult {
@@ -817,8 +819,71 @@ function focusSplit(output: Shape3, part: Shape3, frame: Bounds, margin: number)
 
 /** Parse and evaluate only: what `aixle check` does. `sourceName` lets imports resolve. */
 /** Parse and evaluate a program, nothing rendered; `cache` keeps an import's samples between runs (see importResolver). */
-export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache): Evaluation {
-  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts });
+export function check(source: string, sourceName = "model.aix", log?: (line: string) => void, jointPoses?: Record<string, JointPose>, poseName?: string, skipAsserts = false, cache?: ImportCache, onAssert?: (phase: "start" | "end", a: AssertInfo) => void): Evaluation {
+  return evaluate(parse(source), { resolveImport: importResolver(sourceName, log, cache), resolveModule: moduleResolver(sourceName), resolveImage: imageResolver(sourceName), moduleFrom: sourceName, jointPoses, poseName, skipAsserts, onAssert });
+}
+
+/** An assert as a line names it: `assert (line 12) in pose open: clearance(lid, box) > 0.02`, its library first. */
+export function assertLabel(a: AssertInfo): string {
+  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""}: ${a.text}`;
+}
+
+const seconds = (ms: number): string => `${Number((ms / 1000).toPrecision(ms < 10000 ? 2 : 3))} s`;
+
+/**
+ * Times the asserts as they are judged and says which are slow, so a check that seems hung, or a quick render that
+ * takes twenty seconds, says where the time goes (round 11: a shelf's check sat silent for twelve minutes on one
+ * overlap() and took forty runs to bisect; a mixer's quick pass spent 18 of its 20 s on one wall()). A fast run says
+ * nothing. Once the asserts have taken `after` ms between them, each is named as it starts, at most one a second,
+ * so a loop of quick promises does not flood the terminal; one that takes over `slow` ms is named with its time when
+ * it ends. `watch` is told which assert is running (the CLI's watchdog names one that has not returned). `now` is
+ * the clock in milliseconds: performance.now in the CLI, a counter in a test.
+ */
+export class AssertClock {
+  /** Milliseconds spent judging asserts so far. */
+  total = 0;
+  /** Each assert's time by its place, over all its judgements (a loop's, every pose's), for the slowest few. */
+  readonly byPlace = new Map<string, { info: AssertInfo; ms: number; count: number }>();
+  private started = 0;
+  private lastNamed = -Infinity;
+  private named = false;
+  constructor(
+    private readonly now: () => number,
+    private readonly write: (line: string) => void,
+    private readonly opts: { after?: number; slow?: number; watch?: (a: AssertInfo | undefined) => void } = {},
+  ) {}
+  readonly hook = (phase: "start" | "end", a: AssertInfo): void => {
+    const after = this.opts.after ?? 2000, slow = this.opts.slow ?? 1000;
+    const t = this.now();
+    if (phase === "start") {
+      this.started = t;
+      this.opts.watch?.(a);
+      if (this.total > after && t - this.lastNamed >= 1000) {
+        if (!this.named) this.write(`asserts: ${seconds(this.total)} so far; naming one as it starts each second`);
+        this.named = true;
+        this.lastNamed = t;
+        this.write(`judging ${assertLabel(a)}`);
+      }
+      return;
+    }
+    this.opts.watch?.(undefined);
+    const ms = t - this.started;
+    this.total += ms;
+    const key = [a.file ?? "", a.line, a.pose ?? "", a.text].join("\u0000");
+    const e = this.byPlace.get(key);
+    if (e) { e.ms += ms; e.count++; } else this.byPlace.set(key, { info: a, ms, count: 1 });
+    if (ms > slow) this.write(`${assertLabel(a)} took ${seconds(ms)}`);
+  };
+  /** The slowest places, most time first: "line 149 wall(bowl) > 0.04, 15.9 s over 3 judgements". */
+  slowest(n = 3): string[] {
+    return [...this.byPlace.values()].sort((x, y) => y.ms - x.ms).slice(0, n).filter((e) => e.ms >= 100)
+      .map((e) => `${e.info.file ? `${e.info.file} ` : ""}line ${e.info.line}${e.info.pose ? ` in pose ${e.info.pose}` : ""}, ${e.info.text}, ${seconds(e.ms)}${e.count > 1 ? ` over ${e.count} judgements` : ""}`);
+  }
+  /** The closing line once the asserts took more than `after`: how long, and where; undefined for a fast run. */
+  summary(): string | undefined {
+    if (this.total <= (this.opts.after ?? 2000)) return undefined;
+    return `asserts took ${seconds(this.total)}; the slowest: ${this.slowest().join("; ")}`;
+  }
 }
 
 /**
@@ -952,17 +1017,22 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const program = parse(source);
   const modules = moduleResolver(sourceName);
   const skipAsserts = opts.asserts === false;
-  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts, slice: opts.slice }));
+  // The asserts' own time, over every evaluation of the run, so a quick pass that spent it on them can say so.
+  const runStart = performance.now();
+  const assertClock = new AssertClock(() => performance.now(), () => {});
+  const onAssert = (phase: "start" | "end", a: AssertInfo) => { opts.onAssert?.(phase, a); assertClock.hook(phase, a); };
+  const rest = time("evaluate", () => evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, skipAsserts, slice: opts.slice, onAssert }));
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
-  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts, slice: opts.slice }) : rest;
+  const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts, slice: opts.slice, onAssert }) : rest;
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
   // asserts for a pose share it.
-  const evalCache = new Map<string, Evaluation>();
+  // The rest pose is the rest evaluation, so the pose sheet's rest thumbnail does not judge every promise again.
+  const evalCache = new Map<string, Evaluation>([["[]", rest]]);
   const evalAt = (joints: Record<string, JointPose>, poseName?: string): Evaluation => {
     const key = JSON.stringify(Object.entries(joints).sort(([a], [b]) => (a < b ? -1 : 1)));
     let ev = evalCache.get(key);
-    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts, slice: opts.slice }); evalCache.set(key, ev); }
+    if (!ev) { ev = evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: joints, poseName: poseName ?? rest.poses.find((p) => p.joints === joints)?.name, skipAsserts, slice: opts.slice, onAssert }); evalCache.set(key, ev); }
     return ev;
   };
   // Asserts are the program's promises about the model as built, so they are judged at rest (round 7: a "2.5 tall"
@@ -1787,6 +1857,11 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       2,
     ),
   );
+  // A quick pass is the placing loop; when the promises took most of it, say so and how to leave them out (round 11:
+  // a mixer's quick pass took 20 s, 18 of them one wall(), with no word that the asserts were the cost).
+  const elapsed = performance.now() - runStart;
+  if (opts.quick && assertClock.total > 1500 && assertClock.total > elapsed / 2)
+    log(`note: the asserts took ${seconds(assertClock.total)} of this ${seconds(elapsed)} quick pass (${assertClock.slowest(2).join("; ")}); --no-asserts while placing parts, and check judges them`);
   return { name, outDir, evaluation, mesh, bounds, files, warnings, report, timings, physics };
 }
 

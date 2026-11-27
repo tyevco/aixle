@@ -988,7 +988,9 @@ coarse mesh, as the render judges its own, so the two agree.
 
 `aixle render model.aix --quick` renders the sheet only, at a small grid
 (stepped up, to 128 at most, on a model whose parts are mostly thinner
-than the small grid's cell), in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
+than the small grid's cell), in a second or two, and judges the
+program's asserts at their own cost (one that says so took most of the
+time: `--no-asserts` while placing parts); `--watch` re-renders on every save; `aixle diff a.aix
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
 detail thinner than its cell, and the sheet says which steps it dropped.
@@ -1038,7 +1040,9 @@ which is the number to hold against a boss's rim), numbers and lists of numbers
 as their values (a number set inside a loop is the last iteration's and
 is not listed), then the program's `def`s with their parameters;
 `--brief` leaves the sizes out and prints the output, the warnings and
-the asserts alone, for a promise loop on a long program. A step whose tree holds a rotation, a warp or a posed
+the asserts alone, for a promise loop on a long program, with each used
+library named by how many names it exports (`use lib shelf_lib: 24
+names`; the full check lists them). A step whose tree holds a rotation, a warp or a posed
 joint gets a second `surface` line when the surface's own extent is
 tighter than the box (a box after a rotation is the box of a turned box),
 and with `--pose` a `posed` line says where the step ends up once the
@@ -1061,12 +1065,15 @@ animated PNG of 24 frames that a browser plays (`--no-turntable` skips both).
 Warnings cover: a shape computed but never assigned; a step that is not part
 of the output (a step an assert, a decal or a camera reads is a region
 and is not warned about; `check` tags each step `(cut)`, `(region)` or
-`(not in output)`); an empty output (a difference that removed everything, an
+`(not in output)`; a step only asserts read is a region with
+`--no-asserts` too, and in a pose that does not judge them); an empty output (a difference that removed everything, an
 intersection that did not overlap); a model or part thinner than a grid
 cell (the threshold is 1.2 cells: at that thickness the surface nets
 still catch it, below it they may not; between 1.2 and 2 cells a tube
 or a wall meshes but often not watertight, and the report names such
-parts when the mesh has open edges; a rigging line wants about three
+parts when the mesh has open edges, as `check` does every time, on its
+`no warnings` line when there is nothing else to say, so the note is
+never read past; a rigging line wants about three
 cells across to be clean, measured on a dinghy), including a `shell` wall, a
 `tube`, a `sweep` profile or a `text` stroke inside a thick part (those
 carry their own thickness, since a bounding box cannot see it); a
@@ -1171,10 +1178,37 @@ other joints (`bottom(paw)`, `clearance(wrist, base)`, `at(foot,
 above it, so a foot-on-the-floor promise is `assert abs(at(dog,
 "sole")[1]) < 0.01, pose=walk_a` or `assert bottom(paw_fl) < 0.01,
 pose=walk_a` alike; outside an assert a step's own queries stay in its
-own frame, since geometry is built there. `check` prints every passing
-assert with its numbers too, so how close a promise came is on the
-terminal. A pose that is not defined is a warning and the assert is
-never tested. A used library's asserts run with it and are reported
+own frame, since geometry is built there. A promise at rest is judged
+once, at rest: an evaluation in a pose (the pose sheet, a strip's frame,
+a pose's own promises) judges only the promises that name it. `check`
+prints every passing assert with its numbers too, so how close a promise
+came is on the terminal. An assert judged many times from one line, in a
+loop, is one line: how many times it held and the judgement nearest to
+failing, with that judgement's message, `assert (line 104) holds 33
+times: clearance(bk, board) > -0.002, nearest to failing -3.6e-16 >
+-0.002: book 24 is not sunk into its shelf` (or `is 1 == 1 each time`
+when it came out the same each time). Nearest to failing is the smallest
+margin, how far the comparison passed by: `a - b` for `>` and `>=`, `b -
+a` for `<` and `<=`, `|a - b|` for `!=`; a test that is no comparison
+has no margin, and its first judgement stands for the rest. The failures
+come after the passes, every one in full with its numbers and its place,
+just above the count, so four failures among two hundred promises are
+the last thing printed and need no grep (and no switch for failures
+alone). A pose that is not defined is a warning and the assert is never
+tested.
+
+An assert that takes time says so on the error stream, and a fast run
+says nothing: one that takes over a second is named with its time when
+it ends; once the asserts have taken two seconds between them, `check`
+and `render` name one as it starts each second, and `check` ends with
+how long they took and the slowest few lines; one still running two
+seconds after it started is named then, at 10, 30 and 60 seconds and
+each minute after, so a query that does not return shows which promise it is (`still
+judging assert (line 8): overlap(bk, board) < 0.0001 after 2 s`). A
+`--quick` render whose asserts took most of its time says so, with the
+slowest, since a `wall()` or a `pieces()` meshes at the program's grid
+in a quick pass too; `--no-asserts` leaves them out while placing parts,
+and `check` judges them. A used library's asserts run with it and are reported
 with the library's path.
 
 The queries that make it useful: `pieces(shape, resolution)` is the
@@ -1248,7 +1282,8 @@ from a part is a *cut*, tagged so on the steps sheet, which draws it as
 the solid it removes; the larger operand of an `&` (a half-space box
 that trims a gem, even turned and moved on its way in, `stone & (below
 | rotate(x=25) | move(0, h, 0))`) is a *mask*, tagged so and never labelled. `check`
-prints the asserts in line order, failures among the passes.
+prints the passing asserts in line order, a loop's once per line, then
+the failures.
 
 ## Limits worth knowing
 

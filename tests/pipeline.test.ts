@@ -453,8 +453,9 @@ describe("round-6 findings", () => {
       expect(r.report).toMatch(/\| Asserts \| 1 pass, 1 fail: \(line 2\) fails: width\(m\) < 1 is 2 < 1: narrow \|/);
       const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
       expect(json.asserts).toEqual([
-        { line: 2, text: "width(m) < 1", detail: "2 < 1", message: "narrow", passed: false },
-        { line: 3, text: "tall(m) == 1", detail: "1 == 1", passed: true },
+        // The margin is how far each passed by (negative: failed by), for a reader that wants the nearest to failing.
+        { line: 2, text: "width(m) < 1", detail: "2 < 1", message: "narrow", passed: false, margin: -1 },
+        { line: 3, text: "tall(m) == 1", detail: "1 == 1", passed: true, margin: 0 },
       ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

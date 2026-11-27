@@ -47,6 +47,21 @@ describe("asserts", () => {
     expect(failed).toMatch(/assert \(line 4\) fails: pieces\(a \+ b\) == 1 is 2 == 1, the smallest piece is [\d.]+ at \([-\d., ]+\)\n/);
     expect(failed).toMatch(/asserts: 1 pass, 2 fail\n$/);
   });
+  it("check --brief names a library by its count, keeps a near-thin note on the warnings' line, and prints a loop's promise once", { timeout: 60000 }, () => {
+    let out = "";
+    try {
+      cli("check", "tests/fixtures/brief_loop.aix", "--brief");
+    } catch (e) {
+      out = (e as { stdout: string }).stdout;
+      expect((e as { status: number }).status).toBe(1);
+    }
+    // Round 11: a library's 24 names opened every brief check; the full check keeps the list.
+    expect(out).toMatch(/^use lib {12}brief_lib: 3 names \(check without --brief lists them\)\n/);
+    // Round 11: "no warnings" read as the verdict, and the note on the line under it went unread.
+    expect(out).toMatch(/\nno warnings; note: Parts between 1\.2 and 2 cells thick mesh but often not watertight: 'cup' \(1\.6 cells\)/);
+    // One line for the passes of a promise judged three times, then the failure in full, above the count.
+    expect(out).toMatch(/\nassert \(line 7\) holds 2 of 3 times: tall\(peg\) < 1\.15, nearest to failing 1\.1 < 1\.15: peg 1 is short enough\nassert \(line 7\) fails: tall\(peg\) < 1\.15 is 1\.2 < 1\.15: peg 2 is short enough\nasserts: 2 pass, 1 fail\n$/);
+  });
 });
 
 describe("libraries", () => {

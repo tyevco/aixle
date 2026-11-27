@@ -93,6 +93,11 @@ export interface EvalOptions {
   resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
   /** The step `--slice` cuts through, which is a region when nothing else reads it, as with `set slice name`. */
   slice?: string;
+  /**
+   * Called as each assert starts and ends being judged, so a caller with a clock can say which one is slow or hung
+   * (round 11: a check sat silent for twelve minutes on one overlap()); the language itself keeps no time.
+   */
+  onAssert?: (phase: "start" | "end", a: AssertInfo) => void;
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -221,6 +226,20 @@ export interface AssertResult {
   pending?: boolean;
   /** Where a void, inside or overlap query found the offending point, and in which step, for a failure. */
   where?: string;
+  /**
+   * For a comparison of two numbers, how far it passed by (negative: how far it failed by): a - b for `>` and `>=`,
+   * b - a for `<` and `<=`, |a - b| for `!=` and -|a - b| for `==`. Of an assert judged many times, the judgement
+   * with the smallest margin is the one nearest to failing.
+   */
+  margin?: number;
+}
+
+/** What an assert is, for whoever times it: its line and test, its library and pose. */
+export interface AssertInfo {
+  line: number;
+  text: string;
+  file?: string;
+  pose?: string;
 }
 
 /** One line for a failed assert, the same in `check`, the render's warnings and the report. */
@@ -237,6 +256,49 @@ const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tal
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
   return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+}
+
+/**
+ * The asserts as `check` prints them. One judged once is a line of its own, as before. One judged many times from
+ * one line (inside a loop) is one line for its passes, how many times it held and the judgement nearest to failing
+ * (the smallest margin, see AssertResult), with that judgement's message, so a loop's six promises over 33 books are
+ * six lines rather than 198 (round 11). Then every failure in full, in line order, together above the count, where a
+ * few failures among many passes cannot be missed.
+ */
+export function assertReport(all: AssertResult[]): string[] {
+  const groups = new Map<string, AssertResult[]>();
+  for (const a of all) {
+    const key = [a.file ?? "", a.line, a.pose ?? "", a.text].join("\u0000");
+    const g = groups.get(key);
+    if (g) g.push(a); else groups.set(key, [a]);
+  }
+  const order = (x: AssertResult, y: AssertResult) => (x.file ?? "").localeCompare(y.file ?? "") || x.line - y.line;
+  const out: string[] = [];
+  for (const g of [...groups.values()].sort((x, y) => order(x[0], y[0]))) {
+    const passed = g.filter((a) => a.passed);
+    if (!passed.length) continue;
+    if (g.length === 1) { out.push(assertPassLine(g[0])); continue; }
+    let near = passed[0];
+    for (const a of passed) if (a.margin !== undefined && (near.margin === undefined || a.margin < near.margin)) near = a;
+    // A promise that came out the same every time (pieces(x) == 1) has no nearest: it is that each time.
+    const same = passed.every((a) => a.detail === near.detail);
+    const detail = near.detail ? (same ? ` is ${near.detail} each time` : `, nearest to failing ${near.detail}`) : "";
+    const times = passed.length === g.length ? `${g.length} times` : `${passed.length} of ${g.length} times`;
+    out.push(`${near.file ? `${near.file}: ` : ""}assert (line ${near.line})${near.pose ? ` in pose ${near.pose}` : ""} holds ${times}: ${near.text}${detail}${near.message ? `: ${near.message}` : ""}`);
+  }
+  for (const a of all.filter((x) => !x.passed).sort(order)) out.push(assertLine(a));
+  return out;
+}
+
+/** How far `a op b` passed by: see AssertResult's margin. */
+function marginOf(op: string, a: number, b: number): number | undefined {
+  switch (op) {
+    case ">": case ">=": return a - b;
+    case "<": case "<=": return b - a;
+    case "!=": return Math.abs(a - b);
+    case "==": return -Math.abs(a - b);
+  }
+  return undefined;
 }
 
 const MAX_LOOP = 20000;
@@ -699,6 +761,30 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return e.name.split(".")[0];
   }
 
+  /**
+   * The steps an assert's test reads as regions, found in its text rather than by judging it: the names given to a
+   * builtin's call, as a judged assert marks them. For an assert skipped here (--no-asserts, another pose's, a
+   * promise at rest in a posed evaluation), so its probes are regions all the same.
+   */
+  function assertRegions(e: Expr): void {
+    switch (e.type) {
+      case "call": {
+        const user = e.callee.includes(".") ? undefined : global.get(e.callee);
+        if (!e.callee.includes(".") && BUILTIN_MAP.has(e.callee) && !(user !== undefined && isUserFn(user)))
+          for (const a of e.args) { const nm = a.name ? undefined : stepNameOf(a.value); if (nm) regionNames.add(nm); }
+        for (const a of e.args) assertRegions(a.value);
+        return;
+      }
+      case "binary": assertRegions(e.left); assertRegions(e.right); return;
+      case "unary": assertRegions(e.arg); return;
+      case "list": for (const it of e.items) assertRegions(it); return;
+      case "index": assertRegions(e.target); assertRegions(e.index); return;
+      case "field": assertRegions(e.target); return;
+      case "record": for (const en of e.entries) assertRegions(en.value); return;
+      default: return;
+    }
+  }
+
   /** `prefix.name` from a used library: its def or constant, with the message naming what the library has. */
   function fromModule(dotted: string, line: number, scope: Scope): Value {
     const dot = dotted.indexOf(".");
@@ -1145,7 +1231,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // scope as their closure, so a library def sees its helpers and constants and nothing of the caller's.
         let lib: Evaluation;
         try {
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses });
+          const onAssert = options.onAssert;
+          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
@@ -1215,12 +1302,19 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "assert": {
-        if (options.skipAsserts) return;
+        // A step only asserts read is a region whether or not the asserts are judged here (round 11: --no-asserts
+        // turned three probes back into "not part of the output" warnings).
+        if (options.skipAsserts) { assertRegions(stmt.test); return; }
         // A promise about a pose is tested in that pose's evaluation and only noted in any other.
-        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true }); return; }
+        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { assertRegions(stmt.test); asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true }); return; }
+        // A promise about the model at rest is judged at rest, once: an evaluation in a pose (a pose sheet, a frame of
+        // a strip, a pose's promises) judges only that pose's (round 11: a wall() promise ran again in every pose).
+        if ((!stmt.pose || stmt.pose === "rest") && posed) { assertRegions(stmt.test); return; }
         // A comparison is evaluated side by side, so a failure can say what the two numbers were.
         const t = stmt.test;
-        let value: Value, detail: string | undefined;
+        let value: Value, detail: string | undefined, margin: number | undefined;
+        const info: AssertInfo = { line: stmt.line, text: exprText(t), pose: stmt.pose };
+        options.onAssert?.("start", info);
         assertDepth++;
         witness = undefined;
         try {
@@ -1229,9 +1323,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           value = compare(t.op, a, b, t.line);
           const show = (v: Value) => (typeof v === "number" ? String(Number(v.toPrecision(4))) : typeof v === "string" ? JSON.stringify(v) : typeName(v));
           detail = `${show(a)} ${t.op} ${show(b)}`;
+          if (typeof a === "number" && typeof b === "number") margin = marginOf(t.op, a, b);
         } else value = evalExpr(t, scope);
         } finally {
           assertDepth--;
+          options.onAssert?.("end", info);
         }
         if (typeof value !== "number") throw new RuntimeError(`assert tests a number (a comparison such as width(m) < 5, or 1 and 0), not a ${typeName(value)}`, stmt.line);
         let message: string | undefined;
@@ -1240,7 +1336,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
           message = m;
         }
-        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined });
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined, margin });
         return;
       }
     }

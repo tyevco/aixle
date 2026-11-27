@@ -47,8 +47,11 @@ the inside is cut open.
    about a pose (`assert abs(at(dog, "sole_fl")[1]) < 0.01, pose=walk_a`:
    in a pose assert a step is measured where the pose puts it). `check`
    fails when one is broken and says by how much, prints every passing
-   promise with its numbers, so the next edit cannot silently undo
-   what the pictures once showed.
+   promise with its numbers (a promise in a loop once, with how many
+   times it held and the judgement nearest to failing; the failures last,
+   in full), so the next edit cannot silently undo what the pictures
+   once showed. An assert that is slow, or does not return, is named on
+   the error stream with its time.
 6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
    For a print, say what a unit is and what the printer holds (`set units
@@ -70,7 +73,7 @@ npx aixle render model.aix --quick         the sheet only, small grid, fast; --w
 npx aixle render model.aix                 sheet, views, slices, steps, turntable, OBJ, GLB, viewer, report
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
-npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises: both for a big rig's loop
+npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises while placing parts (a quick pass that spent most of its time on them says so)
 npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
 npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
