@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exprText, type Expr, type Stmt } from "../src/lang/ast.js";
 import { parse } from "../src/lang/parser.js";
-import { commentCodeWarnings, evaluate } from "../src/lang/interpreter.js";
+import { assertLine, assertPassLine, commentCodeWarnings, evaluate } from "../src/lang/interpreter.js";
+import { format } from "../src/lang/format.js";
 import { run as render } from "../src/pipeline.js";
 
 const run = (src: string) => evaluate(parse(src));
@@ -134,5 +135,102 @@ describe("a material named in a loop (round 11: the name taken on the first iter
   it("names the material once outside a loop, and leaves a named one passed on as it was", () => {
     const ev = run("m = material(\"red\", \"stripes\")\nn = m\nb = box(1) | paint(n)\n");
     expect((ev.steps.find((s) => s.name === "n")!.value as { name: string }).name).toBe("m");
+  });
+});
+
+describe("a def with a block body (round 11: a library part had no local names and no loops)", () => {
+  const BOOK = [
+    "def book(b) {",
+    "  cover = box(b.w, b.h, b.d) | paint(b.color)",
+    "  bands = empty()",
+    "  for i in range(2) { bands = bands + (box(b.w + 0.01, 0.06, 0.02) | move(0, 0.3 + i * 0.4, b.d / 2)) }",
+    "  return cover + bands",
+    "}",
+  ].join("\n");
+  const error = (src: string): string => { try { run(src); } catch (err) { return (err as Error).message; } return "no error"; };
+  it("parses to a def with its statements, the return last", () => {
+    const d = parse(BOOK).body[0];
+    expect(d.type).toBe("def");
+    if (d.type !== "def") return;
+    expect(d.body).toBeUndefined();
+    expect(d.block!.map((st) => st.type)).toEqual(["assign", "assign", "for", "return"]);
+    // The one-expression form stays as it was.
+    const e = parse("def leg(h=1) = cylinder(0.1, h)").body[0];
+    expect(e.type === "def" && e.body?.type).toBe("call");
+  });
+  it("runs its statements with names of its own and a loop, and returns the value", () => {
+    const ev = run(`${BOOK}\nnavy = book({w: 0.3, h: 2, d: 1.5, color: "navy"})\n`);
+    const v = ev.steps.find((st) => st.name === "navy")!.value as { bounds: { min: number[]; max: number[] } };
+    // The cover's 0.3 and the bands' 0.31 across; the bands stand out 0.01 in front of the cover's face.
+    expect(v.bounds.max[0] - v.bounds.min[0]).toBeCloseTo(0.31, 6);
+    expect(v.bounds.max[2]).toBeCloseTo(0.76, 6);
+    // Its names are not steps, and not seen outside the call.
+    expect(ev.steps.map((st) => st.name)).toEqual(["navy"]);
+    expect(error(`${BOOK}\nnavy = book({w: 0.3, h: 2, d: 1.5, color: "navy"})\nx = cover\n`)).toMatch(/^line 8: 'cover' is not defined/);
+  });
+  it("reads its parameters, the file's defs and constants, and keeps a step of the same name apart", () => {
+    const src = "sink = 0.04\ncover = sphere(3)\ndef wide(w) = w + 2 * sink\ndef panel(w) {\n  cover = box(wide(w), 1, 0.1)\n  return cover\n}\np = panel(1)\nshow p\n";
+    const ev = run(src);
+    const p = ev.steps.find((st) => st.name === "p")!.value as { bounds: { min: number[]; max: number[] } };
+    expect(p.bounds.max[0] - p.bounds.min[0]).toBeCloseTo(1.08, 6);
+    // The step called cover is not what the def's own cover is: it is unused, and p does not read it.
+    expect(ev.roles.has("cover")).toBe(false);
+    expect([...ev.steps.find((st) => st.name === "p")!.deps]).toEqual(["sink"]);
+    expect(ev.warnings.join("\n")).toMatch(/'cover' \(line 2\) is not part of the output/);
+  });
+  it("recurses as an expression-bodied def does: into the depth guard, since nothing can stop it", () => {
+    expect(error("def stack(n) {\n  one = box(1, 0.2, 1)\n  rest = stack(n - 1) | move(0, 0.2, 0)\n  return one + rest\n}\nt = stack(3)\n")).toMatch(/^line 3: 'stack' recursed more than 64 deep/);
+    expect(error("def stack(n) = box(1) + stack(n - 1)\nt = stack(3)\n")).toMatch(/^line 1: 'stack' recursed more than 64 deep/);
+  });
+  it("judges an assert in its body on every call, naming the call's line", () => {
+    const ev = run(`def book(b) {\n  cover = box(b.w, b.h, b.d)\n  assert width(cover) < 0.5, "a book is thin"\n  return cover\n}\na = book({w: 0.3, h: 2, d: 1})\nb = book({w: 0.6, h: 2, d: 1})\n`);
+    expect(ev.asserts.map((a) => [a.line, a.call?.line, a.passed])).toEqual([[3, 6, true], [3, 7, false]]);
+    expect(assertLine(ev.asserts[1])).toBe("assert (line 3, in book() called on line 7) fails: width(cover) < 0.5 is 0.6 < 0.5: a book is thin");
+    expect(assertPassLine(ev.asserts[0])).toBe("assert (line 3, in book() called on line 6) holds: width(cover) < 0.5 is 0.3 < 0.5: a book is thin");
+  });
+  it("says what is wrong with a body that does not end with its return, or holds what belongs at the top", () => {
+    expect(error("def f(x) {\n  a = box(x)\n  a + sphere(1)\n}\n")).toBe("line 3: def f (line 1): its body ends on a value with no return; write return a + sphere(1)");
+    expect(error("def f(x) {\n  a = box(x)\n}\n")).toBe("line 2: def f (line 1): its body ends without a return; end it with return and the value the def makes (return a)");
+    expect(error("def f(x) {\n  return box(x)\n  a = 1\n}\n")).toBe("line 3: def f (line 1): the return on line 2 must end the body, but line 3 follows it");
+    expect(error("def f(x) {\n  for i in range(2) {\n    return box(i)\n  }\n  return box(x)\n}\n")).toMatch(/^line 3: def f \(line 1\): the return on line 3 is inside a for loop/);
+    for (const kw of ["show box(x)", "set grid 64", "use \"std/hardware\"", "def g(y) = y", "scene box(x)"])
+      expect(error(`def f(x) {\n  ${kw}\n  return box(x)\n}\n`)).toMatch(new RegExp(`^line 2: def f \\(line 1\\): ${kw.split(" ")[0]} belongs at the top level`));
+    expect(error("def f(x) {\n  a = box(x)\n  box(2)\n  return a\n}\n")).toBe("line 3: def f (line 1): line 3 computes a value and drops it; a def's body names its values (part = ...) and ends with return");
+    expect(error("return box(1)\n")).toMatch(/^line 1: return ends a def's block body/);
+    expect(error("def f(x) {\n  return box(x)\n")).toBe("line 1: the body of def f opened on line 1 is never closed: missing '}'");
+    expect(error("def f(x) {w: 1}\n")).toMatch(/a body in braces is statements; for a def that makes a record, write def f\(\.\.\.\) = \{w: \.\.\.\}/);
+  });
+  it("is laid out by fmt, the body two in, and the layout is idempotent and keeps the meaning", () => {
+    const messy = "def book(b) {\ncover = box(b.w,b.h, b.d)|paint(b.color)\n    bands = empty()\n for i in range(2) {\nbands = bands + box(1)\n}\n      return(cover + bands)\n  }\ndef f(x) {  return box(x)  }\n";
+    const once = format(messy);
+    expect(once).toBe("def book(b) {\n  cover = box(b.w,b.h, b.d) | paint(b.color)\n  bands = empty()\n  for i in range(2) {\n    bands = bands + box(1)\n  }\n  return (cover + bands)\n}\ndef f(x) { return box(x) }\n");
+    expect(format(once)).toBe(once);
+    const meaning = (src: string) => JSON.stringify(parse(src).body, (k, v) => (k === "line" ? undefined : v));
+    expect(meaning(once)).toBe(meaning(messy));
+  });
+});
+
+describe("a library's def with a block body", () => {
+  const libs: Record<string, string> = {
+    "books.aix": [
+      "# books",
+      "book_default = {w: 0.35, h: 2.2, d: 1.7}",
+      "# A book standing on y = 0.",
+      "def book(b) {",
+      "  cover = box(b.w, b.h, b.d) | move(0, b.h / 2, 0)",
+      "  assert tall(cover) > 0.5, \"a book stands at least half a unit\"",
+      "  return cover",
+      "}",
+    ].join("\n"),
+  };
+  const resolve = (path: string) => ({ source: libs[path] ?? libs[`${path}.aix`], file: path });
+  const ev = (src: string) => evaluate(parse(src), { resolveModule: resolve });
+  it("says an assert in its body is the library's line, called from the program's", () => {
+    const e = ev('use "books"\na = books.book({w: 0.3, h: 0.3, d: 1.5})\nb = books.book(books.book_default)\nshow a + b\n');
+    expect(e.asserts.filter((a) => !a.passed).map(assertLine)).toEqual(["books: assert (line 6, in book() called on line 2) fails: tall(cover) > 0.5 is 0.3 > 0.5: a book stands at least half a unit"]);
+  });
+  it("leaves a caller's step that shares a parameter's name out of what a call reads (a library's names are its own)", () => {
+    const e = ev('use "books"\na = books.book({w: 0.3, h: 2, d: 1.5})\nb = books.book(books.book_default) | move(1, 0, 0)\nshow a + b\n');
+    expect([...e.steps.find((st) => st.name === "a")!.deps]).not.toContain("b");
   });
 });

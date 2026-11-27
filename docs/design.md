@@ -631,6 +631,23 @@ side-effects. A program is a straight-line construction with loops and
 parametric parts. That is enough for what has been tried, and it keeps every
 step renderable on its own.
 
+A def's body was one expression until round 11, whose bookcase library
+needed a book's width, height and depth a dozen times with no name for
+an intermediate and a case's shelves as a loop, and split itself into a
+helper def per sub-part. A block body (`def book(b) { cover = ...
+return cover + bands }`) is the same straight-line construction one
+level down: assignments, loops and promises in order, then one
+`return`, which must be last, so a def still makes one value from its
+arguments with no early exit and no branch. Its names are the call's
+own, like its parameters, so they never become steps: a library's part
+called thirty times would otherwise fill the steps sheet with its
+cover thirty times, and a caller's step that happened to share a name
+would read as a part of every book. (The same rule fixed an older leak:
+a def's parameter, or a library's constant, read in a call used to be
+recorded as a read of the caller's step of that name.) An `assert` in a
+block is judged per call, as one in a loop is per iteration, and names
+the call's line, since the def's line is the same for every verdict.
+
 ## Records
 
 A part with five numbers was a call with five positions, and the next

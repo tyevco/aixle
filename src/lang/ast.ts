@@ -33,7 +33,14 @@ export interface Field { type: "field"; target: Expr; name: string; line: number
 export type Expr = Num | Str | Ident | List | Unary | Binary | Call | Index | RecordExpr | Field;
 
 export interface Assign { type: "assign"; name: string; value: Expr; line: number }
-export interface Def { type: "def"; name: string; params: { name: string; default?: Expr }[]; body: Expr; line: number }
+/**
+ * `def name(a, b=2) = expr`, or a block body: `def name(a) { ... return expr }`, whose statements (assignments,
+ * for loops, asserts) name the def's own intermediates and whose last statement is the return. One of `body` and
+ * `block` is set.
+ */
+export interface Def { type: "def"; name: string; params: { name: string; default?: Expr }[]; body?: Expr; block?: Stmt[]; line: number }
+/** `return expr`: the last statement of a def's block body, its value. */
+export interface Return { type: "return"; value: Expr; line: number }
 export interface For { type: "for"; name: string; iterable: Expr; body: Stmt[]; line: number }
 export interface Show { type: "show"; values: Expr[]; line: number }
 export interface Scene { type: "scene"; values: Expr[]; line: number }
@@ -45,7 +52,7 @@ export interface Use { type: "use"; path: string; alias?: string; line: number }
 /** `assert test, "message", pose=name`: a promise the model makes about itself, checked at rest or in the named pose. */
 export interface Assert { type: "assert"; test: Expr; message?: Expr; pose?: string; line: number }
 
-export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt | Use | Assert;
+export type Stmt = Assign | Def | For | Show | Scene | Set | ExprStmt | Use | Assert | Return;
 
 export interface Program {
   body: Stmt[];

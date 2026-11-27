@@ -110,6 +110,7 @@ Reference: `docs/reference.md` (every function, generated from the code),
 ```
 name = expr                      # a step
 def part(a, b=1) = expr          # a parametric part
+def part(a) { x = ...  return x } # one with names and loops of its own, ending with return
 for i in range(6) { ... }        # loops; range(a, b), range(a, b, step), [1, 2.5]
 seat = {w: 0.9, h: 0.45}         # a record: seat.h, legs[0].x, {...seat, h: 0.6} for a changed copy
 show name                        # the output (default: the last shape)

@@ -1,5 +1,5 @@
 /** Runtime values and the shape of a builtin's signature (which also generates the reference). */
-import type { Expr } from "./ast.js";
+import type { Expr, Stmt } from "./ast.js";
 import type { Material, Shape2, Shape3 } from "../sdf/types.js";
 import { isCurve, type Curve } from "../sdf/curves.js";
 import type { MeshCache } from "../mesh/pieces.js";
@@ -8,7 +8,11 @@ export interface UserFn {
   kind: "fn";
   name: string;
   params: { name: string; default?: Expr }[];
-  body: Expr;
+  /** The expression a `def name(...) = expr` makes; a block body has `block` instead, ending with its return. */
+  body?: Expr;
+  block?: Stmt[];
+  /** The library the def is from, as its `use` wrote it, for an assert in its body; none for the program's own. */
+  file?: string;
   /** The top-level scope of the program or library that defined it, so a library's def sees its own helpers, not the caller's names. Opaque here; the interpreter owns it. */
   closure?: unknown;
 }

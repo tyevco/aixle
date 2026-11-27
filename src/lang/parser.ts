@@ -3,6 +3,7 @@
  *
  *   program   := statement*
  *   statement := 'def' NAME '(' params ')' '=' expr
+ *              | 'def' NAME '(' params ')' '{' body* 'return' expr '}'
  *              | 'for' NAME 'in' expr '{' statement* '}'
  *              | 'show' expr (',' expr)*
  *              | 'scene' expr (',' expr)*
@@ -20,16 +21,25 @@
  *   primary    number, string, name, call, list, record, ( expr ), then any [i] or .name
  *
  *   record    := '{' (NAME ':' expr | '...' expr) (',' ...)* ','? '}'
+ *
+ * A def's block body holds assignments, for loops and asserts (a loop's body inside it the same), and ends with
+ * its return; show, scene, set, use, def and a bare expression belong at the top level.
  */
 import { COMPARE_OPS, exprText, type Arg, type CompareOp, type Expr, type Program, type RecordEntry, type Stmt } from "./ast.js";
 import { SyntaxError, tokenize, type Token, type TrailingComment } from "./lexer.js";
 
-const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert"]);
+const KEYWORDS = new Set(["def", "for", "in", "show", "scene", "set", "use", "assert", "return"]);
+/** The statements that belong at the top level of a program and never in a def's block body. */
+const TOP_ONLY = new Set(["show", "scene", "set", "use", "def"]);
 
 class Parser {
   private pos = 0;
 
   private readonly warnings: string[] = [];
+
+  /** The def whose block body is being parsed, and how many loops deep in it: where return and the rest may go. */
+  private inDef?: { name: string; line: number };
+  private loopsInDef = 0;
 
   constructor(private readonly tokens: Token[]) {}
 
@@ -79,6 +89,14 @@ class Parser {
     const t = this.peek();
     if (t.type === "ident" && KEYWORDS.has(t.value) && this.peek(1).type === "op" && this.peek(1).value === "=")
       throw new SyntaxError(`'${t.value}' is a keyword and cannot be a name; call it ${t.value}_ or something else`, t.line);
+    if (t.type === "ident" && t.value === "return") {
+      if (this.inDef === undefined) throw new SyntaxError(`return ends a def's block body, def f(x) { ... return value }; a program's output is shown with show`, t.line);
+      if (this.loopsInDef > 0) throw new SyntaxError(`def ${this.inDef.name} (line ${this.inDef.line}): the return on line ${t.line} is inside a for loop; a def returns once, at the end of its body: build the value in the loop and return it after`, t.line);
+      this.next();
+      return { type: "return", value: this.expr(), line: t.line };
+    }
+    if (this.inDef !== undefined && t.type === "ident" && TOP_ONLY.has(t.value))
+      throw new SyntaxError(`def ${this.inDef.name} (line ${this.inDef.line}): ${t.value} belongs at the top level, not in a def's body, which holds assignments, for loops and asserts and ends with return`, t.line);
     if (t.type === "ident" && t.value === "def") return this.def();
     if (t.type === "ident" && t.value === "for") return this.for();
     if (t.type === "ident" && t.value === "show") {
@@ -175,8 +193,54 @@ class Parser {
       else if (!this.atOp(")")) throw new SyntaxError(`expected ',' or ')' in parameters of ${name}`, this.peek().line);
     }
     this.expectOp(")");
-    this.expectOp("=");
+    if (this.atOp("{")) return { type: "def", name, params, block: this.defBlock(name, line), line };
+    if (!this.atOp("=")) throw new SyntaxError(`expected '=' and an expression, or '{' and a body, after def ${name}(...), but found ${describe(this.peek())}`, this.peek().line);
+    this.next();
     return { type: "def", name, params, body: this.expr(), line };
+  }
+
+  /**
+   * `{ ... return expr }`: the def's own statements, then its return, which must be last. A body that ends on a bare
+   * value or with no return at all is the likely slip, so the error says which line and what to write.
+   */
+  private defBlock(name: string, line: number): Stmt[] {
+    const open = this.next();
+    this.skipNewlines();
+    // `def f(x) {w: 1}` is a record the author meant as the value.
+    if (this.at("ident") && this.peek(1).type === "op" && this.peek(1).value === ":")
+      throw new SyntaxError(`def ${name}: a body in braces is statements; for a def that makes a record, write def ${name}(...) = {${this.peek().value}: ...}`, this.peek().line);
+    const outer = this.inDef, outerLoops = this.loopsInDef;
+    this.inDef = { name, line };
+    this.loopsInDef = 0;
+    const block: Stmt[] = [];
+    try {
+      while (!this.atOp("}")) {
+        if (this.at("eof")) throw new SyntaxError(`the body of def ${name} opened on line ${open.line} is never closed: missing '}'`, open.line);
+        block.push(this.statement());
+        this.endStatement();
+      }
+    } finally {
+      this.inDef = outer;
+      this.loopsInDef = outerLoops;
+    }
+    this.expectOp("}");
+    // A bare value anywhere computes and drops it; at the end it is a return without the word.
+    const bare = (body: Stmt[]) => {
+      for (const st of body) {
+        if (st.type === "expr" && st !== block[block.length - 1])
+          throw new SyntaxError(`def ${name} (line ${line}): line ${st.line} computes a value and drops it; a def's body names its values (part = ...) and ends with return`, st.line);
+        if (st.type === "for") bare(st.body);
+      }
+    };
+    bare(block);
+    const last = block[block.length - 1];
+    const ret = block.findIndex((st) => st.type === "return");
+    if (ret >= 0 && ret < block.length - 1)
+      throw new SyntaxError(`def ${name} (line ${line}): the return on line ${block[ret].line} must end the body, but line ${block[ret + 1].line} follows it`, block[ret + 1].line);
+    if (!last) throw new SyntaxError(`def ${name} (line ${line}): its body is empty; end it with return and the value the def makes`, open.line);
+    if (last.type === "expr") throw new SyntaxError(`def ${name} (line ${line}): its body ends on a value with no return; write return ${exprText(last.value)}`, last.line);
+    if (last.type !== "return") throw new SyntaxError(`def ${name} (line ${line}): its body ends without a return; end it with return and the value the def makes (return ${last.type === "assign" ? last.name : "part"})`, last.line);
+    return block;
   }
 
   private for(): Stmt {
@@ -188,10 +252,15 @@ class Parser {
     this.expectOp("{");
     this.skipNewlines();
     const body: Stmt[] = [];
-    while (!this.atOp("}")) {
-      if (this.at("eof")) throw new SyntaxError(`'for' body opened on line ${line} is never closed`, line);
-      body.push(this.statement());
-      this.endStatement();
+    if (this.inDef !== undefined) this.loopsInDef++;
+    try {
+      while (!this.atOp("}")) {
+        if (this.at("eof")) throw new SyntaxError(`'for' body opened on line ${line} is never closed`, line);
+        body.push(this.statement());
+        this.endStatement();
+      }
+    } finally {
+      if (this.inDef !== undefined) this.loopsInDef--;
     }
     this.expectOp("}");
     return { type: "for", name, iterable, body, line };

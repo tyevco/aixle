@@ -30,6 +30,7 @@ This document is the language around them.
 ```
 name = expr                 # a step
 def name(a, b=2) = expr     # a parametric part; call it like a builtin
+def name(a) { ... return expr }   # a part with names and loops of its own
 for i in range(5) { ... }   # repeat the block; i is 0..4
 show a, b                   # output these (several are unioned)
 set grid 200                # a render setting from inside the file
@@ -37,16 +38,54 @@ assert width(m) < 5, "fits"  # a promise the model makes; check reports a failur
 # a comment, or // a comment
 ```
 
-A `def` body is one expression; it can span lines. A statement continues
-onto the next line when the line ends with an operator or `=`, or the next
-line starts with `+ - * / | &`; a blank line always ends a statement.
-Inside parentheses line breaks never matter.
+A `def` body is one expression, which can span lines, or a block in
+braces. A statement continues onto the next line when the line ends with
+an operator or `=`, or the next line starts with `+ - * / | &`; a blank
+line always ends a statement. Inside parentheses line breaks never
+matter.
 
 ```
 def chair() =
   box(0.9, 0.08, 0.9) | move(0, 0.9, 0)
   + (leg(0.9) | move(-0.38, 0, -0.38) | grid(2, 2, 0.76, 0.76))
 ```
+
+A block body is for a part that needs its own intermediates or a loop:
+the book's cover, its pages and its bands all read `b.w`, `b.h` and
+`b.d`, and a case's shelves are a `for`:
+
+```
+def book(b) {
+  cover = box(b.w, b.h, b.d) | paint(b.color)
+  bands = empty()
+  for i in range(2) {
+    bands = bands + (box(b.w + 0.01, 0.06, 0.02) | move(0, 0.3 + i * 0.4, b.d / 2))
+  }
+  assert width(cover) < 1, "a book is thinner than a unit"
+  return cover + bands
+}
+```
+
+The block holds assignments, `for` loops and `assert`s, and ends with
+`return` and the value the def makes; `show`, `scene`, `set`, `use` and
+`def` belong at the top level, and a line that computes a value and
+assigns it to nothing is an error, as is a body whose last line is not
+the `return` (`def book (line 3): its body ends on a value with no
+return; write return cover + bands`) or a `return` inside a loop. The
+names it assigns are the def's own, as its parameters are: they are not
+steps (no thumbnail, no callout, no size in `check`), they are gone when
+the call returns, and a step elsewhere with the same name is a different
+thing. Otherwise a block sees what an expression body sees: its
+parameters, and the file's (or the library's) defs and constants. An
+`assert` in a block is judged on every call, and `check` says which call
+each verdict is for: `assert (line 9, in book() called on line 40)
+holds: ...`, the call's line being the program's statement that made it
+(in a library's def the assert's own line is the library's, and the
+line says so: `shelf_lib: assert (line 9, ...)`). A material assigned
+to a name in a block takes that name (see Materials). A def calls
+itself as any def does, up to the depth guard; with no conditional, a
+def that calls itself always reaches it. `aixle fmt` puts the body two
+in, as a loop's.
 
 Loops can rebuild the same name; the step keeps its last value:
 
@@ -426,7 +465,10 @@ costs the caller nothing); its materials and numbers are exported with
 its defs. To write one, put `def`s in a file with a comment line above
 each, a comment block at the top saying the conventions (where the
 origin is, which way is front, what the units are), and a `show` of a
-plate of every part so `aixle render` on the file is its test. `check`
+plate of every part so `aixle render` on the file is its test. A part
+that needs intermediates or a loop is a def with a block body (see
+Statements), so a library is one def per part rather than a helper per
+sub-part. `check`
 lists what a program uses and `explain` ends with it. A part's slats,
 rods and walls carry their thickness into the scene, so `check` warns
 when a used part has a member thinner than the scene's cell (a bench's
