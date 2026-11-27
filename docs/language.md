@@ -774,9 +774,11 @@ What the lights and the skies can and cannot do, measured in round 9:
   gets no warning). `check` runs the same test before any render, in a
   few tenths of a second a camera: the focus alone is meshed coarsely and a ray is
   marched from each of its points towards the camera through the field,
-  where the render reads a depth buffer of the model's mesh, so its
-  share can come out a few points lower than the render's (a ring of
-  stones round a fire, 57% against 63). Under its `Cameras:` line,
+  where the render reads a coarse depth buffer of the model's mesh, so
+  the two shares can differ by a few points, and by fifteen or so on a
+  focus that hides much of itself (a ring of stones round a fire, 57%
+  against the render's 63; a window's interior behind its pane, 46
+  against 30). Under its `Cameras:` line,
   each camera with a focus gets how much of it is hidden from its angle
   and, past 15%, the least from seven other azimuths 45 degrees apart
   (`into_bowl: 52% of paddle hidden behind the rest of the model from
