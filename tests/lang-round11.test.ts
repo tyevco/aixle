@@ -291,6 +291,8 @@ describe("a loop's own names and named() (round 11: BK on the steps sheet, a loo
     expect(ev.steps.map((st) => st.name)).toEqual(["stud", "books", "n", "book_0", "book_1", "book_2", "probe"]);
     const b1 = ev.steps.find((st) => st.name === "book_1")!;
     expect(b1.line).toBe(9);
+    // It is made of bk; the i its name is built from is not one of its parts.
+    expect([...b1.deps]).toEqual(["bk"]);
     expect((b1.value as { bounds: { min: number[] } }).bounds.min[0]).toBeCloseTo(3.85, 6);
     expect(ev.roles.get("book_1")).toBe("part");
     expect(ev.warnings).toEqual([]);

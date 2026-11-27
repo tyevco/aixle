@@ -947,7 +947,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     reads = here.deps;
     currentStep = here;
     let values: { name?: string; value: Value }[];
-    try { values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) })); } finally { reads = outerReads; currentStep = outerStep; }
+    // The step is made of its value; what the name reads (the n of "book_" + n, a counter) is not an ingredient.
+    const nameArg = args.find((a) => a.name === "name") ?? args.find((a) => !a.name);
+    try {
+      values = args.map((a) => {
+        reads = a === nameArg ? new Set() : here.deps;
+        return { name: a.name, value: evalExpr(a.value, scope) };
+      });
+    } finally { reads = outerReads; currentStep = outerStep; }
     const value = callBuiltin(builtin, values, line);
     const name = (values.find((v) => v.name === "name") ?? values.find((v) => !v.name))!.value as string;
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new RuntimeError(`named(): "${name}" is not a name; a step's name is letters, digits and _, as "book_" + n makes`, line);
