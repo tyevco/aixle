@@ -1585,24 +1585,34 @@ support with supports switched off, and past 16 mm PrusaSlicer's own
 check of such a print adds a support point to it; Hubs gives 5 mm as
 the span with no sag at all. Each connected ceiling is crossed in one
 direction, as a slicer lays a bridge (PrusaSlicer picks the direction
-whose lines are anchored at both ends over the most length), so an
-L-shaped ceiling is crossed on the diagonal and a ring of roof between
-a post and a wall by chords, the chords past 16 mm needing support. A
-slope, a dome, the top of a horizontal hole and a cantilever are not
-bridges: each layer of them is a ledge on the one below. The row gives
+whose lines are anchored at both ends over the most length, however
+long, and only then does the span say which lines hold), so an L-shaped
+ceiling is crossed on the diagonal, a ring of roof between a post and a
+wall by chords, the chords past 16 mm needing support, and a bay walled
+on three sides the short way, so that 18 wide none of it is bridged. A
+slope closed at both ends along its level, a pitched roof between its
+gables, is a bridge too: each layer of it is a straight line landing on
+the walls at both ends, which PrusaSlicer's "Don't support bridges"
+leaves unsupported. A dome, a cantilever, and a slope or the top of a
+horizontal hole open along its level are not bridges: each layer of them
+is a ledge on the one below. The row gives
 the bridged volume apart, since a slicer with supports on fills bridges
 too unless told not to (PrusaSlicer's own printer profiles turn its
 "Don't support bridges" off). The span is in millimetres through `set
 units`; without it a unit is read as a millimetre, as the STL is. An
 island is a point lower than all the surface around it, off the plate:
-a cone hanging tip down, a keel, a piece floating free. Its first layer
+a cone hanging tip down, a keel whose ends hang free, a piece floating
+free. Its first layer
 prints in the air whatever its faces' angles, so it needs a column that
 no face asks for, and the row names the first three with their steps and
 their columns' heights (`report.json` has up to fifty); `islands()`
 counts them. An island is the lowest point of a part of the surface
 that hangs more than half a cell clear of what is lower before joining
-it, facing down, and not over faces with support of their own (a ball's
-underside has its own columns). The thinnest wall is measured by a
+it, facing down with the solid above it, and not over faces with
+support of their own (a ball's underside has its own columns). A keel
+that runs level into a wall, its faces steeper than 45°, is a line in
+the air rather than a point and neither count catches it: tilt it down
+a few degrees away from the wall, and its far end is an island. The thinnest wall is measured by a
 ray from every vertex inward to the far side of the solid, through the
 field, so a wall under a cell is still read at its own thickness, and a
 cut's walls (a flute through a vase's side, an engraving's floor) are

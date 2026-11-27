@@ -162,6 +162,11 @@ describe("the meshed queries' default cell (round 11)", () => {
     const bowl = run('set grid 200\nbase = box(3.66, 0.4, 2) | move(0, 0.2, 0)\nbowl = cylinder(1.34, 1.5) - (cylinder(1.3, 1.5) | move(0, 0.05, 0))\nshow base + (bowl | move(0, 1.2, 0))\nassert wall(bowl) == wall(bowl, 147)');
     expect(bowl.asserts[0].passed).toBe(true);
   });
+  it("is the model's cell whichever way the shape is passed, and with only other parameters named", () => {
+    // A slab on posts at grid 200: the shape named, or a span named beside it, still meshes at the model's 0.24 cell.
+    const ev = run('set units mm\nset grid 200\na = box(10, 20, 10) | move(-9, 10, 0)\nb = box(10, 20, 10) | move(9, 10, 0)\nslab = box(48, 3, 10) | move(0, 21.5, 0)\nm = a + b + slab\nshow m\nassert support(shape=m) == support(m)\nassert support(m, span=5) == support(m, 200, 5)\nassert support(shape=m, span=5) == support(m, 200, 5)\nassert islands(shape=m) == islands(m, 200)\nassert overhang(shape=m) == overhang(m, 200)');
+    expect(ev.asserts.map((a) => [a.passed, a.detail])).toEqual(ev.asserts.map((a) => [true, a.detail]));
+  });
 });
 
 describe("support() (round 11)", () => {

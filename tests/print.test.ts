@@ -109,10 +109,26 @@ describe("bridges (roadmap 20)", () => {
     const dome = O.difference(O.move(P.box(26, 18, 26), 0, 9, 0), O.union([O.move(P.cylinder(10, 6), 0, 3, 0), O.move(P.sphere(10), 0, 6, 0)]));
     expect(split(dome, 16, 96).bridged).toBe(0);
   });
+  it("bridges a slope closed at both ends along its level, as PrusaSlicer's bridging perimeters, and not one open there", () => {
+    // A ceiling falling at 30 degrees (60 past the 45 rule) over a channel 10 wide: each layer of it is a straight line
+    // from side wall to side wall, which PrusaSlicer's remove_bridges_from_contacts takes as a bridge (a straight
+    // overhanging perimeter that lands on the layer below at both ends). Without the side walls the lines land nowhere.
+    const under = O.intersect(O.move(P.box(10, 40, 34), 0, 20, 0), O.rotate(P.box(10, 40, 60), 30, 0, 0));
+    const walled = O.difference(O.move(P.box(14, 30, 30), 0, 15, 0), O.union([O.move(P.box(10, 8, 34), 0, 4, 0), under]));
+    const w = split(walled, 16, 96);
+    expect(w.volume).toBeLessThan(w.bridged * 0.01);
+    expect(w.longestBridge).toBeLessThan(11);
+    const open = O.intersect(walled, O.move(P.box(10, 30, 30), 0, 15, 0)); // the walls cut away: a wedge in the air
+    const o = split(open, 16, 96);
+    expect(o.bridged).toBe(0);
+    expect(o.volume).toBeGreaterThan(1000);
+  });
   it("lays each ceiling in one direction, as PrusaSlicer's bridge detector does", () => {
     // An L-shaped room under a flat roof, arms 8 wide and 30 long: the detector, emulated on the roof's layer, picks the
-    // diagonal, whose longest line is 8√2 = 11.3 (along an arm it would be 30). At 16 all of it is bridged on that line;
-    // at 10 one arm is, the long way of the other being too far.
+    // diagonal, whose longest line is 8√2 = 11.3 (along an arm it would be 30). At 16 all of it is bridged on that line.
+    // The slicer picks the direction without knowing the span, so at 10 it still lays the diagonal, 11.3 long: only the
+    // corners at the arms' ends, where the diagonal is cut short, are bridged (12%), where one arm (30 to 60%) would be if
+    // each ceiling took whichever axis spanned the most within the span.
     const room = O.union([O.move(P.box(30, 12, 8), 15, 6, 4), O.move(P.box(8, 12, 30), 4, 6, 15)]);
     const L = O.difference(O.move(P.box(34, 14, 34), 15, 7, 15), room);
     const at16 = split(L, 16, 128);
@@ -120,14 +136,28 @@ describe("bridges (roadmap 20)", () => {
     expect(at16.longestBridge).toBeGreaterThan(10.5);
     expect(at16.longestBridge).toBeLessThan(12.5);
     const at10 = split(L, 10, 128);
-    expect(at10.bridged / (at10.bridged + at10.volume)).toBeGreaterThan(0.3);
-    expect(at10.bridged / (at10.bridged + at10.volume)).toBeLessThan(0.6);
+    expect(at10.bridged / (at10.bridged + at10.volume)).toBeGreaterThan(0.05);
+    expect(at10.bridged / (at10.bridged + at10.volume)).toBeLessThan(0.2);
+    expect(at10.longestBridge).toBeLessThanOrEqual(10);
     // A ring of roof from radius 3 to 10, between a post and a wall: lines in one direction run as chords up to
     // 2√(10² - 3²) = 19 past the post, so the share past 16 needs support (the faces 4 mm across, met radially, would not).
     const ring = O.difference(O.move(P.cylinder(12, 14), 0, 7, 0), O.difference(O.move(P.cylinder(10, 12), 0, 6, 0), O.move(P.cylinder(3, 12), 0, 6, 0)));
     const r = split(ring, 16, 128);
     expect(r.bridged).toBeGreaterThan(0);
     expect(r.volume).toBeGreaterThan(r.bridged * 0.2);
+  });
+  it("takes the direction the slicer would whatever the span: the one anchored over the most, not the most within it", () => {
+    // A bay under a roof, walled on both long sides and the back, open at the front: PrusaSlicer's detector, emulated on
+    // the roof's layer, crosses it the short way (1235 mm of anchored line against 849 on a diagonal, whose lines run
+    // out of the open front). 14 wide, every line is within the span; 18 wide, every line is 18.4 long and none is,
+    // though the diagonals cut short in the back corners are.
+    const bay = (w: number) => O.difference(O.move(P.box(w + 4, 14, 32), 0, 7, -1), O.move(P.box(w, 12, 32), 0, 6, 1));
+    const narrow = split(bay(14), 16, 128);
+    expect(narrow.volume).toBe(0);
+    expect(narrow.longestBridge).toBeLessThan(15);
+    const wide = split(bay(18), 16, 128);
+    expect(wide.bridged).toBe(0);
+    expect(wide.volume).toBeGreaterThan(18 * 30 * 12 * 0.9);
   });
 });
 
@@ -152,11 +182,41 @@ describe("islands (roadmap 20)", () => {
       expect(s.islands[0].height).toBeGreaterThan(26);
     }
   });
+  it("finds a sharp tip whose last few faces the mesher folds, by the faces round them facing down", () => {
+    // Cones at 75 and 80 degrees sunk 1 into the wall: at these grids dual contouring ends the tip on three faces whose
+    // normals sum to face up (+0.10 to +1.0 of their area), though the faces round them face down (-0.23 to -0.35).
+    const tip = (deg: number) => {
+      const h = 5 * Math.tan((deg * Math.PI) / 180);
+      return { shape: O.union([wall, O.move(O.rotate(P.cone(5, 0, h), 180, 0, 0), 0, 36 - h / 2, 4)]), y: 36 - h };
+    };
+    for (const [deg, res] of [[75, 96], [75, 112], [80, 128], [80, 160]]) {
+      const { shape, y } = tip(deg);
+      const s = islandsOf(shape, res);
+      expect(s.islands.length).toBe(1);
+      expect(Math.abs(s.islands[0].at[1] - y)).toBeLessThan(1.5);
+    }
+  });
+  it("finds a keel whose ends hang free, and says nothing of one running level into a wall, a line rather than a point", () => {
+    // A triangular keel, edge down, its faces 60 degrees from the horizontal: under a slab between posts, ends free.
+    const keel = (r: number, len: number) => O.rotate(O.rotate(P.prism(3, r, len), 90, 0, 0), 0, 0, 180);
+    const posts = O.union([O.move(P.box(6, 20, 10), -12, 10, 0), O.move(P.box(6, 20, 10), 12, 10, 0), O.move(P.box(30, 3, 10), 0, 21.5, 0)]);
+    expect(islandsOf(O.union([posts, O.move(O.rotate(keel(3, 12), 0, 90, 0), 0, 20.5, 0)]), 128).islands.length).toBe(1);
+    // Off a wall, level, it joins the wall at its own height: no face past 45 and no point, a known miss. Tilted 5
+    // degrees down away from the wall its far end is the island.
+    const off = O.move(keel(3, 15), 0, 25, 7.5);
+    expect(islandsOf(O.union([wall, off]), 128).islands).toEqual([]);
+    const tilted = islandsOf(O.union([wall, O.rotate(off, 5, 0, 0)]), 128).islands;
+    expect(tilted.length).toBe(1);
+    expect(tilted[0].at[2]).toBeGreaterThan(13);
+  });
   it("counts no island where faces already stand on support, nor on a shape standing on the plate", () => {
     // A ball hanging off a wall on an arm: its underside faces down past 45 degrees and has its own columns.
     expect(islandsOf(O.union([wall, O.move(P.box(2, 2, 10), 0, 30, 5), O.move(P.sphere(4), 0, 26, 10)]), 128).islands).toEqual([]);
     expect(islandsOf(O.union([O.move(P.cylinder(2, 20), 0, 10, 0), O.move(P.sphere(8), 0, 26, 0)]), 128).islands).toEqual([]);
     expect(islandsOf(wall, 128).islands).toEqual([]);
+    // A cup on a post: its inner floor is a minimum 10 over the plate, but it faces up, the solid under it.
+    const cup = O.union([O.move(P.cylinder(1.5, 10), 0, 5, 0), O.difference(O.move(P.cylinder(6, 8), 0, 14, 0), O.move(P.cylinder(5, 8), 0, 16, 0))]);
+    expect(islandsOf(cup, 96).islands).toEqual([]);
   });
   it("notes a tallest column standing on a sliver at a crease", () => {
     // Two faces under a cell in plan facing down beside a wall's corner, under a field that faces down there too.

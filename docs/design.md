@@ -708,11 +708,25 @@ would be 30. A ring of roof from 6 to 10 mm between a post and a wall
 ties at every angle, and its longest line is the 16.4 mm chord past the
 post, not the 4 mm across the ring; from 3 to 10 the chords reach 19.3.
 So each connected, level ceiling here is crossed along one of four axes
-45 degrees apart, the one spanning the most area within the span, ties to
-the shorter longest line: the L reads all bridged at 16 with its longest
-line 11.4, the 6-to-10 ring 2380 of 2402 mm³ bridged (the rest at the
-chords' ends), and the 3-to-10 ring 1305 of 3421 mm³ still needing
-support, where the per-face rule read both rings bridged radially.
+45 degrees apart: the one whose lines are anchored at both ends under
+the most of it, at any length, ties within a hundredth of its area going
+to the shorter longest line; only then does the span say which faces are
+bridged. The detector does not know the span, so the span cannot choose
+the direction. A bay roofed over, walled on both sides and at the back,
+18 wide and 30 deep, is crossed the short way (1235 mm of anchored line
+against 849 on a diagonal, whose lines run out of the open front), every
+line 18.4 mm, and none of it is bridged; taking instead the axis that
+spans the most within 16 mm read 754 of 6460 mm³ bridged, on a diagonal
+cut short in the back corners. The L at a 10 mm span keeps its diagonal
+and bridges only the corners at the arms' ends (12%), not one arm (30 to
+60% by the other rule). At 16 the L reads all bridged with its longest
+line 11.7, the 6-to-10 ring 2361 of 2398 mm³ bridged (the rest at the
+chords' ends), and the 3-to-10 ring 1311 of 3418 mm³ still needing
+support, where the per-face rule read both rings bridged radially. A
+closed room ties on all four axes and is crossed the short way, so 18 by
+18 none of it is bridged; the detector itself picks 60 degrees there, its
+coverage spread over the angles only 7 mm of 744, within the noise of
+where its lines fall.
 
 A face is spanned along a line when, half a cell under the ceiling's own
 height (one Newton step in the field from the samples that tested its
@@ -721,10 +735,24 @@ a cell off it), the line runs under the same ceiling, solid within a
 third of a cell above it the whole way, to solid that stands on
 something: solid a cell lower, straight down or a cell further on (a
 wall, a post, a wall leaning out up to 45 degrees). Without those two
-tests the prototype bridged a dome, a pitched roof and the top of a
-horizontal hole on their own undersides, which slope down to meet the
-line; each layer of those is a ledge on the one below, and the 45-degree
-rule already had them right. It also bridged all of round 11's stand's
+tests the prototype bridged a dome, a pitched roof open at its ends and
+the top of a horizontal hole on their own undersides, which slope down
+to meet the line; each layer of those is a ledge on the one below, and
+the 45-degree rule already had them right. A slope closed at both ends
+along its level is another matter: along that level its lines run under
+the same ceiling to the walls, so a pitched roof between gables 10 or 14
+apart, a ceiling falling at 30 degrees across a channel 10 wide and a
+closed horizontal cavity 12 long read bridged. PrusaSlicer agrees: its
+`remove_bridges_from_contacts` (SupportCommon.cpp), which "Don't support
+bridges" runs, takes a straight overhanging perimeter whose two ends land
+on the layer below as a bridge and removes it from the support, with no
+limit on its length ("FIXME add supports at regular intervals to support
+long bridges!"), and its stability check's LongBridge cause covers
+"bridge and straight perimeter extrusion longer than the allowed length"
+(SupportSpotsGenerator.hpp). An anchor is whatever the layer below holds
+there, as the detector's anchors are the layer below's slices, so a 12
+mm cantilever with a 1 mm lip under its end reads bridged from the wall
+to the lip, and the lip's own 283 mm³ needs support. It also bridged all of round 11's stand's
 word (0 of 55.6 mm³ left): the grooves closed at both ends are bridged
 here (21.2 mm³), and 34.5 mm³ stays under the bars that open into a
 stem's groove (the E's bars, the H's crossbar), ceilings tilted 25
@@ -744,12 +772,16 @@ groove's ceiling) march along lines they share, a sixteenth of a cell
 across; the rest, the faces of a curved or displaced underside whose
 lines leave the ceiling within a step or two, march on their own, the
 rising way first and not at all along an axis where the ceiling rises
-out of the band in one step. The chest then took 0.25 s. Over the 25
-examples and the five print programs the pass took 8 ms to 3.1 s
-(median 107 ms) against 3 ms to 1.5 s (median 58 ms) for round 11's,
-whose column rays it still casts, and under the wall pass on every one
-(median 422 ms); the dearest is the rope, whose twisted sweep is the
-dearest field to read.
+out of the band in one step. The chest then took 0.25 s. Lines run to
+their anchors whatever their length, as the direction needs, and that
+cost nothing measurable over stopping them at the span (the stand 47 and
+49 ms, the tree 622 and 657, the rope 3.0 s either way). Over the 25
+examples and the five print programs the pass took 8 ms to 3.0 s
+(median 100 ms) against 2 ms to 1.4 s (median 50 ms) for round 11's,
+whose column rays it still casts, and under the wall pass on 28 of them
+(median 368 ms; the workshop and the rope within a tenth of theirs, on a
+machine shared with other work); the dearest is the rope, whose twisted
+sweep is the dearest field to read.
 
 An island is a point overhang (Vanek, Galicia and Benes, 'Clever
 Support', SGP 2014, section 4): a cone hanging tip down off a wall, its
@@ -768,14 +800,29 @@ of their own, which floats, an island too), a cube on its corner 12 to
 39, the guitar's tuner buttons under their pegs 0.52 and 0.84, and the
 mesher's dips on the tree's displaced bark, the trophy's rim text, the
 nameplate and every other example and print program at most 0.16 cells;
-only the rope, whose strands leave channels two cells tall between them,
-has cusps between: 0.11 to 0.49 cells, and two past half a cell (0.74 at
-its cut end, 3.15 in a channel). An island hangs more than half a cell, faces
-down, is off the plate, and is not at a corner of a patch of faces
-needing support a cell or more in plan (a hanging ball's underside has
-columns of its own); a floating piece's lowest point hangs the piece's
-height, and a speck of under 32 vertices, which the Pieces row already
-tells of, is none. Its column is counted by height and place, not
+only the rope, whose coiled turns press on each other and on the spool,
+has minima between: 0.11 to 0.49 cells, and four past half a cell (0.50
+to 4.3 cells, pits in the creases where the mesh dips, and one at its
+cut end). An island hangs more than half a cell, faces down with the
+solid above it, is off the plate, and is not at a corner of a patch of
+faces needing support a cell or more in plan (a hanging ball's underside
+has columns of its own); a floating piece's lowest point hangs the
+piece's height, and a speck of under 32 vertices, which the Pieces row
+already tells of, is none. Facing down is read on the faces two rings
+round the vertex, and the field must fall going up from it. The
+vertex's own faces will not do: at a sharp tip the mesher can fold its
+last three faces to face up, and a cone at 80 degrees sunk 1 into a
+wall lost its island at 112 to 176 cells that way (at 75 degrees, 96 and
+112), where the ring beyond faces down by a quarter to two fifths of its
+area. The field alone will not either: in the rope's creases, where the
+mesh dips into a pit, the field a twentieth of a cell either side of the
+vertex faced down and counted 28; read upward half a cell, and with the
+ring, 4. Upward only, since round 11's cable, a piece floating 0.2 mm
+over its groove's floor, has that floor under its lowest vertex. A keel
+that runs level into a wall, its faces steeper than 45 degrees, joins
+the wall at its own height and is no island: it is a line in the air,
+not a point, and neither count catches it (tilted 5 degrees down away
+from the wall, its far end is one). Its column is counted by height and place, not
 volume: a point has no area, and the support tip that holds it is the
 slicer's choice.
 

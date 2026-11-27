@@ -152,7 +152,8 @@ export const BRIDGE_MM = 16;
 /**
  * A point overhang: a place on the underside lower than all the surface around it, off the plate, whose first layer
  * prints in the air whatever its faces' angles (Vanek, Galicia and Benes, 'Clever Support', SGP 2014, section 4): a
- * cone's tip hanging down, a level keel whose faces are steeper than 45 degrees, a piece floating free.
+ * cone's tip hanging down, a keel whose faces are steeper than 45 degrees with its ends hanging free, a piece floating
+ * free. A keel running level into a wall is a line overhang, not a point, and joins the wall at its own height: not one.
  */
 export interface Island {
   /** Its lowest point, the top of the column it needs. */
@@ -244,24 +245,27 @@ const ISLAND_DEPTH = 0.5;
  * into regions, connected and level within half a cell, and each region is
  * crossed in one direction, as a slicer lays a bridge (PrusaSlicer's
  * BridgeDetector picks, per bridge, the direction whose lines are anchored
- * at both ends over the most length, ties going to the shorter longest
- * line): of four, 45 degrees apart, the one under which the most area is
- * spanned within `span`, ties to the shorter longest line. A face is
- * spanned along a
- * direction when, half a cell under it, a line each way runs under the
- * same ceiling (solid just above the face's height all along) to solid that
- * stands on something (solid a cell lower, straight down or a cell on: a
- * wall or a post, not the overhang's own underside sloping down to meet the
- * line), the two together within the span. So a flat ceiling between walls
- * is bridged and a dome, a pitched roof or the top of a horizontal hole is
- * not: each of its layers is a ledge on the one below, not a span.
+ * at both ends over the most length, whatever their length, ties going to
+ * the shorter longest line): of four, 45 degrees apart, the one under which
+ * the most area is anchored, ties to the shorter longest line, and only
+ * then is a face bridged whose line that way is within `span`. A face is
+ * anchored along a direction when, half a cell under it, a line each way
+ * runs under the same ceiling (solid just above the face's height all
+ * along) to solid that stands on something (solid a cell lower, straight
+ * down or a cell on: a wall or a post, not the overhang's own underside
+ * sloping down to meet the line). So a flat ceiling between walls is
+ * bridged, and so is a slope closed at both ends along its level (a pitched
+ * roof between gables, as PrusaSlicer takes a straight overhanging
+ * perimeter that lands on the layer below at both ends), while a dome, a
+ * cantilever and a slope or a horizontal hole open along its level are not.
  *
  * Islands are the point overhangs the faces miss: the lowest point of a
  * part of the surface that hangs more than half a cell clear of anything
  * lower before it joins it (the minima of height over the welded mesh that
- * persist, taking the vertices lowest first), its faces facing down, off
- * the plate, and not at a corner of a patch of faces needing support a cell
- * or more in plan (a hanging ball's underside has columns of its own).
+ * persist, taking the vertices lowest first), facing down with the solid
+ * above it (the faces two rings round, and the field), off the plate, and
+ * not at a corner of a patch of faces needing support a cell or more in
+ * plan (a hanging ball's underside has columns of its own).
  */
 export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor: number, opts: SupportOptions = {}): SupportResult {
   const p = mesh.positions, ix = mesh.indices;
@@ -349,11 +353,15 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
     }
   }
 
-  // Each face's span along four axes (eight directions), Infinity where it is not spanned within `span`.
+  // Each face's line along four axes (eight directions), anchored at both ends at whatever length, Infinity where it is
+  // not: a slicer picks a bridge's direction by what is anchored, not by what is short (the span is the printer's, and
+  // the slicer does not know it), so the direction is chosen from these and the span applied after.
   const spans = new Float64Array(nf * 4).fill(Infinity);
   if (span > 0 && nf) {
     const bb = shape.bounds;
     const x0 = bb.min[0] - cellSize, x1 = bb.max[0] + cellSize, z0 = bb.min[2] - cellSize, z1 = bb.max[2] + cellSize;
+    // No line in plan is longer than the model's diagonal.
+    const longest = Math.hypot(x1 - x0, z1 - z0);
     const under = cellSize * 0.5, over = cellSize * 0.35, step = cellSize * 0.5;
     const DX = [1, Math.SQRT1_2, 0, -Math.SQRT1_2, -1, -Math.SQRT1_2, 0, Math.SQRT1_2], DZ = [0, Math.SQRT1_2, 1, Math.SQRT1_2, 0, -Math.SQRT1_2, -1, -Math.SQRT1_2];
     // Solid at the line's height that stands on something: solid a cell lower, straight down or a cell on (a wall, a
@@ -414,9 +422,9 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
         const rise = rx[i] * DX[k] + rz[i] * DZ[k];
         if (Math.abs(rise) * step > over * 1.2) continue;
         const first = rise < 0 ? k + 4 : k;
-        const fwd = reach(cx, y0, cz, first, span, memo);
+        const fwd = reach(cx, y0, cz, first, longest, memo);
         if (fwd === Infinity) continue;
-        const back = reach(cx, y0, cz, (first + 4) % 8, span - fwd, memo);
+        const back = reach(cx, y0, cz, (first + 4) % 8, longest, memo);
         if (back !== Infinity) spans[i * 4 + k] = fwd + back;
       }
     };
@@ -424,17 +432,17 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
     // height, and each direction's reach swept across the lattice, where marching from every face would read the same
     // points over and over (a chest's lid at a 0.006 cell: 12 s).
     // A line under a ceiling ends within a step of the ceiling's region, at an anchor or where nothing is overhead, so
-    // the lattice need reach no further than the region's faces and two cells (or the span, when that is less).
+    // the lattice need reach no further than the region's faces and two cells.
     const raster = (list: number[], y0: number, region: number[]): boolean => {
       let ax0 = Infinity, ax1 = -Infinity, az0 = Infinity, az1 = -Infinity, rx0 = Infinity, rx1 = -Infinity, rz0 = Infinity, rz1 = -Infinity;
       for (const i of list) { ax0 = Math.min(ax0, cxs[i]); ax1 = Math.max(ax1, cxs[i]); az0 = Math.min(az0, czs[i]); az1 = Math.max(az1, czs[i]); }
       for (const i of region) { rx0 = Math.min(rx0, cxs[i]); rx1 = Math.max(rx1, cxs[i]); rz0 = Math.min(rz0, czs[i]); rz1 = Math.max(rz1, czs[i]); }
       const m = cellSize * 2;
-      ax0 = Math.max(x0, ax0 - span, rx0 - m); ax1 = Math.min(x1, ax1 + span, rx1 + m); az0 = Math.max(z0, az0 - span, rz0 - m); az1 = Math.min(z1, az1 + span, rz1 + m);
+      ax0 = Math.max(x0, rx0 - m); ax1 = Math.min(x1, rx1 + m); az0 = Math.max(z0, rz0 - m); az1 = Math.min(z1, rz1 + m);
       const ni = Math.floor((ax1 - ax0) / step) + 2, nj = Math.floor((az1 - az0) / step) + 2;
       if (ni * nj > 4e6) return false;
-      // Marching costs about four lines a face, each as long as the span or the model; the lattice, its points.
-      const far = Math.min(span, Math.max(x1 - x0, z1 - z0)) / step;
+      // Marching costs about four lines a face, each as long as the ceiling; the lattice, its points.
+      const far = Math.max(ax1 - ax0, az1 - az0) / step;
       if (list.length * 4 * far < ni * nj * 1.5) return false;
       const yp = y0 - under, yc = y0 + over;
       // 0: air under the ceiling, 1: solid at the line's height, 2: air with no ceiling over it (a line ends there).
@@ -469,14 +477,14 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
             if (a2 < 0 || b2 < 0 || a2 >= ni || b2 >= nj) { R[n] = Infinity; continue; }
             const m = a2 * nj + b2;
             const v = state[m] === 1 ? (stands(ax0 + a2 * step, yp, az0 + b2 * step, ex, ez) ? len : Infinity) : state[m] === 2 ? Infinity : R[m] + len;
-            R[n] = v > span ? Infinity : v;
+            R[n] = v;
           }
         }
         list.forEach((i, q) => {
           const n = node[q];
           if (n < 0) return;
           const sp = there[0][n] + there[1][n];
-          if (sp <= span) spans[i * 4 + k] = sp;
+          if (sp < Infinity) spans[i * 4 + k] = sp;
         });
       }
       return true;
@@ -504,11 +512,13 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
     }
   }
 
-  // Each region's direction: the axis spanning the most of its area, ties (within a hundredth of it) to the one whose
-  // longest line is shorter.
+  // Each region's direction, as PrusaSlicer's BridgeDetector picks it: the axis whose lines are anchored at both ends
+  // under the most of its area, at any length, and of those within a hundredth of the region's area of the most, the
+  // one whose longest line is shortest. Only then is the span applied: a bay walled on three sides and 18 wide is
+  // crossed the short way, every line 18 long and none bridged, not on a diagonal that is short in its back corners.
   const regionAxis = new Map<number, number>();
   {
-    const stats = new Map<number, Float64Array>(); // per region: total area, then covered area and longest span per axis
+    const stats = new Map<number, Float64Array>(); // per region: total area, then anchored area and longest line per axis
     for (let i = 0; i < nf; i++) {
       const root = find(i);
       let st = stats.get(root);
@@ -522,12 +532,11 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
       }
     }
     for (const [root, st] of stats) {
+      const most = Math.max(st[1], st[2], st[3], st[4]);
+      if (!(most > 0)) continue;
       let best = -1;
-      for (let k = 0; k < 4; k++) {
-        if (!(st[1 + k] > 0)) continue;
-        if (best < 0 || st[1 + k] > st[1 + best] + st[0] * 0.01 || (Math.abs(st[1 + k] - st[1 + best]) <= st[0] * 0.01 && st[5 + k] < st[5 + best])) best = k;
-      }
-      if (best >= 0) regionAxis.set(root, best);
+      for (let k = 0; k < 4; k++) if (st[1 + k] >= most - st[0] * 0.01 && (best < 0 || st[5 + k] < st[5 + best])) best = k;
+      regionAxis.set(root, best);
     }
   }
 
@@ -659,7 +668,15 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
   for (const v of order) if (up[v] === v && size[v] >= 32) minima.push([v, topOf[v] - p[v * 3 + 1]]);
   for (const [v, hung] of minima) {
     const o = v * 3, x = p[o], y = p[o + 1], z = p[o + 2];
-    if (!(hung > depth) || !(y > off) || !(down[v] < 0) || held[v]) continue;
+    if (!(hung > depth) || !(y > off) || held[v]) continue;
+    // Facing down, with the solid above it: a bowl's inner floor is a minimum too, facing up. Read on the faces two
+    // rings round, not the vertex's own: at a sharp tip the mesher can fold its last three faces to face up (a cone
+    // at 80 degrees sunk 1 into a wall, at 112 to 176 cells), while the ring beyond faces down. And the field must
+    // fall going up from it, which a pit in a crease the mesh dips into does not; read upward only, since a piece
+    // floating a fraction of a cell over a floor (round 11's cable in its groove) has that floor just under it.
+    let ring = down[v];
+    for (let k = start[v]; k < start[v + 1]; k++) ring += down[nb[k]];
+    if (!(ring < 0) || !(d(x, y + cellSize * 0.5, z) < d(x, y, z))) continue;
     // The column starts clear of the island's own tip, which the mesh's vertex can sit a fraction of a cell above.
     let y1 = y - cellSize * 0.5;
     for (let n = 0; n < 8 && d(x, y1, z) < cellSize * 0.25; n++) y1 -= cellSize * 0.25;

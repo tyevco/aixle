@@ -797,18 +797,28 @@ prototype left open, decided:
   post and a wall ties at every angle, longest line the 16.4 mm chord
   past the post; from 3 to 10, 19.3 mm. The prototype's per-face rule
   read both rings bridged radially, 4 and 7 mm across. Each connected,
-  level ceiling is now crossed along the one of four axes that spans the
-  most of it within the span, ties to the shorter longest line: the L is
-  all bridged at 16 on the diagonal (longest 11.4 mm), the 6-to-10 ring
-  2380 of 2402 mm³, and the 3-to-10 ring leaves 1305 of 3421 mm³ needing
-  support at the chords past 16.
-- **Anchors stand, ceilings are level.** A line runs half a cell under
-  the ceiling's own height, under solid all the way, to solid that is
-  still solid a cell lower (straight down or a cell on). So a dome, a
-  pitched roof, a horizontal hole's top (4, 8 and 16 mm) and a
-  cantilever are support as the 45° rule had them, and posts 4, 8 and 14
-  apart are bridged at 16 and 20 and 40 apart are not, as the prototype
-  found. The prototype bridged all of round 11's stand's word (0 of 55.6
+  level ceiling is now crossed along the one of four axes whose lines
+  are anchored at both ends under the most of it, at any length, ties
+  within a hundredth of its area to the shorter longest line, and the
+  span is applied only then, since the slicer chooses without knowing
+  it: the L is all bridged at 16 on the diagonal (longest 11.7 mm), the
+  6-to-10 ring 2361 of 2398 mm³, and the 3-to-10 ring leaves 1311 of
+  3418 mm³ needing support at the chords past 16. A bay walled on three
+  sides, 18 wide, is crossed the short way as the detector crosses it
+  (1235 mm anchored against 849 on a diagonal), every line 18.4 mm, so
+  none of it is bridged, where the axis spanning the most within 16
+  read 754 of 6460 mm³ bridged on a diagonal.
+- **Anchors stand, ceilings are level along the line.** A line runs half
+  a cell under the ceiling's own height, under solid all the way, to
+  solid that is still solid a cell lower (straight down or a cell on).
+  So a dome, a pitched roof open at its ends, a horizontal hole's top
+  (4, 8 and 16 mm) and a cantilever are support as the 45° rule had
+  them, and posts 4, 8 and 14 apart are bridged at 16 and 20 and 40
+  apart are not, as the prototype found. A slope closed at both ends
+  along its level, a pitched roof between gables or a ceiling falling
+  across a channel, is bridged, as PrusaSlicer's
+  `remove_bridges_from_contacts` takes a straight overhanging perimeter
+  landing on the layer below at both ends. The prototype bridged all of round 11's stand's word (0 of 55.6
   mm³ left); here the grooves closed at both ends are bridged (21.2 mm³)
   and 34.5 mm³ stays under the bars that open into a stem's groove (the
   E's bars, the H's crossbar), read on a render focused on `word` from
@@ -821,13 +831,19 @@ prototype left open, decided:
   joins something lower does separate them: cones' tips at 46 to 80°
   hang 22 to 135 cells, a cube on its corner 12 to 39, and the mesher's
   dips on the tree, the trophy's rim text (0.13), the nameplate and every
-  other example and print program at most 0.16; the rope's channels
-  between strands leave cusps of 0.11 to 0.49 and two past half a cell.
-  An island hangs more than half a cell, faces down, is off the plate,
-  and is not at a corner of a patch of faces needing support a cell or
-  more in plan; a floating piece hangs its own height and a speck of
-  under 32 vertices is none. Its column is counted by height and place,
-  not volume: a point has no area, and its support tip is the slicer's.
+  other example and print program at most 0.16; the rope's creases,
+  where its turns press on each other and on the spool, leave minima of
+  0.11 to 0.49 and four past half a cell. An island hangs more than half
+  a cell, faces down with the solid above it (the faces two rings round,
+  since a sharp tip's own three faces can fold to face up and an 80°
+  cone's tip went missing at 112 to 176 cells; and the field falling
+  going up, which a pit in a crease does not), is off the plate, and is
+  not at a corner of a patch of faces needing support a cell or more in
+  plan; a floating piece hangs its own height and a speck of under 32
+  vertices is none. Its column is counted by height and place, not
+  volume: a point has no area, and its support tip is the slicer's. A
+  keel running level into a wall is a line overhang, not a point: it
+  joins the wall at its own height, and neither count catches it.
 - **Units.** The span is in millimetres through `set units`; without it a
   unit is a millimetre, as the Units row and the STL take it, and a
   program in unitless metres bridges everything under 16 units.
@@ -847,23 +863,24 @@ prints):
 
 | Program | Round 11 | Needs support | Bridged | Islands |
 | --- | --- | --- | --- | --- |
-| stand (round 11) | 55.65 | 34.46 (45.67 at 5 mm) | 21.18, longest 6.9 mm | 0 |
-| stand_probe_phone | 5062 | 1763 (5015 at 5, 3898 at 10) | 3299, longest 15.1 mm | 1, the cable floating in its groove |
+| stand (round 11) | 55.65 | 34.46 (46.52 at 5 mm) | 21.18, longest 6.9 mm | 0 |
+| stand_probe_phone | 5062 | 1763 (5017 at 5, 3898 at 10) | 3299, longest 15.1 mm | 1, the cable floating in its groove |
 | teapot | 12.67 | 5.20 | 7.47 | 0 |
 | fence | 13.35 | 10.91 | 2.44 | 0 |
 | table | 10.27 | 8.95 | 1.32 | 0 |
 | guitar | 1.28 | 0.23 | 1.04 | 2, its tuner buttons |
 | workshop, lantern, tower, sign, robot, arm, windmill | 1.73, 3.35, 4.37, 1.88, 1.99, 3.26, 7.07 | 1.07, 2.54, 3.78, 1.41, 1.68, 2.98, 6.84 | the rest | 0 |
-| rope | 12.32 | 12.30 | 0.02 | 2, in the channels between strands |
+| rope | 12.32 | 12.30 | 0.02 | 4, pits in the creases between its turns and the spool |
 | chest | 0.28 | 0 | 0.28 | 0 |
 | tree, garden, lamp, stairs, medal, nameplate, mug, tin, patterns | 0.05 to 21.7 | within 0.03 of round 11's | 0 to 0.03 | 0 |
 | gear, tumbler, vase, the mixer's unit probe, the fixtures | 0 | 0 | 0 | 0 |
 
-The pass took 8 ms to 3.1 s (median 107 ms) against 3 ms to 1.5 s
-(median 58 ms) for round 11's, which it includes, and under the wall
-pass on every program (median 422 ms); the dearest are the rope (3.1 s,
-1.5 s of it round 11's columns in its twisted sweep's field) and the
-tree (0.76 s, its displaced underside marched face by face). Marching
+The pass took 8 ms to 3.0 s (median 100 ms) against 2 ms to 1.4 s
+(median 50 ms) for round 11's, which it includes, and under the wall
+pass on 28 of the 30 (median 368 ms; the workshop and the rope within a
+tenth of theirs); the dearest are the rope (3.0 s, 1.4 s of it round
+11's columns in its twisted sweep's field) and the tree (0.66 s, its
+displaced underside marched face by face). Marching
 from every face cost a chest's lid 12 s at a 0.006 cell; reading a level
 ceiling once on a lattice and sharing a level's lines brought it to
 0.25 s. The committed renders do not change: the row is the report's,
