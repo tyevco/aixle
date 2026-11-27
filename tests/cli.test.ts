@@ -110,6 +110,15 @@ describe("aixle fmt", () => {
   });
 });
 
+describe("check in a pose", () => {
+  it("prints a posed line for a step assigned twice, and for a union a larger union flattened", { timeout: 30000 }, () => {
+    const out = cli("check", "tests/fixtures/posed_lines.aix", "--pose", "up");
+    // Round 11: the mixer's agent missed a posed line under a step assigned twice, while the asserts measured it posed.
+    expect(out).toMatch(/\nshell {14}1 × 0\.6 × 2 .*\n {2}posed shell {6}1 × 2\.03 × 1\.52 {6}x -0\.5\.\.0\.5 {2}y 1\.\.3\.03 {2}z -1\.52\.\.0\n/);
+    expect(out).toMatch(/\nhinged .*\n {2}posed hinged {5}1 × 2\.18 × 1\.52 /);
+  });
+});
+
 describe("printing", () => {
   it("check prints the size in millimetres and the bed's verdict when a program sets units or a bed", { timeout: 30000 }, () => {
     const out = cli("check", "tests/fixtures/print_bed.aix");
