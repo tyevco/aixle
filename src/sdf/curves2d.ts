@@ -1,7 +1,8 @@
 /**
  * Smooth 2D profiles: a chain of cubic Bezier pieces in the plane, drawn
- * through points (`curve2`, the curve `curve()` draws, closed) or from
- * anchors and handles (`bezier2`). Closed, the chain is an outline and the
+ * through points (`curve2`, a centripetal Catmull-Rom spline, which on
+ * evenly spaced points is the curve `curve()` draws) or from anchors and
+ * handles (`bezier2`). Closed, the chain is an outline and the
  * profile is what it encloses; with a wall, the chain is left open and the
  * profile is the band that wide along it, for a vase drawn as one line.
  *
@@ -47,8 +48,9 @@ function tolerance(pts: [number, number][]): number {
 const same = (a: [number, number], b: [number, number], tol: number): boolean => Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol;
 
 /**
- * A chain through the points with Catmull-Rom tangents turned into Bezier
- * handles, as curve() builds in 3D. A point given twice in a row is a sharp
+ * A chain through the points with centripetal Catmull-Rom tangents turned
+ * into Bezier handles (curve() in 3D takes the uniform ones, the same on
+ * evenly spaced points). A point given twice in a row is a sharp
  * corner: the curve arrives and leaves it with one-sided tangents, as an
  * open curve does at its ends, so a run between two corners is straight.
  * Closed, the list wraps; a last point equal to the first only closes it
@@ -69,7 +71,12 @@ export function chainThrough(flat: readonly number[], closed: boolean, what = "c
   const m = pts.length;
   if (closed && m < 3) throw new Error(`${what} needs at least 3 different points for a closed outline, got ${m}`);
   if (!closed && m < 2) throw new Error(`${what} needs at least 2 different points, got ${m}`);
-  // Outgoing and incoming tangents at each point.
+  // Outgoing and incoming tangents at each point. Through a smooth point the tangent is the centripetal Catmull-Rom
+  // one: the knots are spaced by the square root of each chord, the derivative there is taken in that parameter, and
+  // each side's handle is that derivative times its own knot span, so a short piece beside a long one gets a short
+  // handle. The uniform tangent, half the chord between the neighbours on both sides, handed a 2 mm piece next to an
+  // 85 mm one a handle of 14 mm, and it looped into a 0.019 sliver (round 11). Evenly spaced points give the uniform
+  // tangent exactly.
   const outT: [number, number][] = [], inT: [number, number][] = [];
   for (let i = 0; i < m; i++) {
     const p = pts[i];
@@ -80,9 +87,10 @@ export function chainThrough(flat: readonly number[], closed: boolean, what = "c
       outT.push([next[0] - p[0], next[1] - p[1]]);
       inT.push([p[0] - prev[0], p[1] - prev[1]]);
     } else {
-      const t: [number, number] = [(next[0] - prev[0]) / 2, (next[1] - prev[1]) / 2];
-      outT.push(t);
-      inT.push(t);
+      const di = Math.sqrt(Math.hypot(p[0] - prev[0], p[1] - prev[1])), dout = Math.sqrt(Math.hypot(next[0] - p[0], next[1] - p[1]));
+      const mt: [number, number] = [0, 1].map((k) => (p[k] - prev[k]) / di - (next[k] - prev[k]) / (di + dout) + (next[k] - p[k]) / dout) as [number, number];
+      outT.push([mt[0] * dout, mt[1] * dout]);
+      inT.push([mt[0] * di, mt[1] * di]);
     }
   }
   const pieces = closed ? m : m - 1;

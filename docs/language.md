@@ -233,7 +233,8 @@ y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
 **Smooth profiles**: a polygon is straight between its points, so a vase,
 a bottle or a guitar's body drawn as one looks it once revolved or
 extruded. `curve2([x,y, x,y, ...])` is a closed outline through the
-points, the same curve `curve()` draws, closed back to the first point;
+points, closed back to the first point (its tangents are taken as below,
+which on evenly spaced points is the curve `curve()` draws);
 `bezier2([...])` is one from cubic Bezier anchors and handles, laid out as
 `bezier()` takes them (an anchor, then two handles and an anchor for each
 piece: 4, 7, 10, ... pairs). Either is a profile like any other, for
@@ -249,6 +250,21 @@ circle (glass on it renders clean).
   underside, a sharp foot and a straight run up the axis. The list wraps,
   and may end on its first point again, which only closes it (give it
   twice there for a corner at the start).
+- The tangent at a point comes from its two neighbours: its direction
+  halves the angle between the chords to them, and the handle into each
+  neighbour is as long as that side's chord allows (a centripetal
+  Catmull-Rom spline: the knots are spaced by the square root of each
+  chord). A short piece beside a long one therefore gets a short handle
+  and cannot loop: round 11's stand outline put a point 2 mm before the
+  end of an 85 mm run, and the uniform spline the tool used then took a
+  14 mm handle into the 2 mm piece, overshot by 2.2 mm and looped into a
+  0.019 mm sliver; with these tangents the same points run straight to
+  the round end and the profile is the height worked out by hand. On
+  evenly spaced points it is the uniform spline exactly. Spacing still
+  shapes the curve: the long piece beside a short one leaves its point
+  along the halfway direction, so it bows a little (a floor run of 0.8
+  after a 0.3 piece dips 0.024 below the line its two points are on). A
+  run meant to be straight still ends in a corner, a point given twice.
 - In `bezier2` a corner is two handles that do not line up, and a handle
   0.5523 r along the tangent makes a quarter circle of radius r (within
   0.03%). The last anchor should be the first; when it is not, a straight
@@ -326,6 +342,14 @@ twist=, taper=)` in place of the point list. The surface is then the true
 offset of the curve, found by the nearest point on it for every sample,
 so a scroll or a handle has no facets at any grid; the cost per piece is
 about that of a spline's. A `spline` is still fine for anything gentle.
+`curve`, `spline` and a `tube` or `sweep`'s `smooth=` take a uniform
+Catmull-Rom tangent, half the chord between a point's two neighbours,
+so the points want even spacing: a piece much shorter than the one
+before it gets a handle longer than itself and overshoots (`curve2`
+takes its tangents the other way, above, after a 2D outline looped on
+it). Measured on the nine programs in `dogfood/` that use `curve`, that
+tangent would move no curve by more than 1.6% of its length and loops
+none, so the 3D curves keep it and their renders stand.
 
 **Text**: `text("Aixle", size=1, weight=0.15, align="center")` is a 2D
 profile from a built-in single-stroke font (upper and lower case, digits,

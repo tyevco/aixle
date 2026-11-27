@@ -653,6 +653,31 @@ describe("smooth profiles", () => {
       for (let i = 0; i < n; i++) expect(Math.abs(c.dist(pts[i * 2], pts[i * 2 + 1]))).toBeLessThan(1e-9);
     }
   });
+  it("takes centripetal tangents, so a short piece beside a long one cannot loop, and evenly spaced points are the uniform spline", () => {
+    // Round 11's stand: a straight run 85 long ends in a point 2 before the end, then a round end of radius 3 as
+    // evenly spaced points. The uniform tangent at (83, 0), half the chord between its neighbours, handed the 2-long
+    // piece a 14-long handle: it overshot past 85 and looped into a sliver (the thin-part warning read 0.0012).
+    const end: number[] = [];
+    for (let i = 1; i < 8; i++) { const a = (i * 22.5 * Math.PI) / 180; end.push(85 + 3 * Math.sin(a), 3 - 3 * Math.cos(a)); }
+    const run = [0, 0, 0, 0, 83, 0, 85, 0, ...end, 85, 6, 83, 6, 0, 6, 0, 6];
+    const c = C2.curve2(run);
+    // The round end reaches x = 88 and no further; the run stays on y = 0 to within a hair, and the bar is 6 thick.
+    expect(c.bounds.max[0]).toBeLessThan(88.01);
+    expect(c.bounds.min[1]).toBeGreaterThan(-0.15);
+    expect(c.feature!).toBeGreaterThan(5.9);
+    let back = 0;
+    const pts = C2.chainPoints(C2.chainThrough(run, true), 64);
+    for (let i = 1; i < pts.length; i++) if (pts[i][1] < 1 && pts[i - 1][1] < 1 && pts[i][0] < pts[i - 1][0] - 1e-9 && pts[i][0] > 1) back++;
+    expect(back).toBe(0); // along the bottom run the curve only moves forward: no loop
+    // Evenly spaced points: each handle is a third of half the chord between the neighbours, as the uniform spline's.
+    const ring = ringOf(12);
+    const ch = C2.chainThrough(ring, true);
+    for (let i = 0; i < 12; i++) {
+      const prev = (i + 11) % 12, next = (i + 1) % 12;
+      expect(ch.ctrl[i * 8 + 2]).toBeCloseTo(ring[i * 2] + (ring[next * 2] - ring[prev * 2]) / 6, 12);
+      expect(ch.ctrl[i * 8 + 3]).toBeCloseTo(ring[i * 2 + 1] + (ring[next * 2 + 1] - ring[prev * 2 + 1]) / 6, 12);
+    }
+  });
   it("is the exact distance to the curve, signed by which side, with a gradient of length 1 near it", () => {
     const chain = C2.chainThrough(vasePts, true);
     const vase = C2.curve2(vasePts);
@@ -814,7 +839,9 @@ describe("smooth profiles", () => {
     expect(S.difference2(vase, S.move2(S.circle(0.1), 1.3, 1)).revolveDist).toBeUndefined();
     expect(S.revolve(S.difference2(vase, S.move2(S.circle(0.1), 1.3, 1))).dist(0, 0.1, 0)).toBeCloseTo(0, 9);
     expect(S.revolve(vase, 0, 180).dist(0, 0.1, 0.001)).toBeCloseTo(vase.dist(0.001, 0.1), 9);
-    const r = surfaceNets(solid, { resolution: 64 });
+    // At 80 cells the 0.096 lip is 1.9 cells. At 64 it is 1.5, in the band that meshes but not always watertight: it
+    // was watertight there by luck, and with the centripetal tangents its crest falls 6 open edges short.
+    const r = surfaceNets(solid, { resolution: 80 });
     expect(isWatertight(r.mesh)).toBe(true);
     const mb = meshBounds(r.mesh);
     expect(mb.max[1]).toBeCloseTo(vase.bounds.max[1], 1);
