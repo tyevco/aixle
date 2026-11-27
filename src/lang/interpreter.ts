@@ -311,6 +311,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
+  // The names first assigned inside a loop's body: the loop's own, no steps, kept for what they read.
+  const loopSteps = new Map<string, Step>();
   const settings: Settings = {};
   // One mesh per shape and resolution for this evaluation's pieces() and overhang() (and a failing pieces()'s loose
   // piece): measured on round 10's hub, check fell from 3.9 s to 2.5 s when the two queries shared the hub's mesh.
@@ -794,6 +796,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "camera") return callCamera(args, scope, line);
     const user = scope.get(callee);
     if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
+    if (callee === "named") return callNamed(args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
     // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
     // reaches the builtin, and the program says so once (round 4 asked; a name alone, never called, is fine).
@@ -907,6 +910,37 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "decal" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value) && !regionTouches(values[0].value, values[1].value))
       warnings.push(`line ${line}: decal(): the region \`${exprText(args[1].value)}\` touches none of the shape's surface, so it paints nothing; the region must cross the surface (a sphere centred on the skin, a box through it)`);
     return result;
+  }
+
+  /**
+   * `named("book_" + n, bk)`: a step of that name holding this value, for a copy a loop makes, so the steps sheet,
+   * the callouts, the slices, a focus and a warning can point at book 9 itself (round 11: the shelf rebuilt one book
+   * as a probe beside the loop to have a name to slice through). The step reads what the value's expression read,
+   * and the statement around the call reads the step.
+   */
+  function callNamed(args: Arg[], scope: Scope, line: number): Value {
+    const builtin = BUILTIN_MAP.get("named")!;
+    const outerReads = reads, outerStep = currentStep;
+    const here: Step = { name: "", value: 0, line, deps: new Set() };
+    reads = here.deps;
+    currentStep = here;
+    let values: { name?: string; value: Value }[];
+    try { values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) })); } finally { reads = outerReads; currentStep = outerStep; }
+    const value = callBuiltin(builtin, values, line);
+    const name = (values.find((v) => v.name === "name") ?? values.find((v) => !v.name))!.value as string;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new RuntimeError(`named(): "${name}" is not a name; a step's name is letters, digits and _, as "book_" + n makes`, line);
+    const prev = steps.get(name);
+    if (prev) throw new RuntimeError(`named("${name}"): '${name}' is already a step (line ${prev.line}); each named() makes a step of its own, so build the name from the loop's index, named("${name}_" + i, ...)`, line);
+    if (BUILTIN_MAP.has(name)) throw new RuntimeError(`named("${name}"): ${name} is a builtin; give the step another name`, line);
+    if (global.has(name) || loopSteps.has(name)) throw new RuntimeError(`named("${name}"): '${name}' is already a name in the program (a def, a constant or a loop's name); give the step another`, line);
+    here.name = name;
+    here.value = value;
+    here.deps.delete(name);
+    steps.set(name, here);
+    global.set(name, value);
+    if (isShape3(value)) { stepOfValue.set(value, name); lastShape = { name }; }
+    reads?.add(name);
+    return value;
   }
 
   function callUser(fn: UserFn, args: Arg[], scope: Scope, line: number): Value {
@@ -1188,7 +1222,15 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         scope.set(stmt.name, value);
         if (inDef) scope.locals?.add(stmt.name);
         if (topLevel) {
-          const prev = steps.get(stmt.name);
+          // A name first assigned inside a loop's body is the loop's own working name (bk, prev, board): it holds the
+          // last iteration's value, so it is kept off the steps, the callouts, the unused warning and a library's
+          // exports, and kept apart only so the steps it reads are still known to be read (round 11: a shelf's
+          // "8. BK" thumbnail and callout; a stand's loop counter exported). A name assigned before the loop and
+          // updated in it, an accumulator, stays a step; named() gives one iteration's value a step of its own.
+          const loopOwn = loopDepth > 0 && !steps.has(stmt.name);
+          if (!loopOwn) loopSteps.delete(stmt.name);
+          const table = loopOwn ? loopSteps : steps;
+          const prev = table.get(stmt.name);
           const deps = new Set(prev?.deps ?? []);
           for (const r of reads ?? []) if (r !== stmt.name) deps.add(r);
           if (prev) {
@@ -1201,9 +1243,13 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
             if (maskDeps) prev.maskDeps = new Set([...(prev.maskDeps ?? []), ...maskDeps]);
             if (loopDepth > 0) prev.inLoop = true;
           } else {
-            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
+            table.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
           }
-          if (isShape3(value)) { lastShape = { name: stmt.name }; stepOfValue.set(value, stmt.name); }
+          if (isShape3(value)) {
+            if (!loopOwn) lastShape = { name: stmt.name };
+            // A step's name for a value wins over a loop's own name for the same one (prev = bk after named(..., bk)).
+            if (!loopOwn || !steps.has(stepOfValue.get(value) ?? "")) stepOfValue.set(value, stmt.name);
+          }
         }
         if (collecting) reads = undefined;
         return;
@@ -1296,7 +1342,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       }
       case "expr": {
         const v = evalExpr(stmt.value, scope);
-        if (isShape3(v) || isShape2(v)) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
+        const kept = stmt.value.type === "call" && stmt.value.callee === "named";
+        if ((isShape3(v) || isShape2(v)) && !kept) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
         return;
       }
       case "assert": {
@@ -1396,7 +1443,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const visit = (nme: string, role: StepRole) => {
     if (rank(roles.get(nme)) >= rank(role)) return;
     roles.set(nme, role);
-    const st = steps.get(nme);
+    // Through a loop's own names too: a part placed only by bk = part | move(...) is still a part.
+    const st = steps.get(nme) ?? loopSteps.get(nme);
     if (st) for (const d of st.deps) visit(d, role === "region" ? role : st.cutDeps?.has(d) ? "cut" : st.maskDeps?.has(d) ? "mask" : decalRegions.has(d) ? "region" : role);
   };
   for (const r of roots) visit(r, "part");
@@ -1405,7 +1453,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const stepList = [...steps.values()];
   // A step is displaced when every step that reads it moves it, and nothing shows it as it is.
   const readers = new Map<string, Step[]>();
-  for (const st of stepList) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
+  for (const st of [...stepList, ...loopSteps.values()]) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
   const displaced = new Set<string>();
   for (const st of stepList) {
     if (!isShape3(st.value) || roots.has(st.name)) continue;

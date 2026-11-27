@@ -411,6 +411,15 @@ Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optiona
 - `placements`: [x,y,z,yaw, x,y,z,yaw, ...]
 - `fields`: 4 for x,y,z,yaw or 5 to add a scale
 
+### named
+
+A step of its own for a value made in a loop: `books = books + named("book_" + n, bk)` registers the step `book_3` (or whatever the name reads) holding that iteration's value, and returns the value, so each copy has a name for steps.png, the callouts, `set slice` and `--slice`, `--focus`, `camera(focus=)` and the warnings, and can be read by that name below the loop. A name is letters, digits and _, and names one step: naming the same one twice, or a name the program already has, is an error. A name first assigned inside a loop is the loop's own and is no step at all; see the language guide's Statements.
+
+    named(name, value) -> any
+
+- `name`: the step's name, usually built from the loop's index: "book_" + n
+- `value`: the value it holds, returned as it is
+
 ### xform
 
 A joint's pose in one value, for pose(): xform(rotate=[x, y, z] degrees or one angle about the joint's axis, move=[dx, dy, dz] in world units after the turn, scale=s or [sx, sy, sz] about the pivot). pose("hop", body=xform(move=[0, 0.3, 0]), lungs=xform(scale=[1, 1.02, 1])); a plain [x, y, z] in a pose is still just the angles.

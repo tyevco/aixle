@@ -359,9 +359,9 @@ describe("interpreter", () => {
     expect(lamp.bounds.min[1]).toBeCloseTo(1, 9);
     expect(sunk.bounds.min[1]).toBeCloseTo(0.95, 9);
   });
-  it("marks a step assigned inside a loop", () => {
+  it("marks a step updated inside a loop, and keeps a name first assigned there off the steps (round 11)", () => {
     const ev = run('b = 1\nall = sphere(0.1)\nfor i in range(3) {\n  a = i * 2\n  all = all + (sphere(0.1) | move(i, 0, 0))\n}\nshow all');
-    expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true], ["a", true]]);
+    expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true]]);
   });
   it("measures overhangs like the report's row", () => {
     // A table: the underside of its top faces down and is not on the floor.
@@ -642,8 +642,8 @@ describe("records", () => {
     expect(tokenize("{...p}").map((t) => t.value).slice(0, 3)).toEqual(["{", "...", "p"]);
   });
   it("spans lines between entries, and a loop's braces are still a block", () => {
-    const ev = run("p = {\n  x: 1,\n\n  y: 2 +\n    3,\n}\nfor i in [p] {\n  q = i.y\n}");
-    expect(ev.steps.find((s) => s.name === "q")!.value).toBe(5);
+    const ev = run("p = {\n  x: 1,\n\n  y: 2 +\n    3,\n}\nfor i in [p] {\n  q = i.y\n}\nr = q");
+    expect(ev.steps.find((s) => s.name === "r")!.value).toBe(5);
   });
   it("is never taken for a shape: show, scene, union and for say what a record is and how to use one", () => {
     expect(() => run("parts = {lid: box(1)}\nshow parts")).toThrow(/show needs a 3D shape, got a record \(fields lid\); show its shapes by name, show parts\.lid/);

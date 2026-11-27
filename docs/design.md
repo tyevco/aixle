@@ -648,6 +648,23 @@ recorded as a read of the caller's step of that name.) An `assert` in a
 block is judged per call, as one in a loop is per iteration, and names
 the call's line, since the def's line is the same for every verdict.
 
+A step is a name and the value it ends with, which suits a line run
+once. A loop's working names (the shelf's `bk`, `prev`, `board`) ran
+thirty-three times and ended holding the last book, so `steps.png`
+showed "8. BK", the callouts labelled one flat book `BK` as if it were
+a part, and a stand used as a library exported its loop counter. A name
+first assigned inside a loop's body is therefore the loop's own: the
+interpreter keeps a record of what it read, so a part placed only
+through it is still a part, and nothing else. A name assigned before
+the loop and grown in it is still a step, since its last value is the
+whole of what the loop built. What the shelf wanted instead, a name per
+book, is `named("book_" + n, bk)`: a builtin that registers a step of
+that name holding that iteration's value and returns the value. It fits
+the step model as it is, one name and one value from one line, with the
+reads of its argument as the step's reads and the statement around it
+reading the step, so the sheets, the slices, `--focus` and the
+warnings find book 9 by name with no change of their own.
+
 ## Records
 
 A part with five numbers was a call with five positions, and the next

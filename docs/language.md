@@ -96,12 +96,40 @@ for i in range(12) {
 }
 ```
 
+A name assigned before the loop and updated in it (`teeth` above, a
+counter, a list grown with `+ [...]`) is a step, an accumulator. A name
+first assigned inside the loop's body (a book `bk`, the `prev` book it
+leans on, the row's `board`) is the loop's own working name: it holds
+the last iteration's value, which is no part of the model by itself, so
+it is not a step. It gets no thumbnail on `steps.png`, no label on
+`callouts.png`, no size in `check`, no unused warning, and a library
+does not export it; it can still be read below the loop, where it holds
+that last value (assign it to a name there, `last = bk`, to make that a
+step). To give each copy a loop makes a step of its own, name it:
+
+```
+books = empty()
+for i in range(len(rows)) {
+  bk = book(rows[i]) | move(x, y, 0)
+  books = books + named("book_" + i, bk)
+}
+```
+
+`named(name, value)` registers a step called `book_0`, `book_1`, ...
+holding that iteration's value and returns the value, so each copy has
+its thumbnail, its callout, a name for `set slice book_9`, `--slice`,
+`--focus`, `camera(focus=)` and the warnings, and can be read by that
+name below the loop (`assert clearance(book_9, shelf) < 0.005`). A name
+is letters, digits and `_`, and names one step: naming the same one
+twice, or a name the program already has, is an error.
+
 `for` iterates a list: `range(n)`, `range(a, b)`, `range(a, b, step)`, or a
 literal like `[0.5, 1, 2]`.
 
 `for` also runs over any list, including one of strings, and a name
 assigned inside the loop keeps its value between iterations, so a counter
-is `i = i + 1`; `len(list)` is its length.
+is `i = i + 1` (set before the loop, so it is a step); `len(list)` is its
+length.
 
 ```
 letters = ["C", "H", "A", "M", "P"]
@@ -485,7 +513,8 @@ copy): the render is the union, the export is one mesh with a node per
 copy, so a forest costs one tree. A placed copy has its yaw and nothing
 else: no joint of its own, no pose. Copies that must move on their own
 (a Ferris wheel's gondolas, each hanging level) are a `def` called once
-per copy with a named step each, `gondola_1 = car(1, "gondola_1")`,
+per copy with a named step each, `gondola_1 = car(1, "gondola_1")`, or
+in a loop `wheel = wheel + named("gondola_" + i, car(i, "gondola_" + i))`,
 where the joint's name is built from the index: `"gondola_" + i` joins
 a string and a number (`str(i)` is the number as text). A placed set keeps its copies' nodes
 wherever it sits: joined to a board with `+`, inside a joint's part, or
@@ -1104,8 +1133,9 @@ prints every step's size and the warnings: shapes as their
 box, 2D profiles as their box in the plane (text on an arc adds the
 radii its lettering spans from the origin, `on the arc r 0.255..0.385`,
 which is the number to hold against a boss's rim), numbers and lists of numbers
-as their values (a number set inside a loop is the last iteration's and
-is not listed), then the program's `def`s with their parameters;
+as their values (a name first assigned inside a loop is the loop's own
+and is not listed, and an accumulator's number is the last iteration's
+and is not listed either), then the program's `def`s with their parameters;
 `--brief` leaves the sizes out and prints the output, the warnings and
 the asserts alone, for a promise loop on a long program. A step whose tree holds a rotation, a warp or a posed
 joint gets a second `surface` line when the surface's own extent is
@@ -1336,8 +1366,9 @@ prints the asserts in line order, failures among the passes.
 - `--focus` on a placed set frames its first copy, in world orientation
   (`--focus chairs_4` for another); a part that exists only through
   `array`, `ring` or `mirror` cannot be focused on by itself (its step's box is the original, at the origin,
-  or the whole set); give one copy a name of its own next to the set, or
-  use `place()` for the copies and `--focus name_3`. A def called inline
+  or the whole set); give one copy a name of its own next to the set,
+  make the copies in a loop and name each with `named("leg_" + i, leg)`,
+  or use `place()` for the copies and `--focus name_3`. A def called inline
   (`plate = pawn() + rook()`) is a step with no name of its own: name
   the parts you will want to focus on or see blamed.
 - The sheet, the views, the pose sheets and the animation strips draw

@@ -234,3 +234,57 @@ describe("a library's def with a block body", () => {
     expect([...e.steps.find((st) => st.name === "a")!.deps]).not.toContain("b");
   });
 });
+
+describe("a loop's own names and named() (round 11: BK on the steps sheet, a loop counter exported)", () => {
+  const SHELF = [
+    "stud = sphere(0.1)",
+    "books = empty()",
+    "n = 0",
+    "for i in range(3) {",
+    "  board = box(3, 0.1, 1) | move(i * 4, 0, 0)",
+    "  bk = box(0.3, 2, 1) | move(i * 4, 1.05, 0)",
+    "  knob = stud | move(i * 4, 2.1, 0)",
+    "  assert clearance(bk, board) > -0.01, \"on its board\"",
+    "  books = books + bk + knob + board",
+    "  n = n + 1",
+    "}",
+    "show books",
+  ].join("\n");
+  it("keeps a name first assigned inside a loop off the steps, the warnings and the roles' table of steps", () => {
+    const ev = run(SHELF);
+    expect(ev.steps.map((st) => st.name)).toEqual(["stud", "books", "n"]);
+    expect(ev.warnings).toEqual([]);
+    // stud is read only through the loop's own knob, and is still a part of the output; n, an accumulator, a step.
+    expect(ev.roles.get("stud")).toBe("part");
+    expect(ev.steps.find((st) => st.name === "n")!.value).toBe(3);
+    // Its last value can still be read below the loop.
+    expect(run(`${SHELF}\nlast = bk\n`).steps.map((st) => st.name)).toEqual(["stud", "books", "n", "last"]);
+  });
+  it("keeps a loop's own names out of a library's exports", () => {
+    const lib = "for i in range(1, 3) {\n  a = i * 22.5\n}\nlean = 65\ndef seat(w) = box(w)\n";
+    const e = evaluate(parse('use "stand"\nx = stand.lean\n'), { resolveModule: () => ({ source: lib, file: "stand.aix" }) });
+    expect(e.modules[0].names).toEqual(["lean", "seat"]);
+  });
+  it("gives a loop's copy a step of its own with named(), readable below the loop, a part of the output", () => {
+    const src = SHELF.replace("books = books + bk + knob + board", "books = books + named(\"book_\" + i, bk) + knob + board") + "\nset slice book_1\nprobe = book_1 | move(0, 0, 0)\nassert clearance(probe, books) < 0.01\n";
+    const ev = run(src);
+    expect(ev.steps.map((st) => st.name)).toEqual(["stud", "books", "n", "book_0", "book_1", "book_2", "probe"]);
+    const b1 = ev.steps.find((st) => st.name === "book_1")!;
+    expect(b1.line).toBe(9);
+    expect((b1.value as { bounds: { min: number[] } }).bounds.min[0]).toBeCloseTo(3.85, 6);
+    expect(ev.roles.get("book_1")).toBe("part");
+    expect(ev.warnings).toEqual([]);
+  });
+  it("refuses a name twice, a name that is no name, and a name the program already has", () => {
+    const error = (src: string): string => { try { run(src); } catch (err) { return (err as Error).message; } return "no error"; };
+    expect(error("all = empty()\nfor i in range(2) {\n  all = all + named(\"book\", box(1))\n}\n")).toBe("line 3: named(\"book\"): 'book' is already a step (line 3); each named() makes a step of its own, so build the name from the loop's index, named(\"book_\" + i, ...)");
+    expect(error("a = named(\"book 3\", box(1))\n")).toMatch(/named\(\): "book 3" is not a name/);
+    expect(error("a = named(\"box\", box(1))\n")).toMatch(/named\("box"\): box is a builtin/);
+    expect(error("w = 2\na = named(\"w\", box(1))\n")).toMatch(/named\("w"\): 'w' is already a step \(line 1\)/);
+    expect(error("a = named(3, box(1))\n")).toMatch(/named\(\): name: expected a string, got the number 3/);
+  });
+  it("warns about a named step that is not part of the output, as about any step", () => {
+    const ev = run("for i in range(2) {\n  p = named(\"peg_\" + i, box(1) | move(i * 2, 0, 0))\n}\nm = sphere(1)\nshow m\n");
+    expect(ev.warnings).toEqual(["'peg_0' (line 2) is not part of the output; add it to the model or remove it", "'peg_1' (line 2) is not part of the output; add it to the model or remove it"]);
+  });
+});
