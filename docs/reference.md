@@ -493,7 +493,7 @@ The support volume under the shape's overhangs, in cubic model units (mm³ for a
 
 ### stands
 
-Whether the shape stands on its own: the margin by which its centre of mass (uniform density), projected on the floor, lies inside its footprint, the hull of what rests within a cell and a half of its lowest point, in units, positive inside and negative outside: the report's Stands row. For assert stands(bookcase) > 0.5. A shape resting on a point or an edge has no footprint and reads -Infinity. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces() reads); a failure says where the centre of mass is and which way the shape tips.
+Whether the shape stands on its own: the margin by which its centre of mass (uniform density), projected on the floor, lies inside its footprint, the hull of what rests within a cell and a half of its lowest point, in units, positive inside and negative outside: the report's Stands row. For assert stands(bookcase) > 0.5. A shape balanced on an edge or a point still has a footprint, the strip of cells along the contact, so it reads a small positive margin that shrinks with the cell (a cube on its edge: 0.025 at 64 cells, 0.008 at 200): promise a margin of several cells, not > 0. A shape with no surface at that cell reads -Infinity. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces() reads); a failure says where the centre of mass is and which way the shape tips.
 
     stands(shape, resolution=64) -> number
 

@@ -90,7 +90,9 @@ export function loosePiece(shape: Shape3, resolution = 64, cache?: MeshCache): {
  * footprint of what rests within a cell and a half of its lowest point, in model units, positive inside and negative
  * outside (the report's Stands row, at `resolution` cells). With the centre of mass and the footprint, and, for a
  * failure, the way it would tip: from the footprint's nearest edge towards the centre of mass, on the plan (x, z).
- * -Infinity when the shape rests on a point or an edge (no footprint) or has no surface at that cell.
+ * A shape balanced on an edge or a point has the strip of cells along the contact for a footprint, so it reads a
+ * small positive margin, about a cell; -Infinity only when there is no footprint at all (no surface at that cell,
+ * or fewer than three vertices that low).
  */
 export function standing(shape: Shape3, resolution = 64, cache?: MeshCache): { margin: number; centre?: Vec3; footprint: [number, number][]; towards?: [number, number] } {
   const m = meshedAnalysis(shape, Math.max(8, Math.round(resolution)), cache);

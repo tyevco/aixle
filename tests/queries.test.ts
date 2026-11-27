@@ -223,4 +223,18 @@ describe("stands() (round 11)", () => {
     expect(ev.asserts[2].where).toMatch(/^the centre of mass \(2\.79, 0\.98, 0\) is 0\.0\d+ outside the footprint, so it tips towards -x$/);
     expect(ev.asserts[3].where).toMatch(/^the centre of mass \(0, 0\.7\d?, 0\) is 0\.37\d* inside the footprint, nearest its edge towards [+-]z$/);
   });
+  it("reads a margin about a cell wide for a cube balanced on its edge, and -Infinity only with no surface", async () => {
+    // The footprint is what lies within a cell and a half of the lowest point, so an edge or a point has one: a strip
+    // of cells. The reference said such a shape "has no footprint and reads -Infinity"; it reads a small margin that
+    // shrinks with the cell, and a promise of > 0 holds of a cube on its edge.
+    const { standing } = await import("../src/mesh/pieces.js");
+    const edge = run("edge = box(1, 1, 1) | rotate(z=45) | ground()\nshow edge").steps.find((s) => s.name === "edge")!.value as never;
+    const at64 = standing(edge, 64).margin, at200 = standing(edge, 200).margin;
+    expect(at64).toBeGreaterThan(0);
+    expect(at64).toBeLessThan((Math.SQRT2 / 64) * 2);
+    expect(at200).toBeGreaterThan(0);
+    expect(at200).toBeLessThan(at64 / 2);
+    const empty = run("e = box(1, 1, 1) - box(2, 2, 2)\nshow box(1)").steps.find((s) => s.name === "e")!.value as never;
+    expect(standing(empty, 64).margin).toBe(-Infinity);
+  });
 });

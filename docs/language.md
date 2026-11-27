@@ -1227,8 +1227,12 @@ the footprint of what rests within a cell and a half of the shape's
 lowest point, positive inside and negative outside, in units: `assert
 stands(bookcase) > 0.5, "the case stands"`; a failure gives the centre of
 mass and which way it tips (`is 0.047 outside the footprint, so it tips
-towards -x`), and a shape resting on a point or an edge has no footprint
-and reads -Infinity. Both mesh as `pieces` does, sharing its mesh;
+towards -x`). A shape balanced on an edge or a point still has a
+footprint, the strip of cells along the contact, so it reads a small
+positive margin that shrinks with the cell (a cube on its edge reads
+0.025 at 64 cells across it and 0.008 at 200, a ball 0.28 and 0.17):
+promise a margin of several cells, not `> 0`; a shape with no surface at
+that cell reads -Infinity. Both mesh as `pieces` does, sharing its mesh;
 `clearance(a, b)` is
 the smallest gap between two surfaces, zero when they touch, and
 negative when they overlap: minus the depth of the deepest point either
