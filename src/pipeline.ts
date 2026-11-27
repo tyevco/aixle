@@ -874,7 +874,7 @@ export class AssertClock {
     if (e) { e.ms += ms; e.count++; } else this.byPlace.set(key, { info: a, ms, count: 1 });
     if (ms > slow) this.write(`${assertLabel(a)} took ${seconds(ms)}`);
   };
-  /** The slowest places, most time first: "line 149 wall(bowl) > 0.04, 15.9 s over 3 judgements". */
+  /** The slowest places, most time first: "line 149, wall(bowl) > 0.04, 15.9 s over 3 judgements". */
   slowest(n = 3): string[] {
     return [...this.byPlace.values()].sort((x, y) => y.ms - x.ms).slice(0, n).filter((e) => e.ms >= 100)
       .map((e) => `${e.info.file ? `${e.info.file} ` : ""}line ${e.info.line}${e.info.pose ? ` in pose ${e.info.pose}` : ""}, ${e.info.text}, ${seconds(e.ms)}${e.count > 1 ? ` over ${e.count} judgements` : ""}`);
