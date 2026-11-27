@@ -1019,8 +1019,9 @@ units in` works though `in` is a keyword) says what one unit is, and
 build volume in millimetres: width along x, depth along z, height along
 y. A model is judged as a print only when the program says it is one,
 with `set units` or `set bed`, or the run asks for a print's file with
-`--3mf`. Then the report has its Print section, `check` its `print:`
-line and the render a `model.3mf`. Otherwise the report says in one
+`--3mf`. Then the report has its Print section and the render a
+`model.3mf` (`check`, which takes no `--3mf`, prints its `print:` line
+for units or a bed, below). Otherwise the report says in one
 line that it was not judged as a print and how to make it one, with no
 size in millimetres, no wall or support, no grams of PLA and no print
 summary (the files list still says what `model.stl` is): a door for a
