@@ -1021,6 +1021,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let calloutData: { labelled: { name: string; cut?: boolean; visible: number }[]; unlabelled: string[]; unseen: string[] } | undefined;
   // The rest pose's cell, when a pose is shown and meshed at it rather than with the grid across the posed box.
   let poseCell: number | undefined;
+  let poseCoarser = false;
   // Every cluster of open edges, for report.json: where, how many, which steps (round 6: most edges were unattributed).
   const edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [];
   if (shownPose && !shownJoints && shownPose !== "rest") warnings.push(`pose ${shownPose}: no such pose (poses: ${rest.poses.map((p) => p.name).join(", ") || "none"}); showing rest`);
@@ -1142,6 +1143,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     }
     mesh = nets.mesh;
     cellSize = nets.cellSize;
+    // Past 500 cells along the posed box the rest cell cannot be kept (a folded arm unfolded at set grid 400), and the
+    // title and the report say the cell is coarser than at rest rather than "as at rest".
+    if (poseCell !== undefined && cellSize > poseCell * 1.001) poseCoarser = true;
     log(`mesh: ${triangleCount(mesh)} triangles, cell ${fmt(cellSize)} (${nets.dims.join("×")} cells, ${nets.samples} samples) in ${timings.mesh} ms`);
     if (nets.nanSamples > 0)
       warnings.push(`The distance field is NaN at ${nets.nanSamples} of ${nets.samples} samples, so parts of the model are missing: look for a scale of 0, a zero-size primitive, or a blend radius that is not a number.`);
@@ -1280,7 +1284,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // surface: a coarse cell's vertices stray past a face (round 10: a quick sheet titled a 0.5-tall flange 0.52,
     // its engraving's vertices standing proud of the boss), and the frame keeps the mesh's own extent.
     const shownSize = !focusStep && trueBounds ? clampBounds(trueBounds, bounds) : undefined;
-    const info = { name: shownName, bounds: frame, size: shownSize, triangles: triangleCount(viewMesh), cellSize: viewCell, cellNote: poseCell !== undefined && viewCell === cellSize ? "as at rest" : undefined, warnings: warnings.length, azimuth, elevation, units: shownUnits.assumed ? undefined : shownUnits.units };
+    const info = { name: shownName, bounds: frame, size: shownSize, triangles: triangleCount(viewMesh), cellSize: viewCell, cellNote: poseCell !== undefined && viewCell === cellSize ? (poseCoarser ? "coarser than at rest" : "as at rest") : undefined, warnings: warnings.length, azimuth, elevation, units: shownUnits.assumed ? undefined : shownUnits.units };
     time("sheet", () => write("sheet.png", renderSheet(viewMesh, info, size, viewGhost, ghostCell).toPng()));
     // The perspective view with the largest visible steps named, a leader line each: what maps a picture back to
     // the program (roadmap 9: "the thing at the top left is lantern_ring" as a fact). Not on a quick pass.
@@ -1738,7 +1742,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
       ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
-      `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units${poseCell !== undefined ? ` (the rest pose's cell, kept for pose ${shownPose}: ${Math.round(Math.max(...boundsSize(trueBounds ?? bounds)) / cellSize)} cells along its longest side)` : ""} |`,
+      `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units${poseCell !== undefined ? poseCoarser ? ` (pose ${shownPose}: the rest pose's cell, ${fmt(poseCell)}, would be more than the 500 cells the extractor takes along the posed model, so this one is coarser than at rest)` : ` (the rest pose's cell, kept for pose ${shownPose}: ${Math.round(Math.max(...boundsSize(trueBounds ?? bounds)) / cellSize)} cells along its longest side)` : ""} |`,
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,

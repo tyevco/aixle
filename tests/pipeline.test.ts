@@ -572,6 +572,14 @@ describe("round-11 renders", () => {
     expect(cell()).toBeCloseTo(restCell, 9);
     expect(posed.report).toMatch(/\| Grid \| \d+ cells on the longest side, cell [\d.]+ units \(the rest pose's cell, kept for pose open: \d+ cells along its longest side\) \|/);
     expect(rest.report).not.toMatch(/the rest pose's cell/);
+    // Past the 500 cells the extractor takes along the posed model the rest cell cannot be kept, and the report says
+    // the cell is coarser rather than "kept" (an arm folded over its base at rest, unfolded to twice the length).
+    const fold = 'base = box(1, 0.1, 0.1) | move(0, 0.05, 0)\narm = joint(box(1, 0.1, 0.1) | move(-0.5, 0.15, 0), "hinge", 0.5, 0.1, 0, axis=[0, 0, 1])\npose("open", hinge=-180)\nshow base + arm';
+    run(fold, "fold.aix", dir, { ...QUICK, grid: 400 });
+    const foldCell = cell();
+    const far = run(fold, "fold.aix", dir, { ...QUICK, grid: 400, pose: "open" });
+    expect(cell()).toBeGreaterThan(foldCell * 1.1);
+    expect(far.report).toMatch(/\| Grid \| 400 cells on the longest side, cell [\d.]+ units \(pose open: the rest pose's cell, [\d.]+, would be more than the 500 cells the extractor takes along the posed model, so this one is coarser than at rest\) \|/);
   });
 
   it("draws named steps with the output for a picture, each its own object in a scene, and names an unknown one", () => {

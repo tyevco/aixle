@@ -9,7 +9,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { assertsRow, BEAUTY_ONLY, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { assertsRow, BEAUTY_ONLY, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -17,7 +17,7 @@ import { diskCache, type ImportCache } from "./import/cache.js";
 import { assertLine, assertPassLine } from "./lang/interpreter.js";
 import { exprText } from "./lang/ast.js";
 import { watch } from "node:fs";
-import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
+import { boundsSize, isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
 import { isMaterial, isRecord, isShape2, isShape3, isUserFn, typeName, type Value } from "./lang/values.js";
@@ -277,7 +277,9 @@ function main(argv: string[]): number {
       // A pose is meshed at the rest pose's cell, so its thin parts are judged there too.
       const { grid, cellSize } = cellFor(pose ? rest : ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
       let bedWarning: string | undefined;
-      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units${pose ? `, the rest pose's, which a render of pose ${pose.name} keeps` : ""}`);
+      // Past the 500 cells the extractor takes along the posed model, a render cannot keep it.
+      const posedCells = pose && ev.output && cellSize > 0 && !isEmpty(ev.output.bounds) ? Math.max(...boundsSize(tightBounds(ev.output))) / cellSize : 0;
+      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units${pose ? posedCells > 500 ? `, the rest pose's; pose ${pose.name} is about ${Math.round(posedCells)} of those along its longest side, past the 500 a render takes, so a render of it is meshed coarser` : `, the rest pose's, which a render of pose ${pose.name} keeps` : ""}`);
       // A program that says it is a print (set units, set bed) gets its size in millimetres and the bed's verdict,
       // from the surface's extent (rays, no mesh); the thinnest wall and the supports are the render's report.
       if ((ev.settings.units !== undefined || ev.settings.bed !== undefined) && ev.output && !isEmpty(ev.output.bounds)) {

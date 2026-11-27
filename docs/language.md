@@ -497,6 +497,9 @@ at the rest cell). So the same part
 reads the same at rest and posed; the sheet's title says `cell 0.0189
 as at rest` and the report's Grid row how many cells that is along the
 posed model's longest side, and `check --pose` prints the rest cell.
+Past 500 cells along the posed model (a folded arm unfolded at `set
+grid 400`) the rest cell cannot be kept: the title then says `coarser
+than at rest`, and the Grid row and `check --pose` say why.
 With `set focus name` (or
 `--focus`) the pose sheet and the strips are close-ups of that step
 where each pose puts it, at the frame's own cell, with the rest of the
