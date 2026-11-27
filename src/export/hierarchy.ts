@@ -55,6 +55,11 @@ export interface SceneHierarchy {
   normalStats?: NormalStats;
   /** With an atlas: the texels on triangles across a material seam, painted from the surface, and how many differ from the nearest corner. */
   seams?: { texels: number; differ: number };
+  /**
+   * True when the normal map was baked with the field's normal for every material because the decimation went past
+   * the flat faces; false or absent when it was not, which with no atlas (`texture: 0`) or no maps is always.
+   */
+  fieldNormals?: boolean;
   triangles: number;
   /** Things the export could not carry, for the report: a rotation or a scale above a joint. */
   notes: string[];
@@ -342,6 +347,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     out.materialMaps = new Map(materials.map((m, i) => [m, baked.maps[i]]));
     out.normalStats = baked.normalStats;
     out.seams = baked.seams;
+    out.fieldNormals = fieldNormals && withMaps && !!baked.normal;
   }
   return out;
 }

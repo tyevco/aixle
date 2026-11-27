@@ -914,7 +914,8 @@ where the surface curves. The sheet and the STL are never decimated. A
 cap under the flat faces' count merges curved faces too, and then every
 material's texels in the normal map carry the field's own normal, so a
 merged band shades as the surface does rather than in streaks between
-its corners; the row says so. A face across a material seam (the band
+its corners; the row says so (with `--no-texture` there is no normal
+map, the band shades in streaks, and the row says that instead). A face across a material seam (the band
 round a stud where iron meets oak) is painted texel by texel with the
 material of the surface under it, not of its nearest corner, and the row
 counts those texels. What no map changes is the outline: a part a few

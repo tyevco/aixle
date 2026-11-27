@@ -450,6 +450,25 @@ describe("a triangle cap on the exports", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("says merged faces carry the field's normal past the flat faces only when a normal map was baked to carry it", () => {
+    // Review of round 11's fixes: with --no-texture there is no normal map, and the row claimed one all the same.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = 'b = sphere(0.5) | paint("red")\nset triangles 300\nshow b';
+      const opts = { grid: 40, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false };
+      const mapped = run(src, "ball.aix", join(dir, "mapped"), { ...opts, texture: 64 });
+      const data = JSON.parse(readFileSync(join(dir, "mapped", "report.json"), "utf8"));
+      expect(data.exports.triangles).toBeLessThan(data.exports.flat);
+      expect(mapped.files).toContain("model_normal.png");
+      expect(mapped.report).toMatch(/past the flat faces, so every material's texels carry the field's normal in the normal map/);
+      const plain = run(src, "ball.aix", join(dir, "plain"), { ...opts, texture: 0 });
+      expect(plain.files).not.toContain("model_normal.png");
+      expect(plain.report).not.toMatch(/carry the field's normal in the normal map/);
+      expect(plain.report).toMatch(/past the flat faces, and with no texture atlas there is no normal map to carry the field's normal, so merged curved faces shade flatter/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("warns past a cell with a cap that would raise the count, though each mesh keeps a few triangles under any cap", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
