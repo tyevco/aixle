@@ -11,6 +11,7 @@ import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderBeauty, type BeautyOptions } from "../src/render/beauty.js";
 import { fieldCheck, fieldMatches, lastPoolRows, openBeautyPool, poolWorkerRows } from "../src/render/beauty-pool.js";
 import { importResolver, replayedImports } from "../src/resolvers.js";
+import { encodePng } from "../src/render/png.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { parse } from "../src/lang/parser.js";
 import type { MeshSamples } from "../src/mesh/meshSdf.js";
@@ -27,9 +28,9 @@ const SMALL: RunOptions = { grid: 28, size: 64, views: [], steps: false, slices:
 
 /** The beauty pictures a run wrote, by file name, as bytes. */
 let runs = 0;
-function pictures(src: string, name: string, threads: number, extra: RunOptions = {}): Record<string, Buffer> {
+function pictures(src: string, name: string, threads: number, extra: RunOptions = {}, log?: string[]): Record<string, Buffer> {
   const out = join(dir, `run${runs++}`);
-  const r = run(src, name, out, { ...SMALL, ...extra, threads });
+  const r = run(src, name, out, { ...SMALL, ...extra, threads, log: log && ((l) => log.push(l)) });
   const files = r.files.filter((f) => /^(beauty.*|lights)\.png$/.test(f)).sort();
   return Object.fromEntries(files.map((f) => [f, readFileSync(join(out, f))]));
 }
@@ -81,6 +82,28 @@ describe("the beauty render on the pool", () => {
     const one = pictures(IMPORTED, name, 1);
     expect(Object.keys(one)).toEqual(["beauty.png", "beauty_low.png", "lights.png"]);
     for (const got of [cold, pictures(IMPORTED, name, 2), pictures(IMPORTED, name, 4)]) for (const f of Object.keys(one)) expect(sha(got[f]), f).toBe(sha(one[f]));
+  });
+
+  it("draws what the files say now: a picture and a library changed between two runs of the same program", () => {
+    // The same source run twice in one process (a --watch save, a test, a tool): the workers kept the shape they built
+    // from the first run's files, which matched the main thread's field, so they drew their rows with the old ones.
+    const at = join(dir, "edited");
+    mkdirSync(join(at, "parts"), { recursive: true });
+    const name = join(at, "tin.aix");
+    const src = 'use "parts/knob"\nlabel = material("cream", image="label.png", projection="cylindrical", scale=0.6)\nbody = cylinder(0.5, 1) | move(0, 0.5, 0) | paint(label)\nshow body + (knob.knob() | move(0, 1.05, 0))';
+    const paint = (rgb: [number, number, number]) => writeFileSync(join(at, "label.png"), encodePng(2, 2, new Uint8Array([0, 1, 2, 3].flatMap(() => [...rgb, 255]))));
+    const knob = (shape: string) => writeFileSync(join(at, "parts", "knob.aix"), `# a knob on the lid\ndef knob() = ${shape} | paint("gold")\n`);
+    paint([200, 40, 30]);
+    knob("sphere(0.1)");
+    pictures(src, name, 4);
+    paint([30, 60, 210]);
+    knob("box(0.08, 0.1, 0.08)");
+    const before = poolWorkerRows(), lines: string[] = [];
+    const now = pictures(src, name, 4, { beautySize: 160 }, lines), fresh = pictures(src, name, 1, { beautySize: 160 });
+    expect(sha(now["beauty.png"])).toBe(sha(fresh["beauty.png"]));
+    // On the pool, not around it: the workers built the program again and drew rows of it.
+    expect(lines.filter((l) => /^beauty: /.test(l))).toEqual([]);
+    expect(poolWorkerRows()).toBeGreaterThan(before);
   });
 
   it("builds an import from the samples the main evaluation recorded, never from the file", () => {

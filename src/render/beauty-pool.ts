@@ -28,12 +28,18 @@ import { availableParallelism } from "node:os";
 import { pathToFileURL } from "node:url";
 import type { MeshSamples } from "../mesh/meshSdf.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { ModuleSource } from "../resolvers.js";
+import type { DecodedPng } from "./png.js";
 import type { Bounds, JointPose, Material, Shape3 } from "../sdf/types.js";
 import type { Camera } from "./camera.js";
 import type { BeautyOptions } from "./beauty.js";
 import { allocBuffers, materialKey, type BufferSpec, type Kernel, type KernelContext, type KernelMesh, type KernelResult } from "./kernel.js";
 
-/** What a worker needs to build the shape again: the program, the pose, slice and steps shown, and each import's samples. */
+/**
+ * What a worker needs to build the shape again: the program, the pose, slice and steps shown, and what it read from
+ * outside itself as the main evaluation read it: each import's samples, each library's source and each picture.
+ * A library or a picture left out is read from disk by the worker.
+ */
 export interface ProgramRef {
   source: string;
   sourceName: string;
@@ -43,6 +49,10 @@ export interface ProgramRef {
   show?: string[];
   /** Each import's samples, by importSampleKey, as the main evaluation recorded them. */
   importSamples?: Map<string, MeshSamples>;
+  /** Each library's source, by its file, as the main evaluation read it. */
+  modules?: Map<string, ModuleSource>;
+  /** Each picture's pixels, by its file, as the main evaluation decoded them. */
+  images?: Map<string, DecodedPng>;
 }
 
 /** The mesh as it crosses to a worker: its arrays on SharedArrayBuffers, its materials copied, and their keys. */
@@ -120,13 +130,26 @@ export function fieldMatches(shape: Shape3, check: { at: Float64Array; d: Float6
   return true;
 }
 
-/** A hash of everything a worker's shape depends on: the same key, the same field. */
+/** A map's entries in the order of their keys. */
+function sorted<V>(m: Map<string, V> | undefined): [string, V][] {
+  return [...(m ?? new Map<string, V>())].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * A hash of everything a worker's shape depends on: the same key, the same shape. The libraries and pictures are in it
+ * by content, so a program run again after one of them was edited is built again, not drawn with the old one.
+ */
 export function programKey(ref: ProgramRef): string {
   const h = createHash("sha256");
-  h.update(JSON.stringify([ref.source, ref.sourceName, ref.jointPoses ?? null, ref.poseName ?? null, ref.slice ?? null, ref.show ?? null]));
-  for (const [k, s] of [...(ref.importSamples ?? new Map<string, MeshSamples>())].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-    h.update(`\n${k}\n${JSON.stringify([s.dims, s.origin, s.cell, s.openness, s.bounds, s.triangles])}\n`);
+  h.update(JSON.stringify([ref.source, ref.sourceName, ref.jointPoses ?? null, ref.poseName ?? null, ref.slice ?? null, ref.show ?? null, !!ref.modules, !!ref.images]));
+  for (const [k, s] of sorted(ref.importSamples)) {
+    h.update(`\nimport ${k}\n${JSON.stringify([s.dims, s.origin, s.cell, s.openness, s.bounds, s.triangles])}\n`);
     h.update(new Uint8Array(s.samples.buffer, s.samples.byteOffset, s.samples.byteLength));
+  }
+  for (const [k, m] of sorted(ref.modules)) h.update(`\nmodule ${k}\n${JSON.stringify([m.file, m.source])}\n`);
+  for (const [k, p] of sorted(ref.images)) {
+    h.update(`\nimage ${k}\n${p.width}x${p.height}\n`);
+    h.update(new Uint8Array(p.rgba.buffer, p.rgba.byteOffset, p.rgba.byteLength));
   }
   return h.digest("hex");
 }
@@ -174,6 +197,14 @@ const sharedSamples = new WeakMap<MeshSamples, MeshSamples>();
 function shareSamples(s: MeshSamples): MeshSamples {
   let c = sharedSamples.get(s);
   if (!c) { c = { ...s, samples: shared(s.samples) }; sharedSamples.set(s, c); }
+  return c;
+}
+
+/** A picture's pixels on a SharedArrayBuffer, likewise. */
+const sharedImages = new WeakMap<DecodedPng, DecodedPng>();
+function shareImage(p: DecodedPng): DecodedPng {
+  let c = sharedImages.get(p);
+  if (!c) { c = { ...p, rgba: shared(p.rgba) }; sharedImages.set(p, c); }
   return c;
 }
 
@@ -326,9 +357,10 @@ export class BeautyPool {
   warm(ref: ProgramRef): void {
     if (!this.live) return;
     const samples = new Map([...(ref.importSamples ?? new Map<string, MeshSamples>())].map(([k, s]) => [k, shareSamples(s)] as const));
+    const images = ref.images && new Map([...ref.images].map(([k, p]) => [k, shareImage(p)] as const));
     this.key = programKey(ref);
     this.gen = ++generation;
-    const program: ProgramRef = { ...ref, importSamples: samples };
+    const program: ProgramRef = { ...ref, importSamples: samples, images };
     for (const s of this.workers) s.worker.postMessage({ type: "program", key: this.key, gen: this.gen, program });
   }
 

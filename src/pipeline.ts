@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "no
 import { basename, join } from "node:path";
 import type { MeshSamples } from "./mesh/meshSdf.js";
 import type { ImportCache } from "./import/cache.js";
-import { imageResolver, importResolver, moduleResolver, STD_DIR } from "./resolvers.js";
+import { imageResolver, importResolver, moduleResolver, STD_DIR, type ModuleSource } from "./resolvers.js";
 import { box } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, glbLights, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
@@ -37,7 +37,7 @@ import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { bedFit, contactArea, supportVolume, threemfUnit, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
-import { encodeApng } from "./render/png.js";
+import { encodeApng, type DecodedPng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
 import { restingContact, sliceLevels } from "./sdf/measure.js";
 
@@ -1267,12 +1267,15 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
   const earlier = previousFiles(outDir);
 
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
-  // Every import's samples, as this run read or made them, for the beauty workers to build the same field from.
+  // Every import's samples, library and picture, as this run read or made them, for the beauty workers to build the
+  // same shape from without reading a file again.
   const importSamples = new Map<string, MeshSamples>();
+  const moduleSources = new Map<string, ModuleSource>();
+  const pictures = new Map<string, DecodedPng>();
   const resolver = importResolver(sourceName, log, opts.importCache, importSamples);
-  const resolveImage = imageResolver(sourceName);
+  const resolveImage = imageResolver(sourceName, pictures);
   const program = parse(source);
-  const modules = moduleResolver(sourceName);
+  const modules = moduleResolver(sourceName, moduleSources);
   const skipAsserts = opts.asserts === false;
   // The asserts' own time, over every evaluation of the run, so a quick pass that spent it on them can say so.
   const runStart = performance.now();
@@ -1287,7 +1290,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
   const threads = Math.max(1, Math.floor(opts.threads ?? 1));
   if (threads > 1 && (opts.beauty || evaluation.settings.beauty === 1) && evaluation.output && !isEmpty(evaluation.output.bounds)) {
     session.pool = openBeautyPool(threads, log);
-    session.pool?.warm({ source, sourceName, jointPoses: shownJoints, poseName: shownJoints ? shownPose : undefined, slice: opts.slice, show: opts.show, importSamples });
+    session.pool?.warm({ source, sourceName, jointPoses: shownJoints, poseName: shownJoints ? shownPose : undefined, slice: opts.slice, show: opts.show, importSamples, modules: moduleSources, images: pictures });
   }
   const beautyTables = beautyCache();
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the

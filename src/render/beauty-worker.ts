@@ -7,7 +7,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { parse } from "../lang/parser.js";
 import { evaluate } from "../lang/interpreter.js";
-import { imageResolver, moduleResolver, replayedImports } from "../resolvers.js";
+import { imageResolver, moduleResolver, replayedImages, replayedImports, replayedModules } from "../resolvers.js";
 import type { MeshSamples } from "../mesh/meshSdf.js";
 import type { Bounds, Material, Shape3 } from "../sdf/types.js";
 import type { Camera } from "./camera.js";
@@ -41,8 +41,8 @@ process.on("exit", () => { if (current) fail(current, EXITED); });
 function build(ref: ProgramRef): Shape3 {
   const ev = evaluate(parse(ref.source), {
     resolveImport: replayedImports(ref.sourceName, ref.importSamples ?? new Map<string, MeshSamples>()),
-    resolveModule: moduleResolver(ref.sourceName),
-    resolveImage: imageResolver(ref.sourceName),
+    resolveModule: ref.modules ? replayedModules(ref.sourceName, ref.modules) : moduleResolver(ref.sourceName),
+    resolveImage: ref.images ? replayedImages(ref.sourceName, ref.images) : imageResolver(ref.sourceName),
     moduleFrom: ref.sourceName,
     skipAsserts: true,
     jointPoses: ref.jointPoses,

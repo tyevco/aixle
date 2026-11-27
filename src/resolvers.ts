@@ -5,7 +5,9 @@
  *
  * An import is sampled once, on the main thread. Its samples are recorded as they are made (or read from the cache),
  * and a worker evaluates from that record: it never samples a mesh again, never reads the import file and never
- * touches the disk cache, so its field is the main thread's to the bit.
+ * touches the disk cache, so its field is the main thread's to the bit. The libraries and pictures are recorded the
+ * same way, as the main evaluation read them, so a worker builds from the files as they were then, not as a later
+ * edit left them.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -27,11 +29,19 @@ const fmt = (v: number): string => {
 /** The folder the shipped libraries live in: `std/` beside `src/` (and beside `dist/` once built). */
 export const STD_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "std");
 
-/** Load a PNG beside the program for material(image=) and decal(image=), once per file. */
-export function imageResolver(sourceName: string) {
+/** The file a picture's path names: beside the program. */
+function imageFile(sourceName: string, path: string): string {
+  return resolve(dirname(resolve(sourceName)), path);
+}
+
+/**
+ * Load a PNG beside the program for material(image=) and decal(image=), once per file. With `record`, every picture
+ * read is kept there too, by its file, for the beauty render's workers (replayedImages).
+ */
+export function imageResolver(sourceName: string, record?: Map<string, DecodedPng>) {
   const cache = new Map<string, DecodedPng>();
   return (path: string): DecodedPng => {
-    const file = resolve(dirname(resolve(sourceName)), path);
+    const file = imageFile(sourceName, path);
     const hit = cache.get(file);
     if (hit) return hit;
     let data: Buffer;
@@ -43,21 +53,45 @@ export function imageResolver(sourceName: string) {
     if (!/\.png$/i.test(file)) throw new Error(`${path} is not a PNG; pictures are PNG files`);
     const png = decodePng(data);
     cache.set(file, png);
+    record?.set(file, png);
     return png;
   };
+}
+
+/** The pictures a worker evaluates with: the main evaluation's, by file; one it did not read is an error, never a read. */
+export function replayedImages(sourceName: string, recorded: Map<string, DecodedPng>) {
+  return (path: string): DecodedPng => {
+    const file = imageFile(sourceName, path);
+    const png = recorded.get(file);
+    if (!png) throw new Error(`picture ${path} was not read by the main evaluation`);
+    return png;
+  };
+}
+
+/** A library's source as `use` reads it: the text and the file it came from. */
+export interface ModuleSource {
+  source: string;
+  file: string;
+}
+
+/** The file `use "path"` names, from the program (or, for a library's own uses, the library at `from`). */
+function moduleFile(sourceName: string, path: string, from?: string): string {
+  const withExt = path.endsWith(".aix") ? path : `${path}.aix`;
+  return /^std\//.test(withExt) ? resolve(STD_DIR, withExt.slice(4)) : resolve(dirname(resolve(from ?? sourceName)), withExt);
 }
 
 /**
  * `use "path"` resolves relative to the program that uses it (or, for a
  * library's own uses, relative to that library), except `std/<name>`,
  * which is the library shipped with the tool; `.aix` may be left off.
- * Each file is read once per run.
+ * Each file is read once per run. With `record`, every library read is
+ * kept there too, by its file, for the beauty render's workers
+ * (replayedModules).
  */
-export function moduleResolver(sourceName: string) {
-  const cache = new Map<string, { source: string; file: string }>();
-  return (path: string, from?: string): { source: string; file: string } => {
-    const withExt = path.endsWith(".aix") ? path : `${path}.aix`;
-    const file = /^std\//.test(withExt) ? resolve(STD_DIR, withExt.slice(4)) : resolve(dirname(resolve(from ?? sourceName)), withExt);
+export function moduleResolver(sourceName: string, record?: Map<string, ModuleSource>) {
+  const cache = new Map<string, ModuleSource>();
+  return (path: string, from?: string): ModuleSource => {
+    const file = moduleFile(sourceName, path, from);
     const hit = cache.get(file);
     if (hit) return hit;
     let source: string;
@@ -69,7 +103,18 @@ export function moduleResolver(sourceName: string) {
     }
     const out = { source, file };
     cache.set(file, out);
+    record?.set(file, out);
     return out;
+  };
+}
+
+/** The libraries a worker evaluates with: the main evaluation's, by file; one it did not read is an error, never a read. */
+export function replayedModules(sourceName: string, recorded: Map<string, ModuleSource>) {
+  return (path: string, from?: string): ModuleSource => {
+    const file = moduleFile(sourceName, path, from);
+    const hit = recorded.get(file);
+    if (!hit) throw new Error(`use "${path}": ${file} was not read by the main evaluation`);
+    return hit;
   };
 }
 
