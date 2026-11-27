@@ -1262,6 +1262,30 @@ box on demand, so they cost nothing and every shape has them. `attach`
 is `move` by the difference of two anchors; the interpreter has no idea
 it is anything else.
 
+## Placing by contact
+
+An anchor needs the contact point known; most contacts are not (a book
+leaning on its neighbour touches where its corner happens to meet it).
+`rest` and `lean` (`src/sdf/measure.ts`) search a one-parameter rigid
+motion, a move along a direction or a turn about a line, for the first
+parameter at which the part meets `on`, and return `move` or a turn
+about the pivot, so anchors ride along as they do for any transform.
+The search has two halves. A coarse one traces points of both surfaces
+along the motion through the other's field (sphere tracing; where a
+point slides along a face, which pins the field at zero, a short probe
+ahead says whether it is going in and then a step of a 48th of the part
+keeps it moving), seeds the small leaves of each shape at their own
+scale (a bowl's tab, a hook's lip: a lattice over the whole steps past
+them), and refines around the earliest meetings. A fine one reads
+`clearance()`, which is exact near a touch, to settle the contact the
+seeds can only bracket, by regula falsi on the leaf of `on` the part is
+pressed into: read whole, a union's clearance is its nearest touch, and
+the shelf a book slides along reads zero all the way. Touching is a
+clearance within a ten-millionth of the part's size of zero, and the
+search ends on the near side, within a millionth. The roadmap's item 16
+has the measurements and the decisions (sink 0, an error for no contact,
+backing out of a start inside, the right-handed turn).
+
 ## Explain
 
 `aixle explain` is the first thing to run on a program someone else

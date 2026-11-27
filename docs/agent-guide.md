@@ -19,8 +19,16 @@ the inside is cut open.
    part at the origin, then `rotate`, then `move` into place, or better,
    `anchor` the points where parts meet and `attach` them: `seat |
    attach("bottom", legs, "top")` needs no arithmetic and survives a
-   change to the legs. `at(part, "name")` is a point for a `tube` between
-   two parts. Paint parts before joining them. End with `show model`.
+   change to the legs. Where a part rests on, slides against or leans on
+   another, let the surfaces place it instead of working out the
+   contact: `bowl | rest(plate)` drops it until it touches, `book |
+   rest(prev, dir=[-1, 0, 0], sink=-0.06)` slides it to 0.06 short of its
+   neighbour, `book | lean(prev, pivot="heel", axis=[0, 0, 1])` tips it
+   about its heel until it touches. `check` prints how far each moved or
+   turned, and the promise of contact holds by construction (round 11's
+   leaning books, placed by trigonometry, were 0.007 off; by `rest`,
+   1e-6). `at(part, "name")` is a point for a `tube` between two parts.
+   Paint parts before joining them. End with `show model`.
 3. **`npx aixle check model.aix`.** Fixes syntax and type errors in a
    second, prints each step's size and every warning. Sizes that look wrong
    here are wrong. Under its cameras' line, each `camera(..., focus=)`
@@ -213,6 +221,9 @@ mesh; `--no-cache` samples afresh.
 | "separate pieces" but everything looks joined | a part stops a hair short of its neighbour | the warning names the loose piece's volume, centre and step; overlap by a little |
 | copies meant to sit between another ring's copies land on them | a part centred on y turned before `ring` only turns in place (`check` warns) | turn the ring: `pocket \| ring(6, 0.7) \| rotate(y=30)` |
 | a rig's part swings about the wrong point | the joint's pivot is not where the part turns | give `joint` the world point of the hinge, after the part is moved into place |
+| a part that should sit on, lean on or stand beside another floats a hair, sinks in, or needs trigonometry to place | the contact is worked out by hand | `rest(on)` moves it until it touches (`dir=` for any direction, `sink=` past the touch or, negative, short of it), `lean(on, pivot, axis)` turns it until it touches; the gap left is a millionth of the part's size |
+| `lean` turns the part a long way round, or says it never touches | it turns the right-handed way about `axis`, as `rotate` does | the other sign, `axis=[0, 0, -1]`; check's line says when a turn is more than a quarter |
+| `rest` moves a part the wrong way, or lands it on something it should pass | it started inside `on` and was backed out (check's line says so), or `on` holds what it should fall past | start it clear of `on`; leave out of `on` what it passes (a hook a bowl twists under) |
 | a part placed with `attach` is a loose piece at a finer grid | `attach` sets face on face, exactly touching | `attach(..., sink=0.02)` pushes it in, or put the anchor a cell inside the part |
 | text wrapped inside a band reads backwards | `wrap` reads left to right from outside | `flip("x")` the extruded text before the `wrap` for an inscription read from inside |
 | `set pose reach` shows the rest pose | the pose is not named that | the warning lists the poses that exist |
@@ -288,6 +299,8 @@ shown, so a lug welded to a boom is blamed as the lug, not the boom.
 - `| ground()` when the lowest point should touch the floor. It reads the
   surface itself, so a blend or a cut that leaves the bounding box loose
   does not lift the model; a base already on y = 0 does not need it.
+  On anything but the floor, `| rest(on)`: it finds the contact from both
+  surfaces (a toe of round 3's frog 0.003 lower than `ground()`'s rays did).
 - Draw in the real unit, millimetres for a print (a 117 mm stand is 117
   units, with `set units mm`). Nothing in the mesh, what the checks find
   or the pictures depends on the model's absolute size: measured, a mug

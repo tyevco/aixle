@@ -516,7 +516,81 @@ Two scratch prototypes measured it:
 
 **Cost.** About 150 lines in surfaceNets.ts, a field set by about eight constructors, and tests. A day or two, with the prototype written.
 
-### 16. Place by contact: `rest()` and `lean()`
+### 16. Place by contact: `rest()` and `lean()`: built
+
+Built as proposed, in `src/sdf/measure.ts` beside clearance(), with
+builtin entries and a `check` line per call (`rest (line 14)  bowl onto
+plate: moved 0.15 along [0, -1, 0]; gap 0`, a loop's calls on one line).
+The search traces points of both surfaces along the motion (sphere
+tracing, with a short probe and then a step of a 48th of the part where a
+point slides along a face), seeds a part's small leaves (a tab, a hook's
+lip) at their own scale, refines around the earliest meetings, then
+tightens on clearance(), read a leaf of `on` at a time and following the
+leaf the part is pressed into, so the shelf a book slides along, which
+reads zero the whole way, cannot pass for the neighbour it slides into.
+What the prototype left open, decided:
+- **sink defaults to 0.** A touch meshes as one piece: pieces() read 1
+  for every book on round 11's shelf, the mixer's bowl on its plate, the
+  frog on its pad and a cube on a board at 32 to 317 cells, touching or
+  sunk a cell, and the report reads it watertight. A cell is not known
+  when rest() runs (it comes from the shown model and `set grid`), and a
+  cell of sink would break the bookcase's own `clearance(bk, board) >
+  -0.002`.
+- **No contact is an error** naming both parts, their boxes and the
+  direction: a part left where it was would hide the broken promise.
+- **A part that starts inside** is backed out against the motion to the
+  first place it is clear, so a part built at the origin rests on a shelf
+  above it. One sunk only a sliver (under a ten-thousandth of its size)
+  is lifted out along the surface's normal first: ground() left round
+  11's turned books 4.5e-5 in their shelf, and backing out along a slide
+  never frees that.
+- **lean turns the right-handed way about `axis`**, as rotate() does, not
+  the shorter of the two turns: the other way is often a turn of nothing,
+  into the shelf the book stands on. A turn of more than 90 degrees gets
+  a note naming the other axis.
+- **The tightening** is regula falsi on clearance() (the Illinois rule)
+  aimed at half the tolerance, ending clear and within a millionth of the
+  part's size of touching.
+
+Measured, against the hand values:
+- **Bookcase** (round 11): 33 books and the right bookend placed by 34
+  rest() calls, dropped, slid along the shelf to `sink=-0.06` short of the
+  one before, or slid against it when leaning. All 271 of the agents'
+  asserts hold. The uprights land within 2e-6 of the hand's positions.
+  The three leaning books touch at 1.0e-6 to 1.2e-6, where the hand's
+  `min(b.h * s, prev_h * s / max(c, 0.01))` left 0.0072, 0.0065 and 0.0076
+  (promised < 0.012). The book after the second lean stands 0.0600 from
+  it, where the hand's cursor gave 0.0656 (it reckoned the square corner,
+  not the rounded one). 44 ms a call; check 5.6 s against 3.7 s by hand.
+- **The three leans by lean()**, each book upright with its heel where
+  the agents' arithmetic put it, turned until it touches: 18.18, 15.17
+  and 20.23 degrees against the 18, 15 and 20 written (the hand's gap
+  closed), gaps at most 1.9e-6, about 16 ms each. Turned about the
+  rounding's centre, the heel stays 1e-7 from the shelf.
+- **Mixer** (round 11): the hand's `bowl_y0` was exact (rest from there
+  moves 0); dropped from y = 3 the bowl lands within 2.5e-10 of it, with
+  overlap 0 and the hooks' 0.025 as promised. Rested on base, plate and
+  hooks together it stops on the hook lips, 0.12 higher, which the first
+  build stepped through (a lip as thick as the slide step; now a short
+  probe first, and small leaves seeded).
+- **Frog** (round 3): rest() finds a toe 0.0031 lower than ground()'s
+  rays did, so the hand's `ground() | move(0, pad_thick - 0.01, 0)` sinks
+  it 0.0131, not 0.01. About a second a call: the skin is displaced, a
+  clearance reading costs 144 ms and the contact takes six or seven.
+- **The prototype's cases**, exact by hand: a box tilted 18 degrees onto
+  a board 1.0 within 8.6e-8 (the corner the lattice missed by 0.0046); a
+  ball into a ring, the contact off the drop line, within 3.6e-7; the
+  slide along a ledge 0.01 below, and along the ledge it stands on, square
+  or rounded, within 3e-7, where conservative advancement stalled; drops
+  onto a 20-degree ramp and along a diagonal into a corner within 1e-6; a
+  book leaned on its neighbour at 2.865974 degrees against 2.865984. 10 to
+  60 ms each, one to three clearance readings.
+
+Not built: a sink for lean() (its contacts are an edge or a corner), and
+oriented anchors, as below. A feature thinner than a 48th of the part,
+met only while the part slides along another face, can still be stepped
+over; the other surface's seeds usually meet it. What follows is the
+proposal as it was written.
 
 **Why.** Placement is where code-writing models fail most:
 - Coordinates an LLM writes place objects no better than random. In Holodeck, human ranking (MRR) gave LLM coordinates 0.364, random placement 0.369, and relations solved by a solver 0.706 (CVPR 2024).
