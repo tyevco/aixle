@@ -244,6 +244,33 @@ describe("normal map", () => {
     expect([...O.reliefMaterials(O.paint(O.displace(O.paint(P.sphere(1), leaf), 0.1, 0.3), preset("oak")!))].map((m) => m.name)).toEqual(["oak"]);
     expect([...O.reliefMaterials(O.displace(O.union([O.paint(P.sphere(1), leaf), P.box(1, 1, 1)]), 0.1, 0.3))].map((m) => m.name).sort()).toEqual(["clay", "leaf"]);
   });
+  it("carries the field's normal for every material once the export is decimated past its flat faces", () => {
+    // Round 11: merged curved faces shade in streaks between their corners; the field's normal under each texel, in
+    // the merged face's frame, makes them shade as the surface does. A plain sphere has no map whole.
+    const ball = O.paint(P.sphere(0.5), preset("red")!);
+    const whole = buildHierarchy([{ name: "b", shape: ball }], { cellSize: 0.025, texture: 256 });
+    expect(whole.normalMap).toBeUndefined();
+    const cut = buildHierarchy([{ name: "b", shape: ball }], { cellSize: 0.025, texture: 256, maxTriangles: 120 });
+    expect(cut.triangles).toBeLessThan(cut.decimated!.flat);
+    expect(cut.normalMap).toBeDefined();
+    expect(cut.normalStats!.reason).toMatch(/decimated past its flat faces/);
+    expect([...cut.materialMaps!.values()][0].normal).toBe(true);
+    // Decoded as an engine decodes it, the map's normal is the sphere's at the texel, where the merged faces' own
+    // normals lean several degrees off it.
+    const at: AtlasResult = { mesh: { ...cut.meshes[0] }, uv: cut.uvs![0], image: cut.atlas!, charts: 0, texelsPerUnit: 0, normal: cut.normalMap, tangents: cut.tangents![0], maps: [], seams: { texels: 0, differ: 0 } };
+    let mapOff = 0, meshOff = 0, n = 0;
+    for (const tx of decodedTexels(at)) {
+      const r = Math.hypot(tx.p[0], tx.p[1], tx.p[2]);
+      const true_ = tx.p.map((v) => v / r);
+      mapOff += Math.acos(Math.min(1, tx.n[0] * true_[0] + tx.n[1] * true_[1] + tx.n[2] * true_[2]));
+      meshOff += Math.acos(Math.min(1, tx.mesh[0] * true_[0] + tx.mesh[1] * true_[1] + tx.mesh[2] * true_[2]));
+      n++;
+    }
+    expect(n).toBeGreaterThan(60);
+    // Measured: 4.6 degrees for the mesh's normals at 120 triangles, 0.36 for the map's.
+    expect((meshOff / n) * (180 / Math.PI)).toBeGreaterThan(3);
+    expect((mapOff / n) * (180 / Math.PI)).toBeLessThan(1);
+  });
   it("is not baked for a model with no displace and no bump", () => {
     const plain = bake(O.union([P.box(1, 1, 1), O.move(P.sphere(0.5), 1, 0, 0)]), 0.04);
     expect(plain.normal).toBeUndefined();

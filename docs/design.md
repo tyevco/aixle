@@ -280,9 +280,39 @@ planes, so a band between two soft corners (a lathe profile's bends,
 under the crease angle) becomes slivers from one corner to the next,
 whose normals are both blends of the two bands, and the band shades in
 streaks: measured on a vase at 12 thousand of 188 thousand triangles
-and a teapot at 11 of 108, both fine at a quarter. The default never
-goes that far on the examples; a program that asks for it is told. A
-decimated export is also a slower import: the sampler's nearest-face
+and a teapot at 11 of 108, both fine at a quarter. So once the queue has
+gone past the flat faces, the normal map is baked for every material,
+each texel carrying the field's normal under it in the merged face's
+tangent frame (the bake inverts the frame the shader builds), and the
+vase at 12 thousand shades as the full mesh does in the viewer; its
+GLB grows from 0.84 MB to 1.28 and the bake by 4.8 s. A whole model
+with no bump and no relief still gets no map: on the full vase it would
+add a third to the file (5.9 MB to 7.8) for the mesher's own error at
+creases. A bumped or displaced material always carried the field's
+normal, not the bump alone: on a stud three cells across, the mesh's
+normals lean 8.6 degrees from the field's on average and 29 at most, the
+map's 1.2 and 3. What a normal map cannot change is a silhouette, which
+is why a door's studs looked faceted in round 11's viewer and round in
+its beauty render.
+
+A face whose corners are of two materials straddles a seam. The baker
+took a texel's material and paint point from the triangle's nearest
+corner, which on the mesher's own band, a cell wide, misplaces the seam
+by under half a cell; once decimation stretched those triangles along
+the seam, an iron corner claimed a stud's width of oak (round 11: dark
+blocks beside a door's clavos, iron texels in the metallic-roughness map
+round each stud's foot, absent from the full export). On such a face each
+texel now slides to the surface along the interpolated normal and takes
+the material and paint point the field has there; the rest keep the
+corner rule, which is exact inside one material and costs no `hit()`.
+Keeping the band a cell wide in the decimator, by letting a seam vertex
+move only along the seam, was tried and measured: the band's triangles
+stretched along the seam all the same and the misplaced area did not
+shrink (873 cells² against 858), so it was not kept. A face is still in
+one material's primitive in the GLB, so a texel of the other material
+there takes its primitive's factors where that material has no map.
+
+A decimated export is also a slower import: the sampler's nearest-face
 search prunes by boxes, and a sliver up a tin's wall has a box the
 height of the wall, so a point inside is near every box (the tin's
 capped GLB at resolution 64: 25 s, the full one 5 s).

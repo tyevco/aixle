@@ -890,11 +890,18 @@ each mesh's count before and after, and how far merging flat faces alone
 would go: a cap at or above that number strays no further than the full
 mesh, so it is the cap to ask for when the file should be small. There
 is no cap per object; the shared queue already spends the triangles
-where the surface curves. The sheet and the STL are never decimated. Down to
-about a quarter of the mesh the export reads as the full one; below
-that, curved bands between soft corners (a lathe profile's bends) shade
-in streaks though the surface is in place, and the row says so: read
-`viewer.html` before shipping a cap that low. `set minecraft 16` also writes Minecraft Bedrock
+where the surface curves. The sheet and the STL are never decimated. A
+cap under the flat faces' count merges curved faces too, and then every
+material's texels in the normal map carry the field's own normal, so a
+merged band shades as the surface does rather than in streaks between
+its corners; the row says so. A face across a material seam (the band
+round a stud where iron meets oak) is painted texel by texel with the
+material of the surface under it, not of its nearest corner, and the row
+counts those texels. What no map changes is the outline: a part a few
+cells across (a stud, a ring's tube) has the mesh's polygon silhouette
+in the GLB and in any engine, where `beauty.png`, which marches the
+field, draws it round; judge small round parts in `viewer.html`, and
+raise the grid where their outline matters. `set minecraft 16` also writes Minecraft Bedrock
 geometry (`--minecraft` on the command line, with an optional pixel
 count): the field is sampled at that many pixels per unit, a unit being
 one block, every filled voxel is a pixel of solid, and the voxels are

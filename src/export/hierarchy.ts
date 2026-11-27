@@ -53,6 +53,8 @@ export interface SceneHierarchy {
   /** false when built with `maps: false`: the writer then leaves the materials as the colour atlas alone (no emissive either). */
   pbr?: boolean;
   normalStats?: NormalStats;
+  /** With an atlas: the texels on triangles across a material seam, painted from the surface, and how many differ from the nearest corner. */
+  seams?: { texels: number; differ: number };
   triangles: number;
   /** Things the export could not carry, for the report: a rotation or a scale above a joint. */
   notes: string[];
@@ -83,6 +85,12 @@ export interface HierarchyOptions {
   maps?: boolean;
   /** The distance wear reads curvature over, `wearProbe` of the model's size, so the bake matches the beauty render. */
   wearProbe?: number;
+  /**
+   * Bake the field's normal into the normal map for every material: by default when the decimation went past the
+   * flat faces into curved ones (the cap is under `decimated.flat`), whose merged faces no longer carry the surface's
+   * normals at their corners.
+   */
+  fieldNormals?: boolean;
 }
 
 /** The field a mesh was extracted from, and what was hidden to extract it, so the baker can read the same surface. */
@@ -317,9 +325,11 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       for (const j of src.joints) j.joint!.hidden = on;
       for (const st of src.sets) st.instanced!.hidden = on;
     };
-    const fields: BakeField[] = ranges.map((range, i) => ({ range, dist: sources[i].shape.dist, offset: sources[i].offset, enter: () => hide(sources[i], true), leave: () => hide(sources[i], false), relief: reliefMaterials(sources[i].shape) }));
+    const fields: BakeField[] = ranges.map((range, i) => ({ range, dist: sources[i].shape.dist, hit: sources[i].shape.hit, offset: sources[i].offset, enter: () => hide(sources[i], true), leave: () => hide(sources[i], false), relief: reliefMaterials(sources[i].shape) }));
     const withMaps = opts.maps !== false;
-    const baked = bakeAtlas(merged, { size: opts.texture, fields: withMaps ? fields : undefined, cellSize: opts.cellSize, wearProbe: opts.wearProbe, maps: withMaps });
+    // The fields go to the baker either way: a seam's texels are painted from the surface even in the colour atlas alone.
+    const fieldNormals = opts.fieldNormals ?? (!!decimated && triangles < decimated.flat);
+    const baked = bakeAtlas(merged, { size: opts.texture, fields, cellSize: opts.cellSize, wearProbe: opts.wearProbe, maps: withMaps, fieldNormals });
     const parts = splitBaked(baked.mesh, baked.uv, ranges, materials, baked.tangents);
     out.meshes = parts.map((p) => p.mesh);
     out.uvs = parts.map((p) => p.uv);
@@ -331,6 +341,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     if (baked.tangents) out.tangents = parts.map((p) => p.tangents!);
     out.materialMaps = new Map(materials.map((m, i) => [m, baked.maps[i]]));
     out.normalStats = baked.normalStats;
+    out.seams = baked.seams;
   }
   return out;
 }
