@@ -527,5 +527,26 @@ describe("round-11 renders", () => {
     expect(bytes(a, "lights.png").equals(bytes(c, "lights.png"))).toBe(false);
   });
 
+  it("removes what an earlier run of the tool wrote into the folder and this one did not, and nothing else", () => {
+    // Round 11: beauty_iron.png, beauty_torch.png and lights.png from earlier runs sat beside a quick sheet.
+    const dir = tmp();
+    writeFileSync(join(dir, "notes.txt"), "mine");
+    writeFileSync(join(dir, "beauty_old.png"), "not written by a run");
+    const first = run(lit + "set camera hero\nshow both", "lit.aix", dir, opts);
+    expect(first.removed).toEqual([]);
+    const second = run(lit + "set camera hero\nshow both", "lit.aix", dir, { ...QUICK, grid: 16, size: 64 });
+    expect(second.removed).toEqual(["beauty.png", "lights.png", "beauty_knob.png"]);
+    for (const f of second.removed!) expect(existsSync(join(dir, f)), f).toBe(false);
+    for (const f of [...second.files, "notes.txt", "beauty_old.png"]) expect(existsSync(join(dir, f)), f).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).files).toEqual(second.files.filter((f) => f !== "report.json"));
+    // A file list that names something outside the folder, or a file the tool never writes, is not followed.
+    const outside = tmp();
+    writeFileSync(join(outside, "keep.png"), "x");
+    writeFileSync(join(dir, "report.json"), JSON.stringify({ files: [`../${outside.split("/").pop()}/keep.png`, "notes.txt", "sheet.png"] }));
+    const third = run(lit + "show both", "lit.aix", dir, { ...QUICK, grid: 16, size: 64 });
+    expect(third.removed).toEqual([]);
+    expect(existsSync(join(outside, "keep.png"))).toBe(true);
+    expect(existsSync(join(dir, "notes.txt"))).toBe(true);
+  });
 
 });

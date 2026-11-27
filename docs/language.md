@@ -859,7 +859,12 @@ extent from the mesh held within the model's bounds, since a coarse
 cell's vertices can stray a little past a face (a quick sheet once
 titled a 0.5-tall flange 0.51).
 `--out DIR` puts a render somewhere other than `out/<name>/`, so a focus
-render does not overwrite the main one. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
+render does not overwrite the main one. A render removes the files the
+last render wrote into its folder (`report.json` lists them under
+`files`) that it does not write itself, and says which, so the folder
+holds one run's pictures and a `beauty_iron.png` from an earlier
+`--beauty-only` run is not read as this one's; nothing else in the
+folder is touched. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
 and `--elevation` override). `set grid N` sets the extraction resolution (cells along the longest side,
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size

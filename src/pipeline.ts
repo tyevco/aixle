@@ -4,7 +4,7 @@
  * the exports and the report. The CLI is a thin wrapper over it, and so is
  * the examples generator.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseObj } from "./import/obj.js";
@@ -147,6 +147,24 @@ export interface RunResult {
   timings: Record<string, number>;
   /** Mass properties, pieces and overhangs of the mesh, when there is one. */
   physics?: Physics;
+  /** The files an earlier run of the tool wrote into the folder that this run did not write, removed. */
+  removed?: string[];
+}
+
+/**
+ * The names the tool writes into an --out folder: a run removes only these, and only when the folder's last report.json
+ * lists them as written by that run, so nothing a person or another tool put there is ever touched.
+ */
+const OWN_FILE = /^(?:(?:sheet|persp|front|right|top|back|left|bottom|slices|steps|callouts|turntable|poses|lights|environments|beauty|model|model_normal|model_mr|model_emissive|report)\.(?:png|md)|turntable\.apng|viewer\.html|model\.(?:obj|mtl|stl|3mf|glb|roblox\.glb|geo\.json|geo\.png|animation\.json)|(?:beauty|anim)_[^/\\]+\.png)$/;
+
+/** What the run before wrote into `outDir`, from its report.json: the tool's own file names only, none outside the folder. */
+function previousFiles(outDir: string): string[] {
+  try {
+    const json = JSON.parse(readFileSync(join(outDir, "report.json"), "utf8")) as { files?: unknown };
+    return Array.isArray(json.files) ? json.files.filter((f): f is string => typeof f === "string" && OWN_FILE.test(f) && !f.includes("..")) : [];
+  } catch {
+    return [];
+  }
 }
 
 // Three decimals, or three significant figures below 0.1, so a 0.4-unit drone's 0.006 lens is not "0.01" (round 7).
@@ -956,6 +974,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     files.push(file);
   };
   mkdirSync(outDir, { recursive: true });
+  // What the last run wrote here: whatever of it this run does not write is removed at the end, so the folder holds one
+  // run's files (round 11: beauty_iron.png, beauty_torch.png and lights.png from earlier runs sat beside a quick sheet,
+  // told apart only by their times).
+  const earlier = previousFiles(outDir);
 
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
   const resolver = importResolver(sourceName, log, opts.importCache);
@@ -1821,7 +1843,20 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       2,
     ),
   );
-  return { name, outDir, evaluation, mesh, bounds, files, warnings, report, timings, physics };
+  const removed: string[] = [];
+  for (const f of earlier) {
+    if (files.includes(f) || f === "report.json") continue;
+    const path = join(outDir, f);
+    try {
+      if (!statSync(path).isFile()) continue;
+      unlinkSync(path);
+      removed.push(f);
+    } catch {
+      // Already gone, or not ours to remove.
+    }
+  }
+  if (removed.length) log(`removed ${removed.length} file${removed.length === 1 ? "" : "s"} an earlier run wrote here and this one did not: ${removed.join(", ")}`);
+  return { name, outDir, evaluation, mesh, bounds, files, warnings, report, timings, physics, removed };
 }
 
 /**

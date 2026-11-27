@@ -121,6 +121,9 @@ mesh; `--no-cache` samples afresh.
   no light at all.
 - The shot `set camera` names is `beauty.png`, captioned with the
   camera's name, and is not written again as `beauty_<name>.png`.
+- A render into a folder removes what the last render wrote there and
+  this one did not (the log says which), so every picture in `out/model/`
+  is from the run you just made.
 - A small part of a large model is a few pixels on the sheet: `--focus
   name` (or `--focus name_3` for one copy of a placed set) frames every
   view on that step alone, meshed at the frame's own

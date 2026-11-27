@@ -49,6 +49,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    frame) is a close-up meshed at its own finer cell,
    where the step is in the pose shown, the rest of the model faint
    around it, with its own watertight row.
+   A render removes what the last render wrote into its folder and this
+   one did not, so `out/model/` holds only the run you just made.
    `npx aixle diff before.aix after.aix` shows two versions side by side;
    `npx aixle fmt model.aix --write` lays the program out in the one
    layout (comments kept, meaning unchanged) before you hand it on.
