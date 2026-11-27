@@ -17,9 +17,28 @@ This document is the language around them.
 - Right-handed, **y up**. `x` to the right, `z` towards the viewer in the
   front view. `ground()` rests a shape on `y = 0`.
 - Units are unitless; pick one (metres, centimetres, "one unit is a brick")
-  and stay with it. The renders draw grids in whole units. For a print,
-  `set units cm` (or `mm`, `m`, `in`) says which, and the exports and the
-  report's Print section use it (see Settings).
+  and stay with it. The renders' grid lines are a round step in units,
+  which each view's caption names (`grid 0.25`). For a print,
+  `set units mm` (or `cm`, `dm`, `m`, `in`, `ft`) says which, and the
+  exports and the report's Print section use it (see Settings); a model
+  is judged as a print only then.
+- Draw in the real unit: nothing in the mesh, what the checks and the
+  warnings find, or the pictures depends on the model's absolute size,
+  since the grid is cells along its longest side and every tolerance
+  follows the cell (measured: a mug with a lettered label, a worn rusty
+  handle and a wooden saucer, built at 1, 100, 0.01 and 0.001 times,
+  meshed to the same 119068 triangles and drew the same sheet and beauty
+  render but for the numbers in the captions). What does depend on it
+  is the few defaults given in units: a material preset's pattern size
+  (below) and `text`'s `size` of 1, so a model in millimetres gives
+  `scale=` and `size=`. A point light's reach without `range=` is half the model's
+  longest side, at any size. The one number that still reads the unit is
+  the report's and the warnings' own: they print three decimals and a
+  number under 0.0005 as 0, so a model drawn in metres reads its cell and
+  its thin parts' sizes as 0 when it is under about 6 cm long (at the
+  default grid), and its volume and mass as 0 under about 10 to 20 cm
+  (`check`'s grid line and the sheet's title keep their figures). Draw a
+  part that small in centimetres or millimetres.
 - **Angles are degrees**, in `rotate`, `twist`, `bend` and in `sin`/`cos`.
 - Every primitive is centred on the origin. Anything with an axis
   (cylinder, cone, capsule, prism, capsule) stands along y; a torus lies
@@ -335,7 +354,8 @@ y)`, `rotate(deg)`, `scale`, `mirror`, `round`, `offset`, `shell`. Then:
 **Smooth profiles**: a polygon is straight between its points, so a vase,
 a bottle or a guitar's body drawn as one looks it once revolved or
 extruded. `curve2([x,y, x,y, ...])` is a closed outline through the
-points, the same curve `curve()` draws, closed back to the first point;
+points, closed back to the first point (its tangents are taken as below,
+which on evenly spaced points is the curve `curve()` draws);
 `bezier2([...])` is one from cubic Bezier anchors and handles, laid out as
 `bezier()` takes them (an anchor, then two handles and an anchor for each
 piece: 4, 7, 10, ... pairs). Either is a profile like any other, for
@@ -351,6 +371,21 @@ circle (glass on it renders clean).
   underside, a sharp foot and a straight run up the axis. The list wraps,
   and may end on its first point again, which only closes it (give it
   twice there for a corner at the start).
+- The tangent at a point comes from its two neighbours: its direction
+  halves the angle between the chords to them, and the handle into each
+  neighbour is as long as that side's chord allows (a centripetal
+  Catmull-Rom spline: the knots are spaced by the square root of each
+  chord). A short piece beside a long one therefore gets a short handle
+  and cannot loop: round 11's stand outline put a point 2 mm before the
+  end of an 85 mm run, and the uniform spline the tool used then took a
+  14 mm handle into the 2 mm piece, overshot by 2.2 mm and looped into a
+  0.019 mm sliver; with these tangents the same points run straight to
+  the round end and the profile is the height worked out by hand. On
+  evenly spaced points it is the uniform spline exactly. Spacing still
+  shapes the curve: the long piece beside a short one leaves its point
+  along the halfway direction, so it bows a little (a floor run of 0.8
+  after a 0.3 piece dips 0.024 below the line its two points are on). A
+  run meant to be straight still ends in a corner, a point given twice.
 - In `bezier2` a corner is two handles that do not line up, and a handle
   0.5523 r along the tangent makes a quarter circle of radius r (within
   0.03%). The last anchor should be the first; when it is not, a straight
@@ -381,9 +416,12 @@ circle (glass on it renders clean).
   groove after the revolve (`revolve(p) - torus(...)`), not in the
   profile.
 - A closed outline carries its thinnest wall (two sides facing each other)
-  for the thin-part warning, so a vase drawn as one outline with a wall
-  under a cell is named; a straight run on x = 0 is not counted, since the
-  solid there is twice what the profile shows.
+  and where it is for the thin-part warning, so a vase drawn as one
+  outline with a wall under a cell is named, with the point in the
+  profile's plane and in the model; a straight run on x = 0 is not
+  counted, since the solid there is twice what the profile shows. A band
+  (`wall=`) carries its width exactly, whatever its centre line does: a
+  curl at the rim is the same 0.05 band.
 
 A smooth profile costs more per sample than a polygon of as many points
 (measured: a 22-point vase meshes in 1.5 s against 0.65 s for the 18-point
@@ -428,6 +466,14 @@ twist=, taper=)` in place of the point list. The surface is then the true
 offset of the curve, found by the nearest point on it for every sample,
 so a scroll or a handle has no facets at any grid; the cost per piece is
 about that of a spline's. A `spline` is still fine for anything gentle.
+`curve`, `spline` and a `tube` or `sweep`'s `smooth=` take a uniform
+Catmull-Rom tangent, half the chord between a point's two neighbours,
+so the points want even spacing: a piece much shorter than the one
+before it gets a handle longer than itself and overshoots (`curve2`
+takes its tangents the other way, above, after a 2D outline looped on
+it). Measured on the nine programs in `dogfood/` that use `curve`, that
+tangent would move no curve by more than 1.6% of its length and loops
+none, so the 3D curves keep it and their renders stand.
 
 **Text**: `text("Aixle", size=1, weight=0.15, align="center")` is a 2D
 profile from a built-in single-stroke font (upper and lower case, digits,
@@ -754,7 +800,10 @@ laid down; a rotation after painting turns the pattern with the part.
 A preset at another feature size is `material("granite", scale=0.4)`:
 start from the preset, change only what is given. Pattern sizes are in
 model units (the reference lists each preset's), so wood grain 0.25
-apart suits a table and a 20-unit floor wants `scale=2`.
+apart suits a table and a 20-unit floor wants `scale=2`; a part drawn in
+millimetres wants a hundred times the preset's (a wooden box 120 mm
+across, `material("wood", scale=25)`), or the grain is finer than its
+cell and reads as noise.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
 tiles, dots, rust. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 
@@ -1119,24 +1168,39 @@ the model stands a hair below the floor), which the voxeliser rounds
 away again; `check` warns about a part thinner than a voxel as `render`
 does.
 
-For a print, `set units mm` (or `cm`, `m`, `in`; `set units in` works
-though `in` is a keyword) says what one unit is, and `set bed 220 220
-250` (or `set bed [220, 220, 250]`) is the printer's build volume in
-millimetres: width along x, depth along z, height along y. Without
-units a unit is taken as a millimetre, which is what a slicer reads an
-STL as, and the report says how tall that would print, so a 2.4-unit
-mug is told it prints 2.4 mm tall. `model.stl` is always written in
-millimetres and with z up, the way a slicer's plate is (the model
-stands on it as it stands on the sheet, its front towards the front of
-the plate). A program that sets units or a bed also gets `model.3mf`
-(`--3mf` asks for it without them): the same mesh in the program's own
+For a print, `set units mm` (or `cm`, `dm`, `m`, `in`, `ft`; `set
+units in` works though `in` is a keyword) says what one unit is, and
+`set bed 220 220 250` (or `set bed [220, 220, 250]`) is the printer's
+build volume in millimetres: width along x, depth along z, height along
+y. A model is judged as a print only when the program says it is one,
+with `set units` or `set bed`, or the run asks for a print's file with
+`--3mf`. Then the report has its Print section and the render a
+`model.3mf` (`check`, which takes no `--3mf`, prints its `print:` line
+for units or a bed, below). Otherwise the report says in one
+line that it was not judged as a print and how to make it one, with no
+size in millimetres, no wall or support, no grams of PLA and no print
+summary (the files list still says what `model.stl` is): a door for a
+game engine, a kitchen mixer drawn in decimetres and a
+bookcase are not prints, and a Print section telling them they print
+2.6 mm tall, with a summary that opens on a 0.0144 mm wall, was the
+report's longest section and none of it applied (round 11). The STL is
+written for every model and so does not make one a print. With `--3mf`
+and no units a unit is taken as a millimetre, which is what a slicer
+reads an STL as, and the report says how tall that would print, so a
+2.4-unit mug is told it prints 2.4 mm tall. `model.stl` is always
+written in millimetres and with z up, the way a slicer's plate is (the
+model stands on it as it stands on the sheet, its front towards the
+front of the plate). `model.3mf` is the same mesh in the program's own
 unit, welded so a slicer sees it closed, with each material's colour
-on its triangles. With units set, the sheet's title gives the size in
-them (`3.76 × 2.4 × 2.4 cm`). With a bed set, a model that fits the bed
-neither square nor turned about the vertical is a warning. With units or
-a bed set, `check` prints a `print:` line with the size in millimetres
-and the bed's verdict, from the surface's extent, in no time; when that
-box does not fit square, the outline is judged turned and lying from a
+on its triangles; 3MF has no decimetre, so a model in `dm` is written
+in millimetres, its coordinates multiplied by 100 (a slicer reads the
+same size either way), and the Print section's Files row says so. With
+units set, the sheet's title gives the size in them (`3.76 × 2.4 × 2.4
+cm`). With a bed set, a model that fits the bed neither square nor
+turned about the vertical is a warning. With units or a bed set,
+`check` prints a `print:` line with the size in millimetres and the
+bed's verdict, from the surface's extent, in no time; when that box
+does not fit square, the outline is judged turned and lying from a
 coarse mesh, as the render judges its own, so the two agree.
 
 ## The fast loop
@@ -1148,7 +1212,10 @@ program's asserts at their own cost (one that says so took most of the
 time: `--no-asserts` while placing parts); `--watch` re-renders on every save; `aixle diff a.aix
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
-detail thinner than its cell, and the sheet says which steps it dropped.
+detail thinner than its cell, and the sheet says which steps it dropped
+(with the def's part when a step called one inline, `plate (box() in def
+back_panel at shelf_lib.aix line 49)`) and which are under two of its
+cells and may show holes or seams (a bowl's wall drawn as a sieve).
 When it dropped any, the pieces count and the footprint are not judged
 on that sheet, since the dropped steps are often the joins or the feet; a bucket's teeth or a rail are
 blobs or gone at a quick cell, so judge a working end at full grid, with
@@ -1251,7 +1318,17 @@ parts when the mesh has open edges, as `check` does every time, on its
 never read past; a rigging line wants about three
 cells across to be clean, measured on a dinghy), including a `shell` wall, a
 `tube`, a `sweep` profile or a `text` stroke inside a thick part (those
-carry their own thickness, since a bounding box cannot see it); a
+carry their own thickness, since a bounding box cannot see it; each is
+named once, at the step that brought it in, and known by the part it
+came from rather than by its size, so a bowl's 0.05 band is named
+beside a 0.05 hook, while the copies one call makes (slats in a loop, a
+def's plate in four chairs) are one part, named once; the warning says which call made it, in which def
+and library file, as `made by box() in def back_panel at shelf_lib.aix
+line 49`, and where it is in the model, a box `within x -1.84..1.84 y
+0..6.9 z -1.5..-1.4`, or for an extruded or revolved `curve2` outline
+the point of its thinnest wall, `at (0, 119.3, -29.4) in the model,
+(-29.4, 119.3) in the profile 'side' (line 62)`; the 1.2-to-2-cell note
+names a def's part the same way); a
 lettering counter or a slot under a cell (under half a cell it closes,
 between half and one it survives but the mesh round it may not be
 watertight); a union that paints over parts that already had materials,
@@ -1282,10 +1359,19 @@ one into the other by a cell or two, or blend them with `union(k=)`,
 which also seals the void a tangency leaves. The converse holds too: a
 part that reaches through a face by less than a cell (a tube's round
 cap ending a hair past a plate, a hex head whose corners sit just above
-a boss, a hub top just under a plank) or stops less than a cell short of
-it (a stringer passing a leg with a cell of gap) leaves the same seam,
-and no warning, since nothing there is thin: overlap by a cell or more,
-or clear by a cell or more. When the mesh is not watertight the report
+a boss, a hub top just under a plank) or stops less than a cell and a
+half short of it (a stringer passing a leg with a cell of gap, a door
+leaf 1.35 cells inside its arched opening) leaves the same seam, and no
+warning, since nothing there is thin: overlap by a cell or more, or
+clear by a cell and a half or more. The clearance is the larger because
+curved faces need it: measured over ten placements on the lattice at
+each gap, a round leaf in a round opening and a ball in a round pocket
+left open edges up to 1.4 cells and none from 1.5, two flat faces at a
+slant up to 1.2 cells, and two flat faces along the lattice's axes none
+at any gap from 0.8; parts sunk into each other from 0.4 to 2.2 cells,
+or a rod's end or round cap through a plate, left none attributable to
+the overlap (round 11's door kept 5 edges round its arch at 1.35 cells
+and lost them at 1.44). When the mesh is not watertight the report
 prints the three largest clusters of open edges, and `report.json`
 lists every one under `watertight.clusters` (its position, its edge
 count and the steps whose surfaces pass there). Where a cluster is
@@ -1296,13 +1382,14 @@ cell)`) or how far one reaches into the other (`'pin' only 0.01 into
 when the other is a cutter, whose inside is air), from points of each
 surface within a cell and a half of the edge read in the other's field,
 so the fix is a number: the gap closed to an overlap of a cell, or
-opened to a cell; `report.json` has it as `gap` on the three clusters
+opened to a cell and a half; `report.json` has it as `gap` on the three clusters
 the report prints, negative for an overlap. A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
 overhangs (faces down more than 45°, which a printer would need support
-under). The Print section has what a slicer's user asks first: a
+under). The Print section, for a model judged as a print (above), has
+what a slicer's user asks first: a
 summary line, the unit (or that it was assumed), the size in
 millimetres, the bed (fits; does not fit square, but turned so many
 degrees on the plate it does, the smallest turn, in degrees as
@@ -1618,7 +1705,8 @@ the failures.
   and the render warns: rotate or scale the part before the joint.
 - Two thin parts that must stay separate (a clock's two hands, a lid
   and its rim) cannot overlap by a cell as the contact rule says: leave
-  a gap of a cell or two between them and bridge it with a hub or a
+  a gap of a cell and a half to two between them (a cell is not enough
+  for curved faces; see the contact rule) and bridge it with a hub or a
   post, or they mesh as one part with open edges where they touch.
 - The key light comes from above (elevation 55 by default) and does not
   reach far into an opening: an interior behind a door or a window is

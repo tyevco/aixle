@@ -24,9 +24,18 @@ import { surfaceNets } from "./surfaceNets.js";
 import { meshedAnalysis, type MeshCache } from "./pieces.js";
 
 /** Millimetres in one model unit, for `set units`. */
-export const UNITS: Record<string, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
-/** The 3MF names of the units (its `unit` attribute). */
-export const UNIT_3MF: Record<string, string> = { mm: "millimeter", cm: "centimeter", m: "meter", in: "inch" };
+export const UNITS: Record<string, number> = { mm: 1, cm: 10, dm: 100, m: 1000, in: 25.4, ft: 304.8 };
+/**
+ * The 3MF names of the units (its `unit` attribute). 3MF has micron, millimeter, centimeter, inch, foot and meter
+ * and no decimetre, so a unit missing here is written as millimetres, the coordinates scaled (see threemfUnit).
+ */
+export const UNIT_3MF: Record<string, string> = { mm: "millimeter", cm: "centimeter", m: "meter", in: "inch", ft: "foot" };
+
+/** The 3MF unit for a model unit and the factor its coordinates are multiplied by: its own unit as is, or millimetres. */
+export function threemfUnit(units: string): { unit: string; scale: number } {
+  const own = UNIT_3MF[units];
+  return own ? { unit: own, scale: 1 } : { unit: "millimeter", scale: UNITS[units] ?? 1 };
+}
 
 export interface WallReading {
   /** Thickness along the ray, in model units. */

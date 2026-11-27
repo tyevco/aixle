@@ -464,14 +464,30 @@ and a ratio is meaningless at a threshold of zero.
 
 ### Printing
 
+A model is judged as a print only when the program says it is one, with
+`set units` or `set bed`, or the run asks for a print's file with
+`--3mf`. The Print section used to be written for every model, a unit
+taken as a millimetre, and in round 11 a door for a game engine, a
+kitchen mixer and a bookcase each got the report's longest section
+telling them they printed 2.6 mm tall in 0.00141 g of PLA, with a
+summary that opened on a 0.0144 mm wall: three agents read past it every
+time, and one drew its model in decimetres to dodge it. Nothing in that
+section applies to a model nobody will print, and the program is the
+only place that knows. The STL is still written for every model, so it
+cannot be what makes one a print.
+
 A slicer reads an STL in millimetres with z up, and Aixle's units are
 whatever the program says they are, with y up. So `set units` names the
-unit (millimetres assumed without it, which is what a slicer would
-assume too, and the report says how tall that prints), the STL is
+unit (mm, cm, dm, m, in or ft; with `--3mf` and no unit a millimetre is
+assumed, which is what a slicer would assume too, and the report says how
+tall that prints), the STL is
 scaled to millimetres and turned a quarter turn about x on the way out
 (a rotation, so the winding holds and the front faces the front of the
-plate), and the 3MF keeps the program's unit in its `unit` attribute,
-since 3MF can say it. The 3MF's mesh is welded (the crease copies
+plate), and the 3MF keeps the program's unit in its `unit` attribute
+where 3MF can say it. 3MF has micron, millimeter, centimeter, inch, foot
+and meter, and no decimetre, so a decimetre model's 3MF is in
+millimetres with its coordinates multiplied by 100: the size a slicer
+sees is the same, and nothing else in the file depends on the unit. The 3MF's mesh is welded (the crease copies
 share a position, and a slicer sees unwelded copies as open edges) and
 each triangle names its material, the majority of its corners', from a
 `basematerials` group with each material's display colour. Both are the
@@ -527,6 +543,52 @@ and every transform, boolean and union passes the smallest
 one along (a scale multiplies it by its smallest factor). The thin-part
 warning reads it next to the cell size and names the step that introduced
 it, which is the line to edit.
+
+A feature is known by where it came from, not by its size: the warning
+walks down from a step through every child that carries the same size
+(a union's thinnest part, a move or a paint of it, a joint's child) to
+the node that introduced it, and two steps that reach the same node, or
+nodes the same builtin call made at the same size, are one thin part (a
+loop's slats are a new box each time round, and were each a part of
+their own, so the first was named again under the output). It used to
+report a size once, so a bowl's 0.05 band went unnamed beside a 0.05
+hook named first (round 11). The interpreter
+remembers which builtin call made each shape, and in which def and
+library file, so the warning can name a member a step called inline (a
+0.1 back panel built by `box()` in a library's `back_panel()`, which was
+'plate' alone), and the node's box, carried through the transforms above
+it, says where it is. A `curve2` outline knows the point of its thinnest
+wall, and an extrude or a revolve lays that point into its own frame, so
+a sliver on a 46-point outline is placed in the profile and in the model.
+
+## The model's size
+
+Nothing in the pipeline should care how big the model is in its own
+units, since the unit is the program's choice: the grid is cells along
+the longest side, every tolerance in the mesher, the checks and the
+beauty render's march follows the cell, and the cameras fit the model.
+The skill once told agents to keep a model within 1 to 20 units, which
+sent two of round 11's agents to decimetres and left a third unsure
+whether a 117 mm print could be 117 units. Measured on a mug with a
+lettered label, a worn rusty handle and a wooden saucer, built at 1, 100,
+0.01 and 0.001 times: the same 119068 triangles and the same sheet and
+beauty render, once four constants were taken out. The beauty render's
+steps had a floor of 1e-4 units, three times the cell of the 4 mm mug,
+whose contact shadows went; a point light without a range reached 2
+units, which lights a model in millimetres to nothing; the sheet's grid
+steps stopped at 0.01 and 1000; and sizes under 0.005 printed as 0 in
+the titles and spans. The point light now reaches half the model's
+longest side, the others follow the model, and none of them moved an
+existing render. What stays in units on purpose is what the program
+says in units: a preset's pattern size, `text`'s size, a bump's height.
+What stays in units not on purpose is the report's and the warnings'
+number format, three decimals and anything under 0.0005 as 0: the 4.6
+cm mug in metres reads "cell 0 units", "Volume 0" and a gap "0 wide, of
+the 0 cell". Printing tiny numbers in full is not the cure, since the
+same format hides float noise in a centre of mass (0 for -0.0000274 on
+the mug at 1 times); it wants the model's size passed to the format,
+and until then the guide says to draw a part that small in centimetres
+or millimetres.
 
 ## Glass, a light with a size, depth of field
 
@@ -792,9 +854,23 @@ not roll.
 `polygon` was the only way to draw an outline, so every lathe profile was a
 list of corners and a revolved vase showed them as bands. `curve2` and
 `bezier2` are the 2D counterpart of the exact curves: a chain of cubic
-pieces, through the points with the same Catmull-Rom handles `curve()`
-uses (closed, so the tangent at every point looks at both neighbours) or
-from anchors and handles. The distance is the nearest point on each piece,
+pieces, through the points with Catmull-Rom handles (closed, so the
+tangent at every point looks at both neighbours) or from anchors and
+handles. The handles are centripetal: the knots are spaced by the square
+root of each chord, the tangent is the derivative in that parameter, and
+each side's handle is the tangent times its own span, so the tangent's
+direction halves the angle between the chords and a short piece beside
+a long one gets a short handle. The uniform handles `curve()` uses (half
+the chord between the neighbours, on both sides) gave a 2 mm piece beside
+an 85 mm one a 14 mm handle, and round 11's stand outline looped into a
+0.019 mm sliver there; centripetal Catmull-Rom has no cusp or
+self-intersection within a piece, and on evenly spaced points it is the
+uniform spline exactly, so outlines drawn that way did not move. It
+moved what spacing shapes: the vase example's inner floor, a long run
+after a short piece, now dips 0.024 below its line where it dipped
+0.012. The 3D `curve()` keeps the uniform handles: on the nine dogfood
+programs that use it the centripetal ones move no curve by more than
+1.6% of its length and loop none. The distance is the nearest point on each piece,
 the scan and Newton of the 3D curves in the plane, with Newton kept inside
 the scan's bracket, except that Newton searches every basin the scan shows
 (round each sample lower than both its neighbours, and in each step over

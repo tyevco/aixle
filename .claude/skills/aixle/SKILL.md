@@ -17,8 +17,16 @@ Reference: `docs/reference.md` (every function, generated from the code),
 ## The loop
 
 1. **Plan in words.** What is it, how big, which way is its front (+z),
-   what are its parts. Pick a unit and keep the whole model within about
-   1 to 20 units.
+   what are its parts. Draw in its real unit: millimetres for a print
+   (`set units mm`; a 117 mm stand is 117 units), metres or centimetres
+   for furniture, a room or a game prop. Nothing in the mesh, what the
+   checks find or the pictures depends on the size (the grid is cells along the
+   longest side); what does is the defaults given in units, a material
+   preset's pattern (wood grain 0.25) and `text`'s size 1, so in
+   millimetres give `scale=` and `size=`. The report and the warnings
+   print a number under 0.0005 as 0, so a part under about 10 cm reads
+   its volume, and under 6 cm its cell, as 0 in metres: draw it in
+   centimetres or millimetres.
 2. **Write `model.aix`**, one part per named line. For a bolt, a chair,
    a tree or the like, `use "std/hardware"`, `"std/furniture"` or
    `"std/plants"` first (`npx aixle doc std/hardware.aix` says what each
@@ -94,13 +102,15 @@ Reference: `docs/reference.md` (every function, generated from the code),
    is for Roblox Studio: `model.roblox.glb` facing -Z with an
    `anchor(m, "HatAttachment", ...)` as the attachment, one mesh under
    4000 triangles for an accessory (`set grid 40`), a unit a stud. For a
-   print, `set units mm` (what one unit is; a millimetre is assumed
-   without) and `set bed 220 220 250` (the build volume in millimetres):
-   `check` prints the size in millimetres and whether it fits, the
-   report's Print section has the thinnest wall and where, the support
-   under the overhangs and what rests on the plate, `model.stl` is in
-   millimetres with z up, and `model.3mf` carries the unit and the
-   materials' colours (`--3mf` without units).
+   print, `set units mm` (what one unit is: mm, cm, dm, m, in or ft)
+   and `set bed 220 220 250` (the build volume in millimetres): only
+   then is the model judged as a print (or with `--3mf`, a unit then
+   taken as a millimetre); `check` prints the size in millimetres and
+   whether it fits, the report's Print section has the thinnest wall
+   and where, the support under the overhangs and what rests on the
+   plate, `model.stl` is in millimetres with z up, and `model.3mf`
+   carries the unit and the materials' colours. A model that is not a
+   print gets one line in the report saying so, and no Print section.
    The GLB, OBJ and viewer are decimated past 200 thousand triangles
    (`--triangles N` or `set triangles N`, 0 for all; the report's
    Exports row says how far they stray; below a quarter of the mesh
@@ -113,7 +123,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
 - Title bar: size as `w × h × d`, triangle count, cell size. A model 10
   tall that should be 1 is wrong before anything else is.
 - Front is from +z, right from +x, top from above with the back at the top.
-  Grids are whole units; darker lines pass through the origin. The
+  Grid lines are the step each view's caption names (`grid 0.25`);
+  darker lines pass through the origin. The
   perspective view's red, green, blue lines are +x, +y, +z.
 - A red frame in `steps.png` is a shape that never reached the output;
   "too fine for this thumbnail" is a tiny part the thumbnail's grid could

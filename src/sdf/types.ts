@@ -125,6 +125,14 @@ export interface Shape3 {
    * these, so the thin-part warning reads this instead.
    */
   feature?: number;
+  /**
+   * Where that thinnest feature is, in the shape's own frame, when its constructor knows: a curve2 outline's
+   * thinnest wall, extruded or revolved. Set where the feature is found; the pipeline carries it to the model
+   * through the transforms above, so the thin-part warning can say where (round 11: a sliver on a 46-point outline).
+   */
+  featureAt?: Vec3;
+  /** For an extrude or a revolve whose profile knows where its thinnest wall is: that profile and the point in its plane. */
+  featureProfile?: { profile: Shape2; at: [number, number] };
   /** The narrowest gap the shape is known to contain (a letter's counters, a slot), in model units: closes up under a cell. */
   gap?: number;
   /** What the narrowest gap is, for the warning: "the counter of 'A'", "the space between F and A". */
@@ -203,6 +211,8 @@ export interface Shape2 {
   parts?: Shape2[];
   /** The thinnest feature the profile is known to carry (a stroke's weight, a 2D shell's wall); see Shape3.feature. */
   feature?: number;
+  /** Where that feature is in the profile's plane, when known (a curve2 outline's thinnest wall); see Shape3.featureAt. */
+  featureAt?: [number, number];
   /** The narrowest gap the profile is known to contain; see Shape3.gap. */
   gap?: number;
   /** What that gap is; see Shape3.gapWhat. */

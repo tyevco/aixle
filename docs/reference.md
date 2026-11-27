@@ -117,7 +117,7 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
 
 ### curve2
 
-A closed smooth profile through x, y pairs: the curve curve() draws, closed back to the first point, with the exact distance to it, so a revolve or an extrude has no facets at any grid. A point given twice in a row is a sharp corner, and the run between two corners is straight: give a revolve's points on the axis and the edge of a foot twice. The list may end on its first point again, which only closes it. `wall` > 0 leaves the curve open and makes the profile the band that wide centred on it, ends rounded: a vase's wall drawn as one line, revolved.
+A closed smooth profile through x, y pairs, closed back to the first point, with the exact distance to it, so a revolve or an extrude has no facets at any grid. A point given twice in a row is a sharp corner, and the run between two corners is straight: give a revolve's points on the axis and the edge of a foot twice. The list may end on its first point again, which only closes it. The tangent at a point comes from its two neighbours, each side's handle as long as that side's chord allows (a centripetal Catmull-Rom spline: the curve curve() draws when the points are evenly spaced), so a short piece beside a long one cannot loop; a run meant to be straight still ends in a corner. `wall` > 0 leaves the curve open and makes the profile the band that wide centred on it, ends rounded: a vase's wall drawn as one line, revolved.
 
     curve2(points, wall=0) -> shape2
 
@@ -801,10 +801,10 @@ The beauty render's lighting and shots, declared in the program. Without a `ligh
 
 ### light
 
-A light in the beauty render: `light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")` and `light("rim", azimuth=150, elevation=20, power=0.5, color="#cfe0ff")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's apparent size (0.5 a lamp with crisp shadows, 3 a window); `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's. Each light casts its own soft shadow, so three lights cost about half again the time of one (measured on the market scene: 4.1 s to 5.9 s at 512 px). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them. A point light is at a place instead of a direction: `light("fire", position=[0, 0.4, 0], range=2, color="#ff9a3c")` lights what is round it, its strength halving `range` away, shadowed by what stands between; put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through dimmed), since inside a solid every shadow ray hits that solid.
+A light in the beauty render: `light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")` and `light("rim", azimuth=150, elevation=20, power=0.5, color="#cfe0ff")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's apparent size (0.5 a lamp with crisp shadows, 3 a window); `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's. Each light casts its own soft shadow, so three lights cost about half again the time of one (measured on the market scene: 4.1 s to 5.9 s at 512 px). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them. A point light is at a place instead of a direction: `light("fire", position=[0, 0.4, 0], range=2, color="#ff9a3c")` lights what is round it, its strength halving `range` away (half the model's longest side when not given, so the default suits a model of any size), shadowed by what stands between; put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through dimmed), since inside a solid every shadow ray hits that solid.
 
     light(name, azimuth=-40, elevation=55, size=1, color="white", power=1) -> string
-    light(name, position=[x, y, z], range=2, size=1, color="white", power=1) -> string
+    light(name, position=[x, y, z], range=?, size=1, color="white", power=1) -> string
 
 ### camera
 

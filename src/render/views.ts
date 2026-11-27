@@ -56,16 +56,26 @@ export function fmtCell(v: number): string {
   return v.toFixed(Math.min(6, digits)).replace(/\.?0+$/, "");
 }
 
+/** A size or a grid step: as fmt prints it, and under 0.005 to two significant figures rather than 0 (a 4 mm part in metres read 0 × 0 × 0, its grid 0). */
+const fmtSize = (v: number): string => (v !== 0 && Math.abs(v) < 0.005 ? String(Number(v.toPrecision(2))) : fmt(v));
+
 export function dimsLabel(b: Bounds): string {
   const s = boundsSize(b);
-  return `${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])}`;
+  return `${fmtSize(s[0])} × ${fmtSize(s[1])} × ${fmtSize(s[2])}`;
 }
 
-/** Pick a grid spacing that gives a readable number of lines across `span` units. */
+/**
+ * Pick a grid spacing that gives a readable number of lines across `span` units. Where the steps a model of a few
+ * units uses run out, it goes on in ones, twos and fives: they stopped at 0.01 and 1000, so a part under 2 cm drawn
+ * in metres had one line or none, and a building over 24 m drawn in millimetres more than two dozen.
+ */
+const GRID_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+const FINE_STEPS = [-7, -6, -5, -4, -3].flatMap((e) => [1, 2, 5].map((m) => Number((m * 10 ** e).toPrecision(1))));
+const COARSE_STEPS = [3, 4, 5, 6, 7].flatMap((e) => [2, 5, 10].map((m) => m * 10 ** e));
 export function gridStep(span: number): number {
-  const candidates = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
-  for (const c of candidates) if (span / c <= 24) return c;
-  return 1000;
+  const list = span < 0.02 ? FINE_STEPS : span > 24000 ? COARSE_STEPS : GRID_STEPS;
+  for (const c of list) if (span / c <= 24) return c;
+  return list[list.length - 1];
 }
 
 function axisOf(v: Vec3): { index: number; sign: number } {
@@ -156,7 +166,7 @@ export function renderView(mesh: Mesh, info: ViewInfo, view: ViewName, size: num
     const h = axisOf(cam.right), v = axisOf(cam.up);
     const hs = `${h.sign < 0 ? "-" : ""}${AXIS_NAMES[h.index]}→`;
     const vs = `${v.sign < 0 ? "-" : ""}${AXIS_NAMES[v.index]}↑`;
-    caption(target.canvas, view.toUpperCase(), `${hs} ${vs}  grid ${fmt(step)}`, ghost ? GHOST_NOTE : undefined);
+    caption(target.canvas, view.toUpperCase(), `${hs} ${vs}  grid ${fmtSize(step)}`, ghost ? GHOST_NOTE : undefined);
   }
   return target.canvas;
 }
@@ -184,7 +194,7 @@ function floorGrid(cam: Camera, target: RenderTarget, bounds: Bounds, label = tr
   tip([len, y, 0], "x", INK.axisX);
   tip([0, y + len, 0], "y", INK.axisY);
   tip([0, y, len], "z", INK.axisZ);
-  if (label) drawText(target.canvas, 8, target.canvas.height - 12, `floor grid ${fmt(step)} at y=${fmt(y)}`, INK.dim, 1);
+  if (label) drawText(target.canvas, 8, target.canvas.height - 12, `floor grid ${fmtSize(step)} at y=${fmt(y)}`, INK.dim, 1);
 }
 
 export interface SheetInfo extends ViewInfo {
@@ -288,7 +298,7 @@ export function renderSlices(shape: Shape3, info: ViewInfo, size: number, at?: P
           } else if (g < upp * 0.75) canvas.set(px, py, mixColor(canvas.get(px, py), INK.text, 0.4));
         }
       }
-    caption(canvas, `${pl.axis.toUpperCase()} = ${fmt(level)}`, `${pl.label}  grid ${fmt(step)}`, ghost ? GHOST_NOTE : undefined);
+    caption(canvas, `${pl.axis.toUpperCase()} = ${fmt(level)}`, `${pl.label}  grid ${fmtSize(step)}`, ghost ? GHOST_NOTE : undefined);
     out.blit(canvas, gutter + i * (size + gutter), bar + gutter);
   });
   return out;

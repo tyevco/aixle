@@ -6,6 +6,7 @@ import { inflateRawSync } from "node:zlib";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { watertightReport } from "../src/mesh/mesh.js";
 import { countPieces, type MeshCache } from "../src/mesh/pieces.js";
 import { bedFit, boxCorners, supportVolume, thinnestWall, wallThickness } from "../src/mesh/print.js";
 import { to3mf } from "../src/export/threemf.js";
@@ -183,7 +184,7 @@ describe("set units and set bed", () => {
     expect(check("set bed 220, 220, 250\nm = box(1)").settings.bed).toEqual([220, 220, 250]);
     expect(check("w = 180\nset bed [w, w, 200]\nm = box(1)").settings.bed).toEqual([180, 180, 200]);
     expect(parse("set grid 200").body[0]).toMatchObject({ type: "set", key: "grid", value: { type: "num", value: 200 } });
-    expect(check("set units ft\nm = box(1)").warnings.join()).toMatch(/set units ft: no such unit; a unit can be mm, cm, m, in/);
+    expect(check("set units yd\nm = box(1)").warnings.join()).toMatch(/set units yd: no such unit; a unit can be mm, cm, dm, m, in, ft/);
     expect(check("set bed 200 200\nm = box(1)").warnings.join()).toMatch(/set bed 200 200: the bed is the printer's build volume as three numbers/);
   });
   it("takes several values for the bed only, and ends a set at the brace of a one-line loop", () => {
@@ -216,11 +217,87 @@ describe("set units and set bed", () => {
       expect(Math.abs(stl.readFloatLE(84 + 12))).toBeLessThanOrEqual(20.001);
       const big = run("set units cm\nset bed 30 30 30\nm = box(5, 5, 5) | move(0, 2.5, 0)", "cube.aix", dir, { ...BARE, grid: 24 });
       expect(big.warnings.join()).toMatch(/The model is 50 × 50 × 50 mm and does not fit the 30 × 30 × 30 mm bed whichever way it lies/);
-      // No units: a unit is taken as a millimetre and the report says so; no 3MF unless asked for.
+      // No units and no bed: not judged as a print, no 3MF unless asked for.
       const bare = run("m = box(2, 2, 2) | move(0, 1, 0)", "bare.aix", dir, { ...BARE, grid: 24 });
-      expect(bare.report).toMatch(/\| Units \| not set: a slicer reads a unit as a millimetre, so this prints 2 mm tall/);
       expect(bare.files).not.toContain("model.3mf");
-      expect(run("m = box(2, 2, 2)", "asked.aix", dir, { ...BARE, grid: 24, threemf: true }).files).toContain("model.3mf");
+      // --3mf asks for a print's file, so the model is judged as one, a unit taken as a millimetre.
+      const asked = run("m = box(2, 2, 2) | move(0, 1, 0)", "asked.aix", dir, { ...BARE, grid: 24, threemf: true });
+      expect(asked.files).toContain("model.3mf");
+      expect(asked.report).toMatch(/## Print/);
+      expect(asked.report).toMatch(/\| Units \| not set: a slicer reads a unit as a millimetre, so this prints 2 mm tall/);
+      expect(asked.report).toMatch(/\| Summary \| one piece, watertight; units assumed to be millimetres \|/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("judges a model as a print only when the program sets units or a bed, or --3mf asks", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A door for a game engine (round 11): a thin plank, no units, no bed. One line, no Print section, no "mm",
+      // no grams of PLA, and the STL still written.
+      const src = "leaf = box(1, 2, 0.01) | move(0, 1, 0)\nframe = box(1.2, 0.1, 0.2) | move(0, 2.05, 0)\nm = leaf + frame";
+      const game = run(src, "door.aix", dir, { ...BARE, grid: 48, obj: true });
+      expect(game.files).toContain("model.stl");
+      expect(game.files).not.toContain("model.3mf");
+      expect(game.report).not.toMatch(/## Print/);
+      expect(game.report).toMatch(/^Not judged as a print: `set units mm` \(or cm, dm, m, in, ft\) or `set bed 220 220 250` judges it as one, as `--3mf` does; model.stl is written all the same, a unit read as a millimetre\.$/m);
+      const rest = game.report.split("\n").filter((l) => !l.startsWith("Not judged as a print"));
+      expect(rest.join("\n")).not.toMatch(/\bmm\b|PLA|slicer's|Summary|check first|printer would need/);
+      const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(json.print).toEqual({ judged: false });
+      // The same model with set units m is a print: the section, its summary and the 3MF.
+      const print = run("set units m\n" + src, "door_print.aix", dir, { ...BARE, grid: 48, obj: true });
+      expect(print.files).toContain("model.3mf");
+      expect(print.report).toMatch(/## Print/);
+      expect(print.report).toMatch(/\| Summary \| /);
+      expect(print.report).toMatch(/\| Units \| m: one unit is a metre \(1000 mm\) \|/);
+      expect(JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).print.judged).toBe(true);
+      // A bed alone is enough.
+      expect(run("set bed 220 220 250\n" + src, "door_bed.aix", dir, { ...BARE, grid: 48 }).report).toMatch(/## Print/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("takes decimetres and feet: the STL in millimetres, the 3MF in feet or in millimetres scaled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    // The 3MF's unit and its vertices' extent, read back from the zip.
+    const read3mf = (file: string) => {
+      const model = unzip(readFileSync(file), inflateRawSync).get("3D/3dmodel.model")!.toString();
+      const verts = [...model.matchAll(/<vertex x="([-\d.e]+)" y="([-\d.e]+)" z="([-\d.e]+)"\/>/g)].map((m) => [Number(m[1]), Number(m[2]), Number(m[3])]);
+      const ext = [0, 1, 2].map((k) => Math.max(...verts.map((v) => v[k])) - Math.min(...verts.map((v) => v[k])));
+      return { unit: model.match(/<model unit="([a-z]+)"/)![1], ext };
+    };
+    const stlExtent = (file: string) => {
+      const stl = readFileSync(file);
+      const n = stl.readUInt32LE(80);
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (let t = 0; t < n; t++) for (let v = 0; v < 3; v++) for (let k = 0; k < 3; k++) { const x = stl.readFloatLE(84 + t * 50 + 12 + v * 12 + k * 4); lo[k] = Math.min(lo[k], x); hi[k] = Math.max(hi[k], x); }
+      return [0, 1, 2].map((k) => hi[k] - lo[k]);
+    };
+    try {
+      // A bowl drawn in decimetres, 2 wide, 1 tall, 1 deep: 200 × 100 × 100 mm.
+      expect(check("set units dm\nm = box(2, 1, 1)").warnings.join()).not.toMatch(/no such unit/);
+      const dm = run("set units dm\nm = box(2, 1, 1) | move(0, 0.5, 0)", "bowl.aix", dir, { ...BARE, grid: 24, obj: true });
+      expect(dm.report).toMatch(/\| Units \| dm: one unit is a decimetre \(100 mm\) \|/);
+      expect(dm.report).toMatch(/\| Size \| 200 × 100 × 100 mm/);
+      expect(dm.report).toMatch(/model\.3mf in millimetres \(3MF has no decimetre: the coordinates are scaled by 100\)/);
+      const a = read3mf(join(dir, "model.3mf"));
+      expect(a.unit).toBe("millimeter");
+      // x 200 wide, y (the plate's depth, from z) 100, z (up, from y) 100.
+      expect(a.ext[0]).toBeCloseTo(200, 0);
+      expect(a.ext[1]).toBeCloseTo(100, 0);
+      expect(a.ext[2]).toBeCloseTo(100, 0);
+      const s = stlExtent(join(dir, "model.stl"));
+      expect(s[0]).toBeCloseTo(200, 0);
+      expect(s[2]).toBeCloseTo(100, 0);
+      // Feet: 3MF has the unit, so the coordinates are written as they are; the STL is 304.8 mm to the foot.
+      const ft = run("set units ft\nm = box(2, 1, 1) | move(0, 0.5, 0)", "shed.aix", dir, { ...BARE, grid: 24, obj: true });
+      expect(ft.report).toMatch(/\| Units \| ft: one unit is a foot \(304\.8 mm\) \|/);
+      const b = read3mf(join(dir, "model.3mf"));
+      expect(b.unit).toBe("foot");
+      expect(b.ext[0]).toBeCloseTo(2, 2);
+      expect(b.ext[2]).toBeCloseTo(1, 2);
+      expect(stlExtent(join(dir, "model.stl"))[0]).toBeCloseTo(609.6, 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -244,6 +321,19 @@ describe("set units and set bed", () => {
 });
 
 describe("open edges between two parts", () => {
+  it("clear at a cell and a half between two curved faces, and seam at a cell", () => {
+    // Round 11's door: a leaf 1.35 cells inside its arched opening kept 5 open edges. A round leaf in a round opening
+    // at the gap, over five placements on the lattice: the gap the docs and the watertight row give is clean.
+    const cell = 2 / 64;
+    const at = (c: number, ph: number) => {
+      const g = c * cell;
+      const s = O.move(O.union([P.cylinder(0.45, 0.8), O.difference(P.box(1.6, 0.8, 1.6), P.cylinder(0.45 + g, 1))]), ph * cell, 0, ph * cell * 0.7);
+      const w = watertightReport(surfaceNets(s, { resolution: 64, bounds: { min: [-1, -1, -1], max: [1, 1, 1] } }).mesh);
+      return w.holes + w.nonManifold;
+    };
+    for (const ph of [0, 0.2, 0.4, 0.6, 0.8]) expect(at(1.5, ph)).toBe(0);
+    expect([0, 0.2, 0.4, 0.6, 0.8].every((ph) => at(1.1, ph) > 0)).toBe(true);
+  });
   it("say how far apart the two surfaces are, or how deep one reaches into the other", () => {
     const cluster = (at: [number, number, number]) => ({ centre: at, at, box: { min: [at[0] - 0.01, at[1] - 0.1, at[2] - 0.1] as [number, number, number], max: [at[0] + 0.01, at[1] + 0.1, at[2] + 0.1] as [number, number, number] }, count: 6 });
     const w = (at: [number, number, number]) => ({ ok: false, holes: 6, nonManifold: 0, note: "no: 6 open edges.", where: cluster(at).box, clusters: [cluster(at)] });
@@ -251,7 +341,7 @@ describe("open edges between two parts", () => {
     expect(surfaceGap(apart, "a", "b", [0.505, 0.2, 0.1], 0.05)!.gap).toBeCloseTo(0.01, 3);
     const note = watertightNote(w([0.505, 0.2, 0.1]), apart, 0.05);
     expect(note).toMatch(/6 at \(0\.505, 0\.2, 0\.1\) in 'a', 'b', their surfaces 0\.01 apart there \(0\.2 of a cell\)/);
-    expect(note).toMatch(/overlap them by a cell or more, or part them by a cell/);
+    expect(note).toMatch(/overlap them by a cell or more, or part them by a cell and a half \(curved faces still seam at 1\.4\)/);
     const sunk = check("a = box(1, 1, 1)\nb = box(1, 1, 1) | move(0.99, 0, 0)\nboth = a + b");
     expect(watertightNote(w([0.495, 0.2, 0.1]), sunk, 0.05)).toMatch(/in 'a', 'b', '[ab]' only 0\.01 into '[ab]' there \(0\.2 of a cell\)/);
     // A cutter's inside is air: pebbles 0.01 inside a recess's wall are 0.01 clear of the dish (round 10's terrarium).

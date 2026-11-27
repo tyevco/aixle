@@ -71,7 +71,7 @@ export type StepRole = "part" | "cut" | "mask" | "region";
 export interface Settings {
   grid?: number;
   size?: number;
-  /** What one model unit is, for printing: mm, cm, m or in. */
+  /** What one model unit is, for printing: mm, cm, dm, m, in or ft. */
   units?: string;
   /** The printer's build volume in millimetres: width (x), depth (z), height (y). */
   bed?: number[];
@@ -89,6 +89,8 @@ export interface EvalOptions {
   resolveModule?: (path: string, from?: string) => { source: string; file: string };
   /** The file this program was read from, passed to resolveModule as `from`. */
   moduleFrom?: string;
+  /** For a library: the path its `use` gave, which its defs carry so a shape they build can say where it came from. */
+  moduleName?: string;
   /** The pose per joint name for this evaluation. Joints not named are at rest. */
   jointPoses?: Record<string, JointPose>;
   /** The name of that pose, so an `assert ..., pose=name` knows whether this is its evaluation. */
@@ -134,7 +136,7 @@ export interface Light {
   power: number;
   /** A point light: where it is; azimuth and elevation are then unused. */
   position?: [number, number, number];
-  /** A point light's reach: its strength halves at this distance from it. */
+  /** A point light's reach: its strength halves at this distance from it; undefined, half the model's longest side. */
   range?: number;
   line: number;
 }
@@ -209,6 +211,21 @@ export interface Evaluation {
   asserts: AssertResult[];
   /** The pictures the program painted with, for the report. */
   images: ImageUse[];
+  /**
+   * Where each shape a builtin call made came from: the call, its line, and the def and library file it was in
+   * (round 11: a 0.1 back panel built inside a library's case() was named only as the step that called case()).
+   */
+  origins: WeakMap<object, ShapeOrigin>;
+}
+
+/** The call that made a shape: `box` at line 48, inside def `back_panel` of the library `shelf_lib`. */
+export interface ShapeOrigin {
+  callee: string;
+  line: number;
+  /** The innermost def being run when the call was made. */
+  def?: string;
+  /** The library that def is in, as its `use` gave the path; undefined for the program's own. */
+  file?: string;
 }
 
 /** A picture a material or a decal uses. */
@@ -440,6 +457,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   };
   let lastShape: { name: string } | undefined;
   let depth = 0;
+  const origins = new WeakMap<object, ShapeOrigin>();
   let loops = 0;
   /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
   const modules = new Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>();
@@ -457,7 +475,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
   };
   noteFirst(program.body);
-  // The top-level statement running, and the defs it is inside, for that message.
+  // The top-level statement running, and the defs it is inside (innermost last), for that message and for which def
+  // and library made a shape (origins).
   let runningLine = 0;
   const calling: UserFn[] = [];
 
@@ -728,8 +747,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (posV !== undefined) {
       if (!Array.isArray(posV) || posV.length !== 3 || !posV.every((v) => typeof v === "number")) throw new RuntimeError(`light("${name}"): position is [x, y, z]`, line);
       position = [posV[0] as number, posV[1] as number, posV[2] as number];
-      range = num("range", 2);
-      if (range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
+      // Without range= the render takes half the model's longest side, so the default is a reach for any size of
+      // model: a fixed 2 units lit a stand drawn in millimetres to a few thousandths at 50 mm.
+      range = values.some((x) => x.name === "range") ? num("range", 2) : undefined;
+      if (range !== undefined && range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
       if (values.some((x) => x.name === "azimuth" || x.name === "elevation")) warnings.push(`light("${name}") (line ${line}): a point light is at its position; azimuth and elevation are ignored`);
     } else if (values.some((x) => x.name === "range")) throw new RuntimeError(`light("${name}"): range goes with position=[x, y, z]; a light with no position is a direction`, line);
     const lightDef: Light = { name, azimuth, elevation, size, color, colorName, power, position, range, line };
@@ -1020,6 +1041,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // a 0.012 cell where the whole mixer meshes at 0.019, and one wall(bowl) took 5.3 s of a 6.2 s check).
     if (MESHED_QUERIES.has(callee) && values.length === 1 && isShape3(values[0].value)) values.push({ name: "resolution", value: defaultResolution(values[0].value) });
     const result = callBuiltin(builtin, values, line);
+    // The first call to make a shape is where it came from; one that hands back its input unchanged keeps the input's.
+    if ((isShape3(result) || isShape2(result)) && !origins.has(result)) {
+      const fn = calling[calling.length - 1];
+      origins.set(result, { callee, line, def: fn?.name, file: fn?.file });
+    }
     if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
     if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
@@ -1534,7 +1560,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "def":
-        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, block: stmt.block, closure: global });
+        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, block: stmt.block, closure: global, file: options.moduleName });
         return;
       case "use": {
         if (!topLevel) throw new RuntimeError(`use belongs at the top of the program, not inside a loop`, stmt.line);
@@ -1554,7 +1580,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         let lib: Evaluation;
         try {
           const onAssert = options.onAssert;
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
+          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, moduleName: stmt.path, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
@@ -1759,7 +1785,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images, origins };
 }
 
 export function signature(name: string, ov: Overload): string {

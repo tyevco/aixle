@@ -18,7 +18,7 @@ import { assertLine, assertPassLine, assertReport, isPrivate, type AssertInfo } 
 import { Worker } from "node:worker_threads";
 import { exprText, type Stmt } from "./lang/ast.js";
 import { watch } from "node:fs";
-import { isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
+import { boundsSize, isEmpty, isEmpty2, type Bounds, type Shape3 } from "./sdf/types.js";
 import type { Vec3 } from "./core/vec.js";
 import { dimsLabel } from "./render/views.js";
 import { isMaterial, isRecord, isShape2, isShape3, isUserFn, typeName, type Value } from "./lang/values.js";
@@ -113,7 +113,7 @@ function usage(): never {
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
       "                          [--roblox]                          also write model.roblox.glb for Studio's 3D Importer (facing -Z, _Att nodes)",
-      "                          [--3mf]                             also write model.3mf (written anyway when the program sets units or a bed)",
+      "                          [--3mf]                             also write model.3mf and judge the model as a print (both anyway when the program sets units or a bed)",
       "                          [--azimuth DEG] [--elevation DEG] [--zoom N] [--focus NAME] [--pose NAME]",
       "                          [--slice NAME]                     slices.png through one step, framed on it, the rest of the model faint",
       "                          [--camera NAME] [--environment NAME|A,B|all]  one declared shot only (the sheet takes its view); a sky over the program's, or several into environments.png",
@@ -283,7 +283,12 @@ function main(argv: string[]): number {
       else if (rest.poses.length) console.log(`poses: ${rest.poses.map((p) => p.name).join(", ")} (sizes below are at rest; --pose NAME for one of them)`);
       // The rig as a tree, joints made inside a def included, so it can be checked without a render (round 7).
       if (rest.output) { const tree = jointTreeLines(rest.output, short); if (tree.length) console.log(`joints:\n${tree.map((l) => `  ${l}`).join("\n")}`); }
-      const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${short(b.min[k])}..${short(b.max[k])}`).join("  ");
+      // A model under 0.1 units (a 4 mm part drawn in metres) printed every span as 0..0 at two decimals: its spans
+      // keep three figures of the model's own size instead; any larger model prints as it always has.
+      const modelSize = ev.output && !isEmpty(ev.output.bounds) ? Math.max(...boundsSize(ev.output.bounds)) : 1;
+      const q = modelSize > 0 && modelSize < 0.1 ? 10 ** (Math.floor(Math.log10(modelSize)) - 2) : 0;
+      const at = (v: number): string => (q ? String(Number((Math.round(v / q) * q).toPrecision(12))) : short(v));
+      const span = (b: { min: number[]; max: number[] }) => ["x", "y", "z"].map((a, k) => `${a} ${at(b.min[k])}..${at(b.max[k])}`).join("  ");
       const spanBox = (b: Bounds) => `${dimsLabel(b).padEnd(20)} ${span(b)}`;
       // --brief names each library and how much it exports; the full check lists the names (round 11: a library's 24
       // names opened every brief check).
@@ -313,7 +318,7 @@ function main(argv: string[]): number {
         // A 2D profile has a box too, and a part built from one is invisible until it is extruded (round 4 asked).
         if (isShape2(st.value)) {
           const b = st.value.bounds;
-          console.log(`${st.name.padEnd(18)} ${isEmpty2(b) ? "profile, empty" : `profile ${short(b.max[0] - b.min[0])} × ${short(b.max[1] - b.min[1])}`.padEnd(20) + ` x ${short(b.min[0])}..${short(b.max[0])}  y ${short(b.min[1])}..${short(b.max[1])}`}`);
+          console.log(`${st.name.padEnd(18)} ${isEmpty2(b) ? "profile, empty" : `profile ${at(b.max[0] - b.min[0])} × ${at(b.max[1] - b.min[1])}`.padEnd(20) + ` x ${at(b.min[0])}..${at(b.max[0])}  y ${at(b.min[1])}..${at(b.max[1])}`}`);
           // Lettering on an arc: the radii it spans from the origin, which is what meets a rim (round 10).
           const span = st.value.arcSpan;
           if (span) console.log(`${"  on the arc".padEnd(18)} r ${Number(span[0].toPrecision(3))}..${Number(span[1].toPrecision(3))} from the origin`);

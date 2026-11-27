@@ -71,7 +71,7 @@ npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
 npx aixle render model.aix --roblox             # also model.roblox.glb for Roblox Studio (facing -Z, _Att attachment nodes)
-npx aixle render model.aix --3mf                # also model.3mf for a slicer (written anyway when the program sets units or a bed)
+npx aixle render model.aix --3mf                # also model.3mf for a slicer, and the report judges it as a print (both anyway when the program sets units or a bed)
 npx aixle render model.aix --triangles 50000    # cap the GLB, OBJ and viewer (decimated; default 200000, 0 for all)
 npx aixle check model.aix --no-cache            # sample imports afresh; they are otherwise cached on disk by content
 npx aixle doc                        # the reference, to stdout
@@ -89,7 +89,7 @@ npx aixle doc                        # the reference, to stdout
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
 | `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |
 | `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set, in millimetres with z up |
-| `model.3mf` | with `set units`, `set bed` or `--3mf`: the same mesh for a slicer in the program's unit, a colour per triangle from the materials |
+| `model.3mf` | with `set units`, `set bed` or `--3mf`: the same mesh for a slicer in the program's unit (millimetres for `dm`, which 3MF lacks), a colour per triangle from the materials |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
 | `model_normal.png`, `model_mr.png`, `model_emissive.png` | when the program has them: the normal map (bumps, and `displace` relief finer than the mesh), the metallic-roughness map (wear, rust) and the emissive map (a patterned glow), on the atlas's UVs |
 | `model.glb` | binary glTF with the atlas and those maps embedded, tangents for the normal map (`--no-texture` for vertex colours instead); this, the OBJ and the viewer are decimated past 200 thousand triangles (`--triangles`) |
@@ -99,7 +99,7 @@ npx aixle doc                        # the reference, to stdout
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
 | `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, a bone per object and per joint, with its texture |
 | `model.animation.json` | with `--minecraft` and joints: the animations as Bedrock keyframes on the joint bones |
-| `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings; and for printing the size in millimetres, whether it fits the bed, the thinnest wall and where, the support under the overhangs |
+| `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings; and for a print (`set units`, `set bed` or `--3mf`) the size in millimetres, whether it fits the bed, the thinnest wall and where, the support under the overhangs |
 
 ## The language in one screen
 

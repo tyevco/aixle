@@ -168,7 +168,7 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
     return d;
   }, bounds, live.reduce((c, s) => c + s.cost, 0));
   if (k <= 0) out.parts = live;
-  for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) out.feature = s.feature;
+  for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) { out.feature = s.feature; out.featureAt = s.featureAt; }
   for (const s of live) if (s.gap !== undefined && (out.gap === undefined || s.gap < out.gap)) { out.gap = s.gap; out.gapWhat = s.gapWhat; }
   return out;
 }
@@ -183,9 +183,10 @@ export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
   return keep(shape2((x, y) => smax(da(x, y), db(x, y), k), bounds2Intersect(a.bounds, b.bounds), a.cost + b.cost), a);
 }
 
-/** The result carries the feature size of the shape it was built from (scaled by `by`). */
-function keep(out: Shape2, from: Shape2, by = 1): Shape2 {
+/** The result carries the feature size of the shape it was built from (scaled by `by`), and where it is (moved by `at`). */
+function keep(out: Shape2, from: Shape2, by = 1, at: (p: [number, number]) => [number, number] = (p) => p): Shape2 {
   if (from.feature !== undefined) out.feature = from.feature * by;
+  if (from.featureAt) out.featureAt = at(from.featureAt);
   if (from.gap !== undefined) { out.gap = from.gap * by; out.gapWhat = from.gapWhat; }
   return out;
 }
@@ -195,7 +196,7 @@ function keep(out: Shape2, from: Shape2, by = 1): Shape2 {
 export function move2(s: Shape2, dx: number, dy: number): Shape2 {
   const d = s.dist;
   const b = s.bounds;
-  return keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s);
+  return keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s, 1, (p) => [p[0] + dx, p[1] + dy]);
 }
 
 export function rotate2(s: Shape2, deg: number): Shape2 {
@@ -211,7 +212,7 @@ export function rotate2(s: Shape2, deg: number): Shape2 {
     }
   }
   // Inverse rotation of the point.
-  return keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s);
+  return keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s, 1, (p) => [c * p[0] - sn * p[1], sn * p[0] + c * p[1]]);
 }
 
 export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
@@ -224,7 +225,7 @@ export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
         min: [Math.min(b.min[0] * sx, b.max[0] * sx), Math.min(b.min[1] * sy, b.max[1] * sy)],
         max: [Math.max(b.min[0] * sx, b.max[0] * sx), Math.max(b.min[1] * sy, b.max[1] * sy)],
       };
-  return keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m);
+  return keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m, (p) => [p[0] * sx, p[1] * sy]);
 }
 
 export function flip2(s: Shape2, axis: "x" | "y"): Shape2 {
@@ -246,6 +247,7 @@ export function shell2(s: Shape2, t: number): Shape2 {
   const d = s.dist;
   const out = shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost);
   out.feature = s.feature === undefined ? t : Math.min(s.feature, t);
+  if (s.featureAt && s.feature !== undefined && s.feature <= t) out.featureAt = s.featureAt;
   return out;
 }
 
@@ -281,6 +283,12 @@ export function extrude(profile: Shape2, h: number, axis: ExtrudeAxis = "y"): Sh
         : (x: number, y: number, z: number) => inner(d(-z, y), x);
   const out = primitive(dist, bounds, profile.cost);
   out.feature = profile.feature;
+  if (profile.featureAt) {
+    // The profile's point at mid-thickness, laid as the extrusion lays the profile.
+    const [u, v] = profile.featureAt;
+    out.featureAt = axis === "y" ? [u, 0, -v] : axis === "z" ? [u, v, 0] : [0, v, -u];
+    out.featureProfile = { profile, at: profile.featureAt };
+  }
   out.gap = profile.gap;
   out.gapWhat = profile.gapWhat;
   return out;
@@ -302,6 +310,8 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     const da = offset === 0 && profile.revolveDist ? profile.revolveDist : d;
     const full = primitive((x, y, z) => da(length2(x, z) - offset, y), bounds, profile.cost);
     full.feature = profile.feature;
+    // The profile's point, on the side the profile is drawn on (+x); a full revolve has it all the way round.
+    if (profile.featureAt) { full.featureAt = [profile.featureAt[0] + offset, profile.featureAt[1], 0]; full.featureProfile = { profile, at: profile.featureAt }; }
     full.gap = profile.gap;
     full.gapWhat = profile.gapWhat;
     return full;
@@ -324,6 +334,8 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     return d2 > 0 ? length2(d2, off) : off > 0 ? off : d2;
   }, bounds, profile.cost);
   out.feature = profile.feature;
+  // A wedge starts at +z: the profile's point at its first face.
+  if (profile.featureAt) { out.featureAt = [0, profile.featureAt[1], profile.featureAt[0] + offset]; out.featureProfile = { profile, at: profile.featureAt }; }
   out.gap = profile.gap;
   out.gapWhat = profile.gapWhat;
   return out;

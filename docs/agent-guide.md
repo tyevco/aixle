@@ -7,7 +7,8 @@ the inside is cut open.
 ## The loop
 
 1. **Plan in words first.** What is it, how big, which way does it face,
-   what are its parts. Decide the unit. Decide the front is +z.
+   what are its parts. Decide the unit: the real one (millimetres for a
+   print, with `set units mm`). Decide the front is +z.
 2. **Write `model.aix`** part by part, one named step per line. Before
    building a bolt, a chair or a tree, `use "std/hardware"`,
    `"std/furniture"` or `"std/plants"` (`aixle doc std/hardware.aix` lists
@@ -63,13 +64,16 @@ the inside is cut open.
 6. **Compare with the plan**, fix the program, go to 3. Stop when the sheet
    matches the plan and `report.md` has no warnings you cannot explain.
    For a print, say what a unit is and what the printer holds (`set units
-   mm`, `set bed 220 220 250` in millimetres): `check` then prints the
-   size in millimetres and whether it fits the bed, and the report's
-   Print section has the thinnest wall and where it is, the support
-   under the overhangs and what rests on the plate; `model.stl` is in
-   millimetres with z up and `model.3mf` carries the unit and the
+   mm`, or cm, dm, m, in, ft; `set bed 220 220 250` in millimetres): only
+   then is the model judged as a print (or with `--3mf`). `check` then
+   prints the size in millimetres and whether it fits the bed, and the
+   report's Print section has the thinnest wall and where it is, the
+   support under the overhangs and what rests on the plate; `model.stl`
+   is in millimetres with z up and `model.3mf` carries the unit and the
    colours. Promise the walls with `assert wall(model) > 0.8` (model
-   units: 0.8 mm is two lines of a 0.4 mm nozzle).
+   units: 0.8 mm is two lines of a 0.4 mm nozzle). A game asset or a
+   piece of furniture sets neither, and its report says in one line
+   that it was not judged as a print.
 
 ## The commands
 
@@ -91,7 +95,7 @@ npx aixle render model.aix --beauty-only --camera hero   one shot and the sheet,
 npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all)
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
-npx aixle render model.aix --3mf           also model.3mf (written anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
+npx aixle render model.aix --3mf           also model.3mf, and the report judges it as a print (both anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
 npx aixle render model.aix --triangles 50000   a lighter GLB, OBJ and viewer, decimated (default cap 200000; 0 keeps every triangle)
 npx aixle render model.aix --no-poses --out closeup   skip the pose sheets; write somewhere other than out/model/
 npx aixle diff before.aix after.aix        the two sheets side by side
@@ -107,8 +111,8 @@ mesh; `--no-cache` samples afresh.
 - The title bar has the size as `w × h × d` and the cell size. If the model
   is 10 units tall and you meant 1, fix the numbers before anything else.
 - **Front** is from +z, **right** from +x, **top** from above with the back
-  at the top of the image. The grid is in whole units; the darker lines
-  pass through the origin.
+  at the top of the image. The grid lines are the step each view's
+  caption names (`grid 0.25`); the darker lines pass through the origin.
 - The perspective view's floor grid is at y = 0 (or under the model if it
   goes lower); the red, green and blue lines are +x, +y, +z at the origin.
 - A part visible in the steps sheet with a red frame is not in the output:
@@ -157,7 +161,7 @@ mesh; `--no-cache` samples afresh.
 | an edge looks jagged | the grid is coarse for the size | `--grid 200` (slower, cubic) |
 | a shell wall, a tube or lettering is broken or gone, though the part is thick | the wall, tube radius or stroke weight is under a grid cell | `check` says which step and what grid; thicken it or raise the grid |
 | a library part comes out broken, or leaves a loose sliver, in a scene | a slat, rod or wall of the `use`d part is thinner than the scene's cell | `check` names the step and the size; raise the scene's grid, or use a bigger part |
-| open edges at a cap, a bolt head or a hub, with nothing thin nearby | the part reaches through a face, or stops short of it, by less than a cell | sink it a cell or more into the host, or leave a cell or more clear |
+| open edges at a cap, a bolt head or a hub, with nothing thin nearby | the part reaches through a face by less than a cell, or stops short of it by less than a cell and a half | sink it a cell or more into the host, or leave a cell and a half or more clear (curved faces still seam at 1.4) |
 | open edges "in 'x' twice, as 'a' and 'b'" | two placements of one step cross each other there | move one, or bury one in the other by a cell |
 | a small part cannot be judged on the sheet | the whole model sets the framing | `--focus name`, or `set focus name` |
 | a stone or wood part reads as flat colour | the pattern's feature size is larger than the part | `material("granite", scale=0.3)` (the preset with a smaller scale) |
@@ -260,8 +264,22 @@ shown, so a lug welded to a boom is blamed as the lug, not the boom.
 - `| ground()` when the lowest point should touch the floor. It reads the
   surface itself, so a blend or a cut that leaves the bounding box loose
   does not lift the model; a base already on y = 0 does not need it.
-- Keep the whole model within about 1 to 20 units; the grid resolution is
-  relative to the longest side, so a giant scene loses small detail.
+- Draw in the real unit, millimetres for a print (a 117 mm stand is 117
+  units, with `set units mm`). Nothing in the mesh, what the checks find
+  or the pictures depends on the model's absolute size: measured, a mug
+  built at 1, 100, 0.01 and 0.001 times gave the same mesh and the same
+  sheet and beauty render, but for the numbers in the captions. What does depend on
+  the unit is the few defaults given in units: a material preset's
+  pattern size (wood grain 0.25 apart, granite speckle 0.05; the
+  reference lists each) and `text`'s size of 1, so a model in
+  millimetres gives `scale=` and `size=` (`material("wood", scale=25)`
+  on a 120 mm box, `text("PERCH", 9)`). The report and the warnings
+  print three decimals, a number under 0.0005 as 0, so a part drawn in
+  metres reads its volume and mass as 0 under about 10 to 20 cm, and its
+  cell and thin sizes as 0 under about 6 cm: draw a part that small in
+  centimetres or millimetres. The grid is cells along the longest side,
+  so what loses detail is a big scene with small parts, at any unit:
+  raise the grid, or `--focus` the part.
 - Name steps for what they are (`lid`, `left_arm`, `stair_3`), since the
   names are what the steps sheet and the report show you, and a part's
   sizes too: `seat = {w: 0.9, h: 0.45}` read as `seat.h` says what each

@@ -1,7 +1,8 @@
 /**
  * Smooth 2D profiles: a chain of cubic Bezier pieces in the plane, drawn
- * through points (`curve2`, the curve `curve()` draws, closed) or from
- * anchors and handles (`bezier2`). Closed, the chain is an outline and the
+ * through points (`curve2`, a centripetal Catmull-Rom spline, which on
+ * evenly spaced points is the curve `curve()` draws) or from anchors and
+ * handles (`bezier2`). Closed, the chain is an outline and the
  * profile is what it encloses; with a wall, the chain is left open and the
  * profile is the band that wide along it, for a vase drawn as one line.
  *
@@ -47,8 +48,9 @@ function tolerance(pts: [number, number][]): number {
 const same = (a: [number, number], b: [number, number], tol: number): boolean => Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol;
 
 /**
- * A chain through the points with Catmull-Rom tangents turned into Bezier
- * handles, as curve() builds in 3D. A point given twice in a row is a sharp
+ * A chain through the points with centripetal Catmull-Rom tangents turned
+ * into Bezier handles (curve() in 3D takes the uniform ones, the same on
+ * evenly spaced points). A point given twice in a row is a sharp
  * corner: the curve arrives and leaves it with one-sided tangents, as an
  * open curve does at its ends, so a run between two corners is straight.
  * Closed, the list wraps; a last point equal to the first only closes it
@@ -69,7 +71,12 @@ export function chainThrough(flat: readonly number[], closed: boolean, what = "c
   const m = pts.length;
   if (closed && m < 3) throw new Error(`${what} needs at least 3 different points for a closed outline, got ${m}`);
   if (!closed && m < 2) throw new Error(`${what} needs at least 2 different points, got ${m}`);
-  // Outgoing and incoming tangents at each point.
+  // Outgoing and incoming tangents at each point. Through a smooth point the tangent is the centripetal Catmull-Rom
+  // one: the knots are spaced by the square root of each chord, the derivative there is taken in that parameter, and
+  // each side's handle is that derivative times its own knot span, so a short piece beside a long one gets a short
+  // handle. The uniform tangent, half the chord between the neighbours on both sides, handed a 2 mm piece next to an
+  // 85 mm one a handle of 14 mm, and it looped into a 0.019 sliver (round 11). Evenly spaced points give the uniform
+  // tangent exactly.
   const outT: [number, number][] = [], inT: [number, number][] = [];
   for (let i = 0; i < m; i++) {
     const p = pts[i];
@@ -80,9 +87,10 @@ export function chainThrough(flat: readonly number[], closed: boolean, what = "c
       outT.push([next[0] - p[0], next[1] - p[1]]);
       inT.push([p[0] - prev[0], p[1] - prev[1]]);
     } else {
-      const t: [number, number] = [(next[0] - prev[0]) / 2, (next[1] - prev[1]) / 2];
-      outT.push(t);
-      inT.push(t);
+      const di = Math.sqrt(Math.hypot(p[0] - prev[0], p[1] - prev[1])), dout = Math.sqrt(Math.hypot(next[0] - p[0], next[1] - p[1]));
+      const mt: [number, number] = [0, 1].map((k) => (p[k] - prev[k]) / di - (next[k] - prev[k]) / (di + dout) + (next[k] - p[k]) / dout) as [number, number];
+      outT.push([mt[0] * dout, mt[1] * dout]);
+      inT.push([mt[0] * di, mt[1] * di]);
     }
   }
   const pieces = closed ? m : m - 1;
@@ -451,7 +459,11 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
   const all = Array.from({ length: pieces }, (_, s) => s);
   const dist = field(all);
   const out = shape2(dist, { min: [minx - half, miny - half], max: [maxx + half, maxy + half] }, pieces * COST_PER_PIECE);
-  out.feature = filled ? thinnestWall(chain, co, dist, [minx, miny, maxx, maxy]) : wall;
+  if (filled) {
+    const w = thinnestWall(chain, co, dist, [minx, miny, maxx, maxy]);
+    out.feature = w?.r;
+    out.featureAt = w?.at;
+  } else out.feature = wall;
   const off = all.filter((s) => !onAxis(s));
   if (filled && off.length < pieces && off.length > 0) out.revolveDist = field(off);
   return out;
@@ -471,7 +483,7 @@ const FACING = Math.cos((10 * Math.PI) / 180);
  * there is twice what the profile shows. Undefined when no two sides face
  * each other.
  */
-function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: number) => number, b: number[]): number | undefined {
+function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: number) => number, b: number[]): { r: number; at: [number, number] } | undefined {
   const { ctrl, pieces } = chain;
   const size = Math.max(b[2] - b[0], b[3] - b[1]);
   // Corners: where one piece's end tangent and the next one's start tangent part by more than 10 degrees.
@@ -495,6 +507,7 @@ function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: numb
     return true;
   };
   let best: number | undefined;
+  let bestAt: [number, number] = [0, 0];
   // Sixteen points a piece, fewer on a long outline so the build stays well under a second.
   const PER = Math.max(2, Math.min(16, Math.floor(1600 / pieces)));
   for (let s = 0; s < pieces; s++) {
@@ -524,10 +537,10 @@ function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: numb
       if (g[0] * nx + g[1] * ny < FACING) continue;
       if (nearCorner(px, py, r) || nearCorner(hx, hy, r)) continue;
       if (Math.abs(hx) < eps * 10 && Math.abs(px) > eps * 10 && axisAt(chain, hy, eps * 10)) continue;
-      if (best === undefined || r < best) best = r;
+      if (best === undefined || r < best) { best = r; bestAt = [(px + hx) / 2, (py + hy) / 2]; }
     }
   }
-  return best;
+  return best === undefined ? undefined : { r: best, at: bestAt };
 }
 
 /** Whether the chain has a straight run on x = 0 that covers height y (the far side of a march that ended on the axis). */

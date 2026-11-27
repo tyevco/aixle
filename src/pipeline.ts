@@ -21,7 +21,7 @@ import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/robl
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import { wearProbe } from "./sdf/materials.js";
 import type { Vec3 } from "./core/vec.js";
-import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedPoint, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
@@ -29,13 +29,13 @@ import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
+import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
 import { analyse, isSpeck, type Physics, type Piece } from "./mesh/physics.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
-import { bedFit, contactArea, supportVolume, UNIT_3MF, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
+import { bedFit, contactArea, supportVolume, threemfUnit, UNITS, wallThickness, type BedFit } from "./mesh/print.js";
 import { meshSteps, renderSheet, renderSlices, renderSteps, renderTurntable, renderView, turntableFrames, dimsLabel, type StepView, type ViewName } from "./render/views.js";
 import { encodeApng } from "./render/png.js";
 import { boundsCenter, boundsSize, isEmpty, type Bounds, type JointPose, type Shape3 } from "./sdf/types.js";
@@ -95,7 +95,7 @@ export interface RunOptions {
   sharp?: boolean;
   /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
   crease?: number;
-  /** Also write model.3mf beside model.stl (it is written anyway when the program sets units or a bed). */
+  /** Also write model.3mf beside model.stl and judge the model as a print (both happen anyway when the program sets units or a bed). */
   threemf?: boolean;
   /** Also write model.roblox.glb: the GLB turned to face -Z with a Handle node and `_Att` attachment nodes from the anchors, sized against Roblox's accessory limits (or `set roblox 1`). */
   roblox?: boolean;
@@ -237,30 +237,124 @@ export function importResolver(sourceName: string, log: (line: string) => void =
 }
 
 /**
+ * Where a shape's thinnest feature comes from: the path down the tree from
+ * the shape, through every child that carries the same size (a union's
+ * thinnest part, a move or a paint of it, a joint's child) and through a
+ * transform that scales it, to the node that introduced it (a box's thin
+ * side, a shell, a curve2 band, an extruded outline). The last node is the
+ * feature's source; two steps with the same source, or with sources one call made (sourceKey), are one thin part.
+ */
+export function featureSource(s: Shape3): Shape3[] {
+  const path = [s];
+  let n = s;
+  for (let guard = 0; guard < 512 && n.feature !== undefined; guard++) {
+    const kids = [...(n.parts ?? n.inner ?? []), ...(n.joint ? [n.joint.child] : []), ...(n.instanced ? [n.instanced.base] : [])];
+    let next = kids.find((c) => c.feature === n.feature);
+    if (!next && n.transform && kids.length === 1 && kids[0].feature !== undefined) next = kids[0];
+    if (!next) break;
+    path.push(next);
+    n = next;
+  }
+  return path;
+}
+
+/**
+ * What makes two thin features one part: the call that made the source (its builtin, line, def and library) and
+ * the feature's size. The slats a loop builds, or the legs a def called four times builds, are each a new node from
+ * one call, and would otherwise each be named, under the step that brought the first one in and again under the
+ * output; a source no call recorded is known by itself.
+ */
+function sourceKey(evaluation: Evaluation, s: Shape3): Shape3 | string {
+  const path = featureSource(s);
+  const node = path[path.length - 1];
+  let origin: ShapeOrigin | undefined;
+  for (let i = path.length - 1; i >= 0 && !origin; i--) origin = evaluation.origins?.get(path[i]);
+  if (!origin || node.feature === undefined) return node;
+  return `${origin.callee}|${origin.line}|${origin.def ?? ""}|${origin.file ?? ""}|${Number(node.feature.toPrecision(6))}`;
+}
+
+/** A library's path as its `use` gave it, as a file name. */
+const libraryFile = (f: string): string => (f.endsWith(".aix") ? f : `${f}.aix`);
+
+/**
+ * The thin member a step carries, as well as it can be named: the call that
+ * made it (and the def and library file it was in), where it is in the
+ * model (the point a profile knows, or its box), and for an extruded or
+ * revolved outline the point in the profile's own plane. Round 11: a 0.1
+ * back panel built inside a library's case() was named only as 'plate', the
+ * step that called case(); a sliver on a 46-point outline had no place.
+ */
+export function thinMember(evaluation: Evaluation, step: { name: string; line: number; value: Shape3 }): { made?: string; short?: string; where?: string } {
+  const path = featureSource(step.value);
+  const node = path[path.length - 1];
+  let origin: ShapeOrigin | undefined;
+  for (let i = path.length - 1; i >= 0 && !origin; i--) origin = evaluation.origins?.get(path[i]);
+  // The step's own call says nothing the step's name and line do not.
+  const own = !origin || (!origin.def && !origin.file && origin.line === step.line);
+  const madeAt = origin && !own ? `${origin.callee}()${origin.def ? ` in def ${origin.def}` : ""} at ${origin.file ? `${libraryFile(origin.file)} ` : ""}line ${origin.line}` : undefined;
+  // Where the output puts it, through every transform and joint above it; the step's own frame when it is not there.
+  const roots = [...(evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : []), step.value];
+  let where: string | undefined;
+  for (const root of roots) {
+    if (node.featureAt) {
+      const p = placedPoint(root, node, node.featureAt);
+      if (p) { where = `at (${p.map(fmt).join(", ")})`; break; }
+    } else if (!isEmpty(node.bounds)) {
+      // The member's box, when it says more than the step's own: a part of a def, or a part much smaller than its step.
+      const b = placedBounds(root, node, node.bounds);
+      const sb = placedBounds(root, step.value, step.value.bounds) ?? step.value.bounds;
+      if (!b) continue;
+      const smaller = [0, 1, 2].some((k) => b.max[k] - b.min[k] < 0.9 * (sb.max[k] - sb.min[k]));
+      if (origin?.def || origin?.file || smaller) where = `within x ${fmt(b.min[0])}..${fmt(b.max[0])} y ${fmt(b.min[1])}..${fmt(b.max[1])} z ${fmt(b.min[2])}..${fmt(b.max[2])}`;
+      break;
+    }
+  }
+  const fp = node.featureProfile;
+  const profileStep = fp ? evaluation.steps.find((st) => st.value === fp.profile) : undefined;
+  const inProfile = fp ? `(${fp.at.map(fmt).join(", ")}) in ${profileStep ? `the profile '${profileStep.name}' (line ${profileStep.line})` : "its profile"}` : undefined;
+  const whereText = [where ? `${where} in the model` : "", inProfile ?? ""].filter(Boolean).join(", ");
+  return {
+    made: madeAt,
+    where: whereText || undefined,
+    short: madeAt ?? (inProfile ? `${where ?? ""}${where ? ", " : ""}${inProfile}` : undefined),
+  };
+}
+
+/**
  * A part thinner than about a cell on any axis can drop out of the mesh
  * entirely (measured: rails at 0.9 of a cell vanished, a plate at 1.3
  * survived); say so from its bounds alone, so `check` can say it too.
  */
 export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: number, thin = 1.2): string[] {
-  const out: string[] = [];
+  return thinParts(evaluation, cellSize, grid, thin).map((p) => p.text);
+}
+
+/** The thin-part warnings with the step each names and the member as short as it can be said, for the quick pass's list. */
+export function thinParts(evaluation: Evaluation, cellSize: number, grid: number, thin = 1.2): { step: string; member?: string; text: string }[] {
+  const out: { step: string; member?: string; text: string }[] = [];
   const gridFor = (t: number) => Math.min(512, Math.ceil((grid * 2.5 * cellSize) / t));
   const reportedFeatures = new Set<number>();
+  // A feature is reported once, at the step that brought it in, and known by where it came from, not by its size:
+  // a bowl's 0.05 band went unnamed beside a 0.05 hook that had been named first (round 11).
+  const reportedSources = new Set<Shape3 | string>();
   const notedShapes = new Set<Shape3>();
   const geometry = geometrySteps(evaluation);
   for (const st of evaluation.steps) {
     if (!isShape3(st.value) || !geometry.has(st.name) || isEmpty(st.value.bounds)) continue;
+    const step = { name: st.name, line: st.line, value: st.value };
     const ss = boundsSize(st.value.bounds);
     const t = Math.min(ss[0], ss[1], ss[2]);
     if (t > 0 && t < cellSize * thin) {
-      out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).`);
-      // Its own feature size is settled too, or the union above it would repeat the warning under its own name
+      const m = thinMember(evaluation, step);
+      out.push({ step: st.name, member: m.made, text: `'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell${m.made ? ` (${m.made})` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).` });
+      // Its own feature is settled too, or the union above it would repeat the warning under its own name
       // (measured: 'house', forty parts, listed as thin for its mullion).
-      if (st.value.feature !== undefined) reportedFeatures.add(Math.round(st.value.feature * 1e6));
+      if (st.value.feature !== undefined) reportedSources.add(sourceKey(evaluation, st.value));
       continue;
     }
     // An import is one step: nothing in its mesh thinner than its sampling cell survived, whatever the render grid.
     if (st.value.sampledAt !== undefined && st.value.sampledAt > cellSize * 1.05) {
-      out.push(`'${st.name}' (line ${st.line}) is an import sampled at cell ${fmt(st.value.sampledAt)}, coarser than this render's ${fmt(cellSize)}: anything in its mesh thinner than about ${fmt(st.value.sampledAt * 1.2)} (rails, hooks, rungs) is gone or broken, whatever the grid. Give import() resolution=${Math.ceil(Math.max(...boundsSize(st.value.bounds)) / cellSize)} to match.`);
+      out.push({ step: st.name, text: `'${st.name}' (line ${st.line}) is an import sampled at cell ${fmt(st.value.sampledAt)}, coarser than this render's ${fmt(cellSize)}: anything in its mesh thinner than about ${fmt(st.value.sampledAt * 1.2)} (rails, hooks, rungs) is gone or broken, whatever the grid. Give import() resolution=${Math.ceil(Math.max(...boundsSize(st.value.bounds)) / cellSize)} to match.` });
       continue;
     }
     // A gap (a letter's counters, a slot) narrower than a cell closes up; reported once per size like features.
@@ -276,28 +370,33 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
         const what = st.value.gapWhat ?? "a gap (a letter's counters, the space between letters, a slot)";
         const between = /space between/.test(what);
         const fix = between ? "more spacing= or a lighter weight" : "a larger size or a lighter weight (under a quarter of the size for lowercase), or capitals";
-        out.push(
-          g <= 0
-            ? `'${st.name}' (line ${st.line}): ${what} closes up at this weight. Use ${fix}.`
-            : g < cellSize * 0.5
-              ? `'${st.name}' (line ${st.line}): ${what} is only ${fmt(g)} wide, ${fmt(g / cellSize)} of the ${fmt(cellSize)} cell, and closes up in the mesh. Use ${fix}, or raise the grid (set grid ${gridFor(g)}).`
-              : `'${st.name}' (line ${st.line}): ${what} is ${fmt(g)} wide, ${(g / cellSize).toFixed(2)} of the ${fmt(cellSize)} cell, so the mesh there may not be watertight. For a print or a clean GLB use ${fix}, or raise the grid (set grid ${gridFor(g)}).`,
-        );
+        out.push({
+          step: st.name,
+          text:
+            g <= 0
+              ? `'${st.name}' (line ${st.line}): ${what} closes up at this weight. Use ${fix}.`
+              : g < cellSize * 0.5
+                ? `'${st.name}' (line ${st.line}): ${what} is only ${fmt(g)} wide, ${fmt(g / cellSize)} of the ${fmt(cellSize)} cell, and closes up in the mesh. Use ${fix}, or raise the grid (set grid ${gridFor(g)}).`
+                : `'${st.name}' (line ${st.line}): ${what} is ${fmt(g)} wide, ${(g / cellSize).toFixed(2)} of the ${fmt(cellSize)} cell, so the mesh there may not be watertight. For a print or a clean GLB use ${fix}, or raise the grid (set grid ${gridFor(g)}).`,
+        });
       }
     }
     // What the constructor itself noticed, once, at the step that made it (a curve bent tighter than its tube).
     if (st.value.notes && !notedShapes.has(st.value)) {
       notedShapes.add(st.value);
-      for (const note of st.value.notes) out.push(`'${st.name}' (line ${st.line}): ${note}`);
+      for (const note of st.value.notes) out.push({ step: st.name, text: `'${st.name}' (line ${st.line}): ${note}` });
     }
     // A wall, tube or stroke inside a thick step: bounds cannot see it, so the shape carries the size itself.
-    // Reported once per size, at the step that introduced it, not again at every step built on top.
+    // Reported once per source, at the step that introduced it, not again at every step built on top; named by the
+    // call that made it and placed in the model.
     const f = st.value.feature;
     if (f === undefined || !(f > 0) || f >= cellSize * thin) continue;
-    const key = Math.round(f * 1e6);
-    if (reportedFeatures.has(key)) continue;
-    reportedFeatures.add(key);
-    out.push(`'${st.name}' (line ${st.line}) has a part (a wall, slat, rod, tube at its thin end, or stroke) only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).`);
+    const key = sourceKey(evaluation, st.value);
+    if (reportedSources.has(key)) continue;
+    reportedSources.add(key);
+    const m = thinMember(evaluation, step);
+    const said = [m.made ? `made by ${m.made}` : "", m.where ?? ""].filter(Boolean).join(", ");
+    out.push({ step: st.name, member: m.short, text: `'${st.name}' (line ${st.line}) has a part (a wall, slat, rod, tube at its thin end, or stroke) only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell${said ? `, ${said}` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).` });
   }
   return out;
 }
@@ -586,16 +685,20 @@ function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): 
  */
 export function nearlyThin(evaluation: Evaluation, cellSize: number): string {
   const geometry = geometrySteps(evaluation);
-  const seen = new Set<number>();
+  const seen = new Set<Shape3 | string>();
   const names: string[] = [];
   for (const st of evaluation.steps) {
     if (!isShape3(st.value) || !geometry.has(st.name)) continue;
     const f = st.value.feature;
     if (f === undefined || !(f >= cellSize * 1.2) || f >= cellSize * 2) continue;
-    const key = Math.round(f * 1e6);
+    const key = sourceKey(evaluation, st.value);
     if (seen.has(key)) continue;
     seen.add(key);
-    names.push(`'${st.name}' (${(f / cellSize).toFixed(1)} cells)`);
+    // The member as well as the step: a library's back panel called inline is 'plate' alone otherwise (round 11).
+    // Where it is only with what made it, to keep the note short: the step's name finds a part of its own.
+    const m = names.length < 6 ? thinMember(evaluation, { name: st.name, line: st.line, value: st.value }) : {};
+    const said = m.made ? [m.made, m.where].filter(Boolean).join(", ") : "";
+    names.push(`'${st.name}' (${(f / cellSize).toFixed(1)} cells${said ? `: ${said}` : ""})`);
   }
   if (!names.length) return "";
   return ` Parts between 1.2 and 2 cells thick mesh but often not watertight: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ", ..." : ""}; thicken them to two cells or raise the grid.`;
@@ -704,7 +807,9 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
   // and one that clears them here need not hold at rest (round 8: a lug blamed on a plane in two poses).
   const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : ` Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part by half a cell (${fmt(cellSize / 2)}) along ${"xyz"[planeAxis ?? 1]}, which puts the face midway between two sample planes, or change the radius a little.`) : "";
   const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
-  const gapNote = gaps ? " Two parts closer than a cell, or sunk into each other by less than one, leave a seam: overlap them by a cell or more, or part them by a cell." : "";
+  // Measured over ten placements on the lattice: two curved faces (a round leaf in a round opening, a ball in a pocket)
+  // left open edges up to 1.4 cells apart and none from 1.5; a door's arch kept 5 at 1.35 cells (round 11).
+  const gapNote = gaps ? " Two parts closer than a cell and a half, or sunk into each other by less than a cell, leave a seam: overlap them by a cell or more, or part them by a cell and a half (curved faces still seam at 1.4)." : "";
   return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${planeNote}`;
 }
 
@@ -923,12 +1028,12 @@ export function printBed(settings: Settings): number[] | undefined {
   return Array.isArray(b) && b.length === 3 && b.every((v) => v > 0) ? b : undefined;
 }
 
-const UNIT_WORDS: Record<string, string> = { mm: "a millimetre", cm: "a centimetre", m: "a metre", in: "an inch" };
-const UNIT_PLURALS: Record<string, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches" };
+const UNIT_WORDS: Record<string, string> = { mm: "a millimetre", cm: "a centimetre", dm: "a decimetre", m: "a metre", in: "an inch", ft: "a foot" };
+const UNIT_PLURALS: Record<string, string> = { mm: "millimetres", cm: "centimetres", dm: "decimetres", m: "metres", in: "inches", ft: "feet" };
 
 /** The Units row, and the first words of check's print line. */
 export function unitsText(u: { units: string; mm: number; assumed: boolean }, heightMm?: number): string {
-  if (u.assumed) return `not set: a slicer reads a unit as a millimetre${heightMm !== undefined ? `, so this prints ${fmtMm(heightMm)} mm tall` : ""}; \`set units cm\` (or mm, m, in) says what a unit is`;
+  if (u.assumed) return `not set: a slicer reads a unit as a millimetre${heightMm !== undefined ? `, so this prints ${fmtMm(heightMm)} mm tall` : ""}; \`set units cm\` (or mm, dm, m, in, ft) says what a unit is`;
   return `${u.units}: one unit is ${UNIT_WORDS[u.units]}${u.mm !== 1 ? ` (${fmt(u.mm)} mm)` : ""}`;
 }
 
@@ -998,7 +1103,9 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
   rows.push(`| On the plate | ${fmtMm(contact)} mm² of the base rests flat on the bed${contact < 0.02 * sizeMm[0] * sizeMm[1] ? " (a small foothold for its size: a brim, or a flat cut under it, holds it down)" : ""} |`);
   const volMm3 = Math.abs(physics.volume) * mm * mm * mm;
   rows.push(`| Material | ${fmtMm(volMm3 / 1000)} cm³ solid, about ${fmtMm((volMm3 / 1000) * 1.24)} g of PLA (1.24 g/cm³) at full infill; a slicer's infill uses less |`);
-  rows.push(`| Files | ${[files.stl ? "model.stl in millimetres" : "", files.threemf ? `model.3mf in ${UNIT_PLURALS[u.units]} with the materials' colours` : ""].filter(Boolean).join(", ") || "none (exports off)"}${files.stl || files.threemf ? ", z up as a slicer's plate is" : ""} |`);
+  const t3 = threemfUnit(u.units);
+  const in3mf = t3.scale === 1 ? UNIT_PLURALS[u.units] : `millimetres (3MF has no ${UNIT_PLURALS[u.units].replace(/s$/, "")}: the coordinates are scaled by ${fmt(t3.scale)})`;
+  rows.push(`| Files | ${[files.stl ? "model.stl in millimetres" : "", files.threemf ? `model.3mf in ${in3mf} with the materials' colours` : ""].filter(Boolean).join(", ") || "none (exports off)"}${files.stl || files.threemf ? ", z up as a slicer's plate is" : ""} |`);
   Object.assign(json, { contactMm2: contact, volumeMm3: volMm3 });
   // Turned on the plate is no problem (a slicer turns it); lying down changes the supports, and not fitting is a warning.
   const problems = [pieces > 1 ? `${pieces} pieces` : "", !watertight ? "not watertight" : "", bed && !fit.fits && fit.turned === undefined ? (fit.lying ? "fits the bed only lying down" : "does not fit the bed") : ""].filter(Boolean);
@@ -1095,6 +1202,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   // on a rig failed in its jump pose) unless one names its pose, which is tested in that pose's evaluation.
   const asserts = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? evalAt(p.joints, pn) : undefined; });
   const warnings = [...evaluation.warnings, ...restAssertWarningsFor(evaluation, rest), ...asserts.filter((a) => !a.passed).map(assertLine)];
+  // A model is judged as a print only when the program says it is one (a unit or a bed) or the run asks for a print's
+  // file (--3mf): a door for a game engine was told it prints 2.6 mm tall and its summary opened on a 0.0144 mm wall
+  // (round 11). The STL is written for every model, so it does not count.
+  const asPrint = !!opts.threemf || evaluation.settings.units !== undefined || evaluation.settings.bed !== undefined;
   // Set by a quick pass that dropped thin steps: the pieces count is then not worth a warning.
   let quickDropped = 0;
   // Set when the shown pose has lifted the whole model off the floor: standing is then not judged.
@@ -1231,14 +1342,24 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     }
     if (opts.quick) {
       // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
-      const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];
+      // Each step once, with the member it carries when that is a def's part or a profile's point (round 11: 'model'
+      // named for a back panel built inside a library's case()).
+      const dropped: string[] = [];
+      for (const p of thinParts(evaluation, cellSize, grid)) if (!dropped.some((d) => d === p.step || d.startsWith(`${p.step} (`))) dropped.push(p.member ? `${p.step} (${p.member})` : p.step);
       // An import sampled finer than this pass's cell loses its thin parts here too (round 6: a quick sheet called an
       // imported playground twenty pieces).
-      for (const st of evaluation.steps) if (isShape3(st.value) && st.value.sampledAt !== undefined && st.value.sampledAt < cellSize && !dropped.includes(st.name)) dropped.push(st.name);
+      for (const st of evaluation.steps) if (isShape3(st.value) && st.value.sampledAt !== undefined && st.value.sampledAt < cellSize && !dropped.some((d) => d === st.name || d.startsWith(`${st.name} (`))) dropped.push(st.name);
+      // Under two cells a part meshes but often with holes and seams: a bowl's 0.05 wall at 1.3 quick cells was drawn
+      // as a sieve and named nowhere (round 11). Those are said too, without giving up the pieces count.
+      const named = (n: string) => dropped.some((d) => d === n || d.startsWith(`${n} (`));
+      const soft: string[] = [];
+      for (const p of thinParts(evaluation, cellSize, grid, 2)) if (!named(p.step) && !soft.some((d) => d === p.step || d.startsWith(`${p.step} (`))) soft.push(p.member ? `${p.step} (${p.member})` : p.step);
+      const list = (l: string[]) => { const sep = l.some((d) => d.includes(" (")) ? "; " : ", "; return `${l.slice(0, 6).join(sep)}${l.length > 6 ? `${sep}...` : ""}`; };
+      const softNote = soft.length ? `${dropped.length ? "; and " : ""}${soft.length} step${soft.length === 1 ? " is" : "s are"} under two of its cells and may show holes or seams here: ${list(soft)}` : "";
       if (dropped.length) {
         quickDropped = dropped.length;
-        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet (${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ", ..." : ""}), so the pieces count and the footprint are not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
-      }
+        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet: ${list(dropped)}${softNote}. So the pieces count and the footprint are not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
+      } else if (soft.length) warnings.push(`quick pass: at this pass's ${fmt(cellSize)} cell, ${softNote}; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
     }
     // The true extent comes from the mesh: bounds are boxes, and a difference keeps the left side's box
     // however much was cut away, so a note based on bounds once told a scene on the floor to ground() itself.
@@ -1468,9 +1589,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         // slicer reads millimetres, so it is written in millimetres from `set units` (a unit is a millimetre without).
         write("model.stl", toStl(mesh!, name, printUnits(evaluation.settings).mm));
         // The 3MF carries the unit and the colours, for a program that says it is a print (units or a bed) or --3mf.
-        if (opts.threemf || evaluation.settings.units !== undefined || evaluation.settings.bed !== undefined) {
-          const u = printUnits(evaluation.settings);
-          write("model.3mf", time("3mf", () => to3mf(mesh!, { name, unit: UNIT_3MF[u.units] })));
+        if (asPrint) {
+          // 3MF has no decimetre: such a model is written in millimetres, its coordinates scaled.
+          const t3 = threemfUnit(printUnits(evaluation.settings).units);
+          write("model.3mf", time("3mf", () => to3mf(mesh!, { name, unit: t3.unit, scale: t3.scale })));
         }
       }
       if (opts.glb !== false) {
@@ -1750,16 +1872,22 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         `| Centre of mass | (${physics.centre.map(fmt).join(", ")}) |`,
         `| Base footprint${shownPose ? ` (in pose ${shownPose})` : ""} | ${offFloor ? `none: the pose lifts the model off the floor (lowest point y = ${fmt(physics.floor)})` : physics.footprint.length >= 3 ? `${physics.footprint.length}-sided hull of the points within ${fmt(cellSize * 1.5)} of y = ${fmt(physics.floor)}` : "none (fewer than three contact points)"} |`,
         `| Stands${shownPose ? ` (in pose ${shownPose})` : ""} | ${offFloor ? "not judged: off the floor in this pose" : physics.footprint.length < 3 ? "unknown" : physics.stable ? `yes, centre of mass ${fmt(physics.stabilityMargin)} inside the footprint` : `no, centre of mass ${fmt(-physics.stabilityMargin)} outside the footprint`} |`,
-        `| Overhangs | ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface faces down more than 45° above the floor${physics.overhang > 0.005 ? " (a printer would need support there)" : ""} |`,
+        `| Overhangs | ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface faces down more than 45° above the floor${physics.overhang > 0.005 && asPrint ? " (a printer would need support there)" : ""} |`,
         `| Pieces | ${quickDropped ? `not judged on this quick pass (${quickDropped} thin step${quickDropped === 1 ? "" : "s"} dropped; the full render counts them)` : piecesRow(physics, evaluation, cellSize)} |`,
         `| Cavities | ${cavitiesRow(physics, cellSize)} |`,
         "",
       );
       // What a slicer's user wants first: the unit, the size in millimetres, the bed, the thinnest wall, the supports.
-      const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics!, cellSize)).length;
-      const pr = printSection(evaluation, output!, mesh, cellSize, physics, quickDropped ? 0 : solid, wt.ok, !!opts.quick, time, { stl: files.includes("model.stl"), threemf: files.includes("model.3mf") });
-      lines.push(...pr.lines);
-      printJson = pr.json;
+      // A model that is not a print gets one line saying how to make it one, and no wall or support passes.
+      if (asPrint) {
+        const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics!, cellSize)).length;
+        const pr = printSection(evaluation, output!, mesh, cellSize, physics, quickDropped ? 0 : solid, wt.ok, !!opts.quick, time, { stl: files.includes("model.stl"), threemf: files.includes("model.3mf") });
+        lines.push(...pr.lines);
+        printJson = { judged: true, ...pr.json };
+      } else {
+        lines.push(`Not judged as a print: \`set units mm\` (or cm, dm, m, in, ft) or \`set bed 220 220 250\` judges it as one, as \`--3mf\` does${files.includes("model.stl") ? "; model.stl is written all the same, a unit read as a millimetre" : ""}.`, "");
+        printJson = { judged: false };
+      }
     }
   }
   if (evaluation.objects.length > 1 || joints.length > 0 || evaluation.poses.length > 0) {
@@ -1952,7 +2080,7 @@ export function cameraSight(evaluation: Evaluation, cellSize: number): { lines: 
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */
 export function presentationLines(evaluation: Evaluation, shotName: string | undefined, environment: string | undefined, overridden = false): string[] {
   const lines: string[] = [];
-  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${fmt(l.range ?? 2)}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}${evaluation.lights.length >= 2 ? " (lights.png shows each alone, and what each adds)" : ""}`);
+  if (evaluation.lights.length) lines.push(`Lights: ${evaluation.lights.map((l) => `${l.name} (${l.position ? `at (${l.position.map(fmt).join(", ")}), range ${l.range !== undefined ? fmt(l.range) : "half the model's longest side"}` : `azimuth ${fmt(l.azimuth)}, elevation ${fmt(l.elevation)}`}, size ${fmt(l.size)}, ${l.colorName}${l.power !== 1 ? `, power ${fmt(l.power)}` : ""})`).join("; ")}${evaluation.lights.length >= 2 ? " (lights.png shows each alone, and what each adds)" : ""}`);
   if (evaluation.cameras.length) lines.push(`Cameras: ${evaluation.cameras.map((c) => `${c.name} (${[c.azimuth !== undefined ? `azimuth ${fmt(c.azimuth)}` : "", c.elevation !== undefined ? `elevation ${fmt(c.elevation)}` : "", c.zoom !== undefined ? `zoom ${fmt(c.zoom)}` : "", c.focus ? `on ${c.focus}` : "", c.dof !== undefined ? `dof ${fmt(c.dof)}` : ""].filter(Boolean).join(", ") || "the render's view"}) → beauty_${c.name}.png`).join("; ")}${shotName ? ` (the sheet and beauty.png use "${shotName}"${overridden ? ", its angles overridden from the command line" : ""})` : ""}`);
   if (environment) lines.push(`Environment: ${environment}`);
   return lines;
