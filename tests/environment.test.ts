@@ -256,9 +256,10 @@ describe("environments: the backdrop", () => {
       expect(look(s, at, DIFFUSE)[0]).toBeLessThan(look(s, at, BACKDROP)[0] / 3);
       expect(look(s, at, MIRROR)[0]).toBeCloseTo(look(s, at, BACKDROP)[0] + (look(s, at, MIRROR)[0] - look(s, at, BACKDROP)[0]), 9);
     }
-    // The moon's elevation is the key's, kept between 25° and 60°.
+    // The moon's elevation is the key's, kept between 25° and 60°, whatever the key's length.
     for (const [el, want] of [[10, 25], [45, 45], [80, 60]]) {
-      const s = buildSky("night", 0, lightDirection(-30, el));
+      const k = lightDirection(-30, el);
+      const s = buildSky("night", 0, [k[0] * 3, k[1] * 3, k[2] * 3]);
       expect((Math.asin(s.disc[1]) * 180) / Math.PI).toBeCloseTo(want, 6);
     }
     // Stars: find some in a patch of night sky and measure each across and up the sky.

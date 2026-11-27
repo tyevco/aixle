@@ -278,10 +278,11 @@ function card(out: number[], dir: Vec3, ha: number, hb: number, soft: number, L:
 
 /** What a sky depends on, normalised: the overcast on nothing, sunset and night only on the key, the studio on the camera's azimuth and the key (the model's shadow on the floor). */
 function skyInputs(env: Environment, cameraAzimuth: number, key: Vec3): { az: number; key: Vec3 } {
-  // + 0 turns −0 into 0, so a key's bytes do not depend on the sign of a zero.
-  if (env === "studio") return { az: cameraAzimuth + 0, key: [key[0] + 0, key[1] + 0, key[2] + 0] };
+  // A unit key; + 0 turns −0 into 0, so a key's bytes do not depend on the sign of a zero.
+  const k = normalize(key);
+  if (env === "studio") return { az: cameraAzimuth + 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
   if (env === "overcast") return { az: 0, key: [...DEFAULT_LIGHT_DIRECTION] };
-  return { az: 0, key: [key[0] + 0, key[1] + 0, key[2] + 0] };
+  return { az: 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
 }
 
 /** The structure and the gradient of a sky, without its SH and prefiltered maps. */
