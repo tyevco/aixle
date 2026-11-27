@@ -422,6 +422,23 @@ describe("environments: the studio's structure", () => {
     expect(look(s, at, FILTERED)[0]).toBeLessThan(5);
   });
 
+  it("gives a light wider than the widest disc the same softbox as that disc, as its shadows and highlight take it", () => {
+    // A light's size has no upper bound; its angle, size/18, passes a right angle at 28, and the shadows and the
+    // highlight stop at 1.5 rad. A softbox that did not wrapped round the sphere: at size 100 its edge came back to a
+    // tenth of a radian and a mirror lost the light.
+    const look1 = (size: number, off: number) => {
+      const s = buildEnvironment("studio", { cameraAzimuth: 35, lights: [{ dir: [0, 1, 0], size, color: [1, 1, 1], power: 1 }] });
+      const out = [0, 0, 0];
+      softboxAt(s, 0, Math.sin(off), Math.cos(off), 0, out, 0);
+      return out[0];
+    };
+    for (const off of [0, 0.6, 1.2]) {
+      const widest = look1(27, off);
+      expect(widest).toBeGreaterThan(0);
+      for (const size of [30, 60, 100, 1000]) expect(look1(size, off), `size ${size}, ${off} rad off`).toBeCloseTo(widest, 12);
+    }
+  });
+
   it("the key is the first directional light, or the default key", () => {
     expect(keyDirection()).toEqual(DEFAULT_LIGHT_DIRECTION);
     expect(keyDirection([{ dir: [0, 1, 0], position: [0, 2, 0] }, { dir: [1, 0, 0] }, { dir: [0, 0, 1] }])).toEqual([1, 0, 0]);

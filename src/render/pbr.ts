@@ -45,7 +45,7 @@ import { INK } from "./views.js";
 import { bvhFor, type BvhData } from "./bvh.js";
 import { createRays, softnessFor, type RayLight } from "./rays.js";
 import { filterVisibility } from "./denoise.js";
-import { bloom, decode, FLAG_EDGE, FLAG_GLOW, FLAG_SHINY, GLOW, KEY, KIND_FLOOR, KIND_MODEL, KIND_SKY, lightAngle, pointRadius, tonemap, toLinear, toSrgb, untone } from "./photometry.js";
+import { bloom, decode, FLAG_EDGE, FLAG_GLOW, FLAG_SHINY, GLOW, KEY, KIND_FLOOR, KIND_MODEL, KIND_SKY, lightAngle, MAX_LIGHT_ANGLE, pointRadius, tonemap, toLinear, toSrgb, untone } from "./photometry.js";
 import { BACKDROP, buildEnvironment, DEFAULT_LIGHT_DIRECTION, environmentPalette, horizonRadiance, irradiance, lightDirection, prefiltered, REFLECT, skyAt, softboxAt, type EnvironmentState } from "./environment.js";
 import { createGlass, SEE_BACKDROP, SEE_MIRROR } from "./pbr-glass.js";
 import type { BeautyOptions } from "./beauty.js";
@@ -189,7 +189,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     const r = l.pos ? pointRadius(l.size, l.range) : 0;
     if (l.pos) { LP[o + 3] = l.pos[0]; LP[o + 4] = l.pos[1]; LP[o + 5] = l.pos[2]; LP[o + 6] = 1; }
     LP[o + 7] = l.range * l.range;
-    const ang = Math.min(1.5, lightAngle(l.size));
+    const ang = Math.min(MAX_LIGHT_ANGLE, lightAngle(l.size));
     LP[o + 8] = Math.tan(ang);
     LP[o + 9] = r;
     LP[o + 10] = toLinear(l.color[0]) * l.power * KEY; LP[o + 11] = toLinear(l.color[1]) * l.power * KEY; LP[o + 12] = toLinear(l.color[2]) * l.power * KEY;

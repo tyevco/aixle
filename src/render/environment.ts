@@ -34,7 +34,7 @@
  * by what each sky depends on, so a hit and a miss give the same bytes. Nothing here allocates per look-up.
  */
 import { normalize, type Vec3 } from "../core/vec.js";
-import { decode, KEY, lightAngle, toLinear } from "./photometry.js";
+import { decode, KEY, lightAngle, MAX_LIGHT_ANGLE, toLinear } from "./photometry.js";
 
 /** The procedural skies the metals reflect and the floor sits in. */
 export type Environment = "studio" | "overcast" | "sunset" | "night";
@@ -360,7 +360,8 @@ function softboxes(lights: readonly EnvironmentLight[], shared: boolean): Float6
   lights.forEach((l, i) => {
     if (l.position || !(l.power > 0)) return;
     const o = i * BOX;
-    const t = lightAngle(Math.max(BOX_MIN_SIZE, l.size));
+    // No wider than the shadows' disc: past a right angle the edge's chord wrapped round and shrank the box.
+    const t = Math.min(MAX_LIGHT_ANGLE, lightAngle(Math.max(BOX_MIN_SIZE, l.size)));
     const d = normalize(l.dir);
     const x0 = 2 - 2 * Math.cos(t * (1 - BOX_SOFT)), x1 = 2 - 2 * Math.cos(t * (1 + BOX_SOFT));
     // The disc's solid angle with its soft edge: dΩ = π d(2 − 2cos), and the edge's smoothstep integrates to half.

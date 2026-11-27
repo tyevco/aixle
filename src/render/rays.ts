@@ -18,7 +18,7 @@
 import type { Mesh } from "../mesh/mesh.js";
 import { boundsGrow, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
 import { ALL, BvhTracer, GLASS, OPAQUE, type BvhData } from "./bvh.js";
-import { BEER } from "./photometry.js";
+import { BEER, MAX_LIGHT_ANGLE } from "./photometry.js";
 
 /** Cells every secondary ray marches the field before the BVH takes over. */
 export const NEAR_CELLS = 3;
@@ -27,7 +27,7 @@ export const BOX_CELLS = 2;
 /** Area-light rays per light: four on the outer half of the disc's area, four on the inner. */
 export const AREA_RAYS = 8;
 /** The widest angular radius a directional light's disc is given, in radians: just short of a right angle. */
-const MAX_ANGLE = 1.5;
+const MAX_ANGLE = MAX_LIGHT_ANGLE;
 
 /** A hashed uniform in [0, 1) from two integers (murmur-style finaliser). */
 export function hash01(a: number, b: number): number {
