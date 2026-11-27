@@ -101,7 +101,7 @@ npx aixle doc                        # the reference, to stdout
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
 | `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, a bone per object and per joint, with its texture |
 | `model.animation.json` | with `--minecraft` and joints: the animations as Bedrock keyframes on the joint bones |
-| `report.md`, `report.json` | the files the run wrote (a run removes what the last one wrote into the folder and it did not), size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings; and for a print (`set units`, `set bed` or `--3mf`) the size in millimetres, whether it fits the bed, the thinnest wall and where, the support under the overhangs |
+| `report.md`, `report.json` | the files the run wrote (a run removes what the last one wrote into the folder and it did not), size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings; and for a print (`set units`, `set bed` or `--3mf`) the size in millimetres, whether it fits the bed, the thinnest wall and where, the support under the overhangs with the bridges and the islands apart |
 
 ## The language in one screen
 

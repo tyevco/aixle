@@ -74,6 +74,8 @@ export interface ContactNote {
 /** What one evaluation lends a builtin: a mesh of a shape at a resolution, shared by every query that meshes it. */
 export interface CallContext {
   meshes?: MeshCache;
+  /** Millimetres in a model unit, from `set units` (1 without it, a unit read as a millimetre), for a span in millimetres. */
+  mmPerUnit?: number;
   /** The source text of the argument bound to a parameter, for a message that names the part (rest, lean). */
   text?: (param: string) => string | undefined;
   /** Where a placing call says what it did, for check. */

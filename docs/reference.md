@@ -490,7 +490,7 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). With none given, the model's own cell: the shown model's longest side over the program's `set grid`, so a part is meshed as the report meshes it and costs no more than the model's mesh, but never under 64 cells across the part nor over the grid itself (64 cells across the part without a `set grid`); pieces(), overhang(), wall(), support() and stands() share that rule. For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). With none given, the model's own cell: the shown model's longest side over the program's `set grid`, so a part is meshed as the report meshes it and costs no more than the model's mesh, but never under 64 cells across the part nor over the grid itself (64 cells across the part without a `set grid`); pieces(), overhang(), wall(), support(), islands() and stands() share that rule. For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
 
     pieces(shape, resolution=64) -> number
 
@@ -514,9 +514,18 @@ The thinnest wall of the shape: from every vertex of its mesh at `resolution` ce
 
 ### support
 
-The support volume under the shape's overhangs, in cubic model units (mm³ for a print with `set units mm`): the report's Supports row, from each face that faces down more than 45° above the floor a column straight down to the plate or to the model below, its height times the face's area in plan. A face the mesher bends past 45° at a sharp edge, where the shape itself faces down less, is left out. For assert support(stand) < 50, the support kept small in the unit a printer's user reads, where overhang() is a share of the whole surface that one flat bridge barely moves. An upper estimate: a slicer bridges short spans and fills support sparsely. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces(), overhang() and wall() read); a failure says where the tallest column is and what it stands on.
+The support volume the shape's overhangs need, in cubic model units (mm³ for a print with `set units mm`): the report's Supports row, from each face that faces down more than 45° above the floor a column straight down to the plate or to the model below, its height times the face's area in plan, leaving out the bridges. A bridge is a level ceiling that spans at most `span` millimetres (16 by default, through `set units`; a unit is a millimetre without it) to solid that stands on something on both sides, laid in one direction for each connected ceiling as a slicer lays it: a slab between posts or walls, a lettering groove closed at both ends. A slope, a dome, a horizontal hole's top, a cantilever and a bridge longer than the span need support. span=0 counts every overhang, as a slicer with supports on that supports bridges too fills them (PrusaSlicer's own printer profiles turn its "Don't support bridges" off). A face the mesher bends past 45° at a sharp edge, where the shape itself faces down less, is left out. For assert support(stand) < 50, the support kept small in the unit a printer's user reads, where overhang() is a share of the whole surface that one flat bridge barely moves; a point that hangs lower than all around it needs a column too and is counted by islands(), not here. An upper estimate: a slicer fills support sparsely. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces(), overhang() and wall() read); a failure says where the tallest column is and what it stands on, and how much more lies under bridges.
 
-    support(shape, resolution=64) -> number
+    support(shape, resolution=64, span=16) -> number
+
+- `resolution`: cells on the longest side
+- `span`: the longest bridge, in millimetres; 0 bridges nothing
+
+### islands
+
+How many islands the shape has: points lower than all the surface around them, off the plate, whose first layer prints in the air whatever the angles of their faces, a cone hanging tip down, a keel, a part floating free, each needing a column of support that no face asks for. For assert islands(part) == 0 beside assert support(part) == 0 on a part to be printed without support: a cone hanging off a wall with its sides at 60° reads no support and one island. The lowest point of every part of the surface that hangs clear of what is lower by more than half a cell before it joins it, facing down, and not already over faces that need support (a ball's underside has support of its own); the mesher's dips on a displaced or lettered surface are a fraction of that. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh support() reads); a failure says where each island is, in which step, and how tall its column is.
+
+    islands(shape, resolution=64) -> number
 
 - `resolution`: cells on the longest side
 

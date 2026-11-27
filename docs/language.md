@@ -1561,18 +1561,48 @@ millimetres, the bed (fits; does not fit square, but turned so many
 degrees on the plate it does, the smallest turn, in degrees as
 `rotate(y=)` turns; only lying on its side; not at all), the
 thinnest wall with where it is and the steps on both sides of it, the
-support volume under the overhangs (standing on the plate and on the
-model, the area the columns cover in plan, the tallest column and where,
-an upper estimate since a slicer bridges short spans; `support()` is the
-same number in a promise), what rests flat on the plate, and the material in
-cubic centimetres and grams of PLA. A face counts towards the support
-only where the field faces down past 45° as well as the mesh: at a sharp
-edge, and above all where a cutter's corner lies exactly on the part's
-own corner, dual contouring bends the faces beside the edge a few
-degrees, and a phone stand's slot ceiling at 40° from the vertical read
-as a 33 mm column of support that nothing in the shape needs; the row
-says how much area it left out (a curved part always leaves out a
-little, the mesh's facets along its 45° line). The thinnest wall is measured by a
+support the overhangs need (standing on the plate and on the model, the
+area the columns cover in plan, the tallest column and where, an upper
+estimate since a slicer fills support sparsely; `support()` is the same
+number in a promise), the bridges left out of it and the islands, what
+rests flat on the plate, and the material in cubic centimetres and grams
+of PLA. A face counts towards the support only where the field faces
+down past 45° as well as the mesh: at a sharp edge, and above all where
+a cutter's corner lies exactly on the part's own corner, dual contouring
+bends the faces beside the edge a few degrees, and a phone stand's slot
+ceiling at 40° from the vertical read as a 33 mm column of support that
+nothing in the shape needs; the row says how much area it left out (a
+curved part always leaves out a little, the mesh's facets along its 45°
+line). When the tallest column still stands on a few faces covering
+under a cell in plan beside a crease, the row says so and how far half
+a cell is: a cutter's face laid exactly on the part's own leaves such a
+sliver, and moving the cutter by half a cell clears it.
+
+A bridge is a level ceiling that spans at most 16 mm to solid that
+stands on something on both sides: a slab between posts or walls, the
+ceiling of a lettering groove closed at both ends. It prints without
+support with supports switched off, and past 16 mm PrusaSlicer's own
+check of such a print adds a support point to it; Hubs gives 5 mm as
+the span with no sag at all. Each connected ceiling is crossed in one
+direction, as a slicer lays a bridge (PrusaSlicer picks the direction
+whose lines are anchored at both ends over the most length), so an
+L-shaped ceiling is crossed on the diagonal and a ring of roof between
+a post and a wall by chords, the chords past 16 mm needing support. A
+slope, a dome, the top of a horizontal hole and a cantilever are not
+bridges: each layer of them is a ledge on the one below. The row gives
+the bridged volume apart, since a slicer with supports on fills bridges
+too unless told not to (PrusaSlicer's own printer profiles turn its
+"Don't support bridges" off). The span is in millimetres through `set
+units`; without it a unit is read as a millimetre, as the STL is. An
+island is a point lower than all the surface around it, off the plate:
+a cone hanging tip down, a keel, a piece floating free. Its first layer
+prints in the air whatever its faces' angles, so it needs a column that
+no face asks for, and the row names the first three with their steps and
+their columns' heights (`report.json` has up to fifty); `islands()`
+counts them. An island is the lowest point of a part of the surface
+that hangs more than half a cell clear of what is lower before joining
+it, facing down, and not over faces with support of their own (a ball's
+underside has its own columns). The thinnest wall is measured by a
 ray from every vertex inward to the far side of the solid, through the
 field, so a wall under a cell is still read at its own thickness, and a
 cut's walls (a flute through a vase's side, an engraving's floor) are
@@ -1659,7 +1689,7 @@ at its own surface rather than at its centre (a ring's centre is in the
 air); a piece that is a joint's part, turning clear of what it hangs on
 (a knocker's ring in its eye), is said to be one, since it is loose by
 design and a print would print it so. With no resolution given, the
-queries that mesh (`pieces`, `overhang`, `wall`, `support`, `stands`)
+queries that mesh (`pieces`, `overhang`, `wall`, `support`, `islands`, `stands`)
 mesh at the model's own cell, the shown model's longest side over `set
 grid`, so a part is meshed as the report meshes it and costs no more
 than the model's own mesh: the mixer's bowl, 2.68 of a model 3.66 long at
@@ -1683,14 +1713,27 @@ through to (2.02, 18.18, 29.88) in 'slot'` is an engraving's floor
 against a slot's face. It meshes too, at the model's own cell as
 `pieces` does; a shape with no surface in that mesh, empty or
 thinner than a cell everywhere, reads 0 and fails the promise;
-`support(shape, resolution)` is the support volume under the shape's
-overhangs, as the Print section's Supports row estimates it, in cubic
+`support(shape, resolution, span)` is the support volume the shape's
+overhangs need, as the Print section's Supports row estimates it, in cubic
 model units (mm³ with `set units mm`): `assert support(stand) < 50,
 "little support"` promises it in the unit a printer's user reads, where
 `overhang()`, a share of the whole surface, moved only from 0.0013 to
 0.0035 for a flat 14 mm bridge under a phone stand; a failure says where
 the tallest column is, in which step, and what it stands on (the plate,
-or the model at a point and a step). `stands(shape, resolution)` is the
+or the model at a point and a step), and how much it left out as
+bridged. The bridges are left out of it: a level ceiling spanning at
+most `span` millimetres (16 by default, through `set units`, and 16
+units without it, a unit read as a millimetre) to solid that stands on
+both sides; `support(part, span=0)` counts them as well, the support a
+slicer with supports on fills when it supports bridges too, and
+`span=5` holds them to Hubs' span for a bridge with no sag.
+`islands(shape, resolution)` is how many islands the shape has, points
+lower than all the surface around them that print in the air whatever
+their faces' angles: `assert islands(part) == 0` beside `assert
+support(part) == 0` promises a part that prints with supports off,
+which a cone hanging tip down off a wall, its sides at 60°, passes on
+support alone; a failure says where each island is, in which step, and
+how tall its column is. `stands(shape, resolution)` is the
 Physics section's Stands row as a number: the margin by which the
 centre of mass (uniform density), projected on the floor, lies inside
 the footprint of what rests within a cell and a half of the shape's

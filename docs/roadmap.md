@@ -769,7 +769,106 @@ Separately, every scene object's node sits at the world origin with world-space 
 
 **Cost.** Two to three days, most of it in the slicers. No committed render changes.
 
-### 20. Supports that know bridges and islands
+### 20. Supports that know bridges and islands: built
+
+Built in `src/mesh/print.ts` (`supportVolume`, `supportOf`): the
+Supports row gives the support the overhangs need, the bridged volume
+apart with its longest line, and each island with its step and its
+column; `report.json`'s `support` carries `bridged`, `islands`,
+`islandCount` and `sliver`; `support(shape, resolution, span)` reads the
+share that needs support and `islands(shape, resolution)` counts the
+islands, with builtin entries and a failure that says where. What the
+prototype left open, decided:
+- **Bridged means printing with supports off, across 16 mm.** Past 16 mm
+  PrusaSlicer's stability check for a print with supports off
+  (SupportSpotsGenerator, `bridge_distance = 16.0f`) adds a support
+  point, so that is the span past which a bridge fails; Hubs' 5 mm is the
+  span under which it shows no sag. With supports on, PrusaSlicer's
+  "Don't support bridges" defaults on but Prusa's own printer profiles set
+  `dont_support_bridges: 0`, so a slicer fills bridges too: the row says
+  so and gives the bridged volume apart, and `support(part, span=0)`
+  counts it (`span=5` holds a print to Hubs).
+- **One direction a ceiling, the slicer's.** BridgeDetector (every 5° and
+  the bridge's own edges; the most length anchored at both ends, ties
+  within a line spacing to the shorter longest line), emulated on the
+  ceiling's layer with lines 0.45 mm apart, crosses an L-shaped roof
+  (arms 8 by 30) on the diagonal, 966.7 mm anchored against 961.5 along
+  an arm, longest line 11.8 mm; a ring of roof from 6 to 10 mm between a
+  post and a wall ties at every angle, longest line the 16.4 mm chord
+  past the post; from 3 to 10, 19.3 mm. The prototype's per-face rule
+  read both rings bridged radially, 4 and 7 mm across. Each connected,
+  level ceiling is now crossed along the one of four axes that spans the
+  most of it within the span, ties to the shorter longest line: the L is
+  all bridged at 16 on the diagonal (longest 11.4 mm), the 6-to-10 ring
+  2380 of 2402 mm³, and the 3-to-10 ring leaves 1305 of 3421 mm³ needing
+  support at the chords past 16.
+- **Anchors stand, ceilings are level.** A line runs half a cell under
+  the ceiling's own height, under solid all the way, to solid that is
+  still solid a cell lower (straight down or a cell on). So a dome, a
+  pitched roof, a horizontal hole's top (4, 8 and 16 mm) and a
+  cantilever are support as the 45° rule had them, and posts 4, 8 and 14
+  apart are bridged at 16 and 20 and 40 apart are not, as the prototype
+  found. The prototype bridged all of round 11's stand's word (0 of 55.6
+  mm³ left); here the grooves closed at both ends are bridged (21.2 mm³)
+  and 34.5 mm³ stays under the bars that open into a stem's groove (the
+  E's bars, the H's crossbar), read on a render focused on `word` from
+  below: ceilings tilted 25° that each layer cantilevers from the one
+  behind.
+- **Islands are minima that persist.** A vertex lower than all its
+  neighbours by a tolerance has no tolerance that works: the mesher put
+  a neighbour 0.011 of a cell from a 50° cone's tip and 0.63 under a
+  70° one's. How far a minimum hangs before its part of the surface
+  joins something lower does separate them: cones' tips at 46 to 80°
+  hang 22 to 135 cells, a cube on its corner 12 to 39, and the mesher's
+  dips on the tree, the trophy's rim text (0.13), the nameplate and every
+  other example and print program at most 0.16; the rope's channels
+  between strands leave cusps of 0.11 to 0.49 and two past half a cell.
+  An island hangs more than half a cell, faces down, is off the plate,
+  and is not at a corner of a patch of faces needing support a cell or
+  more in plan; a floating piece hangs its own height and a speck of
+  under 32 vertices is none. Its column is counted by height and place,
+  not volume: a point has no area, and its support tip is the slicer's.
+- **Units.** The span is in millimetres through `set units`; without it a
+  unit is a millimetre, as the Units row and the STL take it, and a
+  program in unitless metres bridges everything under 16 units.
+- **The sliver nudge.** When the tallest column stands on at most eight
+  faces needing support, joined to no others, under a cell in plan,
+  beside a face turned more than 60° from them, the row and the failure
+  of support() give the sample-plane note's half cell. Round 11's
+  coincident slot corner, rebuilt, leaves no column at all now: the
+  field test skips its 7.9 mm².
+
+Measured on the 25 examples and the five print programs (the stand, its
+phone probe and the mixer's unit probe, and the two print test
+fixtures), meshed as the report meshes them, round 11's estimate against
+what needs support at a 16 mm span (5 and 10 mm read the same but where
+said), the bridged volume and the islands, in cubic units (mm³ for the
+prints):
+
+| Program | Round 11 | Needs support | Bridged | Islands |
+| --- | --- | --- | --- | --- |
+| stand (round 11) | 55.65 | 34.46 (45.67 at 5 mm) | 21.18, longest 6.9 mm | 0 |
+| stand_probe_phone | 5062 | 1763 (5015 at 5, 3898 at 10) | 3299, longest 15.1 mm | 1, the cable floating in its groove |
+| teapot | 12.67 | 5.20 | 7.47 | 0 |
+| fence | 13.35 | 10.91 | 2.44 | 0 |
+| table | 10.27 | 8.95 | 1.32 | 0 |
+| guitar | 1.28 | 0.23 | 1.04 | 2, its tuner buttons |
+| workshop, lantern, tower, sign, robot, arm, windmill | 1.73, 3.35, 4.37, 1.88, 1.99, 3.26, 7.07 | 1.07, 2.54, 3.78, 1.41, 1.68, 2.98, 6.84 | the rest | 0 |
+| rope | 12.32 | 12.30 | 0.02 | 2, in the channels between strands |
+| chest | 0.28 | 0 | 0.28 | 0 |
+| tree, garden, lamp, stairs, medal, nameplate, mug, tin, patterns | 0.05 to 21.7 | within 0.03 of round 11's | 0 to 0.03 | 0 |
+| gear, tumbler, vase, the mixer's unit probe, the fixtures | 0 | 0 | 0 | 0 |
+
+The pass took 8 ms to 3.1 s (median 107 ms) against 3 ms to 1.5 s
+(median 58 ms) for round 11's, which it includes, and under the wall
+pass on every program (median 422 ms); the dearest are the rope (3.1 s,
+1.5 s of it round 11's columns in its twisted sweep's field) and the
+tree (0.76 s, its displaced underside marched face by face). Marching
+from every face cost a chest's lid 12 s at a 0.006 cell; reading a level
+ceiling once on a lattice and sharing a level's lines brought it to
+0.25 s. The committed renders do not change: the row is the report's,
+and no warning was added. What follows is the proposal as it was
+written.
 
 **Why.** support() (round 11's first ask, built on the round-11 query branch) counts every face past 45 degrees as needing a column down to the plate or the model below. It is wrong in two ways:
 - **Bridges.** A bridge, a face with solid near it on both sides, prints without support. All of round 11's stand's remaining 55.6 mm³ lies under the grooves of its engraved word.
