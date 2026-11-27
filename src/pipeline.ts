@@ -731,6 +731,46 @@ export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec
 }
 
 /**
+ * The smooth boolean whose fillet a point lies in: a `union(..., k=)` (or a smooth difference or intersection) with
+ * two of its operands' surfaces within k and two cells of the point, the innermost such, by its name or its nearest
+ * named parent's (round 11: an edge in a head blended to its hinge knuckle with k=0.03 was put down to the two parts
+ * under the blend, "only 0.000825 into 'head_knuckle'", as if no blend were there).
+ */
+export function blendAt(evaluation: Evaluation, at: Vec3, cellSize: number): { name: string; k: number } | undefined {
+  const names = new Map<Shape3, string>();
+  for (const st of evaluation.steps) if (isShape3(st.value) && !names.has(st.value)) names.set(st.value, st.name);
+  const roots = evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : [];
+  let found: { name: string; k: number; depth: number } | undefined;
+  let budget = 20000;
+  const walk = (n: Shape3, x: number, y: number, z: number, t: number, depth: number, named: string | undefined): void => {
+    if (--budget < 0 || isEmpty(n.bounds)) return;
+    const b = n.bounds, r = t + (n.blend ?? 0);
+    if (x < b.min[0] - r || x > b.max[0] + r || y < b.min[1] - r || y > b.max[1] + r || z < b.min[2] - r || z > b.max[2] + r) return;
+    if (Math.abs(n.dist(x, y, z)) > r) return;
+    const here = names.get(n) ?? named;
+    if (n.blend && n.inner && n.inner.length >= 2 && here && (!found || depth >= found.depth)) {
+      let near = 0;
+      for (const c of n.inner) if (Math.abs(c.dist(x, y, z)) < n.blend + t) near++;
+      if (near >= 2) found = { name: here, k: n.blend, depth };
+    }
+    let cx = x, cy = y, cz = z, ct = t;
+    if (n.unwarp) {
+      const q = n.unwarp(x, y, z);
+      let stretch = 0;
+      for (const [ex, ey, ez] of [[t, 0, 0], [0, t, 0], [0, 0, t]]) {
+        const w = n.unwarp(x + ex, y + ey, z + ez);
+        stretch = Math.max(stretch, Math.hypot(w[0] - q[0], w[1] - q[1], w[2] - q[2]));
+      }
+      cx = q[0]; cy = q[1]; cz = q[2]; ct = stretch > 0 && Number.isFinite(stretch) ? stretch : t;
+    }
+    for (const k of n.parts ?? n.inner ?? []) walk(k, cx, cy, cz, ct, depth + 1, here);
+    if (n.instanced && !n.parts) walk(n.instanced.base, cx, cy, cz, ct, depth + 1, here);
+  };
+  for (const r of roots) walk(r, at[0], at[1], at[2], cellSize * 2, 0, undefined);
+  return found ? { name: found.name, k: found.k } : undefined;
+}
+
+/**
  * The watertight line, with where the bad edges are and which steps hold
  * them, so it can be acted on. Each cluster names the steps whose surface
  * passes there; when only one step does, two of its own surfaces cross
@@ -743,9 +783,11 @@ export function surfaceGap(evaluation: Evaluation, a: string, b: string, at: Vec
 export function watertightNote(w: ReturnType<typeof watertightReport>, evaluation: Evaluation, cellSize: number, edgeList: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [], posed = false): string {
   if (w.ok || !w.where || isEmpty(w.where)) return w.note;
   const tally = new Map<string, number>();
-  let planar = 0, gaps = 0;
+  let planar = 0, gaps = 0, blends = 0;
   let planeAxis: number | undefined;
   const all = w.clusters ?? [];
+  let joints: Map<string, string | undefined> | undefined;
+  const jointOf = () => (joints ??= jointsOfSteps(evaluation));
   const spots = all.map((cl, index) => {
     // Named at an edge that is on the model, not at the cluster's mean, which for a ring of edges is inside the part.
     const names = namesAt(evaluation, cl.at, cellSize);
@@ -756,13 +798,21 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
     // One name alone: the step's own surface folds or creases there, or a sample-plane coincidence; a straight
     // tube has no second surface to cross, so it is not called "with itself" (round 6: that read as nonsense).
     // Two steps meeting: how far apart their surfaces are there, which says which way to move one (round 4).
-    const g = names.length === 2 && index < 3 ? surfaceGap(evaluation, names[0].name, names[1].name, cl.at, cellSize) : undefined;
+    // Inside a blend's fillet the two parts' own surfaces are not the surface, so their gap says nothing: the blend is
+    // named instead.
+    const blend = names.length === 2 && index < 3 ? blendAt(evaluation, cl.at, cellSize) : undefined;
+    if (blend) blends++;
+    const g = names.length === 2 && index < 3 && !blend ? surfaceGap(evaluation, names[0].name, names[1].name, cl.at, cellSize) : undefined;
     if (g) gaps++;
     const gapText = !g ? "" : g.into ? `, '${g.into[0]}' only ${fmt(-g.gap)} ${g.cut ? `past the face '${g.into[1]}' cut` : `into '${g.into[1]}'`} there (${(-g.gap / cellSize).toFixed(1)} of a cell)` : `, their surfaces ${fmt(g.gap)} apart there (${(g.gap / cellSize).toFixed(1)} of a cell)`;
     // A cutter named there is the face it cut in its part, which is tagged, or a reader looks for the cutter itself
     // (round 10: a recess named at a pebble band's edges sent the reader to the base's own shape).
     const q = (nm: string) => `'${nm}'${evaluation.roles.get(nm) === "cut" ? " (cut: the face it cut)" : ""}`;
-    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in ${q(names[0].name)} twice, as '${twice[0]}' and '${twice[1]}'` : ` in ${q(names[0].name)} alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => q(n.name)).join(", ")}${gapText}`;
+    const blendText = blend ? `, in the fillet where '${blend.name}' blends them (k ${fmt(blend.k)}, ${(blend.k / cellSize).toFixed(1)} cells)` : "";
+    // A joint's part against what it turns on is two meshes in the GLB, so a seam between them is the fused mesh's only.
+    const ja = names.length === 2 ? jointOf().get(names[0].name) : undefined, jb = names.length === 2 ? jointOf().get(names[1].name) : undefined;
+    const jointText = names.length === 2 && ja !== jb ? `, the joint '${(ja ?? jb)!}''s part against what it turns on, which the GLB carries as separate meshes` : "";
+    const label = names.length === 0 ? "" : names.length === 1 ? (twice ? ` in ${q(names[0].name)} twice, as '${twice[0]}' and '${twice[1]}'` : ` in ${q(names[0].name)} alone (no other part within a cell: two copies of the same step touching, a crease of its own surface, or the mesher's noise at a few edges)`) : ` in ${names.map((n) => q(n.name)).join(", ")}${blendText}${gapText}${jointText}`;
     edgeList.push({ at: cl.at, count: cl.count, steps: names.map((n) => n.name), ...(g ? { gap: g.gap } : {}) });
     if (index >= 3) return "";
     // Edges that all share one coordinate lie on a plane: a flat face or a widest line sitting exactly on a sample
@@ -778,7 +828,8 @@ export function watertightNote(w: ReturnType<typeof watertightReport>, evaluatio
   const planeNote = planar ? (posed ? " Edges all on one plane are a surface lying exactly on a sample plane in this pose, not a thin part; the planes move with the pose, so judge watertightness at rest and leave these." : ` Edges all on one plane are a surface lying exactly on a sample plane, not a thin part: move the part by half a cell (${fmt(cellSize / 2)}) along ${"xyz"[planeAxis ?? 1]}, which puts the face midway between two sample planes, or change the radius a little.`) : "";
   const more = all.length > 3 ? ` and ${all.length - 3} more places (every one is in report.json under watertight)` : "";
   const gapNote = gaps ? " Two parts closer than a cell, or sunk into each other by less than one, leave a seam: overlap them by a cell or more, or part them by a cell." : "";
-  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${planeNote}`;
+  const blendNote = blends ? " An edge in a blend's fillet is the mesher's, where the blended surface turns within a cell or two, not a gap between the parts the blend joins." : "";
+  return `${w.note} The edges are mostly ${spots.filter(Boolean).join("; ")}${more}.${byStep ? ` By step, over all of them: ${byStep}.` : ""}${gapNote}${blendNote}${planeNote}`;
 }
 
 /**
@@ -1727,6 +1778,39 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       warnings.push(`The centre of mass is only ${fmt(physics.stabilityMargin)} units inside the base's footprint: the model would balance, barely.`);
   }
 
+  // Each object of a scene meshed on its own, for the Assembly table and for the Watertight row, which says when
+  // every object is watertight alone and the fused scene's edges are only where they meet.
+  type ObjectRow = { name: string; row: string; ok: boolean; edges?: string; json: Record<string, unknown> };
+  let objectRows: ObjectRow[] | undefined;
+  if (evaluation.objects.length > 1 && mesh && !opts.quick && cellSize > 0) {
+    objectRows = [];
+    for (const o of evaluation.objects) {
+      const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
+      if (isEmpty(shape.bounds)) { objectRows.push({ name: o.name, row: `| ${o.name} | empty | | | |`, ok: true, json: { empty: true } }); continue; }
+      const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
+      if (triangleCount(own.mesh) === 0) { objectRows.push({ name: o.name, row: `| ${o.name} | no surface | | | |`, ok: true, json: { empty: true } }); continue; }
+      const w = watertightReport(own.mesh);
+      const ph = analyse(own.mesh, own.cellSize);
+      const solid = ph.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, ph, own.cellSize)).length;
+      const label = o.shape.instanced ? `${o.name} (each of ${o.shape.instanced.placements.length} copies)` : o.name;
+      // The object's edges named among its own steps only, as the Watertight row names the scene's.
+      const list: { at: Vec3; count: number; steps: string[]; gap?: number }[] = [];
+      const alone: Evaluation = { ...evaluation, objects: [{ name: o.name, shape }] };
+      const edges = w.ok ? undefined : watertightNote(w, alone, own.cellSize, list).slice(w.note.length).trim().replace(/^The edges are mostly /, `${w.nonManifold + w.holes} open edge${w.nonManifold + w.holes === 1 ? "" : "s"}, mostly `).replace("(every one is in report.json under watertight)", "(every one is in report.json under the object's watertight)");
+      const first = list[0];
+      const where = first ? `; ${first.count} at (${first.at.map(fmt).join(", ")})${first.steps.length ? ` in ${first.steps.map((n) => `'${n}'`).join(", ")}` : ""}, below` : "";
+      objectRows.push({
+        name: o.name, ok: w.ok, edges,
+        row: `| ${label} | ${w.ok ? "yes" : `no: ${w.nonManifold + w.holes} edges${where}`} | ${solid} | ${ph.footprint.length < 3 ? "unknown" : ph.stable ? `yes, ${fmt(ph.stabilityMargin)} inside` : `no, ${fmt(-ph.stabilityMargin)} outside`} | ${(ph.overhang * 100).toFixed(ph.overhang < 0.095 ? 1 : 0)}% |`,
+        json: { watertight: w.ok ? { ok: true } : { ok: false, edges: w.nonManifold + w.holes, clusters: list }, pieces: solid },
+      });
+    }
+  }
+  // The scene's fused mesh has edges no object has alone: where objects meet, or where its lattice falls otherwise.
+  const fusedOnly = !!objectRows && objectRows.every((r) => r.ok)
+    ? " Each object is watertight on its own (the Assembly table), so these edges are only in the fused scene, where objects meet or where its sample lattice falls otherwise; they are not in the objects' own meshes, which are what the GLB carries, and matter only for printing the scene as one piece."
+    : "";
+
   // The report.
   let printJson: Record<string, unknown> | undefined;
   if (mesh && bounds) {
@@ -1744,7 +1828,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre${exportsNote.where && exportsNote.meshes.length > 1 ? ` (in ${exportsNote.where})` : ""}, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.flat ? `; past the flat faces, so every material's texels carry the field's normal in the normal map and merged curved faces shade as the surface does, though their outlines are the coarser mesh's: read viewer.html` : ""}. ${capShare(exportsNote)}${exportsNote.seams?.texels ? `. ${exportsNote.seams.texels} texels lie on faces that span two materials, each painted with the material of the surface under it (${exportsNote.seams.differ} of them took another material than the face's nearest corner)` : ""}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
-      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
+      `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : fusedOnly || nearlyThin(evaluation, cellSize))} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
       `| Materials | ${countedNames(mesh.materials.map((m) => m.name)) || "none"} |`,
       ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),
@@ -1781,21 +1865,16 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     if (evaluation.objects.length > 1) lines.push(`Objects: ${evaluation.objects.map((o) => `${o.name}${o.shape.instanced ? ` (${o.shape.instanced.placements.length} copies)` : ""}`).join(", ")}`, "");
     // A print-ready set is judged one object at a time: the scene's rows above are for the fused union, in which
     // thirty-two chess pieces resting on their board count as one piece (measured). Each object is meshed on its
-    // own at the scene's cell (a placed set once, its base) and gets the same rows; a quick pass skips this.
-    if (evaluation.objects.length > 1 && mesh && !opts.quick && cellSize > 0) {
+    // own at the scene's cell (a placed set once, its base) and gets the same rows; a quick pass skips this. Where an
+    // object's own mesh has open edges, they are placed and named under the table as the Watertight row's are, since
+    // its own mesh is what the GLB carries, its joints' parts aside (round 11: "bowl | no: 17 edges" with no place
+    // cost a render on a guess).
+    if (objectRows) {
       lines.push("Each object on its own, at the scene's cell:", "", "| Object | Watertight | Pieces | Stands | Overhangs |", "| --- | --- | --- | --- | --- |");
-      for (const o of evaluation.objects) {
-        const shape = o.shape.instanced ? o.shape.instanced.base : o.shape;
-        if (isEmpty(shape.bounds)) { lines.push(`| ${o.name} | empty | | | |`); continue; }
-        const own = time(`object:${o.name}`, () => surfaceNets(shape, { resolution: Math.max(8, Math.round(Math.max(...boundsSize(shape.bounds)) / cellSize)), sharp: opts.sharp ?? evaluation.settings.sharp !== 0, crease }));
-        if (triangleCount(own.mesh) === 0) { lines.push(`| ${o.name} | no surface | | | |`); continue; }
-        const w = watertightReport(own.mesh);
-        const ph = analyse(own.mesh, own.cellSize);
-        const solid = ph.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, ph, own.cellSize)).length;
-        const label = o.shape.instanced ? `${o.name} (each of ${o.shape.instanced.placements.length} copies)` : o.name;
-        lines.push(`| ${label} | ${w.ok ? "yes" : `no: ${w.nonManifold + w.holes} edges`} | ${solid} | ${ph.footprint.length < 3 ? "unknown" : ph.stable ? `yes, ${fmt(ph.stabilityMargin)} inside` : `no, ${fmt(-ph.stabilityMargin)} outside`} | ${(ph.overhang * 100).toFixed(ph.overhang < 0.095 ? 1 : 0)}% |`);
-      }
+      for (const r of objectRows) lines.push(r.row);
       lines.push("");
+      for (const r of objectRows) if (r.edges) lines.push(`- ${r.name}'s own mesh: ${r.edges}`);
+      if (objectRows.some((r) => r.edges)) lines.push("");
     }
     if (joints.length && output) lines.push("Joints, each under the joint it turns with:", "", "```", ...jointTreeLines(output, fmt), "```", "");
     if (evaluation.poses.length) lines.push(`Poses: ${evaluation.poses.map((p) => p.name).join(", ")}${shownPose ? ` (sheet shows "${shownPose}")` : ""}`, "");
@@ -1864,7 +1943,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         cellSize,
         grid,
         materials: mesh?.materials.map((m) => m.name) ?? [],
-        objects: evaluation.objects.map((o) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1 })),
+        objects: evaluation.objects.map((o, i) => ({ name: o.name, copies: o.shape.instanced?.placements.length ?? 1, ...(objectRows?.[i]?.json ?? {}) })),
         physics: physics ? { volume: Math.abs(physics.volume), centre: physics.centre, stable: physics.stable, stabilityMargin: physics.stabilityMargin, pieces: physics.pieces.length, overhang: physics.overhang } : undefined,
         print: printJson,
         watertight: edgeList.length ? { clusters: edgeList } : undefined,

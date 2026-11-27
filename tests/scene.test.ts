@@ -12,6 +12,8 @@ import { toObjScene } from "../src/export/obj.js";
 import { easeBlend, interpolatePose, keyAt, renderAnimation, renderPoses, type PoseCache, type PoseView } from "../src/render/views.js";
 import { REST_POSE, type JointPose } from "../src/sdf/types.js";
 import { run } from "../src/pipeline.js";
+import * as pipelineFns from "../src/pipeline.js";
+import { check } from "../src/pipeline.js";
 import { preset } from "../src/sdf/materials.js";
 
 describe("joints", () => {
@@ -607,5 +609,56 @@ describe("a loose piece in the report", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("open edges in a scene's report", () => {
+  const opts = { grid: 40, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, glb: false, obj: false } as const;
+  it("places each object's own open edges in its Assembly row, under the table, and in report.json under the object", () => {
+    // Round 11: "bowl | no: 17 edges" with no place, though the tool had found them all on one plane in the bowl.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A plate 0.06 thick, about a cell, tilted into a block: the pair meshes with open edges, the ball without.
+      const src = "left = box(1, 1, 1)\nright = box(1, 0.06, 1) | rotate(z=30) | move(0.9, 0.3, 0)\npair = left + right\nball = sphere(0.5) | move(0, 0, 2)\nscene pair, ball";
+      const r = run(src, "pair.aix", dir, opts);
+      expect(r.report).toMatch(/\| pair \| no: \d+ edges?; \d+ at \([-\d.]+, [-\d.]+, [-\d.]+\) in '(left|right)', '(left|right)', below \|/);
+      expect(r.report).toMatch(/\| ball \| yes \|/);
+      expect(r.report).toMatch(/^- pair's own mesh: \d+ open edges?, mostly \d+ at \([-\d., ]+\) in '(left|right)', '(left|right)', '(left|right)' only [\d.]+ into '(left|right)' there/m);
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      const pair = data.objects.find((o: { name: string }) => o.name === "pair");
+      expect(pair.watertight.ok).toBe(false);
+      expect(pair.watertight.clusters.length).toBeGreaterThan(0);
+      expect(pair.watertight.clusters[0].steps.sort()).toEqual(["left", "right"]);
+      expect(data.objects.find((o: { name: string }) => o.name === "ball").watertight).toEqual({ ok: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("says when every object is watertight alone and the fused scene's edges are only where they meet", () => {
+    // Round 11: a mixer's fused scene kept one edge though its body and bowl were each watertight.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // Two blocks a hundredth apart, turned off the lattice: each meshes whole, the fused scene not where they meet.
+      const r = run("left = box(1, 1, 1) | rotate(z=17)\nright = box(1, 1, 1) | move(1.01, 0, 0) | rotate(z=17)\nscene left, right", "two.aix", dir, opts);
+      expect(r.report).toMatch(/\| Watertight \| no: .*Each object is watertight on its own \(the Assembly table\), so these edges are only in the fused scene/);
+      expect(r.report).toMatch(/\| left \| yes \|/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("names the blend when an edge lies in its fillet, not the gap between the parts it joins", () => {
+    // Round 11: "in 'head_round', 'head_knuckle', 'head_round' only 0.000825 into 'head_knuckle'" under a k=0.03 blend.
+    const { watertightNote } = pipelineFns;
+    const cluster = (at: [number, number, number]) => ({ centre: at, at, box: { min: [at[0] - 0.01, at[1] - 0.01, at[2] - 0.01] as [number, number, number], max: [at[0] + 0.01, at[1] + 0.01, at[2] + 0.01] as [number, number, number] }, count: 1 });
+    const w = (at: [number, number, number]) => ({ ok: false, holes: 0, nonManifold: 1, note: "no: 1 edge.", where: cluster(at).box, clusters: [cluster(at)] });
+    // A post blended onto a plate: the fillet is round the post's foot, at y = 0.1 a little out from its side.
+    const src = (k: number) => `plate = box(2, 0.2, 2)\npost = cylinder(0.2, 1) | move(0, 0.6, 0)\njoined = union(plate, post, k=${k})\nshow joined`;
+    const at: [number, number, number] = [0.21, 0.11, 0];
+    const blended = watertightNote(w(at), check(src(0.1)), 0.02);
+    expect(blended).toMatch(/in '(plate|post)', '(plate|post)', in the fillet where 'joined' blends them \(k 0\.1, 5\.0 cells\)/);
+    expect(blended).not.toMatch(/only [\d.]+ into/);
+    expect(blended).toMatch(/An edge in a blend's fillet is the mesher's/);
+    const hard = watertightNote(w(at), check(src(0)), 0.02);
+    expect(hard).not.toMatch(/fillet/);
   });
 });

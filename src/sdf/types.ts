@@ -147,6 +147,8 @@ export interface Shape3 {
   loose?: boolean;
   /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
   bound?: boolean;
+  /** Set by a smooth union, difference or intersection: its blend radius k, so a report can say an edge lies in its fillet. */
+  blend?: number;
   /** Set by displace: the noise's feature size. Relief like this is finer than the mesh can follow, so the atlas baker writes it into a normal map. */
   relief?: number;
   /** Set by paint: the material it gives everything inside it; by decal, `decal` is the one it gives inside its region. */

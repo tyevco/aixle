@@ -444,7 +444,15 @@ mesh). `--focus pawns_3` frames the third copy of a placed set on its
 own. A scene's report has, under Assembly, a row per object (a placed
 set once, for its base): watertight, pieces, stands, overhangs, since
 the rows above are for the fused union, in which thirty-two pieces
-resting on their board are one piece.
+resting on their board are one piece. An object with open edges of its
+own has its largest cluster in its row and every cluster under the
+table, placed and named among its own steps as the Watertight row's are
+(`report.json` has them under the object's `watertight`); a cluster
+between a joint's part and what it turns on is said to be one, since the
+GLB carries those as separate meshes. When every object is watertight
+alone, the Watertight row says its edges are only in the fused scene,
+where objects meet: they are not in the meshes the GLB carries, and
+matter only for printing the scene as one piece.
 
 `ground()` moves one shape, so in a `scene` it moves that object alone
 and the others stay where their numbers put them: ground the whole
@@ -1136,7 +1144,11 @@ when the other is a cutter, whose inside is air), from points of each
 surface within a cell and a half of the edge read in the other's field,
 so the fix is a number: the gap closed to an overlap of a cell, or
 opened to a cell; `report.json` has it as `gap` on the three clusters
-the report prints, negative for an overlap. A focused render adds a
+the report prints, negative for an overlap. An edge inside the fillet
+of a smooth `union(..., k=)` (or a smooth difference or intersection)
+names the blend instead of a gap, `in the fillet where 'head_hinged'
+blends them (k 0.03, 1.6 cells)`, since inside the fillet the two parts'
+own surfaces are not the surface. A focused render adds a
 "Close-up watertight" row for the close-up's own finer mesh, with the
 frame's clip faces left out. The report's Physics section has the numbers: mass at `set
 density`, centre of mass, footprint, pieces, and how much of the surface
