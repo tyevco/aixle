@@ -9,7 +9,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { AssertClock, assertLabel, assertsRow, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { AssertClock, assertLabel, assertsRow, cameraSight, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -381,10 +381,16 @@ function main(argv: string[]): number {
       // warnings it shares their line, so "no warnings" is never read as the whole verdict (round 11: a 1.6-cell wall's
       // note under it went unread).
       const nearly = cellSize > 0 ? nearlyThin(ev, cellSize).trim() : "";
-      if (warnings.length === 0) console.log(nearly ? `no warnings; note: ${nearly}` : "no warnings");
+      // What each focused camera sees of its focus, from rays: the render's hidden-focus test, before a beauty run
+      // (round 11). Its warning is printed under the cameras' line, so it is counted here.
+      const sight = cameraSight(ev, cellSize);
+      if (warnings.length === 0 && sight.warnings.length === 0) console.log(nearly ? `no warnings; note: ${nearly}` : "no warnings");
       else if (nearly) console.log(`note: ${nearly}`);
       // The lights, the shots and the sky, as the report will list them: a typo in a name is a warning above.
-      for (const l of presentationLines(ev, typeof ev.settings.camera === "string" ? ev.settings.camera : undefined, ENVIRONMENTS.includes(ev.settings.environment as never) ? String(ev.settings.environment) : undefined)) console.log(l);
+      for (const l of presentationLines(ev, typeof ev.settings.camera === "string" ? ev.settings.camera : undefined, ENVIRONMENTS.includes(ev.settings.environment as never) ? String(ev.settings.environment) : undefined)) {
+        console.log(l);
+        if (l.startsWith("Cameras: ")) { for (const c of sight.lines) console.log(c); for (const w of sight.warnings) console.log(`warning: ${w}`); }
+      }
       // The program's own promises, each failure with the numbers it saw; a failure fails the check like an error.
       // They are judged at rest: a promise about the model as built, whatever pose is being measured.
       const all = collectAsserts(rest, (pn) => { const p = rest.poses.find((x) => x.name === pn); return p ? (pn === pose?.name ? ev : check(source, file, undefined, p.joints, pn, !!opts["no-asserts"], importCache, clock.hook)) : undefined; });

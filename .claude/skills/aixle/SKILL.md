@@ -31,7 +31,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    `at(part, "name")` as the end of a `tube`. Paint parts before
    joining them. End with `show model`.
 3. **`npx aixle check model.aix`**: syntax and type errors, every step's
-   size (profiles and numbers too), every warning, in a second. Sizes
+   size (profiles and numbers too), every warning, in a second, and for
+   each `camera(..., focus=)` how much of its focus the rest of the model
+   hides from its angle (aim a shot here, not with beauty runs). Sizes
    that look wrong are wrong. A `surface` line under a step is its surface's
    own extent where the box is the box of a turned box (from rays, a
    union's thin parts each on its own box; a thin plate inside a cut part

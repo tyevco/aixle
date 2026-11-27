@@ -771,7 +771,14 @@ What the lights and the skies can and cannot do, measured in round 9:
   the rest of the model and another azimuth would show much more of
   it, the render warns with the fraction and the better azimuth (a
   stone enclosed in its setting is hidden from every side alike and
-  gets no warning). `dof` scales a
+  gets no warning). `check` runs the same test before any render, by
+  rays through the field rather than the mesh, in a few hundredths of a
+  second: under its `Cameras:` line, each camera with a focus gets how
+  much of it is hidden from its angle and, past 15%, the least from
+  seven other azimuths 45 degrees apart (`into_bowl: 49% of paddle
+  hidden behind the rest of the model from azimuth 330, elevation 45`),
+  with the render's warning when another azimuth would show much more,
+  so a shot is aimed with `check` and rendered once. `dof` scales a
   blur that grows with a surface's distance from the focus: 0.3 to 0.5
   is a gentle falloff, 1 blurs everything off the focus plane hard.
 - `--azimuth`, `--elevation` and `--zoom` on the command line override

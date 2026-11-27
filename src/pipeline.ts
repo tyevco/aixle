@@ -27,7 +27,7 @@ import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
 import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
-import { hiddenFraction, renderCallouts } from "./render/callouts.js";
+import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
@@ -994,6 +994,49 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
   return { lines: ["## Print", "", "| | |", "| --- | --- |", head, ...rows, ""], json };
 }
 
+/**
+ * A step or object to frame, as `--focus` and a camera's focus= do: its surface where the output puts it, grown
+ * a little; `name_3` is one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
+ * placed group framed the whole span between its copies).
+ */
+export function resolveFocusOf(evaluation: Evaluation, output: Shape3 | undefined, name: string): { frame: Bounds; shape: Shape3 } | undefined {
+  let st = evaluation.steps.find((x) => x.name === name && isShape3(x.value));
+  let obj = evaluation.objects.find((o) => o.name === name);
+  let fs = st ? (st.value as Shape3) : obj?.shape;
+  const copy = /^(.+)_(\d+)$/.exec(name);
+  if (!fs && copy) {
+    const setStep = evaluation.steps.find((x) => x.name === copy[1] && isShape3(x.value) && (x.value as Shape3).instanced);
+    const setObj = evaluation.objects.find((o) => o.name === copy[1] && o.shape.instanced);
+    const set = setStep ? (setStep.value as Shape3) : setObj?.shape;
+    const pl = set?.instanced?.placements[Number(copy[2]) - 1];
+    if (set && pl) {
+      let sh = set.instanced!.base;
+      if (pl.scale !== 1) sh = scaleShape(sh, pl.scale, pl.scale, pl.scale);
+      if (pl.yaw !== 0) sh = rotateShape(sh, 0, pl.yaw, 0);
+      fs = move(sh, pl.x, pl.y, pl.z);
+      st = setStep;
+      obj = setObj;
+    }
+  }
+  if (!fs || isEmpty(fs.bounds)) return undefined;
+  // A region (a probe an assert reads) or a cutter is not geometry to draw: the focus is the model inside its
+  // frame (round 10: --focus on a counterbore's region drew the region as a solid cylinder).
+  const role = st ? evaluation.roles.get(st.name) : undefined;
+  if (output && st && (role === "region" || role === "cut")) {
+    const fb0 = (placedBounds(output, fs, tightBounds(fs)) ?? tightBounds(fs));
+    const grow0 = Math.max(...boundsSize(fb0)) * 0.08;
+    const frame0: Bounds = { min: [fb0.min[0] - grow0, fb0.min[1] - grow0, fb0.min[2] - grow0], max: [fb0.max[0] + grow0, fb0.max[1] + grow0, fb0.max[2] + grow0] };
+    return { frame: frame0, shape: clipTo(output, frame0) };
+  }
+  // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the
+  // whole machine); carried through the joints and transforms above it, so a bucket inside a turned joint is
+  // framed where the pose put it (measured: --focus in a pose framed the rest position).
+  const own = tightBounds(fs);
+  const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
+  const grow = Math.max(...boundsSize(fb)) * 0.08;
+  return { frame: { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] }, shape: (output && st ? placedShape(output, fs) : undefined) ?? fs };
+}
+
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
   const log = opts.log ?? (() => {});
   const timings: Record<string, number> = {};
@@ -1206,46 +1249,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     // The focused step as it sits in the output (through the joints and moves above it), for the close-up's split
     // into the part itself and the ghost of everything else the frame holds.
     let focusShape: Shape3 | undefined;
-    // A step or object to frame, as `--focus` and a camera's focus= do: its surface where the output puts it, grown
-    // a little; `name_3` is one copy of a placed set, rebuilt from its base and placement (round 6: focusing on a
-    // placed group framed the whole span between its copies).
-    const resolveFocus = (name: string): { frame: Bounds; shape: Shape3 } | undefined => {
-      let st = evaluation.steps.find((x) => x.name === name && isShape3(x.value));
-      let obj = evaluation.objects.find((o) => o.name === name);
-      let fs = st ? (st.value as Shape3) : obj?.shape;
-      const copy = /^(.+)_(\d+)$/.exec(name);
-      if (!fs && copy) {
-        const setStep = evaluation.steps.find((x) => x.name === copy[1] && isShape3(x.value) && (x.value as Shape3).instanced);
-        const setObj = evaluation.objects.find((o) => o.name === copy[1] && o.shape.instanced);
-        const set = setStep ? (setStep.value as Shape3) : setObj?.shape;
-        const pl = set?.instanced?.placements[Number(copy[2]) - 1];
-        if (set && pl) {
-          let sh = set.instanced!.base;
-          if (pl.scale !== 1) sh = scaleShape(sh, pl.scale, pl.scale, pl.scale);
-          if (pl.yaw !== 0) sh = rotateShape(sh, 0, pl.yaw, 0);
-          fs = move(sh, pl.x, pl.y, pl.z);
-          st = setStep;
-          obj = setObj;
-        }
-      }
-      if (!fs || isEmpty(fs.bounds)) return undefined;
-      // A region (a probe an assert reads) or a cutter is not geometry to draw: the focus is the model inside its
-      // frame (round 10: --focus on a counterbore's region drew the region as a solid cylinder).
-      const role = st ? evaluation.roles.get(st.name) : undefined;
-      if (output && st && (role === "region" || role === "cut")) {
-        const fb0 = (placedBounds(output, fs, tightBounds(fs)) ?? tightBounds(fs));
-        const grow0 = Math.max(...boundsSize(fb0)) * 0.08;
-        const frame0: Bounds = { min: [fb0.min[0] - grow0, fb0.min[1] - grow0, fb0.min[2] - grow0], max: [fb0.max[0] + grow0, fb0.max[1] + grow0, fb0.max[2] + grow0] };
-        return { frame: frame0, shape: clipTo(output, frame0) };
-      }
-      // The step's surface, not its box: a joint's box is the box of a turned box (measured: focus on a boom framed the
-      // whole machine); carried through the joints and transforms above it, so a bucket inside a turned joint is
-      // framed where the pose put it (measured: --focus in a pose framed the rest position).
-      const own = tightBounds(fs);
-      const fb = (output && st ? placedBounds(output, fs, own) : undefined) ?? own;
-      const grow = Math.max(...boundsSize(fb)) * 0.08;
-      return { frame: { min: [fb.min[0] - grow, fb.min[1] - grow, fb.min[2] - grow], max: [fb.max[0] + grow, fb.max[1] + grow, fb.max[2] + grow] }, shape: (output && st ? placedShape(output, fs) : undefined) ?? fs };
-    };
+    const resolveFocus = (name: string) => resolveFocusOf(evaluation, output, name);
     if (focusName) {
       const r = resolveFocus(focusName);
       if (r) { focusStep = true; frame = r.frame; focusShape = r.shape; shownName = `${shownName} → ${focusName}`; }
@@ -1896,6 +1900,36 @@ export function diff(a: { source: string; name: string }, b: { source: string; n
 /** The report's In output column for a step's role. */
 export function roleLabel(role: StepRole | undefined): string {
   return role === "part" ? "yes" : role === "cut" ? "cut" : role === "mask" ? "mask" : role === "region" ? "region" : "no";
+}
+
+/**
+ * What each camera with a focus sees of it, for `check`: the share of the focus hidden behind the rest of the model
+ * from the camera's angle, by rays through the field (no mesh), and when that is over 15%, the least of seven other
+ * azimuths 45 degrees apart, with the render's warning when another azimuth would show much more, as the render
+ * gives it after a beauty run (round 11: aiming one camera into a bowl cost two beauty runs of minutes each).
+ */
+export function cameraSight(evaluation: Evaluation, cellSize: number): { lines: string[]; warnings: string[] } {
+  const lines: string[] = [], warnings: string[] = [];
+  const output = evaluation.output;
+  if (!output || isEmpty(output.bounds) || !(cellSize > 0)) return { lines, warnings };
+  const shot = typeof evaluation.settings.camera === "string" ? evaluation.cameras.find((c) => c.name === evaluation.settings.camera) : undefined;
+  const baseAz = shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
+  const baseEl = shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  let modelBounds: Bounds | undefined;
+  for (const c of evaluation.cameras) {
+    if (!c.focus) continue;
+    const r = resolveFocusOf(evaluation, output, c.focus);
+    if (!r) continue;
+    modelBounds ??= tightBounds(output);
+    const az = c.azimuth ?? baseAz, el = c.elevation ?? baseEl;
+    const hidden = hiddenFractionRays(output, modelBounds, r.shape, r.frame, cellSize, az, el);
+    let bestAz = az, best = hidden;
+    if (hidden > 0.15) for (let k = 1; k < 8; k++) { const h = hiddenFractionRays(output, modelBounds, r.shape, r.frame, cellSize, az + k * 45, el, 28); if (h < best) { best = h; bestAz = az + k * 45; } }
+    const other = ((bestAz % 360) + 360) % 360;
+    lines.push(`  ${c.name}: ${Math.round(hidden * 100)}% of ${c.focus} hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}${best < hidden ? `; ${Math.round(best * 100)}% from azimuth ${fmt(other)}` : ""}`);
+    if (hidden > 0.15 && best < hidden - 0.2) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}; from azimuth ${fmt(other)} it is ${Math.round(best * 100)}%`);
+  }
+  return { lines, warnings };
 }
 
 /** The Lights, Cameras and Environment lines of the report, printed by `check` too. */

@@ -20,7 +20,9 @@ the inside is cut open.
    two parts. Paint parts before joining them. End with `show model`.
 3. **`npx aixle check model.aix`.** Fixes syntax and type errors in a
    second, prints each step's size and every warning. Sizes that look wrong
-   here are wrong.
+   here are wrong. Under its cameras' line, each `camera(..., focus=)`
+   says how much of its focus the rest of the model hides from its angle,
+   and which azimuth hides less, so a shot is aimed before any beauty run.
 4. **`npx aixle render model.aix --quick`** while iterating: the sheet
    in a second or two (a rig's pose sheet is drawn too, its strips only by
    the full render; `--no-poses` while the geometry is still moving). Then

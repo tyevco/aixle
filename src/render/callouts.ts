@@ -7,9 +7,9 @@
  * visible steps are labelled, pushed apart so the labels do not overlap.
  */
 import type { Vec3 } from "../core/vec.js";
-import { boundsSize, isEmpty, type Bounds, type Shape3 } from "../sdf/types.js";
+import { boundsCorners, boundsSize, isEmpty, type Bounds, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { project, toView, type Camera } from "./camera.js";
+import { perspective, project, toView, type Camera } from "./camera.js";
 import { Canvas } from "./canvas.js";
 import { drawText, textWidth } from "./font.js";
 import type { RenderTarget } from "./raster.js";
@@ -212,5 +212,63 @@ export function hiddenFraction(mesh: Mesh, within: Bounds, info: ViewInfo, cellS
     const d = target.depth[py * size + px];
     if (Number.isFinite(d) && pr.depth > d + depthTol) hidden++;
   }
+  return seen ? hidden / seen : 0;
+}
+
+/**
+ * hiddenFraction without a mesh, for `check`: rays from the perspective camera at that azimuth and elevation
+ * (framed on the model's box) across the focus's frame, each marched through the focus's own field to the surface
+ * it would show, then through the whole model's to see whether anything nearer, by more than three cells, is in
+ * the way. The share of the focus's rays that something stops is what the render's test measures from its depth
+ * buffer (round 11: a camera on a beater inside a bowl took two beauty runs of minutes each to aim, since only the
+ * render said what it saw). `rays` a side; a march that runs out of steps counts as not hidden.
+ */
+export function hiddenFractionRays(model: Shape3, modelBounds: Bounds, focus: Shape3, within: Bounds, cellSize: number, azimuth: number, elevation: number, rays = 40): number {
+  if (isEmpty(within) || isEmpty(modelBounds)) return 0;
+  const cam = perspective(modelBounds, 160, 160, azimuth, elevation);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const c of boundsCorners(within)) {
+    const p = project(cam, toView(cam, c));
+    if (!p) continue;
+    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+  }
+  if (!(x1 > x0 && y1 > y0)) return 0;
+  const f = cam.height / 2 / Math.tan((cam.fov! * Math.PI) / 360);
+  const tol = Math.max(cellSize * 3, 1e-6), eps = Math.max(cellSize * 0.02, 1e-7);
+  const e = cam.eye;
+  // Where a ray is inside a box, as [enter, leave]; leave < enter when it misses.
+  const slab = (d: Vec3, b: Bounds): [number, number] => {
+    let t0 = 0, t1 = Infinity;
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs(d[k]) < 1e-12) { if (e[k] < b.min[k] || e[k] > b.max[k]) return [1, 0]; continue; }
+      const a = (b.min[k] - e[k]) / d[k], c = (b.max[k] - e[k]) / d[k];
+      t0 = Math.max(t0, Math.min(a, c)); t1 = Math.min(t1, Math.max(a, c));
+    }
+    return [t0, t1];
+  };
+  const march = (dist: Shape3["dist"], d: Vec3, from: number, to: number): number | undefined => {
+    let t = from;
+    for (let i = 0; i < 300 && t <= to; i++) {
+      const v = dist(e[0] + d[0] * t, e[1] + d[1] * t, e[2] + d[2] * t);
+      if (v < eps) return t;
+      t += v;
+    }
+    return undefined;
+  };
+  let seen = 0, hidden = 0;
+  for (let i = 0; i < rays; i++)
+    for (let j = 0; j < rays; j++) {
+      const sx = (x0 + ((i + 0.5) / rays) * (x1 - x0) - cam.width / 2) / f, sy = -(y0 + ((j + 0.5) / rays) * (y1 - y0) - cam.height / 2) / f;
+      const raw: Vec3 = [cam.forward[0] + cam.right[0] * sx + cam.up[0] * sy, cam.forward[1] + cam.right[1] * sx + cam.up[1] * sy, cam.forward[2] + cam.right[2] * sx + cam.up[2] * sy];
+      const len = Math.hypot(raw[0], raw[1], raw[2]);
+      const d: Vec3 = [raw[0] / len, raw[1] / len, raw[2] / len];
+      const [fa, fb] = slab(d, within);
+      if (fb < fa) continue;
+      const tf = march(focus.dist, d, fa, fb);
+      if (tf === undefined) continue;
+      seen++;
+      const [ma] = slab(d, modelBounds);
+      if (march(model.dist, d, Math.max(0, ma), tf - tol) !== undefined) hidden++;
+    }
   return seen ? hidden / seen : 0;
 }
