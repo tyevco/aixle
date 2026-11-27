@@ -9,7 +9,7 @@ import { anchorsOf, hasLooseBounds, jointTreeLines, placedPoint, placedShape, su
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { referenceMarkdown } from "./doc.js";
-import { AssertClock, assertLabel, assertsRow, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, unitsText, type PaintState } from "./pipeline.js";
+import { AssertClock, assertLabel, assertsRow, BEAUTY_ONLY, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -108,7 +108,9 @@ function usage(): never {
       "                          [--no-asserts]                     skip the program's asserts while placing parts (a quick pass that spent most of its time on them says so)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
       "                          [--triangles N]                    the most triangles the GLB, OBJ and viewer carry, decimated past it (default 200000; 0 for all)",
-      "                          [--beauty-only]                    the beauty render, its shots and the sheet alone (no steps, slices, turntable, callouts, exports): a lighting loop",
+      "                          [--beauty-only]                    the sheet and one beauty render, the set camera's shot or --camera's, written once: a lighting loop",
+      "                          [--lights | --no-lights]           lights.png, each light alone (with two or more lights): on with --beauty, off with --beauty-only",
+      "                          [--show NAME[,NAME]]               draw these steps with the output (a probe in place), as show output, NAME would",
       "                          [--no-caption]                     no caption on beauty.png and the camera shots: a presentation copy",
       "                          [--minecraft [PIXELS_PER_BLOCK]]   also write Bedrock geometry (model.geo.json, model.geo.png) and, with joints, model.animation.json",
       "                          [--minecraft-entity]               the geometry is an entity's, facing north (a block faces south)",
@@ -367,9 +369,12 @@ function main(argv: string[]): number {
       if (ev.output && pose && !isEmpty(ev.output.bounds)) { const e = surfaceExtent(ev.output, 48); console.log(`output: ${ev.outputName} ${isEmpty(e) ? dimsLabel(ev.output.bounds) : `${dimsLabel(e)} (the surface in pose ${pose.name}; its box is ${dimsLabel(ev.output.bounds)})`}`); }
       else if (ev.output) console.log(`output: ${ev.outputName} ${isEmpty(ev.output.bounds) ? "(empty)" : dimsLabel(ev.output.bounds)}`);
       else console.log("output: none");
-      const { grid, cellSize } = cellFor(ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
+      // A pose is meshed at the rest pose's cell, so its thin parts are judged there too.
+      const { grid, cellSize } = cellFor(pose ? rest : ev, typeof opts.grid === "string" ? Number(opts.grid) : undefined);
       let bedWarning: string | undefined;
-      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units`);
+      // Past the 500 cells the extractor takes along the posed model, a render cannot keep it.
+      const posedCells = pose && ev.output && cellSize > 0 && !isEmpty(ev.output.bounds) ? Math.max(...boundsSize(tightBounds(ev.output))) / cellSize : 0;
+      if (cellSize > 0) console.log(`grid ${grid}: cell ${Number(cellSize.toPrecision(3))} units${pose ? posedCells > 500 ? `, the rest pose's; pose ${pose.name} is about ${Math.round(posedCells)} of those along its longest side, past the 500 a render takes, so a render of it is meshed coarser` : `, the rest pose's, which a render of pose ${pose.name} keeps` : ""}`);
       // A program that says it is a print (set units, set bed) gets its size in millimetres and the bed's verdict,
       // from the surface's extent (rays, no mesh); the thinnest wall and the supports are the render's report.
       if ((ev.settings.units !== undefined || ev.settings.bed !== undefined) && ev.output && !isEmpty(ev.output.bounds)) {
@@ -571,7 +576,9 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       glb: opts["no-export"] ? false : undefined,
       viewer: opts["no-viewer"] ? false : undefined,
       beauty: opts.beauty === true || opts["beauty-only"] === true ? true : undefined,
-      ...(opts["beauty-only"] ? { views: [], steps: false, slices: false, turntable: false, callouts: false, poses: false, animations: false, obj: false, glb: false, viewer: false } : {}),
+      ...(opts["beauty-only"] ? BEAUTY_ONLY : {}),
+      lights: opts.lights ? true : opts["no-lights"] ? false : opts["beauty-only"] ? false : undefined,
+      show: typeof opts.show === "string" ? opts.show.split(",").map((x) => x.trim()).filter(Boolean) : undefined,
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       sharp: opts.soft ? false : undefined,
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,

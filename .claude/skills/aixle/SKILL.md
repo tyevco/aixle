@@ -55,8 +55,9 @@ Reference: `docs/reference.md` (every function, generated from the code),
    cost, so add `--no-asserts` while placing parts when the run says they
    took most of it), then read `out/model/sheet.png`. Drop `--quick` for
    the full render: read `slices.png` if anything is hollow or nested
-   (`--slice step` puts its planes through one step, framed on it, so a
-   stem is cut where it meets the soil),
+   (`--slice step` puts its planes through one step, framed on it, and
+   through where it meets the rest of the model, so a stem is cut where
+   it meets the soil and a leaning book where it stands on the shelf),
    `steps.png` if a part is missing or misplaced, `callouts.png` to read
    which step a thing in the picture is; `report.md` has the
    numbers, including whether the model stands and is in one piece; a
@@ -65,6 +66,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    frame) is a close-up meshed at its own finer cell,
    where the step is in the pose shown, the rest of the model faint
    around it, with its own watertight row.
+   A render removes what the last render wrote into its folder and this
+   one did not, so `out/model/` holds only the run you just made.
    `npx aixle diff before.aix after.aix` shows two versions side by side;
    `npx aixle fmt model.aix --write` lays the program out in the one
    layout (comments kept, meaning unchanged) before you hand it on;
@@ -85,7 +88,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    the footprint). A hole that must go through is `void` on a thin rod past
    both faces, not on the cutter (empty by construction); `inside` wants
    the solid, not a shell; a probe step only an assert reads is a region
-   and is not warned about. `check` then fails, with the numbers and
+   and is not warned about; `render --show probe` draws it in place with
+   the output for a picture, the program unchanged. `check` then fails, with the numbers and
    where, when a later edit breaks it; a promise inside a loop is one line
    (how many times it held, the judgement nearest to failing), the
    failures come last in full, and a slow or stuck assert is named on
@@ -159,7 +163,7 @@ set grid 200   set size 768   set focus lid   set slice stem   set pose reach   
 set units mm   set bed 220 220 250                                                       # a print: the report's Print section, model.stl in mm, model.3mf
 set light_azimuth -40   set light_elevation 55   set ambient 1.5   material("#fc6", glow=1)  # beauty lighting
 light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")  light("rim", azimuth=150, elevation=20, power=0.5)  light("fire", position=[0, 0.4, 0], range=2)   # several lights, a point light; lights.png shows each alone
-camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky (--camera NAME, --environment NAME|a,b|all, --beauty-only for the loop)
+camera("hero", azimuth=30, elevation=20, zoom=1.4)  camera("detail", focus="part", zoom=2)  set camera hero  set environment sunset   # shots and a sky; set camera's shot is beauty.png, written once (--camera NAME, --environment NAME|a,b|all; --beauty-only: that one shot and the sheet, --lights to add lights.png)
 decal(part, label_box, image="label.png")   material("cream", image="skin.png", projection="cylindrical", scale=0.6)   # a PNG as a label or a skin
 material("rust", wear=0.4, bump=0.003, bump_scale=0.05)   # a finish: worn edges, rust, bumps below the mesh (beauty and GLB only, not the sheet)
 
@@ -197,7 +201,8 @@ nest the forearm's joint inside the upper arm's part, write poses, then
 read `poses.png` and `anim_<name>.png`: a part that swings about the
 wrong point has the wrong pivot. `check` prints the joints as a tree
 with their pivots, so check the nesting there first. To judge one pose properly render it
-at full size with `--pose name` (or `set pose name`); `check --pose name`
+at full size with `--pose name` (or `set pose name`), meshed at the rest
+pose's cell so an unmoved part reads as it does at rest; `check --pose name`
 prints the posed sizes; `--focus part` makes the pose sheet and strips
 close-ups of that part. A pose value may be `xform(rotate=, move=,
 scale=)` for a hop or a squash, and an animation takes `times=[...]`
@@ -240,7 +245,7 @@ show arm
 | a smooth profile's base rocks, or its box passes x = 0 | the spline overshoots at a sharp turn | give the axis points and the foot's edge twice: corners, straight between |
 | a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
 | stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
-| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty` is a few seconds, but it cannot judge glass: its grid is coarse) |
+| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty-only` is one shot in a few seconds, but it cannot judge glass: its grid is coarse) |
 | the model looks new, like plastic | one smooth colour everywhere | `wear=0.4` (edges bright, creases dark), `bump=` (roughness below the mesh), `"rust"`; judge in `--beauty`, never on the sheet; the GLB carries them as maps (the report's Maps row) |
 | a thin rod or ring is worn bright all over | wear's band is ~1.2% of the model's size; thinner than two bands is all edge | thicken it, or less wear on that part |
 | chrome is a white blob; a night scene is black; a low shot looks down | neutral skies reflect white; `night` cuts the ambient; elevation is about the centre | `sunset`/`night` or `steel` for a mirror; `set ambient 1.6`; `elevation=-8`; a glow lights only itself, so a lamp or a fire lighting its neighbours is `light(..., position=[x, y, z], range=2)` just outside it |

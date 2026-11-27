@@ -647,7 +647,21 @@ reach` prints every step's size in it. The report and the STL describe
 the model as shown, posed if a pose is set; the GLB and the OBJ are
 always at rest, with the joints as nodes. The
 thumbnails on `poses.png` are meshed coarsely, so judge a pose that
-matters at full size with `set pose`; with `set focus name` (or
+matters at full size with `set pose`. A shown pose is meshed at the
+rest pose's cell, not with the grid laid across the posed model: a
+joint turned up leaves the box of a turned box (a mixer's tilted head
+took the box from 3.68 to 5.5 tall against a 5.22 surface), and at the
+same grid the whole model, the parts the pose does not move included,
+was meshed a third coarser, its bowl's wall from 2.6 cells to 1.8, and
+the posed report read 31 open edges against the rest render's one (4
+at the rest cell). So the same part
+reads the same at rest and posed; the sheet's title says `cell 0.0189
+as at rest` and the report's Grid row how many cells that is along the
+posed model's longest side, and `check --pose` prints the rest cell.
+Past 500 cells along the posed model (a folded arm unfolded at `set
+grid 400`) the rest cell cannot be kept: the title then says `coarser
+than at rest`, and the Grid row and `check --pose` say why.
+With `set focus name` (or
 `--focus`) the pose sheet and the strips are close-ups of that step
 where each pose puts it, at the frame's own cell, with the rest of the
 model faint around it, so a crank or a gimbal a few pixels wide on the
@@ -896,19 +910,34 @@ and floor where a `glow` material carries the picture. A named shot,
 when it has one and taking the render's own view for whatever it leaves
 out; `set camera hero` makes that shot the sheet's perspective view and
 `beauty.png` as well (the front, right and top views are unchanged).
+That shot is rendered once, as `beauty.png`, its caption naming the
+camera, and not again as `beauty_hero.png`: the two were the same
+picture marched twice. With `--azimuth`, `--elevation` or `--zoom` over
+it, `beauty.png` is another picture, captioned `camera hero with
+--azimuth 60`, and the camera's own shot is rendered as
+`beauty_hero.png` too, so the light study, which is always the shot
+`beauty.png` shows, is never read as ignoring the camera. The report's
+Cameras line says where each shot went.
 `check` and the report list the lights, the cameras and the
 environment, so a misspelt name is a warning before any render. With
 two or more lights `render --beauty` also writes `lights.png`, the
 picture under each light alone and then all of them, so what a rim
-light adds is seen rather than guessed from two near-identical shots. Under
+light adds is seen rather than guessed from two near-identical shots;
+every frame is the shot `beauty.png` shows, whether `set camera` or
+`--camera` chose it. `--beauty-only` leaves it out (it is four or more
+marches more) unless `--lights` asks for it, and `--no-lights` leaves it
+off a full render. Under
 each of those is what that light adds on its own: the picture under it
 alone minus the picture under no light at all, brightened until its
 brightest part is near white, with the gain printed (`spark adds, ×3`),
 and last the picture under no light, which is the sky's ambient, the
 glows and the metals' reflections. A small point light that changes a
 few pixels of the whole picture (a spark over a ring's stone) fills its
-own frame there, so its reach and its colour can be judged. The frames
-are half the beauty render's size.
+own frame there, so its reach and its colour can be judged. A glowing
+part is flat grey in that row: its own light is in every frame, and two
+near-white glows differ only in the channels not already full, so a
+flame a light barely touches came out bright green once brightened. The
+frames are half the beauty render's size.
 
 What the lights and the skies can and cannot do, measured in round 9:
 
@@ -982,9 +1011,12 @@ What the lights and the skies can and cannot do, measured in round 9:
   the sheet's view and `beauty.png` only; a declared camera keeps its
   own angles. `--camera NAME` renders one declared shot (the sheet and
   `beauty.png` take its view, and its `focus=` framing) while a lighting
-  loop runs, `--beauty-only` skips the steps, slices, turntable,
-  callouts and exports for that loop, and `--environment NAME` tries a
-  sky without editing the program. The caption at the foot of
+  loop runs. `--beauty-only` is that loop: the sheet and the one shot
+  (`set camera`'s, `--camera`'s, or the render's own view), written
+  once as `beauty.png`, and nothing else: no other camera's shot, no
+  `lights.png` (`--lights` adds it), no steps, slices, turntable,
+  callouts or exports. `--environment NAME` tries a sky without editing
+  the program. The caption at the foot of
   `beauty.png` and of each shot names the shot and its size for whoever
   checks it; `set caption 0` (or `--no-caption`) leaves it off a
   presentation copy, where at a low camera it can overprint the model.
@@ -1047,7 +1079,12 @@ extent from the mesh held within the model's bounds, since a coarse
 cell's vertices can stray a little past a face (a quick sheet once
 titled a 0.5-tall flange 0.51).
 `--out DIR` puts a render somewhere other than `out/<name>/`, so a focus
-render does not overwrite the main one. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
+render does not overwrite the main one. A render removes the files the
+last render wrote into its folder (`report.json` lists them under
+`files`) that it does not write itself, and says which, so the folder
+holds one run's pictures and a `beauty_iron.png` from an earlier
+`--beauty-only` run is not read as this one's; nothing else in the
+folder is touched. `set pose name` shows a pose. `set azimuth 60` and `set elevation 10` turn the perspective camera used
 by the sheet, the turntable and the beauty render (the CLI's `--azimuth`
 and `--elevation` override). `set grid N` sets the extraction resolution (cells along the longest side,
 default 128; the CLI's `--grid` overrides). `set size N` sets the pixel size
@@ -1064,7 +1101,16 @@ air between a post and the lamp it carries), never the box's centre,
 which a leaning canopy or a reaching arm puts in the air (measured on
 74 parts in five programs: through the box's centre a vertical plane
 missed the part on 4 of 148 cuts and cut under a quarter of its widest
-section on 8; through the centroid, on none). A `slice_x` given as well
+section on 8; through the centroid, on none). A step that meets the
+rest of the model, touching it or within two cells of it (a book on a
+shelf, a stem in its soil, a beater's shaft in its hub), is cut where it
+meets it instead: the two planes across the contact go through it, a
+little inside the step, and the plane lying along it (the horizontal one
+under a book) keeps the step's own level; of several contacts the lowest
+is taken, since what a part rests on is under it. A book leaning 18
+degrees had its centroid's vertical plane in the air between two
+shelves; through its contact the same plane shows it standing on the
+board. The report's Files line says which planes went where. A `slice_x` given as well
 still sets that plane. Sliced through a probe or a cutter, the planes
 go through its volume and the model is drawn in full, so `--slice rods`
 cuts down the holes a promise's ring of rods stands in. A step only sliced
@@ -1628,6 +1674,16 @@ that trims a gem, even turned and moved on its way in, `stone & (below
 | rotate(x=25) | move(0, h, 0))`) is a *mask*, tagged so and never labelled. `check`
 prints the passing asserts in line order, a loop's once per line, then
 the failures.
+
+A region is not drawn, but it can be seen in place without editing the
+program: `render --show phone_probe,cable` draws the output with those
+steps, as `show stand, phone_probe, cable` would (each its own object
+when the output is a scene), so a phone resting in a stand or a cable
+through its slot is a picture rather than a copy of the program with a
+scene at its end. The report then describes that output, probes and
+all, so it is for the pictures; the asserts have already run on the
+program as written. A name that is no shape step is an error that lists
+the shapes.
 
 ## Limits worth knowing
 

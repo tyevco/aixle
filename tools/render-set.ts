@@ -69,8 +69,13 @@ export function renderSet(srcDir: string, outDir: string, label: string, opts: R
       copyFileSync(join(tmp, "steps.png"), join(outDir, `${name}_steps.png`));
     }
     copyFileSync(join(tmp, "beauty.png"), join(outDir, `${name}_beauty.png`));
-    for (const extra of readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_") || f.startsWith("beauty_")))
-      copyFileSync(join(tmp, extra), join(outDir, `${name}_${extra}`));
+    const extras = readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_") || f.startsWith("beauty_"));
+    for (const extra of extras) copyFileSync(join(tmp, extra), join(outDir, `${name}_${extra}`));
+    // A pose sheet, strip or camera shot this program no longer writes goes too (round 11: the shot `set camera` names
+    // is written once, as beauty.png, so its old beauty_<name>.png copy would have stayed behind).
+    const kept = new Set(extras.map((e) => `${name}_${e}`));
+    for (const old of readdirSync(outDir))
+      if ((old === `${name}_poses.png` || old.startsWith(`${name}_anim_`) || old.startsWith(`${name}_beauty_`)) && !kept.has(old)) rmSync(join(outDir, old));
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     console.log(`${name.padEnd(10)} ${secs}s  ${result.warnings.length ? result.warnings.join(" | ") : "ok"}`);
     rmSync(tmp, { recursive: true, force: true });

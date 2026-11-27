@@ -203,6 +203,29 @@ describe("what a light adds", () => {
     // A light that reaches nothing adds a black frame at a gain of 1.
     expect(lightContribution(none, none).gain).toBe(1);
   });
+  it("draws a glowing surface flat grey and leaves it out of the gain, where its clipped colour would read as a light's", () => {
+    // Round 11: a flame near white under no light and a little whiter under the moon differs only in green, and at the
+    // moon's gain of 7.9 the flame read bright green in "moon adds".
+    const none = new Canvas(10, 10, rgb(20, 20, 20));
+    const alone = new Canvas(10, 10, rgb(20, 20, 20));
+    for (let i = 0; i < 10; i++) { none.set(i, 0, rgb(255, 200, 90)); alone.set(i, 0, rgb(255, 240, 95)); }
+    for (let i = 0; i < 10; i++) alone.set(i, 5, rgb(60, 60, 60));
+    const glow = new Uint8Array(100);
+    for (let i = 0; i < 10; i++) glow[i] = 1;
+    const { canvas, gain } = lightContribution(alone, none, glow);
+    const px = (x: number, y: number) => [...canvas.data.slice((y * 10 + x) * 4, (y * 10 + x) * 4 + 3)];
+    expect(gain).toBeCloseTo(230 / 40, 5);
+    expect(px(3, 0)).toEqual([0x58, 0x58, 0x58]);
+    expect(px(3, 5)).toEqual([230, 230, 230]);
+    // The beauty render marks the pixels whose surface glows.
+    const shape = O.union([P.box(1, 1, 1), O.paint(O.move(P.sphere(0.3), 0, 0.8, 0), { ...preset("gold")!, glow: 1 })]);
+    const m = surfaceNets(shape, { resolution: 24 }).mesh;
+    const mask = new Uint8Array(48 * 48);
+    renderBeauty(shape, m, shape.bounds, { size: 48, cellSize: 0.1, glowMask: mask });
+    const lit = mask.reduce((a, b) => a + b, 0);
+    expect(lit).toBeGreaterThan(20);
+    expect(lit).toBeLessThan(48 * 48 * 0.3);
+  });
 });
 
 describe("pictures", () => {
@@ -282,6 +305,29 @@ describe("callouts", () => {
     const one = renderCallouts(nets.mesh, steps, { name: "m", bounds: model.bounds }, 160, nets.cellSize, 1, undefined, undefined, model);
     expect(one.labelled.map((l) => l.name)).toEqual(["cut"]);
     expect(one.unlabelled.map((u) => u.name).sort()).toEqual(["hole", "knob"]);
+  });
+  it("credits a face only to a step whose own surface faces the same way there, not to a thin operand running through it", () => {
+    // Round 11: the mixer's slab, the 0.06-thick operand of `(cavity | offset(-inset)) & slab`, runs down through the
+    // base inside its own box, so on the base's top a strip within a cell of the slab's side faces was "on" the
+    // slab's field (the slab is the smaller box) and callouts.png labelled SLAB on the base beside the plate.
+    const base = O.move(P.box(2, 0.4, 2), 0, 0.2, 0);
+    const slab = O.move(P.box(1.6, 2, 0.12), 0, 1, 0);
+    const paddle = O.intersect(slab, O.move(P.sphere(0.5), 0, 1.2, 0));
+    const model = O.union([base, paddle]);
+    const nets = surfaceNets(model, { resolution: 64 });
+    const steps = [{ name: "base", shape: base }, { name: "slab", shape: slab }, { name: "paddle", shape: paddle }];
+    const owner = attributeVertices(nets.mesh, steps, nets.cellSize, 1, model);
+    let onTop = 0, slabOnTop = 0;
+    for (let v = 0; v < owner.length; v++) {
+      const y = nets.mesh.positions[v * 3 + 1], ny = nets.mesh.normals[v * 3 + 1];
+      if (Math.abs(y - 0.4) > nets.cellSize * 0.5 || ny < 0.9) continue;
+      onTop++;
+      if (owner[v] === 1) slabOnTop++;
+    }
+    expect(onTop).toBeGreaterThan(100);
+    expect(slabOnTop).toBe(0);
+    // The paddle's own faces are still the paddle's.
+    expect([...owner].filter((o) => o === 2).length).toBeGreaterThan(50);
   });
 });
 

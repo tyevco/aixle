@@ -58,11 +58,19 @@ export function attributeVertices(mesh: Mesh, steps: CalloutStep[], cellSize: nu
     // cavity), so step back less, and give up on the vertex rather than hand it to the cutter it lies over.
     let back = cellSize * 1.5, ix = x - nx * back, iy = y - ny * back, iz = z - nz * back;
     if (model && model.dist(ix, iy, iz) >= 0) { back = cellSize * 0.5; ix = x - nx * back; iy = y - ny * back; iz = z - nz * back; if (model.dist(ix, iy, iz) >= 0) continue; }
+    // The point as far in front of the vertex: a step's own surface faces the way the model's does here, so its field
+    // rises along the normal (falls, for a cutter). A thin operand running through a larger part inside its own box
+    // is within a cell of its side faces all along that part's top, with its inside under it too, but its field does
+    // not change going up through it (round 11: the mixer's slab labelled on the base beside the plate).
+    const fx = x + nx * back, fy = y + ny * back, fz = z + nz * back;
+    const rise = back * 2 * SLOPE;
     let part = -1;
     for (const i of parts) {
       if (!inBox(i, x, y, z)) continue;
       const d = steps[i].shape.dist;
-      if (Math.abs(d(x, y, z)) <= tol && d(ix, iy, iz) < 0) { part = i; break; }
+      if (Math.abs(d(x, y, z)) > tol) continue;
+      const di = d(ix, iy, iz);
+      if (di < 0 && d(fx, fy, fz) - di > rise) { part = i; break; }
     }
     if (part >= 0) owner[v] = part;
     if (part >= 0 && !steps[part].derived) continue;
@@ -70,11 +78,20 @@ export function attributeVertices(mesh: Mesh, steps: CalloutStep[], cellSize: nu
     for (const i of cutters) {
       if (!inBox(i, x, y, z)) continue;
       const d = steps[i].shape.dist;
-      if (Math.abs(d(x, y, z)) <= tol && d(ix, iy, iz) > 0) { owner[v] = i; break; }
+      if (Math.abs(d(x, y, z)) > tol) continue;
+      const di = d(ix, iy, iz);
+      if (di > 0 && di - d(fx, fy, fz) > rise) { owner[v] = i; break; }
     }
   }
   return owner;
 }
+
+/**
+ * The least slope of a step's field along a vertex's normal for the vertex to be on that step's surface: an exact
+ * distance rises at 1 through its own surface, a bound (a smooth blend, a twist) a little less, and a face of the
+ * step at right angles to the model's surface (a thin operand's side running through a larger part) not at all.
+ */
+const SLOPE = 0.3;
 
 /** The perspective view with the largest visible steps named. */
 export function renderCallouts(mesh: Mesh, steps: CalloutStep[], info: ViewInfo, size: number, cellSize: number, maxLabels = 20, azimuth?: number, elevation?: number, model?: Shape3): CalloutResult {

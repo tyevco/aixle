@@ -89,6 +89,8 @@ export interface BeautyOptions {
   reachBounds?: Bounds;
   /** The distance wear reads curvature over (the worn band's width); default `wearProbe` of the model's longest side, as the atlas baker uses. */
   wearProbe?: number;
+  /** size * size flags, set to 1 where the surface a pixel sees glows (left as they are elsewhere): what lights.png's frames of what a light adds leave out. */
+  glowMask?: Uint8Array;
 }
 
 /** The default key light: upper left, from the front. */
@@ -105,6 +107,8 @@ interface Sample {
   depth: number;
   normal: Vec3;
   matId: number;
+  /** The surface glows: its own light is in every frame, lit or not. */
+  glow?: boolean;
 }
 
 export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: BeautyOptions): Canvas {
@@ -446,13 +450,15 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
       const n = gradient(p[0], p[1], p[2]);
       const h = shape.hit(p[0], p[1], p[2]);
       let color: Vec3;
+      let glow = h.mat.glow > 0;
       if (h.mat.transmit > 0) color = shadeGlass(p, n, h.mat, albedo(h.mat, h.lx, h.ly, h.lz), dir);
       else {
         const f = finishAt(p, n, h);
         color = shadePoint(p, f.n, f.base, f.metal, f.rough, dir, 0, f.glow);
+        glow = f.glow > 0;
       }
       // The edge test reads the field's normal, not the bumped one: a bump is texture, not a silhouette to supersample.
-      return { color, depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat) };
+      return { color, depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat), glow };
     }
     // Floor or sky.
     if (dir[1] < -1e-6) {
@@ -482,6 +488,7 @@ export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: Be
     for (let px = 0; px < size; px++) {
       const s = sample(px + 0.5, py + 0.5, prime.depth[py * size + px]);
       samples[py * size + px] = s;
+      if (s.glow && opts.glowMask) opts.glowMask[py * size + px] = 1;
       canvas.set(px, py, rgbDithered(s.color[0], s.color[1], s.color[2], px, py));
     }
   // Edge pixels get four samples. The mesh depth primes them with the neighbour that has one.
@@ -550,19 +557,25 @@ function depthOfField(canvas: Canvas, samples: Sample[], size: number, strength:
 
 
 
+/** What lights.png draws where a glowing part is, in the frames of what a light adds: flat, so no false colour reads there. */
+export const GLOW_GREY = 0x585858;
+
 /**
  * What one light adds to a picture: the render under that light alone minus the render under no light at all (the
  * ambient sky, the glows and the reflections), brightened so its brightest part is near white, on black. A small
  * point light adds a few dim pixels to a whole render (round 10: a ring's spark could be seen in lights.png but not
  * judged); here its reach and its colour fill the frame. The gain is the brightening, 1 to 32; both pictures must be
- * the same shot, unlabelled.
+ * the same shot, unlabelled. Where `glow` flags a glowing surface the frame is flat grey and the gain ignores it: a
+ * glow near white in both pictures differs only in the channels that were not already full, so a flame a light
+ * barely touches came out bright green, brightened (round 11).
  */
-export function lightContribution(alone: Canvas, none: Canvas): { canvas: Canvas; gain: number } {
+export function lightContribution(alone: Canvas, none: Canvas, glow?: Uint8Array): { canvas: Canvas; gain: number } {
   const w = alone.width, h = alone.height;
   const out = new Canvas(w, h, 0);
   const diff = new Float32Array(w * h * 3);
   const peaks: number[] = [];
   for (let i = 0; i < w * h; i++) {
+    if (glow?.[i]) continue;
     let peak = 0;
     for (let c = 0; c < 3; c++) {
       const d = Math.max(0, alone.data[i * 4 + c] - none.data[i * 4 + c]);
@@ -576,6 +589,6 @@ export function lightContribution(alone: Canvas, none: Canvas): { canvas: Canvas
   peaks.sort((a, b) => a - b);
   const p = peaks.length ? peaks[Math.min(peaks.length - 1, Math.floor(peaks.length * 0.99))] : 0;
   const gain = p > 0 ? Math.max(1, Math.min(32, 230 / p)) : 1;
-  for (let i = 0; i < w * h; i++) out.set(i % w, Math.floor(i / w), rgbf((diff[i * 3] * gain) / 255, (diff[i * 3 + 1] * gain) / 255, (diff[i * 3 + 2] * gain) / 255));
+  for (let i = 0; i < w * h; i++) out.set(i % w, Math.floor(i / w), glow?.[i] ? GLOW_GREY : rgbf((diff[i * 3] * gain) / 255, (diff[i * 3 + 1] * gain) / 255, (diff[i * 3 + 2] * gain) / 255));
   return { canvas: out, gain };
 }

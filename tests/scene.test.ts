@@ -311,7 +311,9 @@ describe("pipeline with a scene", () => {
       expect(quick.files).not.toContain("anim_lift.png");
       expect(r.report).toMatch(/Joints, each under the joint it turns with:\n\n```\nelbow at \(0, 1.2, 0\)\n```/);
       expect(r.report).toMatch(/lift \(rest → up, 1s, loop\); soft \(rest 0s → up 0.25s → rest 1s, 1s, loop, ease 1\)/);
-      expect(existsSync(join(dir, "model.png"))).toBe(true);
+      // The first run's atlas; the quick run after it, which writes none, removed it from the folder.
+      expect(r.files).toContain("model.png");
+      expect(existsSync(join(dir, "model.png"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { BEAUTY_ONLY, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -30,6 +30,15 @@ describe("pipeline", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
       const r = run("m = box(1) | paint(\"gold\")", "box.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, beauty: true, beautySize: 64 });
+      // Read before the next run into the folder, which removes what this one wrote and it does not.
+      expect(r.files).toContain("viewer.html");
+      expect(r.files).toContain("beauty.png");
+      const html = readFileSync(join(dir, "viewer.html"), "utf8");
+      expect(html).toContain("<title>m · aixle viewer</title>");
+      expect(html).toMatch(/const GLB = "Z2xURg/); // "glTF" in base64
+      expect(html).toContain("three@0.160.0");
+      const png = readFileSync(join(dir, "beauty.png"));
+      expect(png.readUInt32BE(16)).toBe(64);
       // A declared camera is a shot of its own, framed on its focus; the report lists lights, cameras and the sky.
       const shots = run('m = box(1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5, color="#cfe0ff")\ncamera("hero", azimuth=20, zoom=1.2)\ncamera("knob", focus="k")\nset environment night\nshow both', "shots.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
       expect(shots.files).toEqual(expect.arrayContaining(["beauty.png", "beauty_hero.png", "beauty_knob.png", "lights.png"]));
@@ -40,9 +49,12 @@ describe("pipeline", () => {
       expect(shots.report).toMatch(/Environment: night/);
       expect(shots.report).toMatch(/`beauty_knob\.png`: the beauty render from camera knob, framed on k/);
       expect(shots.timings["beauty:knob"]).toBeDefined();
-      // One camera and another sky from the command line: only that shot, its view on beauty.png, the sky noted.
+      // lights.png: each light alone, then all, and under them what each adds on its own and the picture under none.
+      const lit = readFileSync(join(dir, "lights.png"));
+      expect([lit.readUInt32BE(16), lit.readUInt32BE(20)]).toEqual([(96 + 6) * 3 + 6, 26 + (96 + 6) * 2 + 16 + 6]);
+      // One camera and another sky from the command line: only that shot, as beauty.png, the sky noted.
       const one = run('m = box(1)\ncamera("hero", azimuth=20)\ncamera("side", azimuth=90)\nset environment night\nshow m', "one.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, camera: "side", environment: "sunset" });
-      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_side.png"]);
+      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
       expect(one.report).toMatch(/\(the sheet and beauty\.png use "side"\)/);
       expect(one.report).toMatch(/Environment: sunset/);
       const all = run('m = box(1)\nset environment night\nshow m', "all.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64, environment: "all" });
@@ -56,21 +68,10 @@ describe("pipeline", () => {
       expect(pair.report).toMatch(/`environments\.png`: the beauty render under overcast, sunset, from --environment/);
       expect(readFileSync(join(dir, "environments.png")).readUInt32BE(16)).toBe((96 + 6) * 2 + 6);
       expect(pair.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--environment mars: no such environment/)]));
-      // lights.png: each light alone, then all, and under them what each adds on its own and the picture under none.
-      const lit = readFileSync(join(dir, "lights.png"));
-      expect([lit.readUInt32BE(16), lit.readUInt32BE(20)]).toEqual([(96 + 6) * 3 + 6, 26 + (96 + 6) * 2 + 16 + 6]);
       // A focus hidden behind the rest of the model from its camera is warned about; from the other side it is not.
       const hid = run('wall = box(2, 2, 0.2) | move(0, 1, 1)\nball = sphere(0.3) | move(0, 1, 0)\nboth = wall + ball\ncamera("front", focus="ball", azimuth=0, elevation=5)\ncamera("back", focus="ball", azimuth=180, elevation=5)\nshow both', "hid.aix", dir, { grid: 24, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, beauty: true, beautySize: 64 });
       expect(hid.warnings.filter((w) => /hidden behind/.test(w))).toEqual([expect.stringMatching(/^camera "front" \(line 4\): \d+% of ball is hidden behind the rest of the model from azimuth 0, elevation 5; from azimuth \d+ it is \d+%$/)]);
       expect(run('m = box(1)\nshow m', "bad.aix", dir, { grid: 16, size: 64, views: [], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, camera: "nope", environment: "mars" }).warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera \(declare one/), expect.stringMatching(/^--environment mars: no such environment; the skies are studio/)]));
-      expect(r.files).toContain("viewer.html");
-      expect(r.files).toContain("beauty.png");
-      const html = readFileSync(join(dir, "viewer.html"), "utf8");
-      expect(html).toContain("<title>m · aixle viewer</title>");
-      expect(html).toMatch(/const GLB = "Z2xURg/); // "glTF" in base64
-      expect(html).toContain("three@0.160.0");
-      const png = readFileSync(join(dir, "beauty.png"));
-      expect(png.readUInt32BE(16)).toBe(64);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -175,7 +176,10 @@ describe("pipeline", () => {
       const src = "slab = box(2, 0.1, 2) | move(0, -0.05, 0)\npost = cylinder(0.05, 1) | move(0.6, 0.5, 0.3)\nglobe = sphere(0.25) | move(0.6, 1.2, 0.3)\nm = slab + post + globe\nshow m";
       const r = run(src, "post.aix", dir, { grid: 32, size: 96, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "post" });
       expect(r.files).toContain("slices.png");
-      expect(r.report).toMatch(/`slices\.png`: cross-sections through post at its centroid/);
+      // The post stands on the slab, so the planes across that contact go through it (round 11).
+      expect(r.report).toMatch(/`slices\.png`: cross-sections through post, where it meets the rest of the model \(X and Z; Y at its own level\), framed on it/);
+      const air = run("slab = box(2, 0.1, 2) | move(0, -0.05, 0)\nball = sphere(0.3) | move(0.5, 1, 0)\nm = slab + ball\nshow m", "air.aix", dir, { grid: 32, size: 96, views: [], steps: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, slice: "ball" });
+      expect(air.report).toMatch(/`slices\.png`: cross-sections through ball at its centroid/);
       expect(r.warnings.join()).not.toMatch(/slice/);
       // A probe only the slice reads is a region, not an unused step; a name that is no step is said.
       const probe = check("m = box(1)\nrod = cylinder(0.05, 2) | move(0.2, 0, 0)\nset slice rod\nshow m");
@@ -583,5 +587,111 @@ describe("round 11: check aims a camera", () => {
     expect(back).toBe("  back: 0% of lantern hidden behind the rest of the model from azimuth 180, elevation 10");
     expect(sight.warnings).toHaveLength(1);
     expect(sight.warnings[0]).toMatch(/^camera "front" \(line 3\): \d+% of lantern is hidden behind the rest of the model from azimuth 0, elevation 10; from azimuth \d+ it is 0%$/);
+  });
+});
+
+describe("round-11 renders", () => {
+  const opts = { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 };
+  const lit = 'm = box(1, 1, 1)\nk = sphere(0.2) | move(1, 0.5, 0)\nboth = m + k\nlight("key", azimuth=-30, elevation=40)\nlight("rim", azimuth=160, elevation=20, power=0.5)\ncamera("hero", azimuth=-20, elevation=10, zoom=1.2)\ncamera("knob", focus="k", azimuth=60, elevation=30, zoom=1)\n';
+  const dirs: string[] = [];
+  const tmp = () => { const d = mkdtempSync(join(tmpdir(), "aixle-r11-")); dirs.push(d); return d; };
+  const bytes = (dir: string, f: string) => readFileSync(join(dir, f));
+  afterAll(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+
+  it("renders the shot beauty.png shows once, and --beauty-only renders that one shot alone", () => {
+    // Round 11: with set camera hero, beauty.png and beauty_hero.png were the same camera marched twice, and
+    // --beauty-only --camera iron wrote the shot twice and lights.png: 28 s against the shot's 8.
+    const a = tmp(), b = tmp(), c = tmp();
+    const full = run(lit + "set camera hero\nshow both", "lit.aix", a, opts);
+    expect(full.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_knob.png"]);
+    expect(full.files).toContain("lights.png");
+    expect(full.timings["beauty:hero"]).toBeUndefined();
+    expect(full.report).toMatch(/Cameras: hero \(azimuth -20, elevation 10, zoom 1\.2\) → beauty\.png; knob \(azimuth 60, elevation 30, zoom 1, on k\) → beauty_knob\.png/);
+    expect(full.report).toMatch(/`beauty\.png`: the field ray-marched with soft shadows and ambient occlusion, from camera hero \(set camera\)/);
+    // --camera knob: beauty.png is knob's shot, the very picture the full run wrote as beauty_knob.png, and the only one.
+    const one = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "knob" });
+    expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
+    expect(bytes(b, "beauty.png").equals(bytes(a, "beauty_knob.png"))).toBe(true);
+    // --beauty-only: the sheet and the one shot, the same picture as the full run's beauty.png; no light study.
+    const only = run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64 });
+    expect(only.files).toEqual(["sheet.png", "beauty.png", "report.md", "report.json"]);
+    expect(bytes(c, "beauty.png").equals(bytes(a, "beauty.png"))).toBe(true);
+    expect(only.report).toMatch(/knob \([^)]*\) → not rendered \(one shot\)/);
+    // --camera naming no camera renders every shot, as its warning says; in the one-shot loop beauty.png is the
+    // render's own view and the warning says that instead.
+    const none = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "nope" });
+    expect(none.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_hero.png", "beauty_knob.png"]);
+    expect(none.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; every shot is rendered$/)]));
+    const noneOnly = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, camera: "nope" });
+    expect(noneOnly.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
+    expect(noneOnly.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; beauty\.png takes the render's own view$/)]));
+    // --lights asks for the study in the loop; --no-lights leaves it off a full run.
+    expect(run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, lights: true }).files).toContain("lights.png");
+    expect(run(lit + "show both", "lit.aix", c, { ...opts, lights: false }).files).not.toContain("lights.png");
+  });
+
+  it("draws lights.png from the shot beauty.png shows, whether set camera or --camera chose it", () => {
+    const a = tmp(), b = tmp(), c = tmp();
+    run(lit + "set camera hero\nshow both", "lit.aix", a, opts);
+    run(lit + "show both", "lit.aix", b, { ...opts, camera: "hero" });
+    run(lit + "show both", "lit.aix", c, opts);
+    expect(bytes(a, "lights.png").equals(bytes(b, "lights.png"))).toBe(true);
+    expect(bytes(a, "lights.png").equals(bytes(c, "lights.png"))).toBe(false);
+  });
+
+  it("removes what an earlier run of the tool wrote into the folder and this one did not, and nothing else", () => {
+    // Round 11: beauty_iron.png, beauty_torch.png and lights.png from earlier runs sat beside a quick sheet.
+    const dir = tmp();
+    writeFileSync(join(dir, "notes.txt"), "mine");
+    writeFileSync(join(dir, "beauty_old.png"), "not written by a run");
+    const first = run(lit + "set camera hero\nshow both", "lit.aix", dir, opts);
+    expect(first.removed).toEqual([]);
+    const second = run(lit + "set camera hero\nshow both", "lit.aix", dir, { ...QUICK, grid: 16, size: 64 });
+    expect(second.removed).toEqual(["beauty.png", "lights.png", "beauty_knob.png"]);
+    for (const f of second.removed!) expect(existsSync(join(dir, f)), f).toBe(false);
+    for (const f of [...second.files, "notes.txt", "beauty_old.png"]) expect(existsSync(join(dir, f)), f).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).files).toEqual(second.files.filter((f) => f !== "report.json"));
+    // A file list that names something outside the folder, or a file the tool never writes, is not followed.
+    const outside = tmp();
+    writeFileSync(join(outside, "keep.png"), "x");
+    writeFileSync(join(dir, "report.json"), JSON.stringify({ files: [`../${outside.split("/").pop()}/keep.png`, "notes.txt", "sheet.png"] }));
+    const third = run(lit + "show both", "lit.aix", dir, { ...QUICK, grid: 16, size: 64 });
+    expect(third.removed).toEqual([]);
+    expect(existsSync(join(outside, "keep.png"))).toBe(true);
+    expect(existsSync(join(dir, "notes.txt"))).toBe(true);
+  });
+
+  it("meshes a shown pose at the rest pose's cell, and says so in the report", () => {
+    // Round 11: the mixer's tilted head left the posed model's box loose (y to 5.5 against a 5.22 surface), and the
+    // whole model was meshed a third coarser at the same grid, the bowl it does not move included.
+    const dir = tmp();
+    const src = 'base = box(2, 0.3, 2) | move(0, 0.15, 0)\nlid = joint(box(2, 0.1, 2) | move(1, 0.05, 0), "hinge", -1, 0.3, 0, axis=[0, 0, 1])\npose("open", hinge=50)\nshow base + lid';
+    const cell = () => JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).cellSize as number;
+    const rest = run(src, "lid.aix", dir, { ...QUICK, grid: 32 });
+    const restCell = cell();
+    const posed = run(src, "lid.aix", dir, { ...QUICK, grid: 32, pose: "open" });
+    expect(cell()).toBeCloseTo(restCell, 9);
+    expect(posed.report).toMatch(/\| Grid \| \d+ cells on the longest side, cell [\d.]+ units \(the rest pose's cell, kept for pose open: \d+ cells along its longest side\) \|/);
+    expect(rest.report).not.toMatch(/the rest pose's cell/);
+    // Past the 500 cells the extractor takes along the posed model the rest cell cannot be kept, and the report says
+    // the cell is coarser rather than "kept" (an arm folded over its base at rest, unfolded to twice the length).
+    const fold = 'base = box(1, 0.1, 0.1) | move(0, 0.05, 0)\narm = joint(box(1, 0.1, 0.1) | move(-0.5, 0.15, 0), "hinge", 0.5, 0.1, 0, axis=[0, 0, 1])\npose("open", hinge=-180)\nshow base + arm';
+    run(fold, "fold.aix", dir, { ...QUICK, grid: 400 });
+    const foldCell = cell();
+    const far = run(fold, "fold.aix", dir, { ...QUICK, grid: 400, pose: "open" });
+    expect(cell()).toBeGreaterThan(foldCell * 1.1);
+    expect(far.report).toMatch(/\| Grid \| 400 cells on the longest side, cell [\d.]+ units \(pose open: the rest pose's cell, [\d.]+, would be more than the 500 cells the extractor takes along the posed model, so this one is coarser than at rest\) \|/);
+  });
+
+  it("draws named steps with the output for a picture, each its own object in a scene, and names an unknown one", () => {
+    const dir = tmp();
+    const src = "stand = box(2, 0.2, 1) | move(0, 0.1, 0)\nprobe = box(0.5, 0.5, 0.5) | move(0, 0.45, 0)\nshow stand\nassert clearance(probe, stand) > -1";
+    const r = run(src, "s.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["probe"] });
+    expect(r.evaluation.outputName).toBe("stand+probe");
+    expect(r.evaluation.output!.bounds.max[1]).toBeCloseTo(0.7);
+    expect(r.warnings.join()).not.toMatch(/'probe'.*not part of the output/);
+    const scene = run("a = box(1, 1, 1)\nb = sphere(0.3) | move(2, 0, 0)\nprobe = sphere(0.1) | move(0, 1, 0)\nscene a, b", "sc.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["probe"] });
+    expect(scene.evaluation.objects.map((o) => o.name)).toEqual(["a", "b", "probe"]);
+    expect(() => run(src, "s.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["nope"] })).toThrow(/^--show nope: no such step; the shapes are stand, probe$/);
   });
 });

@@ -1053,3 +1053,29 @@ describe("round-11 findings", () => {
     expect(O.surfaceExtent(placed, 48).max[1]).toBeCloseTo(3, 1);
   });
 });
+
+describe("where a step rests", () => {
+  it("finds the edge a leaning box rests on, not its centroid, and nothing for a box in the air", () => {
+    // Round 11: a book leaning 18 degrees had its centroid's vertical plane in the air between two shelves.
+    const board = O.move(P.box(4, 0.2, 2), 0, -0.1, 0);
+    const book = O.rotate(O.move(P.box(0.3, 2.5, 1.5), 0.15, 1.25, 0), 0, 0, 18);
+    const model = O.union([board, book]);
+    const cell = 0.03;
+    const c = C_.restingContact(book, model, cell * 2)!;
+    expect(c).toBeDefined();
+    // The book stands on its edge at x = 0; its centroid is at x -0.24, up in the air.
+    expect(Math.abs(c.at[0])).toBeLessThan(0.1);
+    expect(c.at[1]).toBeLessThan(0.15);
+    expect(c.normal[1]).toBeLessThan(-0.5);
+    expect(C_.sliceLevels(book)!.at[0]).toBeLessThan(-0.2);
+    // Lifted half a unit off the board it touches nothing.
+    const lifted = O.move(book, 0, 0.5, 0);
+    expect(C_.restingContact(lifted, O.union([board, lifted]), cell * 2)).toBeUndefined();
+    // A stem in its soil meets it all round: no one direction, so no plane is said to lie along it.
+    const soil = O.move(P.box(1, 0.4, 1), 0, 0.2, 0);
+    const stem = O.move(P.cylinder(0.05, 1), 0, 0.6, 0);
+    const s = C_.restingContact(stem, O.union([soil, stem]), cell * 2)!;
+    expect(Math.abs(s.at[0]) + Math.abs(s.at[2])).toBeLessThan(0.03);
+    expect(s.at[1]).toBeLessThan(0.45);
+  });
+});

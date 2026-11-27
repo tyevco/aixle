@@ -134,6 +134,14 @@ the second test is what keeps a cutter from claiming the face it cut (a
 cavity's field is zero on the cup's inner wall too, but the cup's solid
 is outside the cavity), and it uses the model's own field to step back
 less at an edge cell rather than hand a rim to the cavity below it. A
+third test asks that the step's field rise along the vertex's normal,
+as a step's own surface does, at least 0.3 per unit (an exact distance
+rises at 1, a blend a little less): a thin operand of an `&` that runs
+down through a larger part inside its own box is within a cell of its
+side faces all along that part's top, with its inside under it too, so
+the first two tests credited the mixer's 0.06 slab with a strip of the
+base beside the clamp plate (round 11), where its field does not change
+going up. A
 step is visible where the depth buffer shows its vertices, its label
 sits out from the picture's centre past the visible vertex nearest its
 visible centroid (so a ring's label points at the ring, not its hole),
@@ -984,6 +992,31 @@ faint, as a focus close-up draws it, so the step is the thing read and
 the rest is its context. A probe or a cutter places the planes with its
 own volume but is not drawn: what is read there is the model.
 
+The centroid is still wrong for a part that leans on something: a book
+leaning 18 degrees on a shelf has its centroid's vertical plane through
+a slanted band in the air between two shelves (round 11), and the cut
+was asked for to show that the book stands. A slice through a step is
+usually there to show what the step meets, so when the step touches the
+rest of the model or comes within two cells of it, the planes go
+through that contact. The contact is found from the fields, not a mesh:
+lattice samples near the step's surface slide onto it, and one is a
+contact when, a little way out along its normal, the model is nearer
+than the step itself is, which a step's own concave side never is.
+Contacts are grouped by lattice neighbours and the lowest group taken,
+since what a part rests on is under it (a leaning book also touches its
+neighbour at the top). Of the three planes, the one most nearly parallel
+to the contact (the horizontal plane under a book on a shelf) would cut
+along it and show nothing of it, so it keeps the step's own level; the
+other two go through the group's centroid moved two cells into the
+step, so they cut the step and what it rests on together. A contact
+all round (a stem in its soil) has no direction, and the horizontal
+plane keeps its level. A cutter is never given a contact: it is where
+the model is not. The two programs that name a slice step at this point
+were the shelf, whose X plane moved from the air (x 1.17) onto the
+board (x 1.51) once its hand-set `slice_x` was taken out, and the mixer,
+whose beater meets the model only where its shaft enters the hub, on
+the planes it already had.
+
 ## What each light adds
 
 `lights.png` began as each light alone, then all, which shows what a
@@ -1002,6 +1035,22 @@ whatever its power. It costs one more render than the strip did, and
 the frames went from 0.4 to half the beauty size: 6.1 s to 9.6 s on the
 ring's three lights. The no-light frame closes the row, since it is
 what every light adds to.
+
+The difference is taken from the finished pixels, after the shading has
+clipped each channel at white, so on a glowing part it is not that
+light's term: a flame near white under no light and a little whiter
+under the moon differs only in green and blue, and brightened 7.9 times
+it read as a green flame (round 11). The render marks the pixels whose
+surface glows, and that row draws them flat grey and leaves them out of
+the gain. A light that does reach a glow is still seen on everything
+round it.
+
+The strip is four or more marches beside the shot, so it is part of the
+full `--beauty` render and not of `--beauty-only`, the loop for trying
+a finish, unless `--lights` asks; and the shot `set camera` names is
+`beauty.png` and is not marched again as `beauty_<name>.png` (round 11:
+the material loop's one shot was the shot twice and the strip, 28 s
+against 8).
 
 ## Lighting a metal, lighting a lamp
 
