@@ -387,6 +387,23 @@ describe("spatial index", () => {
   });
 });
 
+describe("fewer evaluations, the same bits", () => {
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  it("skips a dear cutter outside its box and reads max(base, -cutter) to the bit everywhere", () => {
+    const board = P.box(4, 1, 0.4);
+    const letters = O.move(S.extrude(textProfile("AIXLE", 0.5), 0.3, "z"), -1.2, -0.2, 0.2);
+    const wrapped = O.move(O.wrap(S.extrude(textProfile("RING", 0.2), 0.05, "z"), 0.9), 0, 0, -0.7);
+    for (const cutter of [letters, wrapped, O.scale(P.sphere(0.4), 3, 1, 1), O.intersect(P.box(3, 0.2, 3), P.box(0.2, 3, 3))]) {
+      const cut = O.difference(board, cutter);
+      for (let k = 0; k < 20000; k++) {
+        const x = rnd() * 6 - 3, y = rnd() * 2 - 1, z = rnd() * 1.2 - 0.6;
+        expect(Object.is(cut.dist(x, y, z), -Math.min(-board.dist(x, y, z), cutter.dist(x, y, z)))).toBe(true);
+      }
+    }
+  });
+});
+
 describe("loft", () => {
   it("measures a slanted wall across it, like the cone it is, and never farther than the truth", () => {
     const l = W.loft(S.circle(1), S.circle(0.5), 2);

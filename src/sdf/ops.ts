@@ -137,12 +137,57 @@ function minFeature(shapes: Shape3[]): number | undefined {
   return f;
 }
 
+/**
+ * A cutter of at least this cost (primitives a call can evaluate) is skipped where its box shows it cannot win. A
+ * single primitive costs about what the box test does: over a lattice on each difference's base, the test took a
+ * sample's time to 0.75 to 1.95 of what it was with one primitive (the mug's two cylinders 1.05 and 0.83), and to 0.20
+ * to 1.11 with two or more, slower only on a lighthouse's three (1.11) and a hub's 58 (1.02).
+ */
+const CUT_CULL_COST = 2;
+
+/**
+ * Whether a field is known to read at least its box distance everywhere outside its box: the floor union()'s cull
+ * rests on, and difference()'s. A distance does, and so do the hard unions and differences, moves, turns, uniform
+ * scales, offsets and shells of fields that do. A field marked as only a bound on the distance (`bound`: a twist, a
+ * bend or a wrap, a non-uniform scale, a displacement, a loft, a blend) is not trusted to (measured: a wrapped
+ * inscription read under its box distance at 6 lattice points of round 10's ring), nor is an intersection, whose box
+ * is the overlap of its operands' boxes while its field is only the larger of their fields. Memoised per shape.
+ */
+const FLOORED = new WeakMap<Shape3, boolean>();
+const INTERSECTIONS = new WeakSet<Shape3>();
+function boxFloored(s: Shape3): boolean {
+  const known = FLOORED.get(s);
+  if (known !== undefined) return known;
+  let ok = !s.bound && !INTERSECTIONS.has(s);
+  if (ok) for (const c of s.inner ?? s.parts ?? []) if (!boxFloored(c)) { ok = false; break; }
+  if (ok && s.joint) ok = boxFloored(s.joint.child);
+  if (ok && s.instanced) ok = boxFloored(s.instanced.base);
+  FLOORED.set(s, ok);
+  return ok;
+}
+
 export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
   if (isEmpty(b.bounds)) return a;
   const da = a.dist, db = b.dist, ha = a.hit, hb = b.hit;
+  let dist = (x: number, y: number, z: number): number => smax(da(x, y, z), -db(x, y, z), k);
+  if (k <= 0 && b.cost >= CUT_CULL_COST && boxFloored(b)) {
+    // Outside the cutter's box by bd the cutter reads at least bd, so where the base reads -bd or more, max(base,
+    // -cutter) is the base's value to the bit and the cutter need not be asked. The floor is taken a hair under the
+    // box distance (a millionth of a millionth, and as much of the box's own coordinates) so rounding in the box test
+    // cannot skip a cutter that would have decided the value.
+    const bx0 = b.bounds.min[0], by0 = b.bounds.min[1], bz0 = b.bounds.min[2], bx1 = b.bounds.max[0], by1 = b.bounds.max[1], bz1 = b.bounds.max[2];
+    const tiny = 1e-12 * (1 + Math.max(Math.abs(bx0), Math.abs(by0), Math.abs(bz0), Math.abs(bx1), Math.abs(by1), Math.abs(bz1)));
+    dist = (x, y, z) => {
+      const va = da(x, y, z);
+      const ex = Math.max(bx0 - x, 0, x - bx1), ey = Math.max(by0 - y, 0, y - by1), ez = Math.max(bz0 - z, 0, z - bz1);
+      const floor = Math.sqrt(ex * ex + ey * ey + ez * ez) * (1 - 1e-12) - tiny;
+      if (floor > 0 && va >= -floor) return va;
+      return -Math.min(-va, db(x, y, z));
+    };
+  }
   return {
     kind: "shape3",
-    dist: (x, y, z) => smax(da(x, y, z), -db(x, y, z), k),
+    dist,
     hit: (x, y, z) => {
       const h = ha(x, y, z);
       const d = smax(h.d, -hb(x, y, z).d, k);
@@ -162,7 +207,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
 
 export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
   const da = a.dist, db = b.dist, ha = a.hit, hb = b.hit;
-  return {
+  const out: Shape3 = {
     kind: "shape3",
     dist: (x, y, z) => smax(da(x, y, z), db(x, y, z), k),
     hit: (x, y, z) => {
@@ -182,6 +227,8 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     gap: a.gap,
     gapWhat: a.gapWhat,
   };
+  INTERSECTIONS.add(out);
+  return out;
 }
 
 // --- transforms --------------------------------------------------------------
