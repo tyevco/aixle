@@ -1,8 +1,11 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { check, run, type RunOptions } from "../src/pipeline.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderBeauty, type BeautyOptions } from "../src/render/beauty.js";
@@ -192,6 +195,30 @@ describe("the classic kernel", () => {
     expect(lines.length).toBe(3);
     for (const l of lines) expect(l).toMatch(/^beauty: worker \d's field differs from the main thread's at the check points; drew without it$/);
   });
+});
+
+describe("the pool under the command line's own node flags", () => {
+  // A flag for V8 or for the whole process (a larger heap for a big model) is one Node will not give a worker thread:
+  // passed on as it is, it made every worker's start throw, and the render failed with nothing written.
+  const ROOT = fileURLToPath(new URL("..", import.meta.url));
+  const program = join(dir, "flags.aix");
+  writeFileSync(program, 'show sphere(0.6) | move(0, 0.6, 0) | paint("copper")');
+  // bin/aixle.mjs without a build: tsx registered by a call, so the workers need it added to their flags.
+  const registered = join(dir, "registered.mjs");
+  const tsxApi = pathToFileURL(createRequire(import.meta.url).resolve("tsx/esm/api")).href;
+  writeFileSync(registered, `const { register } = await import(${JSON.stringify(tsxApi)});\nregister();\nawait import(${JSON.stringify(pathToFileURL(join(ROOT, "src/cli.ts")).href)});\n`);
+  const render = (entry: string[], threads: number): { log: string; png: Buffer } => {
+    const out = join(dir, `flags${runs++}`);
+    const log = execFileSync(process.execPath, ["--max-old-space-size=2048", ...entry, "render", program, "--beauty-only", "--beauty-size", "96", "--no-caption", "--threads", String(threads), "--out", out], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { log, png: readFileSync(join(out, "beauty.png")) };
+  };
+  for (const [how, entry] of [["tsx's flag", ["--import", "tsx", "src/cli.ts"]], ["tsx's register()", [registered]]] as const)
+    it(`draws on the pool with a V8 flag on the command line, through ${how}`, () => {
+      const four = render([...entry], 4), one = render([...entry], 1);
+      expect(four.log).toMatch(/beauty render 96px in \d+ ms on 4 threads/);
+      expect(four.log).not.toMatch(/^beauty: /m);
+      expect(sha(four.png)).toBe(sha(one.png));
+    });
 });
 
 // Last: a failure turns the pool off for the rest of the process, so each case loads the pool afresh.

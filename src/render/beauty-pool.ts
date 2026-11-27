@@ -218,16 +218,43 @@ export function poolWorkerRows(): number {
   return workerRows;
 }
 
+/** The parent's flags a worker loads modules by: the loaders, their conditions, and the experimental switches. */
+function loaderFlags(argv: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i], name = a.split("=")[0];
+    if (/^(--import|--require|-r|--loader|--experimental-loader|--conditions|-C|--disable-warning)$/.test(name)) {
+      out.push(a);
+      if (!a.includes("=") && i + 1 < argv.length) out.push(argv[++i]);
+    } else if (/^--(no-)?experimental-/.test(name) || name === "--enable-source-maps" || name === "--no-warnings" || name === "--no-deprecation") out.push(a);
+  }
+  return out;
+}
+
+/**
+ * A worker thread on `url`, loading modules as the parent does. Node gives a worker the parent's flags itself, leaving
+ * out those a thread cannot take (V8's, such as a larger heap, and the process's own); a list passed explicitly that
+ * holds one of them makes the start throw. So the flags are passed only when a .ts worker needs tsx added, because
+ * the parent has it some other way than a flag (a test runner's transform, or bin/aixle.mjs's register() call), and
+ * then, if Node refuses the parent's whole list, with only the flags that load modules.
+ */
+function startWorker(url: URL, ts: boolean, workerData: unknown): Worker {
+  if (!ts || process.execArgv.some((a) => a.includes("tsx"))) return new Worker(url, { workerData });
+  const tsx = ["--import", tsxImport()];
+  try {
+    return new Worker(url, { execArgv: [...process.execArgv, ...tsx], workerData });
+  } catch (e) {
+    if ((e as { code?: string }).code !== "ERR_WORKER_INVALID_EXEC_ARGV") throw e;
+    return new Worker(url, { execArgv: [...loaderFlags(process.execArgv), ...tsx], workerData });
+  }
+}
+
 function spawn(): Slot {
   const ts = import.meta.url.endsWith(".ts");
   const url = new URL(ts ? "./beauty-worker.ts" : "./beauty-worker.js", import.meta.url);
-  // The parent's flags, so a worker loads modules as the parent does; a .ts worker needs tsx when the parent has it
-  // some other way than a flag (a test runner's transform, or a register() call).
-  const execArgv = [...process.execArgv];
-  if (ts && !execArgv.some((a) => a.includes("tsx"))) execArgv.push("--import", tsxImport());
   const state = new Int32Array(new SharedArrayBuffer(8));
   const note = new Uint8Array(new SharedArrayBuffer(512));
-  const worker = new Worker(url, { execArgv, workerData: { state, note } });
+  const worker = startWorker(url, ts, { state, note });
   worker.unref();
   const slot: Slot = { worker, state, note, dead: false };
   // Heard only when the main thread's event loop runs (between runs, never during one): later runs draw on one thread.
@@ -395,5 +422,14 @@ export function openBeautyPool(threads: number, log?: (line: string) => void): B
   const n = Math.max(1, Math.floor(threads));
   if (n <= 1) return undefined;
   if (off) { log?.(`beauty: ${off}; drawing on one thread for the rest of this process`); return undefined; }
-  return new BeautyPool(n, log);
+  try {
+    return new BeautyPool(n, log);
+  } catch (e) {
+    // A worker that cannot start is no reason to fail the run: the picture is the same on one thread.
+    off = `a beauty worker could not start (${e instanceof Error ? e.message : String(e)})`;
+    stopping = true;
+    for (const s of slots.splice(0)) { s.dead = true; void s.worker.terminate(); }
+    log?.(`beauty: ${off}; drawing on one thread for the rest of this process`);
+    return undefined;
+  }
 }
