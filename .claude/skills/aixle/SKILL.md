@@ -114,6 +114,7 @@ name = expr                      # a step
 def part(a, b=1) = expr          # a parametric part
 def part(a) { x = ...  return x } # one with names and loops of its own, ending with return
 for i in range(6) { ... }        # loops; range(a, b), range(a, b, step), [1, 2.5]
+all = all + named("leg_" + i, leg) # a step per copy a loop makes; a name first assigned in a loop is the loop's own
 seat = {w: 0.9, h: 0.45}         # a record: seat.h, legs[0].x, {...seat, h: 0.6} for a changed copy
 show name                        # the output (default: the last shape)
 assert pieces(m) == 1, "why"     # a promise; check fails with the numbers when it breaks
