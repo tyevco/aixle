@@ -198,6 +198,8 @@ describe("a def with a block body (round 11: a library part had no local names a
     expect(error("def f(x) {\n  a = box(x)\n  box(2)\n  return a\n}\n")).toBe("line 3: def f (line 1): line 3 computes a value and drops it; a def's body names its values (part = ...) and ends with return");
     expect(error("return box(1)\n")).toMatch(/^line 1: return ends a def's block body/);
     expect(error("def f(x) {\n  return box(x)\n")).toBe("line 1: the body of def f opened on line 1 is never closed: missing '}'");
+    // Two statements on the body's one line, as a one-line summary might be copied.
+    expect(error("def part(a) { x = box(a)  return x }\nshow part(1)\n")).toBe("line 1: unexpected 'return' after statement; in def part's body each statement goes on a line of its own, the return last");
     expect(error("def f(x) {w: 1}\n")).toMatch(/a body in braces is statements; for a def that makes a record, write def f\(\.\.\.\) = \{w: \.\.\.\}/);
   });
   it("is laid out by fmt, the body two in, and the layout is idempotent and keeps the meaning", () => {

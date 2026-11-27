@@ -81,7 +81,8 @@ class Parser {
   }
   private endStatement(): void {
     if (this.at("eof") || this.atOp("}")) return;
-    if (!this.at("newline")) throw new SyntaxError(`unexpected ${describe(this.peek())} after statement`, this.peek().line);
+    // `def f(x) { a = box(x)  return a }` on one line reads as one statement with a stray word after it.
+    if (!this.at("newline")) throw new SyntaxError(`unexpected ${describe(this.peek())} after statement${this.inDef ? `; in def ${this.inDef.name}'s body each statement goes on a line of its own, the return last` : ""}`, this.peek().line);
     this.skipNewlines();
   }
 
