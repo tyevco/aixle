@@ -302,15 +302,27 @@ describe("environments: the studio's structure", () => {
     const s = buildSky("studio", camAz, DEFAULT_LIGHT_DIRECTION);
     const toward = look(s, dirOf(camAz, 20), DIFFUSE), away = look(s, dirOf(camAz + 180, 20), DIFFUSE);
     expect(toward[1]).toBeLessThan(away[1] * 0.3);
-    // The flag: the ground on the camera's side is darker.
-    expect(look(s, dirOf(camAz, -30), DIFFUSE)[1]).toBeLessThan(look(s, dirOf(camAz + 180, -30), DIFFUSE)[1] * 0.5);
+    // The flag: the ground on the camera's side is darker than the ground behind the model on the key's side (which
+    // neither the flag nor the model's shadow reaches).
+    const clear = look(s, dirOf(camAz + 225, -30), DIFFUSE)[1];
+    expect(clear).toBeGreaterThan(look(s, dirOf(camAz + 180, -30), DIFFUSE)[1] - 1e-9);
+    expect(look(s, dirOf(camAz, -30), DIFFUSE)[1]).toBeLessThan(clear * 0.6);
     // The overhead strip, above and a little towards the camera.
     const strip = dirOf(camAz, 81.5);
     expect(look(s, strip, FILTERED)[1] - look(s, strip, DIFFUSE)[1]).toBeGreaterThan(3);
     expect(look(s, strip, BACKDROP)[1]).toBeLessThan(1);
-    // The rig turns with the camera.
-    const t = buildSky("studio", camAz + 90, DEFAULT_LIGHT_DIRECTION);
+    // The walls and the flag reach their darkness at the horizon: no bright band there on the camera's side.
+    expect(look(s, dirOf(camAz, 2), DIFFUSE)[1]).toBeLessThan(away[1] * 0.15);
+    expect(look(s, dirOf(camAz, -2), DIFFUSE)[1]).toBeLessThan(look(s, dirOf(camAz + 180, -2), DIFFUSE)[1] * 0.55);
+    // The model's shadow on the floor: the ground away from the key is darker than the ground towards it, at the
+    // same angle from the camera's side.
+    const keyAz = KEY_AZ, side = (keyAz - camAz + 360) % 360;
+    const towardKey = look(s, dirOf(camAz + side, -40), DIFFUSE)[1], awayFromKey = look(s, dirOf(camAz - side, -40), DIFFUSE)[1];
+    expect(awayFromKey).toBeLessThan(towardKey * 0.75);
+    // The rig turns with the camera, and the shadow with the key.
+    const t = buildSky("studio", camAz + 90, lightDirection(KEY_AZ + 90, 40));
     expect(look(t, dirOf(camAz + 90, 20), DIFFUSE)[1]).toBeCloseTo(toward[1], 9);
+    expect(look(t, dirOf(camAz + 90 - side, -40), DIFFUSE)[1]).toBeCloseTo(awayFromKey, 9);
   });
 
   it("a mirror sees each directional light as a softbox that gives the light's own irradiance", () => {
