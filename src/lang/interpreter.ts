@@ -835,7 +835,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (assertDepth > 0 && callee === "pieces" && typeof result === "number" && result > 1 && isShape3(values[0].value)) {
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
       const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64, meshes);
-      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
+      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} ${cubic()} at (${loose.centre.map(fmt3).join(", ")})${stepAt(loose.inside, [], values[0].value)}`;
     }
     // A wall() promise says where the thinnest wall is and in which step, so the line to edit is in the message.
     if (assertDepth > 0 && callee === "wall" && typeof result === "number" && Number.isFinite(result) && isShape3(values[0].value)) {
@@ -843,8 +843,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const w = thinnestWall(values[0].value, typeof res === "number" ? res : 64, meshes);
       if (w.empty) witness = w.empty.cellSize > 0 ? `no surface at a cell of ${Number(w.empty.cellSize.toPrecision(3))}: the shape is empty or thinner than a cell everywhere, so there is no wall to measure (or to print)` : "the shape is empty: there is no wall to measure";
       else if (w.at && w.to) {
-        const mid: Vec3 = [(w.at[0] + w.to[0]) / 2, (w.at[1] + w.to[1]) / 2, (w.at[2] + w.to[2]) / 2];
-        witness = `thinnest at (${w.at.map(fmt3).join(", ")})${stepAt(mid, [], values[0].value)}`;
+        // The innermost steps whose surfaces bound the wall on each side, as the report's Thinnest wall row names them
+        // (round 11: a bowl's wall was blamed on 'bowl', the argument given back, not on 'bowl_wall').
+        const size = boundsSize(values[0].value.bounds), tol = Math.max(...size) / (typeof res === "number" ? res : 64) * 0.25;
+        const near = stepsAtSurface(w.at, values[0].value, tol), far = stepsAtSurface(w.to, values[0].value, tol);
+        const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+        witness = `thinnest at (${w.at.map(fmt3).join(", ")})${named(near)}, through to (${w.to.map(fmt3).join(", ")})${named(far)}`;
       }
     }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
@@ -1064,7 +1068,25 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
    * bell for the gnome that poked through it), the shape itself when it is a step; none when no step holds it.
    */
   function stepAt(p: Vec3, exclude: Shape3[], within: Shape3): string {
-    const roots = posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [];
+    const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
+    const tree = shapeTree(within);
+    let best: string | undefined, bv = Infinity;
+    for (const st of steps.values()) {
+      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
+      // Where the measured shape puts the step: a bowl's wall built at the origin and moved into the bowl is tested
+      // in the bowl, not at the origin (round 11: it was never found, and the bowl was named instead).
+      const s = placedUnder(roots, st.value);
+      const b = s.bounds;
+      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
+      if (s.dist(p[0], p[1], p[2]) > 0) continue;
+      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
+      if (v < bv) { bv = v; best = st.name; }
+    }
+    return best ? ` in '${best}'` : "";
+  }
+
+  /** Every shape in `within`'s tree, through unions, wrappers, placed sets and joints. */
+  function shapeTree(within: Shape3): Set<Shape3> {
     const tree = new Set<Shape3>();
     const walk = (s: Shape3, depth: number) => {
       if (tree.has(s) || depth > 200) return;
@@ -1074,17 +1096,41 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (s.joint) walk(s.joint.child, depth + 1);
     };
     walk(within, 0);
-    let best: string | undefined, bv = Infinity;
+    return tree;
+  }
+
+  /**
+   * The innermost named steps of `within` whose surface passes within `tol` of a surface point, at most two, smallest
+   * box first and none that only holds another one found: the steps a wall's face belongs to, a cut's among them.
+   */
+  function stepsAtSurface(p: Vec3, within: Shape3, tol: number): string[] {
+    const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
+    const tree = shapeTree(within);
+    const found: { name: string; value: Shape3; v: number }[] = [];
     for (const st of steps.values()) {
-      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
-      const s = posed ? placedUnder(roots, st.value) : st.value;
+      if (!isShape3(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
+      const s = placedUnder(roots, st.value);
       const b = s.bounds;
-      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
-      if (s.dist(p[0], p[1], p[2]) > 0) continue;
-      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
-      if (v < bv) { bv = v; best = st.name; }
+      if (p[0] < b.min[0] - tol || p[0] > b.max[0] + tol || p[1] < b.min[1] - tol || p[1] > b.max[1] + tol || p[2] < b.min[2] - tol || p[2] > b.max[2] + tol) continue;
+      if (Math.abs(s.dist(p[0], p[1], p[2])) > tol) continue;
+      found.push({ name: st.name, value: st.value, v: (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]) });
     }
-    return best ? ` in '${best}'` : "";
+    found.sort((x, y) => x.v - y.v);
+    const out: { name: string; value: Shape3 }[] = [];
+    for (const f of found) {
+      if (out.some((o) => o.name === f.name)) continue;
+      const below = shapeTree(f.value);
+      if (out.some((o) => below.has(o.value))) continue;
+      out.push(f);
+      if (out.length === 2) break;
+    }
+    return out.map((o) => o.name);
+  }
+
+  /** "cubic units", or the declared unit's cube when the program sets units (mm³ for a print in millimetres). */
+  function cubic(): string {
+    const u = typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
+    return u ? `${u}³` : "cubic units";
   }
 
   function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {

@@ -1186,9 +1186,14 @@ overhang(part) < 0.05` on something to be printed without support (it
 meshes too); `wall(shape, resolution)` is the thinnest wall, as the
 Print section measures it, in model units: with `set units mm`, `assert
 wall(model) > 0.8, "two lines of a 0.4 mm nozzle"`, and a failure says
-where the thinnest wall is and in which step (it meshes too, at the
+where the thinnest wall is and, as the report's row does, the innermost
+steps whose faces bound it on each side, each tested where the shape
+puts it, so a bowl's wall built at the origin and moved into the bowl is
+named rather than the bowl: `thinnest at (2.02, 18.27, 30.06) in 'word',
+through to (2.02, 18.18, 29.88) in 'slot'` is an engraving's floor
+against a slot's face. It meshes too, at the
 program's grid or 64; a shape with no surface in that mesh, empty or
-thinner than a cell everywhere, reads 0 and fails the promise);
+thinner than a cell everywhere, reads 0 and fails the promise;
 `clearance(a, b)` is
 the smallest gap between two surfaces, zero when they touch, and
 negative when they overlap: minus the depth of the deepest point either
@@ -1268,8 +1273,10 @@ three sample a lattice (24 cells along the longest side, and `void`
 walks the surface too, so a pin thinner than the lattice is caught), so
 measure parts, not a scene. The bound queries (`width`, `tall`,
 `depth`, `top`, `bottom`, `height`) and the anchors (`at`) are the
-rest. A failing `pieces()` names the smallest loose piece and where it
-is. A failing `void` whose region is made of copies (a ring of probe
+rest. A failing `pieces()` names the smallest loose piece, its volume
+(in mm³, or the declared unit's cube, with `set units`; in cubic units
+without), where it is and the step it is made of: `the smallest piece is
+36600 mm³ at (0, 76.36, -12.71) in 'body'`. A failing `void` whose region is made of copies (a ring of probe
 rods) says which copy held the solid, `in copy 3 of the 6 in rods`, and
 one whose region is a union of named probes names the probe. A `void` whose region's box never meets the shape's box holds for
 no reason, and `check` says so: a probe built in one frame against a

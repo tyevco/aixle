@@ -65,12 +65,21 @@ export function overhangFraction(shape: Shape3, resolution = 64, cache?: MeshCac
   return m ? m.physics.overhang : 0;
 }
 
-/** The smallest solid piece other than the largest, when the shape meshes into more than one: what a pieces() promise names. */
-export function loosePiece(shape: Shape3, resolution = 64, cache?: MeshCache): { count: number; volume: number; centre: [number, number, number] } | undefined {
+/**
+ * The smallest solid piece other than the largest, when the shape meshes into more than one: what a pieces() promise
+ * names. `inside` is a point in the piece's solid, half a cell in from one of its vertices along the field, for naming
+ * the step it is made of (its centre can be in the air: a ring's is in its hole).
+ */
+export function loosePiece(shape: Shape3, resolution = 64, cache?: MeshCache): { count: number; volume: number; centre: [number, number, number]; inside: [number, number, number] } | undefined {
   const m = meshedAnalysis(shape, resolution, cache);
   if (!m) return undefined;
   const solid = m.physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, m.physics, m.cell));
   if (solid.length < 2) return undefined;
   const last = solid[solid.length - 1];
-  return { count: solid.length, volume: Math.abs(last.volume), centre: [last.centre[0], last.centre[1], last.centre[2]] };
+  const [x, y, z] = last.at, e = m.cell * 0.05, d = shape.dist;
+  const g = [d(x + e, y, z) - d(x - e, y, z), d(x, y + e, z) - d(x, y - e, z), d(x, y, z + e) - d(x, y, z - e)];
+  const gl = Math.hypot(g[0], g[1], g[2]) || 1;
+  const k = m.cell * 0.5 / gl;
+  const inward: [number, number, number] = [x - g[0] * k, y - g[1] * k, z - g[2] * k];
+  return { count: solid.length, volume: Math.abs(last.volume), centre: [last.centre[0], last.centre[1], last.centre[2]], inside: d(inward[0], inward[1], inward[2]) < 0 ? inward : [x, y, z] };
 }

@@ -23,6 +23,8 @@ export interface Piece {
   size: number;
   /** True for an inward-facing shell: an enclosed void, not a loose part. */
   cavity: boolean;
+  /** A vertex of the piece, on its surface: where to look for the step it belongs to (a ring's centre is in its hole). */
+  at: [number, number, number];
 }
 
 export interface Physics {
@@ -143,7 +145,8 @@ export function analyse(mesh: Mesh, cellSize: number): Physics {
       }
     bottom = lo[1];
     // The main body's winding gives a positive volume; a shell wound the other way is a void inside something.
-    pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre, size: Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), cavity: false });
+    const v0 = ix[tris[0] * 3] * 3;
+    pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre, size: Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), cavity: false, at: [p[v0], p[v0 + 1], p[v0 + 2]] });
   }
   // A piece with no volume is a stray triangle or a flat sliver, not a part; naming it as a loose piece sent an agent
   // looking for something that is not there (round 4). It is dropped unless it is all there is.

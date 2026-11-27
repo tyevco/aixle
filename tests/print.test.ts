@@ -230,7 +230,7 @@ describe("set units and set bed", () => {
     const a = ev.asserts[0];
     expect(a.passed).toBe(false);
     expect(a.detail).toMatch(/^0\.0[56]\d* > 0\.1$/);
-    expect(a.where).toMatch(/^thinnest at \([-\d., ]+\) in 'cup'$/);
+    expect(a.where).toMatch(/^thinnest at \([-\d., ]+\) in 'cup', through to \([-\d., ]+\) in 'cup'$/);
   });
   it("wall() of a part the mesh drops altogether is 0, not a promise kept of nothing", () => {
     // A 0.05 plate 100 wide meshes to nothing at 64 cells: it was Infinity, so wall(plate) > 0.8 held.

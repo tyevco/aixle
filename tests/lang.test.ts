@@ -327,7 +327,7 @@ describe("interpreter", () => {
     expect(run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(1.1, 0, 0)\nassert void(b, a)\nshow a').warnings.filter((w) => /trivially/.test(w))).toEqual([]);
     // A failing pieces() names the loose piece.
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
-    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
+    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ cubic units at \(3, 0, 0\) in 'b'$/);
   });
   it("warns when a part round about the ring's axis is turned just before the ring, which turns nothing (round 10)", () => {
     const ev = run('pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0) | rotate(y=30)\npockets = pocket | ring(6, 0.7)\nslot = box(0.3, 0.1, 0.1) | rotate(y=30)\nslots = slot | ring(6, 0.7)\nright = cylinder(0.1, 0.3) | ring(6, 0.7) | rotate(y=30)\nshow pockets + slots + right');

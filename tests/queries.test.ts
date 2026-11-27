@@ -120,3 +120,23 @@ describe("the decal region test (round 11)", () => {
     expect(warned('m = decal(base, (box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2 + 0.2)) + (box(b.w + 0.1, 0.06, 0.2) | move(0, -0.8, b.d / 2 + 0.2)), "gold")')).toHaveLength(1);
   });
 });
+
+describe("failing pieces() and wall() name the step (round 11)", () => {
+  it("give a loose piece its volume's unit and its step", () => {
+    // dogfood/round-11/stand.aix with the slot through the whole width: the support plate floats free.
+    const src = (units: string) => `${units}base = box(70, 6, 95) | move(0, 3, 0)\nsupport = box(70, 6, 85) | move(0, 76, -12)\nstand = base + support\nassert pieces(stand, 64) == 1\nshow stand`;
+    expect(run(src("set units mm\n")).asserts[0].where).toMatch(/^the smallest piece is 3[45]\d00 mm³ at \(.*\) in 'support'$/);
+    expect(run(src("")).asserts[0].where).toMatch(/^the smallest piece is 3[45]\d00 cubic units at \(.*\) in 'support'$/);
+  });
+  it("name the innermost steps on both sides of the thinnest wall, where the part was moved to", () => {
+    // dogfood/round-11/mixer_probe_fail_thin.aix: the bowl's wall is built at the origin and moved into the bowl.
+    const ev = run('bowl_wall = cylinder(1, 1.2) - (cylinder(0.97, 1.2) | move(0, 0.1, 0))\nhandle = box(0.3, 0.1, 0.1) | move(1.1, 0.3, 0)\nbowl = (bowl_wall + handle) | move(0, 1, 0.45)\nassert wall(bowl, 96) > 0.04\nshow bowl');
+    expect(ev.asserts[0].passed).toBe(false);
+    expect(ev.asserts[0].where).toMatch(/^thinnest at \(.*\) in 'bowl_wall', through to \(.*\) in 'bowl_wall'$/);
+    // A wall between two cuts names the cutters: an engraving's floor against a slot's face.
+    const cut = run('body = box(10, 10, 10)\nslot = box(4, 20, 3) | move(0, 0, 1.5)\nword = box(4, 4, 2) | move(0, 0, 5)\nstand = body - slot - word\nassert wall(stand, 128) > 1.5\nshow stand');
+    expect(cut.asserts[0].detail).toBe("1 > 1.5");
+    expect(cut.asserts[0].where).toMatch(/^thinnest at \(.*\) in '(word|slot)', through to \(.*\) in '(word|slot)'$/);
+    expect(cut.asserts[0].where).toMatch(/'word'.*'slot'|'slot'.*'word'/);
+  });
+});

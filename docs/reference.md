@@ -461,7 +461,7 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
 
     pieces(shape, resolution=64) -> number
 
@@ -477,7 +477,7 @@ The fraction of the shape's surface that faces down more than 45° (the faces re
 
 ### wall
 
-The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (the program's `set grid` when none is given, 64 without one), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it; a part with no surface in the mesh at all (empty, or thinner than a cell everywhere) reads 0, so the promise fails rather than holding of nothing. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and in which step.
+The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (the program's `set grid` when none is given, 64 without one), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it; a part with no surface in the mesh at all (empty, or thinner than a cell everywhere) reads 0, so the promise fails rather than holding of nothing. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and the innermost steps whose faces bound it on each side, as the report's row does (thinnest at (...) in 'word', through to (...) in 'slot').
 
     wall(shape, resolution=64) -> number
 
