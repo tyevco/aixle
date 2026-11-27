@@ -469,11 +469,17 @@ export function createRays(shape: Shape3, mesh: Mesh, bvh: BvhData, cell: number
     RY[0] = px; RY[1] = py; RY[2] = pz; RY[3] = lx; RY[4] = ly; RY[5] = lz; RY[7] = far - r;
     ST[7] = near; ST[8] = cell * 0.5;
     // A centre ray that misses the box has nothing to march near p, but the disc's other rays may still meet the
-    // model (a floor point just past a shadow's edge).
+    // model (a floor point just past a shadow's edge). Nor has one that enters the box only beyond NEAR (a floor
+    // point well behind the model): the march then cleared none of the way, and the disc's rays, which enter the box
+    // where they each do, are traced from NEAR. Starting them where the centre ray enters let a ray that went in
+    // earlier cross a thin wall before that and count as clear (a size-3 light leaked a fifth of its disc through a
+    // 3-cell plate's umbra).
     let res = 1, from = near;
     if (clip(RY)) {
+      const entry = ST[0];
       if (!nearMarch(vis, 64)) { vis[0] = 0; vis[1] = 0; vis[2] = 0; return; }
-      res = ST[4]; from = ST[2];
+      res = ST[4];
+      if (entry < near) from = ST[2];
     }
     // The early out: when no triangle can meet the cone of every ray the disc could send beyond NEAR, all of them are
     // clear, and the answer is exactly what eight rays would give.

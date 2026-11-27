@@ -389,6 +389,49 @@ describe("areaVisibility", () => {
     });
   }
 
+  it("lets no light through a thin wall whose shadow falls far behind it", () => {
+    // A tall plate 3 cells thick, lit from behind by a size-3 light. Floor points behind it are outside the model's
+    // box, so the centre ray enters the box well past NEAR and the near march clears nothing; the disc's lower rays
+    // enter the box earlier than the centre ray and cross the plate before the centre ray even reaches the box.
+    const th = 0.1, H = 2.4;
+    const plate = move(box(2, H, th), 0, H / 2, 0);
+    const nets = surfaceNets(plate, { resolution: 80 });
+    const cell = nets.cellSize;
+    const model: Bounds = { min: [-1, 0, -th / 2], max: [1, H, th / 2] };
+    const rays = createRays(plate, nets.mesh, buildBvh(nets.mesh), cell, model, 6);
+    const L = lightDirection(0, 45);
+    const theta = 3 / 18, tanA = Math.tan(theta);
+    const light: RayLight = { point: false, x: L[0], y: L[1], z: L[2], radius: theta, index: 0 };
+    const sg = L[2] >= 0 ? 1 : -1, ia = -1 / (sg + L[2]), ib = L[0] * L[1] * ia;
+    const t1: Vec3 = [1 + sg * L[0] * L[0] * ia, sg * ib, -sg * L[0]], t2: Vec3 = [ib, sg + L[1] * L[1] * ia, -L[1]];
+    // The exact fraction of the disc a point sees past the plate's box.
+    const exact = (o: Vec3): number => {
+      let seen = 0, all = 0;
+      for (let a = 0; a < 64; a++)
+        for (let b = 0; b < 64; b++) {
+          const uu = ((a + 0.5) / 64) * 2 - 1, v = ((b + 0.5) / 64) * 2 - 1;
+          if (uu * uu + v * v > 1) continue;
+          all++;
+          const d = [L[0] + tanA * (uu * t1[0] + v * t2[0]), L[1] + tanA * (uu * t1[1] + v * t2[1]), L[2] + tanA * (uu * t1[2] + v * t2[2])];
+          let lo = 0, hi = Infinity;
+          for (let k = 0; k < 3; k++) {
+            let ta = (model.min[k] - o[k]) / d[k], tb = (model.max[k] - o[k]) / d[k];
+            if (ta > tb) [ta, tb] = [tb, ta];
+            lo = Math.max(lo, ta); hi = Math.min(hi, tb);
+          }
+          if (!(hi >= lo)) seen++;
+        }
+      return seen / all;
+    };
+    for (const z of [-1.5, -2, -2.2, -2.4]) {
+      let s = 0;
+      for (let col = 0; col < 32; col++) s += rays.areaVisibility(-0.3 + (col / 31) * 0.6, cell, z, light, col, 7, 0, 8, false);
+      // Measured before the disc's rays were traced from NEAR: about 0.08 in the umbra at z -1.5 (exact 0), and
+      // 0.34 against 0.15 at z -2.
+      expect(Math.abs(s / 32 - exact([0, cell, z])), `z ${z}`).toBeLessThan(0.04);
+    }
+  });
+
   it("answers the same with its early out as with all eight rays", () => {
     // The early out is the cone test: no triangle can meet any ray of the disc, so all eight would be clear.
     const f = program(PROGRAMS.cage);
