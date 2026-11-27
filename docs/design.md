@@ -420,14 +420,30 @@ invalidation, and an evaluation in another pose has shapes of its own.
 
 ### Printing
 
+A model is judged as a print only when the program says it is one, with
+`set units` or `set bed`, or the run asks for a print's file with
+`--3mf`. The Print section used to be written for every model, a unit
+taken as a millimetre, and in round 11 a door for a game engine, a
+kitchen mixer and a bookcase each got the report's longest section
+telling them they printed 2.6 mm tall in 0.00141 g of PLA, with a
+summary that opened on a 0.0144 mm wall: three agents read past it every
+time, and one drew its model in decimetres to dodge it. Nothing in that
+section applies to a model nobody will print, and the program is the
+only place that knows. The STL is still written for every model, so it
+cannot be what makes one a print.
+
 A slicer reads an STL in millimetres with z up, and Aixle's units are
 whatever the program says they are, with y up. So `set units` names the
-unit (millimetres assumed without it, which is what a slicer would
-assume too, and the report says how tall that prints), the STL is
+unit (mm, cm, dm, m, in or ft; with `--3mf` and no unit a millimetre is
+assumed, which is what a slicer would assume too, and the report says how
+tall that prints), the STL is
 scaled to millimetres and turned a quarter turn about x on the way out
 (a rotation, so the winding holds and the front faces the front of the
-plate), and the 3MF keeps the program's unit in its `unit` attribute,
-since 3MF can say it. The 3MF's mesh is welded (the crease copies
+plate), and the 3MF keeps the program's unit in its `unit` attribute
+where 3MF can say it. 3MF has micron, millimeter, centimeter, inch, foot
+and meter, and no decimetre, so a decimetre model's 3MF is in
+millimetres with its coordinates multiplied by 100: the size a slicer
+sees is the same, and nothing else in the file depends on the unit. The 3MF's mesh is welded (the crease copies
 share a position, and a slicer sees unwelded copies as open edges) and
 each triangle names its material, the majority of its corners', from a
 `basematerials` group with each material's display colour. Both are the
@@ -702,9 +718,23 @@ not roll.
 `polygon` was the only way to draw an outline, so every lathe profile was a
 list of corners and a revolved vase showed them as bands. `curve2` and
 `bezier2` are the 2D counterpart of the exact curves: a chain of cubic
-pieces, through the points with the same Catmull-Rom handles `curve()`
-uses (closed, so the tangent at every point looks at both neighbours) or
-from anchors and handles. The distance is the nearest point on each piece,
+pieces, through the points with Catmull-Rom handles (closed, so the
+tangent at every point looks at both neighbours) or from anchors and
+handles. The handles are centripetal: the knots are spaced by the square
+root of each chord, the tangent is the derivative in that parameter, and
+each side's handle is the tangent times its own span, so the tangent's
+direction halves the angle between the chords and a short piece beside
+a long one gets a short handle. The uniform handles `curve()` uses (half
+the chord between the neighbours, on both sides) gave a 2 mm piece beside
+an 85 mm one a 14 mm handle, and round 11's stand outline looped into a
+0.019 mm sliver there; centripetal Catmull-Rom has no cusp or
+self-intersection within a piece, and on evenly spaced points it is the
+uniform spline exactly, so outlines drawn that way did not move. It
+moved what spacing shapes: the vase example's inner floor, a long run
+after a short piece, now dips 0.024 below its line where it dipped
+0.012. The 3D `curve()` keeps the uniform handles: on the nine dogfood
+programs that use it the centripetal ones move no curve by more than
+1.6% of its length and loop none. The distance is the nearest point on each piece,
 the scan and Newton of the 3D curves in the plane, with Newton kept inside
 the scan's bracket, except that Newton searches every basin the scan shows
 (round each sample lower than both its neighbours, and in each step over
