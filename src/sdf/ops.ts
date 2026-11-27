@@ -529,9 +529,9 @@ export function ring(s: Shape3, count: number, radius = 0, axis: Axis = "y"): Sh
  * extraction pass, which this replaced, missed a plate thinner than its
  * cell that no sample plane fell inside (measured: a lily pad 0.12 thick
  * under a 4.4-unit frog came back 1.8 wide instead of 2.2). A face no ray
- * hits keeps the bounds' value.
+ * hits keeps the bounds' value (or, with `keepBounds` false, is left open: Infinity).
  */
-export function surfaceExtent(s: Shape3, rays = 48): Bounds {
+export function surfaceExtent(s: Shape3, rays = 48, keepBounds = true): Bounds {
   const b = s.bounds;
   if (isEmpty(b)) return b;
   const size = boundsSize(b);
@@ -566,7 +566,11 @@ export function surfaceExtent(s: Shape3, rays = 48): Bounds {
           const t = march(p, a, dir, limit);
           if (t < best) { best = t; bi = i; bj = j; }
         }
-      if (best === Infinity) continue;
+      if (best === Infinity) {
+        // keepBounds false: a face no ray hits is left open (Infinity), for a caller that only adds what was seen.
+        if (!keepBounds) { if (dir === 1) out.min[a] = Infinity; else out.max[a] = -Infinity; }
+        continue;
+      }
       // Refine within one ray spacing of the best ray.
       const su = size[u] / rays, sv = size[v] / rays;
       const cu = b.min[u] + (bi + 0.5) * su, cv = b.min[v] + (bj + 0.5) * sv;
@@ -595,7 +599,8 @@ export function surfaceExtent(s: Shape3, rays = 48): Bounds {
  * than twice the rays' spacing on some axis, or carries a feature that thin, is measured again on its own box,
  * where the rays are dense, and its extent added: a hard union's extent is its parts' together, so nothing is added
  * that is not on the surface. A thin plate inside a cut part (a difference's left side) is still only seen by the
- * rays. Measured where `root` puts s, through the joints and transforms above it (a posed line), or as s is.
+ * rays. Measured where `root` puts s, through the joints and transforms above it (a posed line), or as s is. A
+ * thin part's face that none of its own rays hits adds nothing, rather than its box.
  */
 export function surfaceExtentDeep(s: Shape3, root: Shape3 = s, rays = 48): Bounds {
   const top = root === s ? s : (placedShape(root, s) ?? s);
@@ -620,8 +625,7 @@ export function surfaceExtentDeep(s: Shape3, root: Shape3 = s, rays = 48): Bound
     const us = boundsSize(placed.bounds);
     const thin = [0, 1, 2].some((k) => us[k] < (2 * size[k]) / rays) || (u.feature ?? Infinity) < (2 * longest) / rays;
     if (!thin) continue;
-    const e = surfaceExtent(placed, 24);
-    if (isEmpty(e)) continue;
+    const e = surfaceExtent(placed, 24, false);
     for (let k = 0; k < 3; k++) {
       out.min[k] = Math.max(top.bounds.min[k], Math.min(out.min[k], e.min[k]));
       out.max[k] = Math.min(top.bounds.max[k], Math.max(out.max[k], e.max[k]));

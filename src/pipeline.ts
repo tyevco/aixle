@@ -1904,7 +1904,8 @@ export function roleLabel(role: StepRole | undefined): string {
 
 /**
  * What each camera with a focus sees of it, for `check`: the share of the focus hidden behind the rest of the model
- * from the camera's angle, by rays through the field (no mesh), and when that is over 15%, the least of seven other
+ * from the camera's angle, by rays through the field from the focus's own surface (meshed alone, coarsely, rather
+ * than the whole model at the program's grid), and when that is over 15%, the least of seven other
  * azimuths 45 degrees apart, with the render's warning when another azimuth would show much more, as the render
  * gives it after a beauty run (round 11: aiming one camera into a bowl cost two beauty runs of minutes each).
  */
@@ -1922,11 +1923,13 @@ export function cameraSight(evaluation: Evaluation, cellSize: number): { lines: 
     if (!r) continue;
     modelBounds ??= tightBounds(output);
     const az = c.azimuth ?? baseAz, el = c.elevation ?? baseEl;
-    const hidden = hiddenFractionRays(output, modelBounds, r.shape, r.frame, cellSize, az, el);
+    // The focus's own surface, coarsely: the points whose view of the camera is tested.
+    const points = surfaceNets(r.shape, { resolution: 48, bounds: r.frame }).mesh;
+    const hidden = hiddenFractionRays(output, modelBounds, points, cellSize, az, el);
     let bestAz = az, best = hidden;
-    if (hidden > 0.15) for (let k = 1; k < 8; k++) { const h = hiddenFractionRays(output, modelBounds, r.shape, r.frame, cellSize, az + k * 45, el, 28); if (h < best) { best = h; bestAz = az + k * 45; } }
+    if (hidden > 0.15) for (let k = 1; k < 8; k++) { const h = hiddenFractionRays(output, modelBounds, points, cellSize, az + k * 45, el, 600); if (h < best) { best = h; bestAz = az + k * 45; } }
     const other = ((bestAz % 360) + 360) % 360;
-    lines.push(`  ${c.name}: ${Math.round(hidden * 100)}% of ${c.focus} hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}${best < hidden ? `; ${Math.round(best * 100)}% from azimuth ${fmt(other)}` : ""}`);
+    lines.push(`  ${c.name}: ${Math.round(hidden * 100)}% of ${c.focus} hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}${Math.round(best * 100) < Math.round(hidden * 100) ? `; ${Math.round(best * 100)}% from azimuth ${fmt(other)}` : ""}`);
     if (hidden > 0.15 && best < hidden - 0.2) warnings.push(`camera "${c.name}" (line ${c.line}): ${Math.round(hidden * 100)}% of ${c.focus} is hidden behind the rest of the model from azimuth ${fmt(az)}, elevation ${fmt(el)}; from azimuth ${fmt(other)} it is ${Math.round(best * 100)}%`);
   }
   return { lines, warnings };
