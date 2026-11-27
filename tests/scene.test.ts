@@ -553,3 +553,30 @@ describe("the program's lights and scene in the exports", () => {
     }
   });
 });
+
+describe("the report's material rows", () => {
+  it("lists a name shared by several materials once, with their count, and keeps every material in the GLB", () => {
+    // Round 11: a bookcase's page paper, a decal per book, was listed 35 times in a row of 70.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = [
+        "books = empty()",
+        "for i in range(4) {",
+        '  books = books + decal(box(0.3, 1, 0.8) | move(i * 0.5, 0.5, 0) | paint("red"), box(0.4, 0.8, 0.1) | move(i * 0.5, 0.5, 0.4), "#efe6cf")',
+        "}",
+        "show books",
+      ].join("\n");
+      const r = run(src, "books.aix", dir, { grid: 48, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, viewer: false, texture: 64 });
+      const row = /\| Materials \| (.*) \|/.exec(r.report)![1];
+      expect(row).toMatch(/#efe6cf ×4/);
+      expect(row.split(", ").filter((n) => n.startsWith("#efe6cf"))).toHaveLength(1);
+      const data = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(data.materials.filter((n: string) => n === "#efe6cf")).toHaveLength(4);
+      const glb = readFileSync(join(dir, "model.glb"));
+      const json = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
+      expect(json.materials.filter((m: { name: string }) => m.name === "#efe6cf")).toHaveLength(4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

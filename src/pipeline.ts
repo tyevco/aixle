@@ -568,6 +568,17 @@ export function assertsRow(asserts: AssertResult[]): string {
 }
 
 /**
+ * Names listed once each, in the order first met, with how many share the name: `custom ×6`. The Materials and Maps
+ * rows list a material per entry of the mesh's list, and a decal painted per book is a material per book (round 11: a
+ * row of 70 with the page paper 35 times). The GLB keeps one material per entry; only the row folds them.
+ */
+export function countedNames(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(", ");
+}
+
+/**
  * How the export's triangle cap was shared out, for the Exports row (round 11: "nothing says how the cap is shared
  * out between objects"): one queue over every mesh takes the flattest collapse wherever it is, so each mesh's count
  * before and after, the largest first, and how far merging only flat faces would go.
@@ -1383,10 +1394,10 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         const who = (k: "normal" | "metalRough" | "emissive") => [...hierarchy.materialMaps!].filter(([, mm]) => mm[k]).map(([m]) => m.name);
         const glows = [...hierarchy.materialMaps].filter(([m, mm]) => m.glow > 0 && !mm.emissive).map(([m]) => m.name);
         const parts = [
-          ...(who("normal").length ? [`normal map (model_normal.png) for ${who("normal").join(", ")}`] : []),
-          ...(who("metalRough").length ? [`metallic-roughness map (model_mr.png) for ${who("metalRough").join(", ")}`] : []),
-          ...(who("emissive").length ? [`emissive map (model_emissive.png) for ${who("emissive").join(", ")}`] : []),
-          ...(glows.length ? [`an emissive colour for ${glows.join(", ")}`] : []),
+          ...(who("normal").length ? [`normal map (model_normal.png) for ${countedNames(who("normal"))}`] : []),
+          ...(who("metalRough").length ? [`metallic-roughness map (model_mr.png) for ${countedNames(who("metalRough"))}`] : []),
+          ...(who("emissive").length ? [`emissive map (model_emissive.png) for ${countedNames(who("emissive"))}`] : []),
+          ...(glows.length ? [`an emissive colour for ${countedNames(glows)}`] : []),
         ];
         if (parts.length) mapsNote = `${parts.join("; ")}; every material has the colour atlas (model.png)`;
       }
@@ -1686,7 +1697,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
       ...(closeUpNote ? [`| Close-up watertight | ${closeUpNote} |`] : []),
-      `| Materials | ${mesh.materials.map((m) => m.name).join(", ") || "none"} |`,
+      `| Materials | ${countedNames(mesh.materials.map((m) => m.name)) || "none"} |`,
       ...(asserts.length ? [`| Asserts | ${assertsRow(asserts)}${asserts.some((a) => a.pose) ? " (at rest, or in the pose each names)" : shownPose ? " (judged at rest)" : ""} |`] : []),
       ...(mapsNote ? [`| Maps | ${mapsNote} |`] : []),
       ...(robloxNote ? [`| Roblox | ${robloxNote} (model.roblox.glb: import with Studio's 3D Importer, then the Accessory Fitting Tool for an accessory) |`] : []),

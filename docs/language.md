@@ -1354,7 +1354,10 @@ prints the asserts in line order, failures among the passes.
   lifts the fill, or a `decal` gives the inner walls a lighter colour.
 - A preset with overrides (`material("glass", transmit=0.95)`) is listed
   in the report as the preset's name with a star, `glass*`, unless it is
-  assigned to a name, which it then takes.
+  assigned to a name, which it then takes. The Materials and Maps rows
+  list a name that several materials share once, with their count
+  (`#efe6cf ×35` for a decal painted on each of 35 books); the GLB and
+  `report.json` keep one material per entry.
 - A cross-section draws the surface's outline a cell or so behind the cut
   plane as a thin line, so a plate just behind the plane shows as a dashed
   line across an opening that is open. Move the slice (`set slice_x`),
