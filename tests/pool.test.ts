@@ -186,6 +186,19 @@ describe("the classic kernel", () => {
     expect(sha(b["beauty.png"])).toBe(sha(a["beauty.png"]));
   });
 
+  it("tells apart two decals of one picture fitted to different regions", () => {
+    // A decal's picture is fitted to its region's box: the same file on two regions is two different paints.
+    const at = join(dir, "decals");
+    mkdirSync(at, { recursive: true });
+    writeFileSync(join(at, "dots.png"), encodePng(2, 2, new Uint8Array([255, 255, 255, 255, 20, 20, 20, 255, 20, 20, 20, 255, 255, 255, 255, 255])));
+    const src = 'left = decal(box(1, 1, 1) | move(-0.5, 0.5, 0), box(1, 0.6, 2) | move(-0.5, 0.5, 0), image="dots.png")\nright = decal(box(1, 1, 1) | move(0.5, 0.5, 0), box(1, 0.3, 2) | move(0.5, 0.7, 0), image="dots.png")\nshow left + right';
+    const x = scene(src, join(at, "decals.aix"), 24);
+    const decals = x.mesh.materials.filter((m) => m.image);
+    expect(decals.length).toBe(2);
+    const ids = materialIds(x.mesh.materials.map(materialKey));
+    expect(ids(decals[0])).not.toBe(ids(decals[1]));
+  });
+
   it("starts its workers under the test runner, through tsx, and they draw rows beside the main thread", () => {
     const g = scene(GLASS, "glass.aix", 40);
     const opts: BeautyOptions = { ...GLASS_OPTS, size: 256, cellSize: g.cell };

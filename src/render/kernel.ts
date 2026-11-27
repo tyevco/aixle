@@ -131,11 +131,13 @@ export function allocBuffers(layout: BufferSpec[], size: number, shared: boolean
 
 /**
  * A material's identity by value, the same in every thread: a worker's materials are its own objects, made by its
- * own evaluation. Two materials alike in all of these are one material to the edge test.
+ * own evaluation. Two materials alike in all of these are one material to the edge test. A picture is its file and
+ * how it is laid on, a decal's box included: one picture fitted to two regions is two paints.
  */
 export function materialKey(m: Material): string {
   const im = m.image;
-  return [m.name, m.color.join(","), m.color2.join(","), m.pattern, m.scale, m.metal, m.rough, m.transmit, m.seed, m.axis, m.glow, im ? `${im.name}:${im.width}x${im.height}:${im.projection}:${im.axis}:${im.size}` : "", m.bump ?? 0, m.bumpScale ?? 0, m.wear ?? 0].join("|");
+  const box = im?.box ? `:${im.box.min.join(",")}:${im.box.max.join(",")}` : "";
+  return [m.name, m.color.join(","), m.color2.join(","), m.pattern, m.scale, m.metal, m.rough, m.transmit, m.seed, m.axis, m.glow, im ? `${im.name}:${im.width}x${im.height}:${im.projection}:${im.axis}:${im.size}${box}` : "", m.bump ?? 0, m.bumpScale ?? 0, m.wear ?? 0].join("|");
 }
 
 /**
