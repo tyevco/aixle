@@ -10,8 +10,8 @@ import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } fro
 import { parse } from "./parser.js";
 import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
 import { regionTouches, voidWitness, outsideWitness, insideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
-import { loosePiece, type MeshCache } from "../mesh/pieces.js";
-import { thinnestWall, UNITS } from "../mesh/print.js";
+import { loosePiece, standing, type MeshCache } from "../mesh/pieces.js";
+import { supportOf, thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
@@ -27,6 +27,12 @@ const MASK_MOVES = new Set(["move", "rotate", "scale", "mirror", "flip"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
+/** A way across the floor, [x, z] of unit length, in words: "+x", "-z", or "+x and -z" within 22.5 degrees of between. */
+const compass = (d: [number, number]): string => {
+  const axes = [[d[0], "x"], [d[1], "z"]] as const;
+  const big = axes.filter(([v]) => Math.abs(v) > Math.sin(Math.PI / 8)).map(([v, a]) => `${v < 0 ? "-" : "+"}${a}`);
+  return big.join(" and ");
+};
 const dimsLabel = (b: { min: number[]; max: number[] }): string => [0, 1, 2].map((k) => fmt3(b.max[k] - b.min[k])).join(" × ");
 
 export class RuntimeError extends Error {
@@ -233,8 +239,8 @@ const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "gro
 
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
 /** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
-const MESHED_QUERIES = new Set(["pieces", "overhang", "wall"]);
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall"]);
+const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "stands"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall", "support", "stands"]);
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
@@ -855,6 +861,28 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         witness = `thinnest at (${w.at.map(fmt3).join(", ")})${named(near)}, through to (${w.to.map(fmt3).join(", ")})${named(far)}`;
       }
     }
+    // A support() promise says where the tallest column is and what it stands on (round 11: the support kept small
+    // could only be promised as a share of the surface).
+    if (assertDepth > 0 && callee === "support" && typeof result === "number" && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const r = typeof res === "number" ? res : 64;
+      const sup = supportOf(values[0].value, r, meshes);
+      if (sup.at && sup.foot) {
+        const tol = Math.max(...boundsSize(values[0].value.bounds)) / r * 0.5;
+        const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+        const on = sup.tallestOnModel ? `on the model at (${sup.foot.map(fmt3).join(", ")})${named(stepsAtSurface(sup.foot, values[0].value, tol))}` : `on the plate at y = ${fmt3(sup.foot[1])}`;
+        witness = `the tallest column is ${Number(sup.tallest.toPrecision(3))} ${linear()} under (${sup.at.map(fmt3).join(", ")})${named(stepsAtSurface(sup.at, values[0].value, tol))}, standing ${on}, of ${Number(sup.volume.toPrecision(3))} ${cubic()} under ${Number(sup.area.toPrecision(3))} ${square()} in plan`;
+      } else witness = "nothing faces down more than 45° above the floor: no support";
+    }
+    // A stands() promise says where the centre of mass is and which way the shape would tip.
+    if (assertDepth > 0 && callee === "stands" && typeof result === "number" && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const st = standing(values[0].value, typeof res === "number" ? res : 64, meshes);
+      const way = st.towards ? compass(st.towards) : "";
+      if (!st.centre) witness = "no surface at that cell: nothing to stand";
+      else if (st.footprint.length < 3) witness = `the centre of mass is at (${st.centre.map(fmt3).join(", ")}), and the shape rests on a point or an edge, with no footprint to stand on`;
+      else witness = `the centre of mass (${st.centre.map(fmt3).join(", ")}) is ${Number(Math.abs(st.margin).toPrecision(3))} ${st.margin < 0 ? `outside the footprint, so it tips towards ${way}` : `inside the footprint, nearest its edge towards ${way}`}`;
+    }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
     // beside the wrong part).
     if (callee === "decal" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value) && !regionTouches(values[0].value, values[1].value))
@@ -1151,8 +1179,18 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   /** "cubic units", or the declared unit's cube when the program sets units (mm³ for a print in millimetres). */
   function cubic(): string {
-    const u = typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
+    const u = declaredUnit();
     return u ? `${u}³` : "cubic units";
+  }
+  function square(): string {
+    const u = declaredUnit();
+    return u ? `${u}²` : "square units";
+  }
+  function linear(): string {
+    return declaredUnit() ?? "units";
+  }
+  function declaredUnit(): string | undefined {
+    return typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
   }
 
   function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {

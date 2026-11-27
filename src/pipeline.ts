@@ -912,8 +912,11 @@ function printSection(evaluation: Evaluation, output: Shape3, mesh: Mesh, cellSi
     const sup = time("supports", () => supportVolume(output, mesh, cellSize, physics.floor));
     const mm3 = mm * mm * mm;
     const vol = (v: number) => (v * mm3 >= 1000 ? `${fmtMm((v * mm3) / 1000)} cm³` : `${fmtMm(v * mm3)} mm³`);
-    rows.push(`| Supports | ${sup.volume > 0 ? `about ${vol(sup.volume)} under the overhangs (${vol(sup.fromFloor)} standing on the plate, ${vol(sup.onModel)} on the model itself), over ${fmtMm(sup.area * mm * mm)} mm² of the plate; the tallest column is ${fmtMm(sup.tallest * mm)} mm under (${sup.at!.map(fmt).join(", ")}). An upper estimate: a slicer bridges short spans and fills support sparsely` : "none: nothing faces down more than 45° above the plate"} |`);
-    json.support = { volume: sup.volume, mm3: sup.volume * mm3, fromFloorMm3: sup.fromFloor * mm3, onModelMm3: sup.onModel * mm3, areaMm2: sup.area * mm * mm, tallestMm: sup.tallest * mm, at: sup.at };
+    // Faces the mesher bent past 45 degrees at a sharp edge, where the shape itself does not face down so far, are left
+    // out, and said to be (round 11: a cutter's corner on the part's corner read as a 33 mm column).
+    const skipped = sup.skipped > 0 ? `; ${fmtMm(sup.skipped * mm * mm)} mm² of mesh faces bent past 45° at a sharp edge, where the shape itself faces down less, are left out` : "";
+    rows.push(`| Supports | ${sup.volume > 0 ? `about ${vol(sup.volume)} under the overhangs (${vol(sup.fromFloor)} standing on the plate, ${vol(sup.onModel)} on the model itself), over ${fmtMm(sup.area * mm * mm)} mm² in plan; the tallest column is ${fmtMm(sup.tallest * mm)} mm under (${sup.at!.map(fmt).join(", ")}). An upper estimate: a slicer bridges short spans and fills support sparsely${skipped}` : `none: nothing faces down more than 45° above the plate${skipped}`} |`);
+    json.support = { volume: sup.volume, mm3: sup.volume * mm3, fromFloorMm3: sup.fromFloor * mm3, onModelMm3: sup.onModel * mm3, areaMm2: sup.area * mm * mm, tallestMm: sup.tallest * mm, at: sup.at, skippedMm2: sup.skipped * mm * mm };
     if (sup.volume > 0) summary.push(`support under ${(physics.overhang * 100).toFixed(physics.overhang < 0.095 ? 1 : 0)}% of the surface`);
   } else rows.push(`| Thinnest wall, supports | not measured on a quick pass |`);
   const contact = contactArea(mesh, cellSize, physics.floor) * mm * mm;

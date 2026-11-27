@@ -484,7 +484,13 @@ in the field, to the plate or the first surface below, its height times
 the face's area on the plate. It is an upper estimate, because a slicer
 bridges short spans and fills support sparsely, and it is split into the
 part standing on the plate and the part standing on the model, which is
-the part that scars a surface. Whether the model fits the bed is judged
+the part that scars a surface. A face counts only where the field at its
+centre faces down past 45 degrees too: dual contouring bends the faces
+beside a sharp edge a few degrees, most where a cutter's corner lies on
+the part's own corner, and a mesh-only test read a slot's 40-degree
+ceiling as a 33 mm column (round 11). The overhang share stays a
+reading of the mesh, as the Overhangs row always was; the support, being
+a volume a promise is made on, is held to the shape. Whether the model fits the bed is judged
 from the hull of its vertices on the plate, turned a degree at a time,
 so a long model that fits across the diagonal is told so; a slicer turns
 a model freely, so only a model that fits no way standing is warned

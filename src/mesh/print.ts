@@ -141,23 +141,34 @@ export interface SupportResult {
   onModel: number;
   /** Area of the overhanging faces projected on the plate, square model units. */
   area: number;
-  /** The tallest column, and where its face is. */
+  /** The tallest column, where its face is, where it lands, and whether that is on the model (else the plate). */
   tallest: number;
   at?: Vec3;
+  foot?: Vec3;
+  tallestOnModel?: boolean;
+  /**
+   * Faces the mesh tilts past 45 degrees where the field does not face down that far, left out: at a sharp edge (a
+   * cutter's corner laid on the part's own corner) dual contouring bends the faces next to the edge a few degrees,
+   * and a ceiling at 40 degrees from vertical read as a 33 mm column of support (round 11). Their area on the plate.
+   */
+  skipped: number;
 }
 
 /**
  * Support under the faces that face down more than 45 degrees and are
  * clear of the floor (the faces the Overhangs row counts): from each face's
  * centre a ray straight down to the floor or the first surface below, its
- * length times the face's area projected on the plate.
+ * length times the face's area projected on the plate. A face counts only
+ * where the field faces down too, read at the face's centre: a face the
+ * mesher bent at a sharp edge is not an overhang of the shape.
  */
 export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor: number): SupportResult {
   const p = mesh.positions, ix = mesh.indices;
-  const r: SupportResult = { volume: 0, fromFloor: 0, onModel: 0, area: 0, tallest: 0 };
+  const r: SupportResult = { volume: 0, fromFloor: 0, onModel: 0, area: 0, tallest: 0, skipped: 0 };
   if (!(cellSize > 0)) return r;
   const d = shape.dist;
   const hitEps = cellSize * 0.1;
+  const e = cellSize * 0.05;
   for (let t = 0; t < ix.length; t += 3) {
     const a = ix[t] * 3, b = ix[t + 1] * 3, c = ix[t + 2] * 3;
     const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
@@ -170,6 +181,9 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
     const cx = (p[a] + p[b] + p[c]) / 3, cy = (p[a + 1] + p[b + 1] + p[c + 1]) / 3, cz = (p[a + 2] + p[b + 2] + p[c + 2]) / 3;
     // Projected on the plate: half the cross product's y.
     const area = -ny / 2;
+    const gx = d(cx + e, cy, cz) - d(cx - e, cy, cz), gy = d(cx, cy + e, cz) - d(cx, cy - e, cz), gz = d(cx, cy, cz + e) - d(cx, cy, cz - e);
+    const gl = Math.sqrt(gx * gx + gy * gy + gz * gz);
+    if (gl > 1e-12 && !(gy / gl < -Math.SQRT1_2)) { r.skipped += area; continue; }
     // Down from just under the face: the floor, or the model below when the field comes back to zero first.
     let y = cy - cellSize * 0.5, hitModel = false;
     for (let i = 0; i < 400 && y > floor; i++) {
@@ -184,10 +198,29 @@ export function supportVolume(shape: Shape3, mesh: Mesh, cellSize: number, floor
     r.area += area;
     if (hitModel) r.onModel += v;
     else r.fromFloor += v;
-    if (hgt > r.tallest) { r.tallest = hgt; r.at = [cx, cy, cz]; }
+    if (hgt > r.tallest) { r.tallest = hgt; r.at = [cx, cy, cz]; r.foot = [cx, bottom, cz]; r.tallestOnModel = hitModel; }
   }
   return r;
 }
+
+/**
+ * The support under a shape on its own, meshed at `resolution` cells on its longest side: what `support(shape)`
+ * returns (its volume, in cubic model units) and what a failure of it says (the tallest column). The evaluation's
+ * mesh when pieces(), overhang() or wall() already meshed the shape at this grid; empty for no surface.
+ */
+export function supportOf(shape: Shape3, resolution = 64, cache?: MeshCache): SupportResult {
+  const res = Math.max(8, Math.round(resolution));
+  const hit = SUPPORTS.get(shape)?.get(res);
+  if (hit) return hit;
+  const m = meshedAnalysis(shape, res, cache);
+  const r = m ? supportVolume(shape, m.mesh, m.meshCell, m.physics.floor) : { volume: 0, fromFloor: 0, onModel: 0, area: 0, tallest: 0, skipped: 0 };
+  const byRes = SUPPORTS.get(shape) ?? new Map<number, SupportResult>();
+  byRes.set(res, r);
+  SUPPORTS.set(shape, byRes);
+  return r;
+}
+
+const SUPPORTS = new WeakMap<Shape3, Map<number, SupportResult>>();
 
 export interface BedFit {
   /** The model's size on the plate (x, depth z) and its height (y), in millimetres. */

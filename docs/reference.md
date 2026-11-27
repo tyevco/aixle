@@ -461,7 +461,7 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). With none given, the model's own cell: the shown model's longest side over the program's `set grid`, so a part is meshed as the report meshes it and costs no more than the model's mesh, but never under 64 cells across the part nor over the grid itself (64 cells across the part without a `set grid`); pieces(), overhang() and wall() share that rule. For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). With none given, the model's own cell: the shown model's longest side over the program's `set grid`, so a part is meshed as the report meshes it and costs no more than the model's mesh, but never under 64 cells across the part nor over the grid itself (64 cells across the part without a `set grid`); pieces(), overhang(), wall(), support() and stands() share that rule. For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
 
     pieces(shape, resolution=64) -> number
 
@@ -480,6 +480,22 @@ The fraction of the shape's surface that faces down more than 45° (the faces re
 The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (by default the model's own cell, as pieces() takes it), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it; a part with no surface in the mesh at all (empty, or thinner than a cell everywhere) reads 0, so the promise fails rather than holding of nothing. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and the innermost steps whose faces bound it on each side, as the report's row does (thinnest at (...) in 'word', through to (...) in 'slot').
 
     wall(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
+### support
+
+The support volume under the shape's overhangs, in cubic model units (mm³ for a print with `set units mm`): the report's Supports row, from each face that faces down more than 45° above the floor a column straight down to the plate or to the model below, its height times the face's area in plan. A face the mesher bends past 45° at a sharp edge, where the shape itself faces down less, is left out. For assert support(stand) < 50, the support kept small in the unit a printer's user reads, where overhang() is a share of the whole surface that one flat bridge barely moves. An upper estimate: a slicer bridges short spans and fills support sparsely. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces(), overhang() and wall() read); a failure says where the tallest column is and what it stands on.
+
+    support(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
+### stands
+
+Whether the shape stands on its own: the margin by which its centre of mass (uniform density), projected on the floor, lies inside its footprint, the hull of what rests within a cell and a half of its lowest point, in units, positive inside and negative outside: the report's Stands row. For assert stands(bookcase) > 0.5. A shape resting on a point or an edge has no footprint and reads -Infinity. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces() reads); a failure says where the centre of mass is and which way the shape tips.
+
+    stands(shape, resolution=64) -> number
 
 - `resolution`: cells on the longest side
 

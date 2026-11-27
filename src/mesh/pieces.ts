@@ -1,6 +1,7 @@
 import type { Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "./surfaceNets.js";
 import { analyse, isSpeck, type Physics } from "./physics.js";
+import type { Vec3 } from "../core/vec.js";
 import { boundsSize, isEmpty } from "../sdf/types.js";
 import type { Mesh } from "./mesh.js";
 
@@ -82,4 +83,35 @@ export function loosePiece(shape: Shape3, resolution = 64, cache?: MeshCache): {
   const k = m.cell * 0.5 / gl;
   const inward: [number, number, number] = [x - g[0] * k, y - g[1] * k, z - g[2] * k];
   return { count: solid.length, volume: Math.abs(last.volume), centre: [last.centre[0], last.centre[1], last.centre[2]], inside: d(inward[0], inward[1], inward[2]) < 0 ? inward : [x, y, z] };
+}
+
+/**
+ * Whether a shape on its own stands: the margin by which its centre of mass, projected on the floor, lies inside the
+ * footprint of what rests within a cell and a half of its lowest point, in model units, positive inside and negative
+ * outside (the report's Stands row, at `resolution` cells). With the centre of mass and the footprint, and, for a
+ * failure, the way it would tip: from the footprint's nearest edge towards the centre of mass, on the plan (x, z).
+ * -Infinity when the shape rests on a point or an edge (no footprint) or has no surface at that cell.
+ */
+export function standing(shape: Shape3, resolution = 64, cache?: MeshCache): { margin: number; centre?: Vec3; footprint: [number, number][]; towards?: [number, number] } {
+  const m = meshedAnalysis(shape, Math.max(8, Math.round(resolution)), cache);
+  if (!m) return { margin: -Infinity, footprint: [] };
+  const ph = m.physics, hull = ph.footprint;
+  const [cx, , cz] = ph.centre;
+  let towards: [number, number] | undefined;
+  if (hull.length >= 3) {
+    // The nearest point of the footprint's edge to the centre of mass.
+    let best = Infinity, near: [number, number] = [cx, cz];
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i], b = hull[(i + 1) % hull.length];
+      const ex = b[0] - a[0], ez = b[1] - a[1], l2 = ex * ex + ez * ez || 1;
+      const t = Math.max(0, Math.min(1, ((cx - a[0]) * ex + (cz - a[1]) * ez) / l2));
+      const px = a[0] + ex * t, pz = a[1] + ez * t, dd = Math.hypot(cx - px, cz - pz);
+      if (dd < best) { best = dd; near = [px, pz]; }
+    }
+    // Outside, it tips from the edge towards the centre of mass; inside, the nearest edge is the way it would go.
+    const dx = ph.stabilityMargin < 0 ? cx - near[0] : near[0] - cx, dz = ph.stabilityMargin < 0 ? cz - near[1] : near[1] - cz;
+    const l = Math.hypot(dx, dz);
+    if (l > 0) towards = [dx / l, dz / l];
+  }
+  return { margin: ph.stabilityMargin, centre: [ph.centre[0], ph.centre[1], ph.centre[2]], footprint: hull, towards };
 }

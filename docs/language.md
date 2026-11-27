@@ -1123,9 +1123,16 @@ degrees on the plate it does, the smallest turn, in degrees as
 `rotate(y=)` turns; only lying on its side; not at all), the
 thinnest wall with where it is and the steps on both sides of it, the
 support volume under the overhangs (standing on the plate and on the
-model, the tallest column and where, an upper estimate since a slicer
-bridges short spans), what rests flat on the plate, and the material in
-cubic centimetres and grams of PLA. The thinnest wall is measured by a
+model, the area the columns cover in plan, the tallest column and where,
+an upper estimate since a slicer bridges short spans; `support()` is the
+same number in a promise), what rests flat on the plate, and the material in
+cubic centimetres and grams of PLA. A face counts towards the support
+only where the field faces down past 45° as well as the mesh: at a sharp
+edge, and above all where a cutter's corner lies exactly on the part's
+own corner, dual contouring bends the faces beside the edge a few
+degrees, and a phone stand's slot ceiling at 40° from the vertical read
+as a 33 mm column of support that nothing in the shape needs; the row
+says how much area it left out that way. The thinnest wall is measured by a
 ray from every vertex inward to the far side of the solid, through the
 field, so a wall under a cell is still read at its own thickness, and a
 cut's walls (a flute through a vase's side, an engraving's floor) are
@@ -1179,7 +1186,7 @@ its longest side, as the report's Pieces row counts them (it meshes the
 shape, so it costs a moment; a whole scene wants the report instead; a
 count at 64 cells bridges a gap a finer grid opens, which is how a
 chair's floating back once passed). With no resolution given, the
-queries that mesh (`pieces`, `overhang`, `wall`)
+queries that mesh (`pieces`, `overhang`, `wall`, `support`, `stands`)
 mesh at the model's own cell, the shown model's longest side over `set
 grid`, so a part is meshed as the report meshes it and costs no more
 than the model's own mesh: the mixer's bowl, 2.68 of a model 3.66 long at
@@ -1203,6 +1210,22 @@ through to (2.02, 18.18, 29.88) in 'slot'` is an engraving's floor
 against a slot's face. It meshes too, at the
 program's grid or 64; a shape with no surface in that mesh, empty or
 thinner than a cell everywhere, reads 0 and fails the promise;
+`support(shape, resolution)` is the support volume under the shape's
+overhangs, as the Print section's Supports row estimates it, in cubic
+model units (mm³ with `set units mm`): `assert support(stand) < 50,
+"little support"` promises it in the unit a printer's user reads, where
+`overhang()`, a share of the whole surface, moved only from 0.0013 to
+0.0035 for a flat 14 mm bridge under a phone stand; a failure says where
+the tallest column is, in which step, and what it stands on (the plate,
+or the model at a point and a step). `stands(shape, resolution)` is the
+Physics section's Stands row as a number: the margin by which the
+centre of mass (uniform density), projected on the floor, lies inside
+the footprint of what rests within a cell and a half of the shape's
+lowest point, positive inside and negative outside, in units: `assert
+stands(bookcase) > 0.5, "the case stands"`; a failure gives the centre of
+mass and which way it tips (`is 0.047 outside the footprint, so it tips
+towards -x`), and a shape resting on a point or an edge has no footprint
+and reads -Infinity. Both mesh as `pieces` does, sharing its mesh;
 `clearance(a, b)` is
 the smallest gap between two surfaces, zero when they touch, and
 negative when they overlap: minus the depth of the deepest point either

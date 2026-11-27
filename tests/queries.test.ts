@@ -152,3 +152,44 @@ describe("the meshed queries' default cell (round 11)", () => {
     expect(bowl.asserts[0].passed).toBe(true);
   });
 });
+
+describe("support() (round 11)", () => {
+  it("is the volume under the overhangs, the report's Supports row, and says where the tallest column stands", async () => {
+    // A table top 1 x 0.1 x 1 on a post 0.2 square: 0.96 in plan overhangs the plate by about 1.
+    const ev = run('set units mm\nset grid 128\npost = box(0.2, 1, 0.2) | move(0, 0.5, 0)\ntop = box(1, 0.1, 1) | move(0, 1.05, 0)\nt = post + top\nshow t\nassert support(t) > 0.85\nassert support(t) < 1.0\nassert support(t) < 0.5\nassert support(post) == 0');
+    expect(ev.asserts.map((a) => a.passed)).toEqual([true, true, false, true]);
+    expect(ev.asserts[2].where).toMatch(/^the tallest column is 1(\.\d+)? mm under \([-\d., ]+\) in 'top', standing on the plate at y = 0, of 0\.9\d* mm³ under 0\.9\d* mm² in plan$/);
+    // On the model below: a shelf over a slab.
+    const on = run('slab = box(1, 0.2, 1) | move(0, 0.1, 0)\npost = box(0.2, 1, 0.2) | move(-0.4, 0.5, 0)\nshelf = box(1, 0.1, 1) | move(0, 1.05, 0)\nm = slab + post + shelf\nshow m\nassert support(m) < 0.1');
+    expect(on.asserts[0].where).toMatch(/standing on the model at \([-\d., ]+\) in 'slab', of .* cubic units under .* square units in plan$/);
+  });
+  it("leaves out faces the mesher bends past 45 degrees where the shape faces down less", async () => {
+    const { supportVolume } = await import("../src/mesh/print.js");
+    // A ceiling falling back at 50 degrees from the horizontal (its normal 50 degrees from straight down, ny -0.64),
+    // above the plate, and one mesh face over it tilted to ny -0.73, as dual contouring left the faces beside the
+    // stand's coincident corner (dogfood/round-11/stand.aix, before its slot's corner moved).
+    const n = [0, -Math.cos((50 * Math.PI) / 180), Math.sin((50 * Math.PI) / 180)];
+    const plane = (ny: number[]) => ({ kind: "shape3", dist: (x: number, y: number, z: number) => ny[0] * x + ny[1] * (y - 30) + ny[2] * z, hit: () => ({ d: 0 }), bounds: { min: [-10, 0, -10], max: [10, 40, 10] }, cost: 1 }) as never;
+    // The face through (0, 30, 0) along x, its normal (0, -0.73, 0.683).
+    const w = Math.sqrt(1 - 0.73 * 0.73);
+    const mesh = { positions: new Float32Array([0, 30, 0, 1, 30, 0, 0, 30 + w, 0.73]), normals: new Float32Array(9), indices: new Uint32Array([0, 1, 2]) } as never;
+    const r = supportVolume(plane(n), mesh, 0.5, 0);
+    expect(r.volume).toBe(0);
+    expect(r.skipped).toBeCloseTo(0.73 / 2, 3);
+    // Under a field that does face down that far (the face's own plane), the same face is support, about 30 tall.
+    const real = supportVolume(plane([0, -0.73, w]), mesh, 0.5, 0);
+    expect(real.skipped).toBe(0);
+    expect(real.volume).toBeCloseTo((0.73 / 2) * (30 + w / 3), 1);
+  });
+});
+
+describe("stands() (round 11)", () => {
+  it("is the margin of the centre of mass inside the footprint, and says which way it tips", () => {
+    const ev = run('top = box(1.2, 0.05, 0.8) | move(0, 0.75, 0)\nleg = box(0.05, 0.725, 0.05) | move(0.55, 0.3625, 0.35)\ntable = top + (leg | mirror("x") | mirror("z"))\ntall = box(0.3, 2, 0.3) | move(0, 1, 0) | rotate(z=12) | move(3, 0, 0)\nshow table + tall\nassert stands(table) > 0.3\nassert stands(table) < 0.4\nassert stands(tall) > 0\nassert stands(table) > 1');
+    expect(ev.asserts.map((a) => a.passed)).toEqual([true, true, false, false]);
+    // Leaning 12 degrees towards -x, its centre of mass is past the edge it rests on.
+    expect(ev.asserts[2].detail).toMatch(/^-0\.0\d+ > 0$/);
+    expect(ev.asserts[2].where).toMatch(/^the centre of mass \(2\.79, 0\.98, 0\) is 0\.0\d+ outside the footprint, so it tips towards -x$/);
+    expect(ev.asserts[3].where).toMatch(/^the centre of mass \(0, 0\.7\d?, 0\) is 0\.37\d* inside the footprint, nearest its edge towards [+-]z$/);
+  });
+});
