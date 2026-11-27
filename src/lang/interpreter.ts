@@ -1268,7 +1268,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
             table.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
           }
           if (isShape3(value)) {
-            if (!loopOwn) lastShape = { name: stmt.name };
+            // The output of a program with no show is still the last shape assigned, a loop's own name too, as the
+            // guide says: a loop of parts with no show outputs its last copy, not nothing, and a step above the loop
+            // is warned about as not part of it rather than shown in its place.
+            lastShape = { name: stmt.name };
             // A step's name for a value wins over a loop's own name for the same one (prev = bk after named(..., bk)).
             if (!loopOwn || !steps.has(stepOfValue.get(value) ?? "")) stepOfValue.set(value, stmt.name);
           }
@@ -1419,7 +1422,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     objects = shown.scene ? shown.names.map((name, i) => ({ name, shape: shown!.shapes[i] })) : [{ name: outputName, shape: output }];
     for (const d of showDeps) roots.add(d);
   } else if (lastShape) {
-    output = steps.get(lastShape.name)!.value as Shape3;
+    output = (steps.get(lastShape.name) ?? loopSteps.get(lastShape.name))!.value as Shape3;
     outputName = lastShape.name;
     objects = [{ name: outputName, shape: output }];
     roots.add(lastShape.name);

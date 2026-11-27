@@ -260,6 +260,16 @@ describe("a loop's own names and named() (round 11: BK on the steps sheet, a loo
     // Its last value can still be read below the loop.
     expect(run(`${SHELF}\nlast = bk\n`).steps.map((st) => st.name)).toEqual(["stud", "books", "n", "last"]);
   });
+  it("still outputs the last shape assigned when there is no show, a loop's own name too", () => {
+    // All the shapes are a loop's own: the output is the last copy, as the guide's opening says, and not nothing.
+    const only = run("for i in range(3) {\n  part = box(1) | move(i * 2, 0, 0)\n}\n");
+    expect(only.outputName).toBe("part");
+    expect(only.output!.bounds.min[0]).toBeCloseTo(3.5, 6);
+    // A step above the loop is not shown in the loop's place; it is the one warned about.
+    const above = run("a = sphere(0.5)\nfor i in range(3) {\n  part = box(1) | move(i * 2, 0, 0)\n}\n");
+    expect(above.outputName).toBe("part");
+    expect(above.warnings).toEqual(["'a' (line 1) is not part of the output; add it to the model or remove it"]);
+  });
   it("keeps a loop's own names out of a library's exports", () => {
     const lib = "for i in range(1, 3) {\n  a = i * 22.5\n}\nlean = 65\ndef seat(w) = box(w)\n";
     const e = evaluate(parse('use "stand"\nx = stand.lean\n'), { resolveModule: () => ({ source: lib, file: "stand.aix" }) });
