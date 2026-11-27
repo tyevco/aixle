@@ -11,6 +11,8 @@ export interface UserFn {
   body: Expr;
   /** The top-level scope of the program or library that defined it, so a library's def sees its own helpers, not the caller's names. Opaque here; the interpreter owns it. */
   closure?: unknown;
+  /** The library it was defined in, as its `use` gave the path; undefined for the program's own. */
+  file?: string;
 }
 
 /** What xform() makes: a joint's pose in one value, for pose("hop", body=xform(move=[0, 0.3, 0])). */

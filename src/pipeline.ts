@@ -21,7 +21,7 @@ import { ACCESSORY_TRIANGLES, MESHPART_TRIANGLES, toRoblox } from "./export/robl
 import { buildHierarchy, flatten } from "./export/hierarchy.js";
 import { wearProbe } from "./sdf/materials.js";
 import type { Vec3 } from "./core/vec.js";
-import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
+import { anchorsOf, allJoints, intersect, jointTreeLines, move, placedBounds, placedPoint, placedShape, placedUnder, rotate as rotateShape, scale as scaleShape, surfaceExtent, surfacePoint } from "./sdf/ops.js";
 import { INK, interpolatePose, renderAnimation, renderPoses, type PoseCache, type PoseView, type ShapeAt } from "./render/views.js";
 import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
@@ -29,7 +29,7 @@ import { viewerHtml } from "./export/viewer.js";
 import { ENVIRONMENTS, lightContribution, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
 import { hiddenFraction, renderCallouts } from "./render/callouts.js";
 import { decodePng, type DecodedPng } from "./render/png.js";
-import { assertLine, type AssertResult, evaluate, type Evaluation, type Settings, type StepRole } from "./lang/interpreter.js";
+import { assertLine, type AssertResult, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
 import { meshBounds, meshVolume, triangleCount, vertexCount, watertightReport, type Mesh } from "./mesh/mesh.js";
@@ -235,30 +235,109 @@ export function importResolver(sourceName: string, log: (line: string) => void =
 }
 
 /**
+ * Where a shape's thinnest feature comes from: the path down the tree from
+ * the shape, through every child that carries the same size (a union's
+ * thinnest part, a move or a paint of it, a joint's child) and through a
+ * transform that scales it, to the node that introduced it (a box's thin
+ * side, a shell, a curve2 band, an extruded outline). The last node is the
+ * feature's source; two steps with the same source are one thin part.
+ */
+export function featureSource(s: Shape3): Shape3[] {
+  const path = [s];
+  let n = s;
+  for (let guard = 0; guard < 512 && n.feature !== undefined; guard++) {
+    const kids = [...(n.parts ?? n.inner ?? []), ...(n.joint ? [n.joint.child] : []), ...(n.instanced ? [n.instanced.base] : [])];
+    let next = kids.find((c) => c.feature === n.feature);
+    if (!next && n.transform && kids.length === 1 && kids[0].feature !== undefined) next = kids[0];
+    if (!next) break;
+    path.push(next);
+    n = next;
+  }
+  return path;
+}
+
+/** A library's path as its `use` gave it, as a file name. */
+const libraryFile = (f: string): string => (f.endsWith(".aix") ? f : `${f}.aix`);
+
+/**
+ * The thin member a step carries, as well as it can be named: the call that
+ * made it (and the def and library file it was in), where it is in the
+ * model (the point a profile knows, or its box), and for an extruded or
+ * revolved outline the point in the profile's own plane. Round 11: a 0.1
+ * back panel built inside a library's case() was named only as 'plate', the
+ * step that called case(); a sliver on a 46-point outline had no place.
+ */
+export function thinMember(evaluation: Evaluation, step: { name: string; line: number; value: Shape3 }): { made?: string; short?: string; where?: string } {
+  const path = featureSource(step.value);
+  const node = path[path.length - 1];
+  let origin: ShapeOrigin | undefined;
+  for (let i = path.length - 1; i >= 0 && !origin; i--) origin = evaluation.origins?.get(path[i]);
+  // The step's own call says nothing the step's name and line do not.
+  const own = !origin || (!origin.def && !origin.file && origin.line === step.line);
+  const madeAt = origin && !own ? `${origin.callee}()${origin.def ? ` in def ${origin.def}` : ""} at ${origin.file ? `${libraryFile(origin.file)} ` : ""}line ${origin.line}` : undefined;
+  // Where the output puts it, through every transform and joint above it; the step's own frame when it is not there.
+  const roots = [...(evaluation.objects.length ? evaluation.objects.map((o) => o.shape) : evaluation.output ? [evaluation.output] : []), step.value];
+  let where: string | undefined;
+  for (const root of roots) {
+    if (node.featureAt) {
+      const p = placedPoint(root, node, node.featureAt);
+      if (p) { where = `at (${p.map(fmt).join(", ")})`; break; }
+    } else if (!isEmpty(node.bounds)) {
+      // The member's box, when it says more than the step's own: a part of a def, or a part much smaller than its step.
+      const b = placedBounds(root, node, node.bounds);
+      const sb = placedBounds(root, step.value, step.value.bounds) ?? step.value.bounds;
+      if (!b) continue;
+      const smaller = [0, 1, 2].some((k) => b.max[k] - b.min[k] < 0.9 * (sb.max[k] - sb.min[k]));
+      if (origin?.def || origin?.file || smaller) where = `within x ${fmt(b.min[0])}..${fmt(b.max[0])} y ${fmt(b.min[1])}..${fmt(b.max[1])} z ${fmt(b.min[2])}..${fmt(b.max[2])}`;
+      break;
+    }
+  }
+  const fp = node.featureProfile;
+  const profileStep = fp ? evaluation.steps.find((st) => st.value === fp.profile) : undefined;
+  const inProfile = fp ? `(${fp.at.map(fmt).join(", ")}) in ${profileStep ? `the profile '${profileStep.name}' (line ${profileStep.line})` : "its profile"}` : undefined;
+  const whereText = [where ? `${where} in the model` : "", inProfile ?? ""].filter(Boolean).join(", ");
+  return {
+    made: madeAt,
+    where: whereText || undefined,
+    short: madeAt ?? (inProfile ? `${where ?? ""}${where ? ", " : ""}${inProfile}` : undefined),
+  };
+}
+
+/**
  * A part thinner than about a cell on any axis can drop out of the mesh
  * entirely (measured: rails at 0.9 of a cell vanished, a plate at 1.3
  * survived); say so from its bounds alone, so `check` can say it too.
  */
 export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: number, thin = 1.2): string[] {
-  const out: string[] = [];
+  return thinParts(evaluation, cellSize, grid, thin).map((p) => p.text);
+}
+
+/** The thin-part warnings with the step each names and the member as short as it can be said, for the quick pass's list. */
+export function thinParts(evaluation: Evaluation, cellSize: number, grid: number, thin = 1.2): { step: string; member?: string; text: string }[] {
+  const out: { step: string; member?: string; text: string }[] = [];
   const gridFor = (t: number) => Math.min(512, Math.ceil((grid * 2.5 * cellSize) / t));
   const reportedFeatures = new Set<number>();
+  // A feature is reported once, at the step that brought it in, and known by where it came from, not by its size:
+  // a bowl's 0.05 band went unnamed beside a 0.05 hook that had been named first (round 11).
+  const reportedSources = new Set<Shape3>();
   const notedShapes = new Set<Shape3>();
   const geometry = geometrySteps(evaluation);
   for (const st of evaluation.steps) {
     if (!isShape3(st.value) || !geometry.has(st.name) || isEmpty(st.value.bounds)) continue;
+    const step = { name: st.name, line: st.line, value: st.value };
     const ss = boundsSize(st.value.bounds);
     const t = Math.min(ss[0], ss[1], ss[2]);
     if (t > 0 && t < cellSize * thin) {
-      out.push(`'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).`);
-      // Its own feature size is settled too, or the union above it would repeat the warning under its own name
+      const m = thinMember(evaluation, step);
+      out.push({ step: st.name, member: m.made, text: `'${st.name}' (line ${st.line}) is only ${fmt(t)} units thin, ${fmt(t / cellSize)} of the ${fmt(cellSize)} cell${m.made ? ` (${m.made})` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(t)}).` });
+      // Its own feature is settled too, or the union above it would repeat the warning under its own name
       // (measured: 'house', forty parts, listed as thin for its mullion).
-      if (st.value.feature !== undefined) reportedFeatures.add(Math.round(st.value.feature * 1e6));
+      if (st.value.feature !== undefined) { const src = featureSource(st.value); reportedSources.add(src[src.length - 1]); }
       continue;
     }
     // An import is one step: nothing in its mesh thinner than its sampling cell survived, whatever the render grid.
     if (st.value.sampledAt !== undefined && st.value.sampledAt > cellSize * 1.05) {
-      out.push(`'${st.name}' (line ${st.line}) is an import sampled at cell ${fmt(st.value.sampledAt)}, coarser than this render's ${fmt(cellSize)}: anything in its mesh thinner than about ${fmt(st.value.sampledAt * 1.2)} (rails, hooks, rungs) is gone or broken, whatever the grid. Give import() resolution=${Math.ceil(Math.max(...boundsSize(st.value.bounds)) / cellSize)} to match.`);
+      out.push({ step: st.name, text: `'${st.name}' (line ${st.line}) is an import sampled at cell ${fmt(st.value.sampledAt)}, coarser than this render's ${fmt(cellSize)}: anything in its mesh thinner than about ${fmt(st.value.sampledAt * 1.2)} (rails, hooks, rungs) is gone or broken, whatever the grid. Give import() resolution=${Math.ceil(Math.max(...boundsSize(st.value.bounds)) / cellSize)} to match.` });
       continue;
     }
     // A gap (a letter's counters, a slot) narrower than a cell closes up; reported once per size like features.
@@ -274,28 +353,33 @@ export function thinWarnings(evaluation: Evaluation, cellSize: number, grid: num
         const what = st.value.gapWhat ?? "a gap (a letter's counters, the space between letters, a slot)";
         const between = /space between/.test(what);
         const fix = between ? "more spacing= or a lighter weight" : "a larger size or a lighter weight (under a quarter of the size for lowercase), or capitals";
-        out.push(
-          g <= 0
-            ? `'${st.name}' (line ${st.line}): ${what} closes up at this weight. Use ${fix}.`
-            : g < cellSize * 0.5
-              ? `'${st.name}' (line ${st.line}): ${what} is only ${fmt(g)} wide, ${fmt(g / cellSize)} of the ${fmt(cellSize)} cell, and closes up in the mesh. Use ${fix}, or raise the grid (set grid ${gridFor(g)}).`
-              : `'${st.name}' (line ${st.line}): ${what} is ${fmt(g)} wide, ${(g / cellSize).toFixed(2)} of the ${fmt(cellSize)} cell, so the mesh there may not be watertight. For a print or a clean GLB use ${fix}, or raise the grid (set grid ${gridFor(g)}).`,
-        );
+        out.push({
+          step: st.name,
+          text:
+            g <= 0
+              ? `'${st.name}' (line ${st.line}): ${what} closes up at this weight. Use ${fix}.`
+              : g < cellSize * 0.5
+                ? `'${st.name}' (line ${st.line}): ${what} is only ${fmt(g)} wide, ${fmt(g / cellSize)} of the ${fmt(cellSize)} cell, and closes up in the mesh. Use ${fix}, or raise the grid (set grid ${gridFor(g)}).`
+                : `'${st.name}' (line ${st.line}): ${what} is ${fmt(g)} wide, ${(g / cellSize).toFixed(2)} of the ${fmt(cellSize)} cell, so the mesh there may not be watertight. For a print or a clean GLB use ${fix}, or raise the grid (set grid ${gridFor(g)}).`,
+        });
       }
     }
     // What the constructor itself noticed, once, at the step that made it (a curve bent tighter than its tube).
     if (st.value.notes && !notedShapes.has(st.value)) {
       notedShapes.add(st.value);
-      for (const note of st.value.notes) out.push(`'${st.name}' (line ${st.line}): ${note}`);
+      for (const note of st.value.notes) out.push({ step: st.name, text: `'${st.name}' (line ${st.line}): ${note}` });
     }
     // A wall, tube or stroke inside a thick step: bounds cannot see it, so the shape carries the size itself.
-    // Reported once per size, at the step that introduced it, not again at every step built on top.
+    // Reported once per source, at the step that introduced it, not again at every step built on top; named by the
+    // call that made it and placed in the model.
     const f = st.value.feature;
     if (f === undefined || !(f > 0) || f >= cellSize * thin) continue;
-    const key = Math.round(f * 1e6);
-    if (reportedFeatures.has(key)) continue;
-    reportedFeatures.add(key);
-    out.push(`'${st.name}' (line ${st.line}) has a part (a wall, slat, rod, tube at its thin end, or stroke) only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).`);
+    const src = featureSource(st.value);
+    if (reportedSources.has(src[src.length - 1])) continue;
+    reportedSources.add(src[src.length - 1]);
+    const m = thinMember(evaluation, step);
+    const said = [m.made ? `made by ${m.made}` : "", m.where ?? ""].filter(Boolean).join(", ");
+    out.push({ step: st.name, member: m.short, text: `'${st.name}' (line ${st.line}) has a part (a wall, slat, rod, tube at its thin end, or stroke) only ${fmt(f)} thick, ${fmt(f / cellSize)} of the ${fmt(cellSize)} cell${said ? `, ${said}` : ""}: it may be missing or broken in the mesh. Thicken it to ${fmt(cellSize * 2)} (two cells) or raise the grid (set grid ${gridFor(f)}).` });
   }
   return out;
 }
@@ -584,16 +668,20 @@ function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): 
  */
 export function nearlyThin(evaluation: Evaluation, cellSize: number): string {
   const geometry = geometrySteps(evaluation);
-  const seen = new Set<number>();
+  const seen = new Set<Shape3>();
   const names: string[] = [];
   for (const st of evaluation.steps) {
     if (!isShape3(st.value) || !geometry.has(st.name)) continue;
     const f = st.value.feature;
     if (f === undefined || !(f >= cellSize * 1.2) || f >= cellSize * 2) continue;
-    const key = Math.round(f * 1e6);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    names.push(`'${st.name}' (${(f / cellSize).toFixed(1)} cells)`);
+    const src = featureSource(st.value);
+    if (seen.has(src[src.length - 1])) continue;
+    seen.add(src[src.length - 1]);
+    // The member as well as the step: a library's back panel called inline is 'plate' alone otherwise (round 11).
+    // Where it is only with what made it, to keep the note short: the step's name finds a part of its own.
+    const m = names.length < 6 ? thinMember(evaluation, { name: st.name, line: st.line, value: st.value }) : {};
+    const said = m.made ? [m.made, m.where].filter(Boolean).join(", ") : "";
+    names.push(`'${st.name}' (${(f / cellSize).toFixed(1)} cells${said ? `: ${said}` : ""})`);
   }
   if (!names.length) return "";
   return ` Parts between 1.2 and 2 cells thick mesh but often not watertight: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ", ..." : ""}; thicken them to two cells or raise the grid.`;
@@ -1111,14 +1199,24 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
     }
     if (opts.quick) {
       // The quick cell drops what the full grid keeps; say so on the sheet rather than let a missing plank look like a bug.
-      const dropped = [...new Set(thinWarnings(evaluation, cellSize, grid).map((w) => w.match(/^'([^']+)'/)?.[1] ?? "?"))];
+      // Each step once, with the member it carries when that is a def's part or a profile's point (round 11: 'model'
+      // named for a back panel built inside a library's case()).
+      const dropped: string[] = [];
+      for (const p of thinParts(evaluation, cellSize, grid)) if (!dropped.some((d) => d === p.step || d.startsWith(`${p.step} (`))) dropped.push(p.member ? `${p.step} (${p.member})` : p.step);
       // An import sampled finer than this pass's cell loses its thin parts here too (round 6: a quick sheet called an
       // imported playground twenty pieces).
-      for (const st of evaluation.steps) if (isShape3(st.value) && st.value.sampledAt !== undefined && st.value.sampledAt < cellSize && !dropped.includes(st.name)) dropped.push(st.name);
+      for (const st of evaluation.steps) if (isShape3(st.value) && st.value.sampledAt !== undefined && st.value.sampledAt < cellSize && !dropped.some((d) => d === st.name || d.startsWith(`${st.name} (`))) dropped.push(st.name);
+      // Under two cells a part meshes but often with holes and seams: a bowl's 0.05 wall at 1.3 quick cells was drawn
+      // as a sieve and named nowhere (round 11). Those are said too, without giving up the pieces count.
+      const named = (n: string) => dropped.some((d) => d === n || d.startsWith(`${n} (`));
+      const soft: string[] = [];
+      for (const p of thinParts(evaluation, cellSize, grid, 2)) if (!named(p.step) && !soft.some((d) => d === p.step || d.startsWith(`${p.step} (`))) soft.push(p.member ? `${p.step} (${p.member})` : p.step);
+      const list = (l: string[]) => { const sep = l.some((d) => d.includes(" (")) ? "; " : ", "; return `${l.slice(0, 6).join(sep)}${l.length > 6 ? `${sep}...` : ""}`; };
+      const softNote = soft.length ? `${dropped.length ? "; and " : ""}${soft.length} step${soft.length === 1 ? " is" : "s are"} under two of its cells and may show holes or seams here: ${list(soft)}` : "";
       if (dropped.length) {
         quickDropped = dropped.length;
-        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet (${dropped.slice(0, 6).join(", ")}${dropped.length > 6 ? ", ..." : ""}), so the pieces count and the footprint are not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
-      }
+        warnings.push(`quick pass: ${dropped.length} step${dropped.length === 1 ? " is" : "s are"} thinner than this pass's ${fmt(cellSize)} cell and may be missing or broken on this sheet: ${list(dropped)}${softNote}. So the pieces count and the footprint are not judged here; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
+      } else if (soft.length) warnings.push(`quick pass: at this pass's ${fmt(cellSize)} cell, ${softNote}; the full render at grid ${fullGrid} has cell ${fmt(fullCell)}.`);
     }
     // The true extent comes from the mesh: bounds are boxes, and a difference keeps the left side's box
     // however much was cut away, so a note based on bounds once told a scene on the floor to ground() itself.

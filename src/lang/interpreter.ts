@@ -65,7 +65,7 @@ export type StepRole = "part" | "cut" | "mask" | "region";
 export interface Settings {
   grid?: number;
   size?: number;
-  /** What one model unit is, for printing: mm, cm, m or in. */
+  /** What one model unit is, for printing: mm, cm, dm, m, in or ft. */
   units?: string;
   /** The printer's build volume in millimetres: width (x), depth (z), height (y). */
   bed?: number[];
@@ -83,6 +83,8 @@ export interface EvalOptions {
   resolveModule?: (path: string, from?: string) => { source: string; file: string };
   /** The file this program was read from, passed to resolveModule as `from`. */
   moduleFrom?: string;
+  /** For a library: the path its `use` gave, which its defs carry so a shape they build can say where it came from. */
+  moduleName?: string;
   /** The pose per joint name for this evaluation. Joints not named are at rest. */
   jointPoses?: Record<string, JointPose>;
   /** The name of that pose, so an `assert ..., pose=name` knows whether this is its evaluation. */
@@ -192,6 +194,21 @@ export interface Evaluation {
   asserts: AssertResult[];
   /** The pictures the program painted with, for the report. */
   images: ImageUse[];
+  /**
+   * Where each shape a builtin call made came from: the call, its line, and the def and library file it was in
+   * (round 11: a 0.1 back panel built inside a library's case() was named only as the step that called case()).
+   */
+  origins: WeakMap<object, ShapeOrigin>;
+}
+
+/** The call that made a shape: `box` at line 48, inside def `back_panel` of the library `shelf_lib`. */
+export interface ShapeOrigin {
+  callee: string;
+  line: number;
+  /** The innermost def being run when the call was made. */
+  def?: string;
+  /** The library that def is in, as its `use` gave the path; undefined for the program's own. */
+  file?: string;
 }
 
 /** A picture a material or a decal uses. */
@@ -320,6 +337,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   };
   let lastShape: { name: string } | undefined;
   let depth = 0;
+  /** The defs being run, innermost last, so a shape a builtin makes inside one can say which def and library made it. */
+  const defStack: UserFn[] = [];
+  const origins = new WeakMap<object, ShapeOrigin>();
   let loops = 0;
   /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
   const modules = new Map<string, { path: string; exports: Map<string, Value> }>();
@@ -787,6 +807,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
     if ((callee === "pieces" || callee === "overhang" || callee === "wall") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
     const result = callBuiltin(builtin, values, line);
+    // The first call to make a shape is where it came from; one that hands back its input unchanged keeps the input's.
+    if ((isShape3(result) || isShape2(result)) && !origins.has(result)) {
+      const fn = defStack[defStack.length - 1];
+      origins.set(result, { callee, line, def: fn?.name, file: fn?.file });
+    }
     if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
     if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
@@ -860,10 +885,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     });
     for (const a of named) if (!fn.params.some((p) => p.name === a.name)) throw new RuntimeError(`'${fn.name}' has no parameter '${a.name}'`, line);
     depth++;
+    defStack.push(fn);
     try {
       return evalExpr(fn.body, local);
     } finally {
       depth--;
+      defStack.pop();
     }
   }
 
@@ -1126,7 +1153,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "def":
-        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, closure: global });
+        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, closure: global, file: options.moduleName });
         return;
       case "use": {
         if (!topLevel) throw new RuntimeError(`use belongs at the top of the program, not inside a loop`, stmt.line);
@@ -1145,7 +1172,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // scope as their closure, so a library def sees its helpers and constants and nothing of the caller's.
         let lib: Evaluation;
         try {
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses });
+          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, moduleName: stmt.path, jointPoses: options.jointPoses });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
@@ -1330,7 +1357,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images, origins };
 }
 
 export function signature(name: string, ov: Overload): string {

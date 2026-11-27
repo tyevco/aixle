@@ -459,7 +459,11 @@ export function chainProfile(chain: Chain2, wall = 0): Shape2 {
   const all = Array.from({ length: pieces }, (_, s) => s);
   const dist = field(all);
   const out = shape2(dist, { min: [minx - half, miny - half], max: [maxx + half, maxy + half] }, pieces * COST_PER_PIECE);
-  out.feature = filled ? thinnestWall(chain, co, dist, [minx, miny, maxx, maxy]) : wall;
+  if (filled) {
+    const w = thinnestWall(chain, co, dist, [minx, miny, maxx, maxy]);
+    out.feature = w?.r;
+    out.featureAt = w?.at;
+  } else out.feature = wall;
   const off = all.filter((s) => !onAxis(s));
   if (filled && off.length < pieces && off.length > 0) out.revolveDist = field(off);
   return out;
@@ -479,7 +483,7 @@ const FACING = Math.cos((10 * Math.PI) / 180);
  * there is twice what the profile shows. Undefined when no two sides face
  * each other.
  */
-function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: number) => number, b: number[]): number | undefined {
+function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: number) => number, b: number[]): { r: number; at: [number, number] } | undefined {
   const { ctrl, pieces } = chain;
   const size = Math.max(b[2] - b[0], b[3] - b[1]);
   // Corners: where one piece's end tangent and the next one's start tangent part by more than 10 degrees.
@@ -503,6 +507,7 @@ function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: numb
     return true;
   };
   let best: number | undefined;
+  let bestAt: [number, number] = [0, 0];
   // Sixteen points a piece, fewer on a long outline so the build stays well under a second.
   const PER = Math.max(2, Math.min(16, Math.floor(1600 / pieces)));
   for (let s = 0; s < pieces; s++) {
@@ -532,10 +537,10 @@ function thinnestWall(chain: Chain2, co: Float64Array, dist: (x: number, y: numb
       if (g[0] * nx + g[1] * ny < FACING) continue;
       if (nearCorner(px, py, r) || nearCorner(hx, hy, r)) continue;
       if (Math.abs(hx) < eps * 10 && Math.abs(px) > eps * 10 && axisAt(chain, hy, eps * 10)) continue;
-      if (best === undefined || r < best) best = r;
+      if (best === undefined || r < best) { best = r; bestAt = [(px + hx) / 2, (py + hy) / 2]; }
     }
   }
-  return best;
+  return best === undefined ? undefined : { r: best, at: bestAt };
 }
 
 /** Whether the chain has a straight run on x = 0 that covers height y (the far side of a march that ended on the axis). */

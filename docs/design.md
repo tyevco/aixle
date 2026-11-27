@@ -494,6 +494,20 @@ one along (a scale multiplies it by its smallest factor). The thin-part
 warning reads it next to the cell size and names the step that introduced
 it, which is the line to edit.
 
+A feature is known by where it came from, not by its size: the warning
+walks down from a step through every child that carries the same size
+(a union's thinnest part, a move or a paint of it, a joint's child) to
+the node that introduced it, and two steps that reach the same node are
+one thin part. It used to report a size once, so a bowl's 0.05 band went
+unnamed beside a 0.05 hook named first (round 11). The interpreter
+remembers which builtin call made each shape, and in which def and
+library file, so the warning can name a member a step called inline (a
+0.1 back panel built by `box()` in a library's `back_panel()`, which was
+'plate' alone), and the node's box, carried through the transforms above
+it, says where it is. A `curve2` outline knows the point of its thinnest
+wall, and an extrude or a revolve lays that point into its own frame, so
+a sliver on a 46-point outline is placed in the profile and in the model.
+
 ## Glass, a light with a size, depth of field
 
 A transmitting material is shaded by continuing the ray: refract in at the

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
 
@@ -274,6 +274,62 @@ describe("rigs, features and overhangs", () => {
       const cube = run("m = box(2)", "cube.aix", dir, { ...QUICK, grid: 16 });
       expect(cube.physics?.overhang ?? 1).toBe(0);
       expect(cube.report).toMatch(/Overhangs \| 0\.0% of the surface faces down more than 45° above the floor \|/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("thin parts, named and placed", () => {
+  it("names a curve2 band beside a part of the same thickness, whatever its centre line does", () => {
+    // Round 11's mixer: a bowl revolved from curve2(..., wall=0.05) with a three-quarter curl at its rim, beside a
+    // 0.05 hook. The thin parts were reported once per size, so the hook, named first, hid the bowl.
+    const src = [
+      "def curl_pt(deg) = [1.145 - 0.055 * cos(deg), 1.65 + 0.055 * sin(deg)]",
+      "line = [0,0.14, 0.5,0.17, 0.88,0.5, 1.06,1.25, 1.09,1.65] + curl_pt(45) + curl_pt(90) + curl_pt(135) + curl_pt(180) + curl_pt(225)",
+      "hook = box(0.05, 0.3, 0.2) | move(1.5, 0.2, 0)",
+      "wall = revolve(curve2(line, wall=0.05))",
+      "m = hook + wall",
+    ].join("\n");
+    const w = thinWarnings(check(src), 0.06, 64).join("\n");
+    expect(w).toMatch(/'hook' \(line 3\) is only 0.05 units thin/);
+    expect(w).toMatch(/'wall' \(line 4\) has a part \(a wall, slat, rod, tube at its thin end, or stroke\) only 0.05 thick/);
+    // 'm' brings in nothing new: both its 0.05 parts were named at their own steps.
+    expect(w).not.toMatch(/'m'/);
+    // Two copies of one part are one thin part, named once.
+    const twice = thinWarnings(check("rod = cylinder(0.02, 1)\nrods = rod + (rod | move(0.5, 0, 0))\nm = rods + box(1, 1, 1)"), 0.05, 64);
+    expect(twice.filter((x) => /0.04 (units thin|thick)/.test(x))).toHaveLength(1);
+  });
+  it("says where a thin wall of an outline is, in the profile's plane and in the model", () => {
+    // Two blocks joined by a 0.02 neck along y = 2, x 4..6 in the profile; extruded along x, turned and moved.
+    const src = "side = curve2([0,0, 0,0, 4,0, 4,0, 4,1.99, 4,1.99, 6,1.99, 6,1.99, 6,0, 6,0, 10,0, 10,0, 10,4, 10,4, 6,4, 6,4, 6,2.01, 6,2.01, 4,2.01, 4,2.01, 4,4, 4,4, 0,4, 0,4])\nbody = extrude(side, 3, \"x\") | flip(\"z\") | move(1, 0, 2)";
+    const w = thinWarnings(check(src), 0.08, 128).join("\n");
+    const m = w.match(/'body' \(line 2\) has a part .* only 0.02 thick, [\d.]+ of the 0.08 cell, at \(1, 2, ([\d.]+)\) in the model, \(([\d.]+), 2\) in the profile 'side' \(line 1\):/);
+    expect(m).not.toBeNull();
+    // The profile's x is the model's z after the flip, moved by 2; the point is on the neck.
+    expect(Number(m![1])).toBeCloseTo(Number(m![2]) + 2, 2);
+    expect(Number(m![2])).toBeGreaterThan(4);
+    expect(Number(m![2])).toBeLessThan(6);
+  });
+  it("names the member a def built, its line and its library, and where it is, for a def called inline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // Round 11's bookcase: a 0.1 back panel built inside a library's case(), called inline in 'plate'.
+      writeFileSync(join(dir, "shelves.aix"), "# a case\ndef back(w) = box(w, 2, 0.05) | move(0, 1, -0.52)\ndef case(w) = box(w, 2, 1) | move(0, 1, 0) + back(w)\n");
+      const prog = join(dir, "room.aix");
+      const src = 'use "shelves" as lib\nball = sphere(0.3) | move(0, 2.2, 0)\ncap = box(0.6, 0.2, 0.6) | move(0, 2.05, 0)\nleg = box(0.5, 0.5, 0.5) | move(0.6, 2.2, 0)\nplate = lib.case(2) + ball + cap + leg';
+      writeFileSync(prog, src);
+      const ev = check(src, prog);
+      const w = thinWarnings(ev, 0.1, 64).join("\n");
+      expect(w).toMatch(/'plate' \(line 5\) has a part \(a wall, slat, rod, tube at its thin end, or stroke\) only 0.05 thick, 0.5 of the 0.1 cell, made by box\(\) in def back at shelves.aix line 2, within x -1..1 y 0..2 z -0.545..-0.495 in the model:/);
+      // Between 1.2 and 2 cells, the note names it the same way.
+      expect(nearlyThin(ev, 0.035)).toMatch(/'plate' \(1.4 cells: box\(\) in def back at shelves.aix line 2, within x -1..1 y 0..2 z -0.545..-0.495 in the model\)/);
+      // A def in the program itself has no file to name.
+      const own = check("def case(w) = box(w, 2, 1) + (box(w, 2, 0.05) | move(0, 0, -0.52))\nplate = case(2) + sphere(0.3)");
+      expect(thinWarnings(own, 0.1, 64).join()).toMatch(/made by box\(\) in def case at line 1, within x -1..1 y -1..1 z -0.545..-0.495 in the model/);
+      // The quick pass's list names the member beside the step.
+      const q = run(src, prog, join(dir, "out"), { ...QUICK, grid: 24 });
+      expect(q.warnings.join()).toMatch(/quick pass: 1 step is thinner than this pass's [\d.]+ cell and may be missing or broken on this sheet: plate \(box\(\) in def back at shelves.aix line 2\); and 1 step is under two of its cells and may show holes or seams here: cap\./);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

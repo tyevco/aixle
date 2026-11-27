@@ -295,9 +295,12 @@ circle (glass on it renders clean).
   groove after the revolve (`revolve(p) - torus(...)`), not in the
   profile.
 - A closed outline carries its thinnest wall (two sides facing each other)
-  for the thin-part warning, so a vase drawn as one outline with a wall
-  under a cell is named; a straight run on x = 0 is not counted, since the
-  solid there is twice what the profile shows.
+  and where it is for the thin-part warning, so a vase drawn as one
+  outline with a wall under a cell is named, with the point in the
+  profile's plane and in the model; a straight run on x = 0 is not
+  counted, since the solid there is twice what the profile shows. A band
+  (`wall=`) carries its width exactly, whatever its centre line does: a
+  curl at the rim is the same 0.05 band.
 
 A smooth profile costs more per sample than a polygon of as many points
 (measured: a 22-point vase meshes in 1.5 s against 0.65 s for the 18-point
@@ -1029,7 +1032,10 @@ coarse mesh, as the render judges its own, so the two agree.
 than the small grid's cell), in a second or two; `--watch` re-renders on every save; `aixle diff a.aix
 b.aix` draws two versions side by side, A on the left, for judging a
 change. Use the full render for the final check: the quick grid drops
-detail thinner than its cell, and the sheet says which steps it dropped.
+detail thinner than its cell, and the sheet says which steps it dropped
+(with the def's part when a step called one inline, `plate (box() in def
+back_panel at shelf_lib.aix line 49)`) and which are under two of its
+cells and may show holes or seams (a bowl's wall drawn as a sieve).
 When it dropped any, the pieces count and the footprint are not judged
 on that sheet, since the dropped steps are often the joins or the feet; a bucket's teeth or a rail are
 blobs or gone at a quick cell, so judge a working end at full grid, with
@@ -1100,7 +1106,16 @@ or a wall meshes but often not watertight, and the report names such
 parts when the mesh has open edges; a rigging line wants about three
 cells across to be clean, measured on a dinghy), including a `shell` wall, a
 `tube`, a `sweep` profile or a `text` stroke inside a thick part (those
-carry their own thickness, since a bounding box cannot see it); a
+carry their own thickness, since a bounding box cannot see it; each is
+named once, at the step that brought it in, and known by the part it
+came from rather than by its size, so a bowl's 0.05 band is named
+beside a 0.05 hook; the warning says which call made it, in which def
+and library file, as `made by box() in def back_panel at shelf_lib.aix
+line 49`, and where it is in the model, a box `within x -1.84..1.84 y
+0..6.9 z -1.5..-1.4`, or for an extruded or revolved `curve2` outline
+the point of its thinnest wall, `at (0, 119.3, -29.4) in the model,
+(-29.4, 119.3) in the profile 'side' (line 62)`; the 1.2-to-2-cell note
+names a def's part the same way); a
 lettering counter or a slot under a cell (under half a cell it closes,
 between half and one it survives but the mesh round it may not be
 watertight); a union that paints over parts that already had materials,
