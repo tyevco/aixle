@@ -15,7 +15,7 @@ import type { Vec3 } from "../core/vec.js";
 import { allJoints, findJoints, move as moveShape, reliefMaterials } from "../sdf/ops.js";
 import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
-import { decimate, faceDeviation } from "../mesh/decimate.js";
+import { decimateMeshes, faceDeviation } from "../mesh/decimate.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
 import { bakeAtlas, type AtlasResult, type BakeField, type MaterialMaps, type NormalStats } from "./atlas.js";
 
@@ -59,9 +59,12 @@ export interface SceneHierarchy {
   /**
    * Set when the meshes were decimated to `maxTriangles`: the count before, and the largest |field| at a face
    * centre of the decimated meshes and of the same meshes before (each read with its own joints hidden, as it was
-   * extracted), so a report can say how far the export strays from the model and how much of that the mesher did.
+   * extracted), so a report can say how far the export strays from the model and how much of that the mesher did;
+   * and per mesh, the node it is for and its count before and after, which says how the cap was shared out.
    */
-  decimated?: { before: number; deviation: number; fullDeviation: number };
+  decimated?: { before: number; deviation: number; fullDeviation: number; where?: string; meshes: { name: string; before: number; after: number }[]; flat: number };
+  /** Per mesh, the name of the node that carries it (an object, a joint, a placed set). */
+  meshNames: string[];
 }
 
 export interface HierarchyOptions {
@@ -74,7 +77,7 @@ export interface HierarchyOptions {
   /** Atlas size in pixels; 0 for none. */
   texture: number;
   maxResolution?: number;
-  /** Decimate the meshes to at most this many triangles in all (a Roblox budget), each taking its share, before the atlas is baked. */
+  /** Decimate the meshes to at most this many triangles in all (a Roblox budget, the web cap) by one queue over all of them, before the atlas is baked. */
   maxTriangles?: number;
   /** false bakes the colour atlas alone, as before the PBR maps (the Roblox export keeps to that). Default true. */
   maps?: boolean;
@@ -134,7 +137,8 @@ export function offsetToJoint(root: Shape3, j: Shape3): { offset: Vec3; rigid: b
 export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts: HierarchyOptions): SceneHierarchy {
   const meshes: Mesh[] = [];
   const sources: MeshSource[] = [];
-  const addMesh = (m: Mesh, src: MeshSource): number => { meshes.push(m); sources.push(src); return meshes.length - 1; };
+  const meshNames: string[] = [];
+  const addMesh = (m: Mesh, src: MeshSource, name: string): number => { meshes.push(m); sources.push(src); meshNames.push(name); return meshes.length - 1; };
   // How far a mesh in a source's place strays from the field it was extracted from: the shape with the same joints
   // and placed sets hidden as at extraction, the mesh moved back by the node's offset.
   const stray = (i: number, mm: Mesh): number => {
@@ -177,7 +181,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     for (const n of baseJoints) n.joint!.hidden = true;
     const m = extract(base, opts);
     for (const n of baseJoints) n.joint!.hidden = false;
-    const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }) : -1;
+    const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }, name) : -1;
     return {
       name,
       mesh: -1,
@@ -212,7 +216,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     const pivot: Vec3 = [st.pivot[0] + offset[0], st.pivot[1] + offset[1], st.pivot[2] + offset[2]];
     const node: SceneNode = {
       name: st.name,
-      mesh: triangleCount(own) ? addMesh(shifted(own, pivot), { shape: child, offset: pivot, joints: nested, sets }) : -1,
+      mesh: triangleCount(own) ? addMesh(shifted(own, pivot), { shape: child, offset: pivot, joints: nested, sets }, st.name) : -1,
       translation: [pivot[0] - parentOrigin[0], pivot[1] - parentOrigin[1], pivot[2] - parentOrigin[2]],
       yaw: 0,
       scale: 1,
@@ -231,7 +235,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       for (const n of baseJoints) n.joint!.hidden = true;
       const m = extract(base, opts);
       for (const n of baseJoints) n.joint!.hidden = false;
-      const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }) : -1;
+      const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }, obj.name) : -1;
       roots.push({
         name: obj.name,
         mesh: -1,
@@ -260,7 +264,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     for (const s of sets) s.instanced!.hidden = false;
     roots.push({
       name: obj.name,
-      mesh: triangleCount(own) ? addMesh(own, { shape: obj.shape, offset: [0, 0, 0], joints, sets }) : -1,
+      mesh: triangleCount(own) ? addMesh(own, { shape: obj.shape, offset: [0, 0, 0], joints, sets }, obj.name) : -1,
       translation: [0, 0, 0],
       yaw: 0,
       scale: 1,
@@ -282,25 +286,30 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
 
   let triangles = 0;
   for (const m of meshes) triangles += triangleCount(m);
-  // A budget is for the whole export: each mesh gives up the same share, so a jointed pet's ten bones together
-  // come in under an accessory's four thousand rather than each taking four thousand of its own.
+  // A budget is for the whole export, shared by error: one queue over every mesh takes the flattest collapse
+  // wherever it is, so a jointed pet's ten bones together come in under an accessory's four thousand, and a flat wall
+  // gives up its triangles before the studs on the door beside it give up any (round 11: with the same share each, a
+  // wall kept 35196 of a 54996 cap and the whole torch 1226).
   let decimated: SceneHierarchy["decimated"];
   if (opts.maxTriangles && triangles > opts.maxTriangles) {
-    const share = opts.maxTriangles / triangles;
-    let deviation = 0, fullDeviation = 0;
+    const { meshes: out, flat } = decimateMeshes(meshes, opts.maxTriangles, opts.crease ?? 35);
+    let deviation = 0, fullDeviation = 0, where: string | undefined;
+    const perMesh: { name: string; before: number; after: number }[] = [];
     for (let i = 0; i < meshes.length; i++) {
-      const d = decimate(meshes[i], Math.max(4, Math.floor(triangleCount(meshes[i]) * share)), opts.crease ?? 35);
+      const d = out[i];
+      perMesh.push({ name: meshNames[i], before: triangleCount(meshes[i]), after: triangleCount(d) });
       if (d !== meshes[i]) {
         fullDeviation = Math.max(fullDeviation, stray(i, meshes[i]));
-        deviation = Math.max(deviation, stray(i, d));
+        const dv = stray(i, d);
+        if (dv > deviation) { deviation = dv; where = meshNames[i]; }
       }
       meshes[i] = d;
     }
-    decimated = { before: triangles, deviation, fullDeviation };
+    decimated = { before: triangles, deviation, fullDeviation, ...(where ? { where } : {}), meshes: perMesh, flat };
     triangles = 0;
     for (const m of meshes) triangles += triangleCount(m);
   }
-  const out: SceneHierarchy = { roots, meshes, triangles, notes, pbr: opts.maps !== false, ...(decimated ? { decimated } : {}) };
+  const out: SceneHierarchy = { roots, meshes, meshNames, triangles, notes, pbr: opts.maps !== false, ...(decimated ? { decimated } : {}) };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);
     // Each mesh's triangles read the field they were extracted from, with the same joints and sets hidden.

@@ -881,7 +881,16 @@ export is decimated before the atlas is baked, keeping material seams
 and creases, and the report's Exports row says from how many and how far
 the result strays from the model at a face centre, beside the full
 mesh's own; a decimation that strays more than a cell and further than
-the full mesh warns. The sheet and the STL are never decimated. Down to
+the full mesh warns. The cap is for the whole export and is shared by
+error, not by count: one queue over every mesh of a scene takes the
+flattest faces first wherever they are, so a flat wall gives up its
+triangles before the studs on the door beside it give up any, and a
+part the cap does not need keeps its full mesh. The Exports row lists
+each mesh's count before and after, and how far merging flat faces alone
+would go: a cap at or above that number strays no further than the full
+mesh, so it is the cap to ask for when the file should be small. There
+is no cap per object; the shared queue already spends the triangles
+where the surface curves. The sheet and the STL are never decimated. Down to
 about a quarter of the mesh the export reads as the full one; below
 that, curved bands between soft corners (a lathe profile's bends) shade
 in streaks though the surface is in place, and the row says so: read
@@ -916,8 +925,8 @@ the Normal body scale (the reference lists every attachment name the
 export knows with its limit: a hat 1.87 × 2.5 × 1.87 studs, a face piece
 1.87 × 1.25 × 1.25, a back piece 9.86 × 8.59 × 4.87), and decimates the
 mesh to the budget: a rigid accessory's 4000 triangles when there is an
-Attachment anchor (shared across the meshes of a jointed model, each
-giving up the same share), a MeshPart's 10000 per mesh otherwise, by
+Attachment anchor (shared across the meshes of a jointed model by the
+same queue as the web cap, the flattest faces first), a MeshPart's 10000 otherwise, by
 quadric edge collapses that never cross a material seam or fold a face,
 so a hat meshed at grid 96 goes out at 4000 with its brim, band and
 crown. A jointed model exports its joints as nodes under `Handle` and

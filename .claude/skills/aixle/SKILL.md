@@ -87,8 +87,10 @@ Reference: `docs/reference.md` (every function, generated from the code),
    millimetres with z up, and `model.3mf` carries the unit and the
    materials' colours (`--3mf` without units).
    The GLB, OBJ and viewer are decimated past 200 thousand triangles
-   (`--triangles N` or `set triangles N`, 0 for all; the report's
-   Exports row says how far they stray; below a quarter of the mesh
+   (`--triangles N` or `set triangles N`, 0 for all; the cap is shared
+   by error over every mesh, flat faces first, and the report's Exports
+   row says how far they stray, each mesh's share and the cap below
+   which detail starts to go; below a quarter of the mesh
    curved bands shade in streaks, so read the viewer). An `import()`
    is sampled once and cached on disk for the next `check` or `render`
    (`--no-cache` samples afresh).

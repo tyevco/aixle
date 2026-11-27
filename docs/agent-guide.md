@@ -198,8 +198,10 @@ plays a rig's animations (loop, speed, a scrub bar, all in turn), and
 a normal map for bumps and fine `displace` relief, a metallic-roughness
 map for wear and rust and an emissive one for a patterned glow where the
 program has them, so it looks the same wherever it is loaded. Past 200
-thousand triangles the GLB, OBJ and viewer are decimated (the report's
-Exports row says from how many and how far they stray); below a quarter
+thousand triangles the GLB, OBJ and viewer are decimated, the cap shared
+by error over every mesh so flat faces go first (the report's Exports row
+says from how many, how far they stray, each mesh's share, and the cap
+below which detail starts to go); below a quarter
 of the mesh (`--triangles`) curved bands shade in streaks, so read the
 viewer.
 

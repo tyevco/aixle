@@ -249,6 +249,25 @@ grid 300 still makes a file a browser opens. The sheet and the STL are
 never decimated: the sheet is how the model is checked, and the STL is
 for a printer, which wants every cell.
 
+The budget is the export's, not each mesh's, and it is spent by error:
+the meshes of a scene go into one queue and the cheapest collapse goes
+first wherever it is. Round 11 shipped a dungeon door at a cap of 55
+thousand when every mesh gave up the same share of its own count: the
+flat stone wall kept 35196 triangles and the whole torch 1226, with the
+studs and the ring faceted. With one queue the wall's flat faces go
+first; at the same cap the ring and the torch keep their full meshes and
+the largest deviation is the full mesh's own; at 15 thousand the wall is
+down to 3570 and the ring still whole, and at 8 thousand the largest
+deviation has grown by 1%. The queue also
+counts how far merging only flat faces would go (a collapse that moves a
+vertex less than a ten-thousandth of an edge off its planes), without
+keeping those collapses, so the report can name the cap below which the
+export starts to cost detail. A per-object cap was considered and not
+built: what it would buy, triangles where a part needs them, is what the
+shared queue does without being asked; an object that must look better
+than its error says (a hero prop beside the camera) is the case it
+would serve, and none has come up.
+
 How far a decimated export strays is measured where it strays most:
 the vertices are the mesher's own and lie on the surface, so the
 error is in the middle of the widest faces, and the report gives the

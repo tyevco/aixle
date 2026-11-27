@@ -566,6 +566,19 @@ export function assertsRow(asserts: AssertResult[]): string {
   return `${passed} pass, ${failed.length} fail: ${failed.map((a) => assertLine(a).replace(/^assert /, "")).join("; ")}`;
 }
 
+/**
+ * How the export's triangle cap was shared out, for the Exports row (round 11: "nothing says how the cap is shared
+ * out between objects"): one queue over every mesh takes the flattest collapse wherever it is, so each mesh's count
+ * before and after, the largest first, and how far merging only flat faces would go.
+ */
+export function capShare(note: { meshes: { name: string; before: number; after: number }[]; flat: number; triangles: number }): string {
+  const each = [...note.meshes].sort((a, b) => b.before - a.before);
+  const list = each.slice(0, 6).map((m) => (m.after === m.before ? `${m.name} ${m.before} (whole)` : `${m.name} ${m.before} to ${m.after}`)).join(", ") + (each.length > 6 ? `, and ${each.length - 6} more (report.json under exports)` : "");
+  const shared = note.meshes.length > 1 ? `The cap is shared by error, one queue over every mesh taking the flattest faces first: ${list}` : `By error, the flattest faces first: ${list}`;
+  const flat = note.flat < note.triangles ? `; merging flat faces alone comes to ${note.flat}, so a cap of that or more strays no further than the full mesh` : `; merging flat faces alone came to ${note.flat}, and the rest of the cut came from curved ones`;
+  return shared + flat;
+}
+
 /** The pieces row: the count without cavities, and for every piece but the largest its volume, centre and step. */
 function piecesRow(physics: Physics, evaluation: Evaluation, cellSize: number): string {
   const solid = physics.pieces.filter((pc) => !pc.cavity && !isSpeck(pc, physics, cellSize));
@@ -1049,7 +1062,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   let robloxNote: string | undefined;
   let mapsNote: string | undefined;
   // Set when the GLB, OBJ and viewer were decimated to the web cap, for the report.
-  let exportsNote: { triangles: number; cap: number; cell: number; before: number; deviation: number; fullDeviation: number } | undefined;
+  let exportsNote: { triangles: number; cap: number; cell: number; before: number; deviation: number; fullDeviation: number; where?: string; meshes: { name: string; before: number; after: number }[]; flat: number } | undefined;
   // A Roblox accessory hangs on an attachment and never stands, so its balance is not worth a warning.
   const robloxAccessory = (opts.roblox ?? evaluation.settings.roblox === 1) && !!rest.output && Object.keys(anchorsOf(rest.output)).some((n) => /Attachment$/.test(n));
   let mesh: Mesh | undefined;
@@ -1640,7 +1653,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       `| Bounds | x ${fmt(bounds.min[0])}..${fmt(bounds.max[0])}, y ${fmt(bounds.min[1])}..${fmt(bounds.max[1])}, z ${fmt(bounds.min[2])}..${fmt(bounds.max[2])} (a box; loose after a cut, a rotation or a twist) |`,
       ...(trueBounds ? (() => { const e = clampBounds(trueBounds!, bounds!); return [`| Surface extent | x ${fmt(e.min[0])}..${fmt(e.max[0])}, y ${fmt(e.min[1])}..${fmt(e.max[1])}, z ${fmt(e.min[2])}..${fmt(e.max[2])} (from the mesh, within the bounds) |`]; })() : []),
       `| Triangles | ${triangleCount(mesh)} (${vertexCount(mesh)} vertices) |`,
-      ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}; the sheet and the STL are the full mesh |`] : []),
+      ...(exportsNote ? [`| Exports | ${exportsNote.triangles} triangles in the GLB, OBJ and viewer, decimated from ${exportsNote.before} (set triangles ${exportsNote.cap}; 0 for all of them): at most ${fmt(exportsNote.deviation)} from the surface at a face centre${exportsNote.where && exportsNote.meshes.length > 1 ? ` (in ${exportsNote.where})` : ""}, ${fmt(exportsNote.deviation / exportsNote.cell)} of a cell (the full mesh ${fmt(exportsNote.fullDeviation)})${exportsNote.triangles < exportsNote.before / 4 ? `; at ${Math.round((100 * exportsNote.triangles) / exportsNote.before)}% of the mesh, curved bands and soft corners shade flatter than on the sheet though the surface is in place, so read viewer.html` : ""}. ${capShare(exportsNote)}; the sheet and the STL are the full mesh |`] : []),
       `| Volume | ${fmt(Math.abs(meshVolume(mesh)))} cubic units |`,
       `| Grid | ${grid} cells on the longest side, cell ${fmt(cellSize)} units |`,
       `| Watertight${shownPose ? ` (in pose ${shownPose}; the exports are at rest)` : ""} | ${watertightNote(wt, evaluation, cellSize, edgeList, !!shownJoints) + (wt.ok ? "" : nearlyThin(evaluation, cellSize))} |`,
@@ -1759,7 +1772,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         bounds,
         size: bounds ? boundsSize(bounds) : undefined,
         triangles: mesh ? triangleCount(mesh) : 0,
-        exports: exportsNote ? { triangles: exportsNote.triangles, before: exportsNote.before, cap: exportsNote.cap, deviation: exportsNote.deviation, fullDeviation: exportsNote.fullDeviation } : undefined,
+        exports: exportsNote ? { triangles: exportsNote.triangles, before: exportsNote.before, cap: exportsNote.cap, deviation: exportsNote.deviation, fullDeviation: exportsNote.fullDeviation, where: exportsNote.where, meshes: exportsNote.meshes, flat: exportsNote.flat } : undefined,
         cellSize,
         grid,
         materials: mesh?.materials.map((m) => m.name) ?? [],

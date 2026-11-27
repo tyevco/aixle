@@ -390,6 +390,28 @@ describe("a triangle cap on the exports", () => {
     expect(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x - 5, y, z) - 1, [5, 0, 0])).toBeCloseTo(faceDeviation(sphereMesh, (x, y, z) => Math.hypot(x, y, z) - 1), 9);
     expect(triangleCount(h.meshes[0]) + triangleCount(h.meshes[1])).toBe(h.triangles);
   });
+  it("shares the cap by error over every mesh: a flat box gives up its triangles and a sphere beside it keeps them", () => {
+    // Round 11: each mesh kept the same share of its own count, so a flat wall kept 35196 of a 54996 cap.
+    const cell = 0.025;
+    const slab = O.move(P.box(2, 1, 0.5), 0, 0.5, 0);
+    const ball = O.move(P.sphere(0.4), 2, 0.4, 0);
+    const full = buildHierarchy([{ name: "slab", shape: slab }, { name: "ball", shape: ball }], { cellSize: cell, texture: 0 });
+    const [slabN, ballN] = full.meshes.map((m) => m.indices.length / 3);
+    const cap = Math.round(ballN * 1.2);
+    const h = buildHierarchy([{ name: "slab", shape: slab }, { name: "ball", shape: ball }], { cellSize: cell, texture: 0, maxTriangles: cap });
+    expect(h.triangles).toBeLessThanOrEqual(cap);
+    const [slabD, ballD] = h.meshes.map((m) => m.indices.length / 3);
+    // The flat box keeps a few percent; the sphere, all but a few.
+    expect(slabD).toBeLessThan(slabN * 0.1);
+    expect(ballD).toBeGreaterThan(ballN * 0.95);
+    // Nothing curved was given up for the cap, so the export strays no further than the full mesh.
+    expect(h.decimated!.deviation).toBeLessThanOrEqual(h.decimated!.fullDeviation * 1.05);
+    // How it was shared, by node, for the report, and how far the flat faces alone could go.
+    expect(h.decimated!.meshes).toEqual([{ name: "slab", before: slabN, after: slabD }, { name: "ball", before: ballN, after: ballD }]);
+    // The flat faces alone come down to the sphere and a few hundred of the box's.
+    expect(h.decimated!.flat).toBeLessThan(ballN + slabN * 0.1);
+    expect(h.decimated!.flat).toBeGreaterThanOrEqual(ballN);
+  });
   it("caps the GLB, OBJ and viewer at set triangles, says so in the report, and leaves the sheet and the STL whole", () => {
     const dir = mkdtempSync(join(tmpdir(), "aixle-"));
     try {
@@ -413,6 +435,9 @@ describe("a triangle cap on the exports", () => {
       expect(data.exports.triangles).toBe(tris);
       expect(data.exports.cap).toBe(3000);
       expect(data.triangles).toBe(full);
+      // How the cap was shared, by mesh, and how far merging flat faces alone would go.
+      expect(data.exports.meshes).toEqual([{ name: "v", before: data.exports.before, after: tris }]);
+      expect(report).toMatch(new RegExp(`By error, the flattest faces first: v ${data.exports.before} to ${tris}; merging flat faces alone (comes|came) to ${data.exports.flat}`));
       // 0 is the full mesh, and the run's option wins over the program's setting.
       const whole = run(src, "cup.aix", join(dir, "whole"), { ...opts, triangles: 0 });
       expect(whole.report).not.toMatch(/\| Exports \|/);
