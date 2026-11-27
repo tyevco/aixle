@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { check, run, type RunOptions } from "../src/pipeline.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { renderBeauty, type BeautyOptions } from "../src/render/beauty.js";
-import { fieldCheck, fieldMatches, lastPoolRows, openBeautyPool } from "../src/render/beauty-pool.js";
+import { fieldCheck, fieldMatches, lastPoolRows, openBeautyPool, poolWorkerRows } from "../src/render/beauty-pool.js";
 import { importResolver, replayedImports } from "../src/resolvers.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { parse } from "../src/lang/parser.js";
@@ -57,16 +57,16 @@ describe("the beauty render on the pool", () => {
     const opts = { slice: "nose" };
     // The first run on four threads starts the workers; the later ones find the program already built.
     const cold = pictures(POSED, "posed.aix", 4, opts);
+    const before = poolWorkerRows();
     const one = pictures(POSED, "posed.aix", 1, opts);
     expect(Object.keys(one)).toEqual(["beauty.png", "beauty_side.png", "lights.png"]);
     for (const [t, got] of [[4, cold], [2, pictures(POSED, "posed.aix", 2, opts)], [4, pictures(POSED, "posed.aix", 4, opts)]] as const) {
       expect(Object.keys(got), `${t} threads`).toEqual(Object.keys(one));
       for (const f of Object.keys(one)) expect(sha(got[f]), `${f} on ${t} threads`).toBe(sha(one[f]));
     }
-    // The workers ran under the test runner (through tsx) and drew rows of the last picture.
-    const rows = lastPoolRows();
-    expect(rows.length).toBe(4);
-    expect(rows.slice(1).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+    // The workers, built under the test runner through tsx, drew rows of those pictures.
+    expect(lastPoolRows().length).toBe(4);
+    expect(poolWorkerRows()).toBeGreaterThan(before);
   });
 
   it("draws an imported mesh the same on 1, 2 and 4 threads", () => {
@@ -78,7 +78,6 @@ describe("the beauty render on the pool", () => {
     const one = pictures(IMPORTED, name, 1);
     expect(Object.keys(one)).toEqual(["beauty.png", "beauty_low.png", "lights.png"]);
     for (const got of [cold, pictures(IMPORTED, name, 2), pictures(IMPORTED, name, 4)]) for (const f of Object.keys(one)) expect(sha(got[f]), f).toBe(sha(one[f]));
-    expect(lastPoolRows().slice(1).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
   });
 
   it("builds an import from the samples the main evaluation recorded, never from the file", () => {
@@ -132,7 +131,6 @@ describe("the classic kernel", () => {
       expect(sha(renderBeauty(x.shape, x.mesh, x.shape.bounds, { ...opts, glowMask: mask, pool }).data)).toBe(want);
       // The glow mask is filled on the main thread from every thread's rows.
       expect(mask.reduce((a, b) => a + b, 0)).toBe(x === g ? 97 : 0);
-      expect(lastPoolRows().slice(1).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
       pool.close();
     }
   });
@@ -157,10 +155,23 @@ describe("the classic kernel", () => {
     const four = renderBeauty(x.shape, x.mesh, x.shape.bounds, { ...opts, pool });
     pool.close();
     expect(sha(four.data)).toBe(sha(one.data));
-    expect(lastPoolRows().slice(1).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
     // And the same through run() at 1 and 4 threads.
     const a = pictures(src, "twins.aix", 1), b = pictures(src, "twins.aix", 4);
     expect(sha(b["beauty.png"])).toBe(sha(a["beauty.png"]));
+  });
+
+  it("starts its workers under the test runner, through tsx, and they draw rows beside the main thread", () => {
+    const g = scene(GLASS, "glass.aix", 40);
+    const opts: BeautyOptions = { ...GLASS_OPTS, size: 256, cellSize: g.cell };
+    const one = renderBeauty(g.shape, g.mesh, g.shape.bounds, opts);
+    const pool = openBeautyPool(4)!;
+    pool.warm(g.ref);
+    expect(pool.waitReady()).toBe(true);
+    expect(sha(renderBeauty(g.shape, g.mesh, g.shape.bounds, { ...opts, pool }).data)).toBe(sha(one.data));
+    pool.close();
+    const rows = lastPoolRows();
+    expect(rows.reduce((a, b) => a + b, 0)).toBe(256);
+    for (const r of rows.slice(1)) expect(r).toBeGreaterThan(0);
   });
 
   it("draws without a worker whose field differs from the main thread's, and says so once", () => {
@@ -190,7 +201,8 @@ describe("a worker that fails", () => {
       vi.resetModules();
       const fresh = await import("../src/render/beauty-pool.js");
       const x = scene(GLASS, "glass.aix", 40);
-      const opts: BeautyOptions = { ...GLASS_OPTS, cellSize: x.cell };
+      // Large enough that every worker claims a row before the main thread has drawn them all.
+      const opts: BeautyOptions = { ...GLASS_OPTS, size: 192, cellSize: x.cell };
       const one = renderBeauty(x.shape, x.mesh, x.shape.bounds, opts);
       const lines: string[] = [];
       const pool = fresh.openBeautyPool(4, (l) => lines.push(l))!;

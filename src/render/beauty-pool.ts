@@ -204,12 +204,18 @@ let off: string | undefined;
 let generation = 0;
 /** Set while the pool's own terminate() runs, so those exits are not failures. */
 let stopping = false;
-/** The primary rows each thread drew in the last pooled render, the main thread first. */
+/** The primary rows each thread drew in the last pooled render, the main thread first; and every worker's rows since the process began. */
 let lastRows: number[] = [];
+let workerRows = 0;
 
 /** For tests and benches: the primary rows each thread drew in the process's last pooled render, the main thread first. */
 export function lastPoolRows(): number[] {
   return [...lastRows];
+}
+
+/** For tests and benches: the primary rows the workers have drawn since the process began, every pooled render's. */
+export function poolWorkerRows(): number {
+  return workerRows;
 }
 
 function spawn(): Slot {
@@ -344,6 +350,7 @@ export class BeautyPool {
       if (!ok) stopJob(ctl, STOPPED);
     }
     lastRows = Array.from(ctl.slice(ROWS, ROWS + T));
+    for (let k = 1; k < T; k++) workerRows += lastRows[k];
     workers.forEach((w, k) => {
       const st = Atomics.load(ctl, ROWS + T + k);
       if (st === MISMATCH) this.say(`beauty: worker ${k + 1}'s field differs from the main thread's at the check points; drew without it`);
