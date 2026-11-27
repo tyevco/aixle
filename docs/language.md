@@ -1014,9 +1014,10 @@ y. A model is judged as a print only when the program says it is one,
 with `set units` or `set bed`, or the run asks for a print's file with
 `--3mf`. Then the report has its Print section, `check` its `print:`
 line and the render a `model.3mf`. Otherwise the report says in one
-line that it was not judged as a print and how to make it one, and
-nothing else in it speaks of millimetres, grams of PLA or a slicer: a
-door for a game engine, a kitchen mixer drawn in decimetres and a
+line that it was not judged as a print and how to make it one, with no
+size in millimetres, no wall or support, no grams of PLA and no print
+summary (the files list still says what `model.stl` is): a door for a
+game engine, a kitchen mixer drawn in decimetres and a
 bookcase are not prints, and a Print section telling them they print
 2.6 mm tall, with a summary that opens on a 0.0144 mm wall, was the
 report's longest section and none of it applied (round 11). The STL is
