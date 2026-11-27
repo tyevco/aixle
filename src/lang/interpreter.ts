@@ -93,6 +93,12 @@ export interface EvalOptions {
   resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
   /** The step `--slice` cuts through, which is a region when nothing else reads it, as with `set slice name`. */
   slice?: string;
+  /**
+   * Steps to draw with the output (`render --show phone_probe,cable`), as `show output, phone_probe` would: added to
+   * the shown names after the program has run, each its own object when the output is a scene. A name that is no
+   * shape step is an error.
+   */
+  show?: string[];
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -1250,6 +1256,27 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   for (const stmt of program.body) if (stmt.type === "assign") topAssigns.set(stmt.name, stmt.value);
   for (const stmt of program.body) exec(stmt, global, true);
 
+  // `render --show phone_probe,cable`: the named steps drawn with the output, as `show output, phone_probe` would, so
+  // a probe is seen in place without editing the program (round 11: a stand's phone and cable were seen only by
+  // copying the whole program into a probe file with a scene at its end). Asserts have run by now; they do not move.
+  if (options.show?.length) {
+    const shapeNames = [...steps.values()].filter((st) => isShape3(st.value)).map((st) => st.name);
+    for (const name of options.show) {
+      const st = steps.get(name);
+      if (!st || !isShape3(st.value)) throw new Error(`--show ${name}: ${st ? `'${name}' is a ${typeName(st.value)}, not a shape` : "no such step"}; the shapes are ${shapeNames.slice(0, 24).join(", ")}${shapeNames.length > 24 ? ", ..." : ""}`);
+    }
+    if (!shown) {
+      shown = { names: [], shapes: [], scene: false };
+      showDeps = new Set();
+      if (lastShape) { shown.names.push(lastShape.name); shown.shapes.push(steps.get(lastShape.name)!.value as Shape3); showDeps.add(lastShape.name); }
+    }
+    for (const name of options.show) {
+      if (shown.names.includes(name)) continue;
+      shown.names.push(name);
+      shown.shapes.push(steps.get(name)!.value as Shape3);
+      showDeps.add(name);
+    }
+  }
   let outputName = "model";
   let objects: SceneObject[] = [];
   const roots = new Set<string>();

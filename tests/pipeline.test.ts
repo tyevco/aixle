@@ -549,4 +549,15 @@ describe("round-11 renders", () => {
     expect(existsSync(join(dir, "notes.txt"))).toBe(true);
   });
 
+  it("draws named steps with the output for a picture, each its own object in a scene, and names an unknown one", () => {
+    const dir = tmp();
+    const src = "stand = box(2, 0.2, 1) | move(0, 0.1, 0)\nprobe = box(0.5, 0.5, 0.5) | move(0, 0.45, 0)\nshow stand\nassert clearance(probe, stand) > -1";
+    const r = run(src, "s.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["probe"] });
+    expect(r.evaluation.outputName).toBe("stand+probe");
+    expect(r.evaluation.output!.bounds.max[1]).toBeCloseTo(0.7);
+    expect(r.warnings.join()).not.toMatch(/'probe'.*not part of the output/);
+    const scene = run("a = box(1, 1, 1)\nb = sphere(0.3) | move(2, 0, 0)\nprobe = sphere(0.1) | move(0, 1, 0)\nscene a, b", "sc.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["probe"] });
+    expect(scene.evaluation.objects.map((o) => o.name)).toEqual(["a", "b", "probe"]);
+    expect(() => run(src, "s.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["nope"] })).toThrow(/^--show nope: no such step; the shapes are stand, probe$/);
+  });
 });

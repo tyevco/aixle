@@ -67,7 +67,8 @@ Reference: `docs/reference.md` (every function, generated from the code),
    two lines, with `set units mm`; the number is in model units). A hole that must go through is `void` on a thin rod past
    both faces, not on the cutter (empty by construction); `inside` wants
    the solid, not a shell; a probe step only an assert reads is a region
-   and is not warned about. `check` then fails, with the numbers and
+   and is not warned about; `render --show probe` draws it in place with
+   the output for a picture, the program unchanged. `check` then fails, with the numbers and
    where, when a later edit breaks it. Edit `.aix` files with the Edit
    tool: `sed` trips on their `|` pipes.
 6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches

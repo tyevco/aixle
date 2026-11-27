@@ -1264,6 +1264,16 @@ that trims a gem, even turned and moved on its way in, `stone & (below
 | rotate(x=25) | move(0, h, 0))`) is a *mask*, tagged so and never labelled. `check`
 prints the asserts in line order, failures among the passes.
 
+A region is not drawn, but it can be seen in place without editing the
+program: `render --show phone_probe,cable` draws the output with those
+steps, as `show stand, phone_probe, cable` would (each its own object
+when the output is a scene), so a phone resting in a stand or a cable
+through its slot is a picture rather than a copy of the program with a
+scene at its end. The report then describes that output, probes and
+all, so it is for the pictures; the asserts have already run on the
+program as written. A name that is no shape step is an error that lists
+the shapes.
+
 ## Limits worth knowing
 
 - Detail thinner than a grid cell disappears. The cell size is on the sheet

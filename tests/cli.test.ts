@@ -127,3 +127,20 @@ describe("the import cache", () => {
     }
   });
 });
+
+describe("render --show", () => {
+  it("fails on a name that is no shape step, naming the shapes", { timeout: 30000 }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-show-"));
+    const file = join(dir, "s.aix");
+    writeFileSync(file, "stand = box(2, 0.2, 1)\nprobe = box(0.5, 0.5, 0.5) | move(0, 0.45, 0)\nshow stand\n");
+    let err = "", status = 0;
+    try {
+      cli("render", file, "--quick", "--show", "prob", "--out", join(dir, "out"));
+    } catch (e) {
+      err = (e as { stderr: string }).stderr;
+      status = (e as { status: number }).status;
+    }
+    expect(status).toBe(1);
+    expect(err).toMatch(/s\.aix: --show prob: no such step; the shapes are stand, probe\n/);
+  });
+});

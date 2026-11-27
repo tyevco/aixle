@@ -75,6 +75,7 @@ npx aixle render model.aix --beauty        plus beauty.png, ray-marched with sha
 npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it; with lights and cameras it draws lights.png and every shot too, so --beauty-only for one)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
 npx aixle render model.aix --slice stem    slices.png through one step, framed on it, the rest of the model faint
+npx aixle render model.aix --show probe,cable   the output with those steps drawn in place: a probe seen without editing the program
                                            with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png, a sky
 npx aixle render model.aix --beauty-only --camera hero   one shot (written once, as beauty.png) and the sheet, nothing else: the lighting loop (--lights adds lights.png)
 npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all)

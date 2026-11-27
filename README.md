@@ -67,6 +67,7 @@ npx aixle render model.aix --beauty         # plus beauty.png (a second or a few
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
 npx aixle render model.aix --slice stem         # slices.png through one step, framed on it, the rest faint
+npx aixle render model.aix --show probe         # the output with a probe step drawn in place, the program unchanged
 npx aixle render model.aix --beauty-only        # the sheet and one beauty render (set camera's shot), for a lighting loop
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
