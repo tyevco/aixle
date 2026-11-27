@@ -10,6 +10,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } 
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { run } from "../src/pipeline.js";
+import { defaultThreads } from "../src/render/beauty-pool.js";
 
 /**
  * A probe: a file an agent wrote to measure something, kept beside the
@@ -42,6 +43,8 @@ function programs(dir: string, prefix = ""): string[] {
 
 export function renderSet(srcDir: string, outDir: string, label: string, opts: RenderSetOptions = {}): void {
   mkdirSync(outDir, { recursive: true });
+  // The beauty renders on the CLI's threads, which give the same bytes as one.
+  const threads = defaultThreads();
   const files = programs(srcDir)
     .filter((f) => !opts.skip || !opts.skip.test(f))
     .filter((f) => !opts.only?.length || opts.only.includes(f.replace(/^.*\//, "").replace(/\.aix$/, "")) || opts.only.includes(f.replace(/\.aix$/, "").replace(/\//g, "_")));
@@ -60,6 +63,9 @@ export function renderSet(srcDir: string, outDir: string, label: string, opts: R
       glb: false,
       beauty: true,
       beautySize: 384,
+      threads,
+      // lights.png is never copied into a render set, so it is not drawn.
+      lights: false,
       steps: !opts.sheetAndBeautyOnly,
       slices: !opts.sheetAndBeautyOnly,
     });

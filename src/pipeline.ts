@@ -4,14 +4,12 @@
  * the exports and the report. The CLI is a thin wrapper over it, and so is
  * the examples generator.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { parseObj } from "./import/obj.js";
-import { parseGlb } from "./import/glb.js";
-import { fieldFromSamples, sampleMesh, type MeshSamples } from "./mesh/meshSdf.js";
-import { importKey, type ImportCache } from "./import/cache.js";
-import { box, primitive } from "./sdf/primitives.js";
+import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import type { MeshSamples } from "./mesh/meshSdf.js";
+import type { ImportCache } from "./import/cache.js";
+import { imageResolver, importResolver, moduleResolver, STD_DIR } from "./resolvers.js";
+import { box } from "./sdf/primitives.js";
 import { axisAngleToQuat, eulerToQuat, glbLights, toGlbScene, type GlbAnimation } from "./export/glb.js";
 import { toObjScene } from "./export/obj.js";
 import { toStl } from "./export/stl.js";
@@ -27,10 +25,10 @@ import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
 import { viewerHtml, type ViewerScene } from "./export/viewer.js";
 import { BENT_DEGREES } from "./export/atlas.js";
-import { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, lightDirection, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { beautyCache, DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, lightDirection, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { openBeautyPool, type BeautyPool } from "./render/beauty-pool.js";
 import { perspective } from "./render/camera.js";
 import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
-import { decodePng, type DecodedPng } from "./render/png.js";
 import { assertLine, type AssertInfo, type AssertResult, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
 import { parse } from "./lang/parser.js";
 import { isShape3 } from "./lang/values.js";
@@ -106,6 +104,8 @@ export interface RunOptions {
   beauty?: boolean;
   /** Pixels for the beauty render; default `size`. */
   beautySize?: number;
+  /** Threads for the beauty renders: the main one and threads - 1 workers that evaluate the program again; the bytes are the same for any number. Default 1. */
+  threads?: number;
   /** Vertex placement: sharp (dual contouring, default) or the rounded surface-nets mean. */
   sharp?: boolean;
   /** Split vertices where faces meet at more than this many degrees, so edges shade and export as edges (or `set crease`); 0 for one smooth normal per vertex. Default 35. */
@@ -179,97 +179,8 @@ const fmt = (v: number): string => {
   return s === "-0" ? "0" : s;
 };
 
-/** The folder the shipped libraries live in: `std/` beside `src/` (and beside `dist/` once built). */
-export const STD_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "std");
-
-/**
- * `use "path"` resolves relative to the program that uses it (or, for a
- * library's own uses, relative to that library), except `std/<name>`,
- * which is the library shipped with the tool; `.aix` may be left off.
- * Each file is read once per run.
- */
-/** Load a PNG beside the program for material(image=) and decal(image=), once per file. */
-export function imageResolver(sourceName: string) {
-  const cache = new Map<string, DecodedPng>();
-  return (path: string): DecodedPng => {
-    const file = resolve(dirname(resolve(sourceName)), path);
-    const hit = cache.get(file);
-    if (hit) return hit;
-    let data: Buffer;
-    try {
-      data = readFileSync(file);
-    } catch {
-      throw new Error(`cannot read ${file}`);
-    }
-    if (!/\.png$/i.test(file)) throw new Error(`${path} is not a PNG; pictures are PNG files`);
-    const png = decodePng(data);
-    cache.set(file, png);
-    return png;
-  };
-}
-
-export function moduleResolver(sourceName: string) {
-  const cache = new Map<string, { source: string; file: string }>();
-  return (path: string, from?: string): { source: string; file: string } => {
-    const withExt = path.endsWith(".aix") ? path : `${path}.aix`;
-    const file = /^std\//.test(withExt) ? resolve(STD_DIR, withExt.slice(4)) : resolve(dirname(resolve(from ?? sourceName)), withExt);
-    const hit = cache.get(file);
-    if (hit) return hit;
-    let source: string;
-    try {
-      source = readFileSync(file, "utf8");
-    } catch {
-      const std = existsSync(STD_DIR) ? readdirSync(STD_DIR).filter((f) => f.endsWith(".aix")).map((f) => `std/${f.replace(/\.aix$/, "")}`) : [];
-      throw new Error(`cannot read ${file}${std.length ? `; the shipped libraries are ${std.join(", ")}` : ""}`);
-    }
-    const out = { source, file };
-    cache.set(file, out);
-    return out;
-  };
-}
-
-/**
- * Imports resolve relative to the source file's folder: OBJ or GLB, sampled into a field, once per file and
- * resolution in a run. With a cache, the samples are looked up by the file's content first and stored after
- * sampling, so a `check` and the `render` after it sample a large mesh once between them.
- */
-export function importResolver(sourceName: string, log: (line: string) => void = () => {}, cache?: ImportCache) {
-  const memo = new Map<string, Shape3>();
-  return (path: string, opts: { resolution: number }): Shape3 => {
-    const file = resolve(dirname(resolve(sourceName)), path);
-    const key = `${file}@${opts.resolution}`;
-    const hit = memo.get(key);
-    if (hit) return hit;
-    let data: Buffer;
-    try {
-      data = readFileSync(file);
-    } catch {
-      throw new Error(`cannot read ${file}`);
-    }
-    const lower = file.toLowerCase();
-    const format = lower.endsWith(".glb") ? "glb" : lower.endsWith(".obj") ? "obj" : undefined;
-    if (!format) throw new Error(`only .obj and .glb files can be imported`);
-    const t0 = performance.now();
-    const cacheKey = cache ? importKey(data, format, opts.resolution) : undefined;
-    let samples = cacheKey ? cache!.get(cacheKey) : undefined;
-    const open = (s: MeshSamples) => (s.openness > 0.01 ? ` (mesh is not closed: ${(s.openness * 100).toFixed(0)}% of rays end inside)` : "");
-    if (samples) log(`import ${path}: ${samples.triangles} triangles at cell ${fmt(samples.cell)}, read from the cache in ${Math.round(performance.now() - t0)} ms${open(samples)}`);
-    else {
-      const mesh = format === "glb" ? parseGlb(data) : parseObj(data.toString("utf8"));
-      log(`import ${path}: sampling ${mesh.indices.length / 3} triangles at resolution ${opts.resolution}...`);
-      samples = sampleMesh(mesh, opts.resolution);
-      const notStored = cacheKey ? cache!.put(cacheKey, samples) : undefined;
-      log(`import ${path}: ${samples.triangles} triangles sampled at cell ${fmt(samples.cell)} in ${Math.round(performance.now() - t0)} ms${open(samples)}${!cacheKey ? "" : notStored ? `; not cached: ${notStored}` : `; cached in ${cache!.dir}`}`);
-    }
-    const field = fieldFromSamples(samples);
-    const shape = primitive(field.dist, field.bounds, 8);
-    shape.sampledAt = field.cell;
-    // Trilinear samples of a distance: each axis's slope is at most 1, so the field's is at most sqrt(3).
-    shape.lipschitz = Math.sqrt(3);
-    memo.set(key, shape);
-    return shape;
-  };
-}
+// The resolvers live in resolvers.ts, so a beauty worker can evaluate a program without loading the pipeline.
+export { imageResolver, importResolver, moduleResolver, STD_DIR };
 
 /**
  * Where a shape's thinnest feature comes from: the path down the tree from
@@ -1325,6 +1236,16 @@ export function resolveFocusOf(evaluation: Evaluation, output: Shape3 | undefine
 }
 
 export function run(source: string, sourceName: string, outDir: string, opts: RunOptions = {}): RunResult {
+  // The beauty render's pool for this run, opened once the program is evaluated, closed however the run ends.
+  const session: { pool?: BeautyPool } = {};
+  try {
+    return runWith(source, sourceName, outDir, opts, session);
+  } finally {
+    session.pool?.close();
+  }
+}
+
+function runWith(source: string, sourceName: string, outDir: string, opts: RunOptions, session: { pool?: BeautyPool }): RunResult {
   const log = opts.log ?? (() => {});
   const timings: Record<string, number> = {};
   const time = <T>(key: string, f: () => T): T => {
@@ -1346,7 +1267,9 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const earlier = previousFiles(outDir);
 
   // Evaluate once at rest to learn the poses, then again with the pose to show (if any); imports are cached across both.
-  const resolver = importResolver(sourceName, log, opts.importCache);
+  // Every import's samples, as this run read or made them, for the beauty workers to build the same field from.
+  const importSamples = new Map<string, MeshSamples>();
+  const resolver = importResolver(sourceName, log, opts.importCache, importSamples);
   const resolveImage = imageResolver(sourceName);
   const program = parse(source);
   const modules = moduleResolver(sourceName);
@@ -1359,6 +1282,14 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
   const shownPose = opts.pose ?? (typeof rest.settings.pose === "string" ? rest.settings.pose : undefined);
   const shownJoints = shownPose ? rest.poses.find((p) => p.name === shownPose)?.joints : undefined;
   const evaluation = shownJoints ? evaluate(program, { resolveImport: resolver, resolveModule: modules, resolveImage, moduleFrom: sourceName, jointPoses: shownJoints, poseName: shownPose, skipAsserts, slice: opts.slice, show: opts.show, onAssert }) : rest;
+  // The beauty render on several threads: workers that build the shown shape again from the program, sent it now so
+  // they evaluate while this thread meshes. The run's beauty renders share the pool and a cache of built tables.
+  const threads = Math.max(1, Math.floor(opts.threads ?? 1));
+  if (threads > 1 && (opts.beauty || evaluation.settings.beauty === 1) && evaluation.output && !isEmpty(evaluation.output.bounds)) {
+    session.pool = openBeautyPool(threads, log);
+    session.pool?.warm({ source, sourceName, jointPoses: shownJoints, poseName: shownJoints ? shownPose : undefined, slice: opts.slice, show: opts.show, importSamples });
+  }
+  const beautyTables = beautyCache();
   // The program evaluated in a pose, once per distinct pose: the pose sheet, the strips, a focused frame and the
   // asserts for a pose share it.
   // The rest pose is the rest evaluation, so the pose sheet's rest thumbnail does not judge every promise again.
@@ -1955,7 +1886,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
       // (measured: a focused beauty render fitted every point and framed the whole mug).
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
-        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label: captioned ? label : undefined, wearProbe: wearScale }).toPng());
+        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label: captioned ? label : undefined, wearProbe: wearScale, pool: session.pool, cache: beautyTables }).toPng());
       // beauty.png is the shot: the camera `set camera` or --camera names, with what the command line overrides, framed
       // on its focus=, its caption naming the camera as that camera's own shot would. The light study and the skies
       // are the same shot, so each can be set beside it.
@@ -1965,7 +1896,7 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
       // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders.
       const stripFrame = Math.max(96, Math.round(bsize * 0.5));
       const stripShot = (o: Partial<Parameters<typeof renderBeauty>[3]>) =>
-        renderBeauty(output, mesh!, beautyFrame, { size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: shotFocused ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocused ? modelBounds : undefined, wearProbe: wearScale, ...o });
+        renderBeauty(output, mesh!, beautyFrame, { size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: shotFocused ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocused ? modelBounds : undefined, wearProbe: wearScale, pool: session.pool, cache: beautyTables, ...o });
       // Every sky at once, or the ones listed, for choosing one: environments.png beside beauty.png.
       if (skies && skies.length) {
         const gutter = 6, bar = 26;
@@ -1977,7 +1908,8 @@ export function run(source: string, sourceName: string, outDir: string, opts: Ru
         });
         write("environments.png", strip.toPng());
       }
-      log(`beauty render ${bsize}px in ${timings.beauty} ms${shot ? `, ${shotLabel}` : ""}`);
+      const drewOn = session.pool?.live ? session.pool.threads : 1;
+      log(`beauty render ${bsize}px in ${timings.beauty} ms on ${drewOn} thread${drewOn === 1 ? "" : "s"}${shot ? `, ${shotLabel}` : ""}`);
       // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
       // near-identical pictures (round 9: two agents could not tell whether a light did anything); under it, what each
       // light adds on its own, brightened, so a small point light's reach and colour can be judged (round 10: a
