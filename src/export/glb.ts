@@ -165,6 +165,9 @@ export interface GlbLight {
   rotation?: [number, number, number, number];
 }
 
+/** glTF's range for a point light, where an engine takes it to zero: this many times the program's range. */
+export const GLB_RANGE_CUTOFF = 3;
+
 /**
  * The program's lights as glTF punctual lights (round 11: a torch that lit a door in beauty.png lit nothing in an
  * engine), in the units that make an engine light the model as the beauty render does.
@@ -184,9 +187,6 @@ export interface GlbLight {
  * (soft shadows, a mirror's softbox) has no glTF counterpart and is left out. A directional light's node sits three
  * radii out from the model's centre along its direction, for an engine whose shadow camera needs a place.
  */
-/** glTF's range for a point light, where an engine takes it to zero: this many times the program's range. */
-export const GLB_RANGE_CUTOFF = 3;
-
 export function glbLights(lights: SceneLight[], centre: [number, number, number], radius: number, defaultRange = 2): GlbLight[] {
   return lights.map((l, i) => {
     const color = l.color.map((c) => Number(srgbToLinear(c).toFixed(5))) as [number, number, number];
