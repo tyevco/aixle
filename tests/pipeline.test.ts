@@ -696,3 +696,32 @@ describe("round-11 renders", () => {
     expect(() => run(src, "s.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["nope"] })).toThrow(/^--show nope: no such step; the shapes are stand, probe$/);
   });
 });
+
+describe("strips: one shot framed as the full run frames it", () => {
+  const opts = { grid: 20, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 };
+  const dirs: string[] = [];
+  const tmp = () => { const d = mkdtempSync(join(tmpdir(), "aixle-strips-")); dirs.push(d); return d; };
+  const bytes = (dir: string, f: string) => readFileSync(join(dir, f));
+  afterAll(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+  // A mirror (which draft and full draw differently), glass, a glowing flame, a key and a point light.
+  const lit = 'ball = sphere(0.4) | move(-0.5, 0.4, 0) | paint("chrome")\nblock = box(0.6, 0.8, 0.6) | move(0.5, 0.4, 0) | paint("amber")\nflame = sphere(0.1) | move(0, 0.1, 0.6) | paint(material("#ffb050", glow=2))\nboth = ball + block + flame\nlight("key", azimuth=-40, elevation=50)\nlight("lamp", position=[0, 1.2, 0.8], color="#ffd8a0", power=0.8)\n';
+
+  it("--beauty-only --camera NAME draws the full run's beauty_NAME.png, a camera taking what it leaves out from the program's shot", () => {
+    // Reviewer's case: with set camera hero (zoom 1.1), --beauty-only --camera close framed close at zoom 1 where the
+    // full run's beauty_close.png took hero's 1.1 (21.5k of 22.5k pixels differed).
+    const src = lit + 'camera("hero", azimuth=25, elevation=15, zoom=1.3)\ncamera("close", focus="ball", azimuth=60)\ncamera("bare")\nset camera hero\nshow both';
+    const a = tmp();
+    const full = run(src, "cams.aix", a, opts);
+    expect(full.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_close.png", "beauty_bare.png"]);
+    for (const name of ["close", "bare"]) {
+      const b = tmp();
+      const one = run(src, "cams.aix", b, { ...BEAUTY_ONLY, grid: 20, size: 64, beautySize: 64, camera: name });
+      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
+      expect(bytes(b, "beauty.png").equals(bytes(a, `beauty_${name}.png`)), name).toBe(true);
+    }
+    // A camera with nothing of its own is the program's shot under its own name and caption: hero's framing.
+    const c = tmp();
+    run(src.replace("set camera hero\n", ""), "cams.aix", c, { ...opts, lights: false });
+    expect(bytes(c, "beauty_bare.png").equals(bytes(a, "beauty_bare.png"))).toBe(false);
+  });
+});

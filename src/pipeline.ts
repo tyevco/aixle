@@ -1458,8 +1458,15 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
   const shotName = opts.camera ?? (typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined);
   const shot = shotName ? evaluation.cameras.find((c) => c.name === shotName) : undefined;
   if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? "beauty.png takes the render's own view" : "every shot is rendered"}`);
-  const azimuth = opts.azimuth ?? shot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
-  const elevation = opts.elevation ?? shot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  // What a camera leaves out it takes from the render's own view: the command line's angles, then the program's own
+  // `set camera` shot, then `set azimuth` and the rest (as check's aim takes them). --camera naming another camera
+  // changes the shot, not that view, so --beauty-only --camera close draws the very beauty_close.png of the full run
+  // (it framed close at the default zoom where the full run took hero's 1.1).
+  const programShot = typeof evaluation.settings.camera === "string" ? evaluation.cameras.find((c) => c.name === evaluation.settings.camera) : undefined;
+  const viewAzimuth = opts.azimuth ?? programShot?.azimuth ?? (evaluation.settings.azimuth as number | undefined) ?? 35;
+  const viewElevation = opts.elevation ?? programShot?.elevation ?? (evaluation.settings.elevation as number | undefined) ?? 25;
+  const azimuth = opts.azimuth ?? shot?.azimuth ?? (shot ? viewAzimuth : (evaluation.settings.azimuth as number | undefined) ?? 35);
+  const elevation = opts.elevation ?? shot?.elevation ?? (shot ? viewElevation : (evaluation.settings.elevation as number | undefined) ?? 25);
   // The command line's angles over the camera's own make beauty.png another picture than beauty_<name>.png, so its
   // caption and the report say which (round 11: a door rendered with --azimuth 22 over set camera hero had beauty.png
   // and lights.png at 22 and beauty_hero.png at -18, both captioned as the camera's, and read as the light study
@@ -1955,7 +1962,9 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       const lightAzimuth = typeof evaluation.settings.light_azimuth === "number" ? evaluation.settings.light_azimuth : undefined;
       const lightElevation = typeof evaluation.settings.light_elevation === "number" ? evaluation.settings.light_elevation : undefined;
       const ambient = typeof evaluation.settings.ambient === "number" ? evaluation.settings.ambient : undefined;
-      const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      const setZoom = typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined;
+      const viewZoom = opts.zoom ?? programShot?.zoom ?? setZoom;
+      const zoom = opts.zoom ?? shot?.zoom ?? (shot ? viewZoom : setZoom);
       // The program's lights, when it declares any; else the one key light the settings describe.
       const lights: BeautyLight[] | undefined = evaluation.lights.length ? evaluation.lights.map((l) => ({ name: l.name, azimuth: l.azimuth, elevation: l.elevation, size: l.size, color: l.color, power: l.power, position: l.position, range: l.range })) : undefined;
       // Framed like the views: on the focused step when there is one.
@@ -2046,7 +2055,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
         if (!isShot && ((opts.camera && shot) || opts.shots === false)) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         const b = r ? r.frame : beautyFrame;
-        const az = c.azimuth ?? azimuth, el = c.elevation ?? elevation, zm = c.zoom ?? zoom, df = c.dof ?? dof;
+        const az = c.azimuth ?? viewAzimuth, el = c.elevation ?? viewElevation, zm = c.zoom ?? viewZoom, df = c.dof ?? dof;
         // A focus mostly hidden from its camera by the rest of the model is said, not discovered in the picture,
         // when another azimuth would see much more of it (a gem in its setting is hidden from every side alike).
         if (r) {
