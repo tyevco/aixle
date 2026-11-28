@@ -910,6 +910,70 @@ cell and reads as noise.
 Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick,
 tiles, dots, rust. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 
+A metal (`metal=1`) has no diffuse colour of its own: its colour is its
+reflectance at normal incidence, F0, as glTF's metallic-roughness model
+means it, written in sRGB. The beauty render, `viewer.html` and any
+engine read that one colour from the GLB. So a metal reads by what it
+reflects, and each metal preset is taken from measured reflectances
+rather than chosen as a paint:
+
+- `silver` #fcfaf5 and `chrome` #c4c5c4 (chromium) are the measured F0
+  of Real-Time Rendering's fourth edition, table 9.2.
+- `steel` #c6c6c8 is iron's measured F0 from the same table, a neutral
+  grey: steel is iron with under 2% carbon. The warm stainless value it
+  had read as ivory under a warm key on a hub, a gear and a bracket.
+- `iron` #7c7c7c is blackened or cast iron under its skin of black
+  oxide, magnetite, which reflects about 20% across the visible spectrum
+  (ore microscopy's reflectance tables give 20 to 21% from 470 to 650
+  nm). Bare polished iron, 56%, drew a bench's arms and a door's hinges
+  as chrome tubing; `wear` rubs an edge through to about that bare iron.
+  `rust` is the same dark iron with rust eating into it.
+- `gold` #ffc95e, `brass` #ebcc75, `copper` #f5ab92 and `bronze`
+  #f0bc84 are their measured F0 squared, the colour of light after two
+  bounces off the metal (gold from Lagarde's 2011 table, brass and
+  copper from table 9.2, bronze, which no table measures, the mean of
+  those two alloys either side of it). A measured F0 is pale, gold's
+  #ffe39d: in a neutral room the trophies' gold read as champagne, the
+  sign's brass letters as cream and a bottle's bronze collar as pink,
+  and a darker room only turned them khaki. Squared, each keeps its
+  measured hue and the order between them and takes the saturation a
+  picture of the metal has: the medal's face has a saturation of 0.73,
+  against 0.46 at F0 and the old renderer's 0.68. A glTF viewer reads the same
+  colour, so the GLB's gold is this deep gold too, a little richer than
+  a measured one.
+
+Gold is deep yellow under `studio` and `overcast`, orange under
+`sunset` and amber under `night`; brass is the greener yellow beside
+it, bronze and copper the browner and the pinker orange, `iron` is dark
+and `steel` the grey of bare iron. A metal of your own is read the same
+way: `material("#c6c6c8", metal=1, rough=0.2)` is polished steel, or
+bright bare iron.
+
+`rough` is the width of glTF's GGX lobe (α = rough²), and decides what a
+surface reflects. Under 0.12 it is a mirror: one traced ray, so it shows
+the model itself (chrome in chrome) and each directional light as a
+bright disc of the light's own size in place of a highlight. From 0.12
+to 0.35 a metal is glossy and reflects the model softened (four traced
+rays in a fixed pattern; one in draft quality). From 0.35 to 0.55, and
+for a glossy non-metal, one traced ray is blended into the blurred sky,
+more of the sky the rougher it is. Above 0.55 a surface reflects only
+the sky, blurred, and no other part of the model. So `chrome` (0.1) is
+a mirror, `silver` (0.25) and `gold` (0.3) glossy, `brass` and `copper`
+(0.35), `bronze` (0.4) and `steel` (0.45) a traced ray softened into the
+sky, and `iron` (0.6) the sky alone. Whatever a reflection brings is
+dimmed in a hollow by a cavity term read from the field, so lettering
+engraved in polished metal reads as dark letters (the medal's, round
+10's ring's FOREVER): without it the traced rays from inside a groove
+met its walls, which mirror the sky as brightly as the face round it
+does, and the letters read only at their edges. In the studio a metal
+face turned square to the camera mirrors the dark room round the camera
+and reads near black, whatever its preset: a convex metal takes its
+contrast from that room, and a flat label facing the camera loses it.
+The patterns plate's labels, iron letters standing on a dark board,
+were lost that way (as they were under the old renderer) and are
+painted porcelain now; lettering that must read face on wants a light
+non-metal.
+
 A material can also carry a finish, which adds no geometry and shows in
 the beauty render and the GLB, not on the sheet (the sheet draws the
 pattern, so it stays a check of the mesh):
@@ -982,101 +1046,235 @@ parameter) keeps its name.
 
 ## Lights, cameras and environments
 
-The beauty render has one key light unless the program declares its
-own: `light("key", azimuth=-40, elevation=55, size=1.5,
-color="#fff2e0")` and `light("rim", azimuth=150, elevation=20,
-power=0.5, color="#cfe0ff")` are a warm key and a cool rim, each
-casting its own soft shadow (azimuth about y, 0 from the front and 90
-from +x; `size` 0.5 is a lamp and 3 a window; `power` 1 is the default
-key's strength; the colour is a name, a hex or a material). Three
-lights cost about half again the time of one. `set environment sunset`
-puts the model under an evening sky; `studio` is the default grey-white
-backdrop, `overcast` a white sky with even light, `night` a dark sky
-and floor where a `glow` material carries the picture. A named shot,
-`camera("hero", azimuth=30, elevation=20, zoom=1.4)` or
+The beauty render is the distance field itself, ray traced: the camera's
+rays march the field, and reflections, shadows and refraction are traced
+from where they land. It shades with glTF's metallic-roughness model in
+linear light, as `viewer.html` and an engine shade the GLB, and tone-maps
+once at the end, so a base colour lit square on shows as itself and a
+highlight rolls off rather than clipping. It has one key light unless
+the program declares its own: `light("key", azimuth=-40, elevation=55,
+size=1.5, color="#fff2e0")` and `light("rim", azimuth=150, elevation=20,
+power=0.5, color="#cfe0ff")` are a warm key and a cool rim (azimuth
+about y, 0 from the front and 90 from +x; a `light()` given no angles
+stands at -40 and 55; `power` 1 is the default key's strength, which
+lights a white face turned square to it to near white; the colour is a
+name, a hex or a material). A light's `size` is its angular radius, size/18
+radians: 0.5 (under 2 degrees) is a lamp, 1 (about 3 degrees) the
+default, 3 (about 10) a window, and a directional light stops growing
+at 27, just short of a right angle. That one
+angle softens the light's shadow, widens its highlight, and is the
+bright disc a mirror shows of it, so a bigger key is a bigger window in
+a chrome part. Shadows are traced from the light's disc, eight rays a
+pixel, smoothed across the neighbouring pixels of the same surface on
+the share of the light each sees and nothing else (so a bump's shading
+stays sharp), and a shadow is as soft as its light is large, without
+stair-steps; it
+hardens where a part meets the floor, as a real shadow does, and it is
+tinted where the light passes through coloured glass. Three lights cost
+about a third more than one: from one light to three, the lantern took
+2.29 to 3.03 s and round 4's market 2.70 to 3.46 s on one thread at the
+committed renders' settings (384 px, full quality, the best of five on a
+shared four-core machine), and 1.41 to 1.73 s and 1.97 to 2.31 s on four
+threads.
+
+Without a `light()` the key is the default one: from the upper left
+and the front, at azimuth -40 and about 47 degrees up, fixed in the
+world rather than the camera, so turning the camera turns the shot and
+not the light (`set light_size`, `set light_azimuth` and `set
+light_elevation` move it; see Settings). The one exception is a camera
+looking steeply down: from an elevation of 55 to 75 the default key
+turns, smoothly with the elevation, to the frame's top left, because
+people read a picture as lit from above, and a plan view lit from its
+bottom draws a blind pocket as a dome (round 10's hub). A program that
+sets either angle, or declares a `light()`, keeps its key where it put
+it, so a plan shot with its own lights puts the key at the camera's
+azimuth less 135: `light("key", azimuth=-135, elevation=55)` for
+`camera("plan", azimuth=0, elevation=90)`.
+
+A point light is at a place instead of a direction: `light("fire",
+position=[0, 0.4, 0], range=2, color="#ff9a3c", power=1.5)` is a
+campfire's warmth on the stones round it. It is a small sphere, its
+radius 2% of `range` for each unit of `size`, so its shadows are soft by
+that sphere and reach the floor (a lantern's bars fan out across it from
+the candle). Its strength at a distance d is range² / (range² + d²) of
+its strength at the light: half at `range`, a fifth at twice it. That
+is in light, as an engine's falloff is, and half the light shows on the
+screen at about three quarters of the brightness, so a pool of light
+looks wider than under the old renderer, which halved the displayed
+colour: a torch lights more of its wall, and lowering `range` narrows
+the pool. Without `range=` it is half the model's longest side, so the
+default suits a model of any size. Put a point light in the air just
+outside the glowing part: a solid the light sits inside shadows
+everything, though inside a glass shade is fine (glass lets its light
+through, tinted), and a bulb beside the light does not shadow what is on
+the far side of it. A `glow` material lights itself only, unshadowed,
+with a soft bloom round it where it is brighter than a white face in the
+key's light: a flame does not light the stones round it or the ground
+under it unless a point light sits in it.
+
+`set environment sunset` puts the model under an evening sky. A sky is
+the backdrop the camera sees, the light a surface takes from all round
+and what a metal reflects; the lights are the program's own:
+
+- `studio`, the default, is a white sweep behind the model, rigged round
+  the camera and out of shot as a photographer rigs one: dark walls on
+  the camera's side, a dim ceiling, a black flag on the floor between
+  the camera and the model (it starts past the frame's bottom edge, so
+  the camera never sees it), and three cards that only reflections see,
+  a fill low on the right, a strip overhead across the frame and a rim
+  strip behind on the left. It is two rigs: the room a surface takes
+  its light from, whose walls still bounce light into a shaded side, and
+  a darker one a surface mirrors, black round and behind the camera, as
+  a photographer flags reflections harder than light. With one rig at
+  the light's darkness every metal mirrored a mostly white room and read
+  white, cream or ceramic; with one at the reflections' darkness a white
+  mug's shaded side fell from the old renderer's 89 levels to 53. So
+  chrome reads as a dark mirror with bright cards in it, silver as a
+  bright one, and a shaded side keeps its form.
+- `overcast` is a white dome, brighter towards the zenith, with soft,
+  even light and no rig, so a mirror metal reflects white sky all round:
+  silver comes out near white and chrome and steel pale and even there.
+  Give a mirror metal the studio, a sunset or a night, or a rougher
+  finish.
+- `sunset` is a blue sky over a warm band at the horizon, with a sun 3
+  degrees up on the key light's side and its glow round it. Only a
+  camera near the horizon (`elevation` under about 10) sees the band;
+  from above, the backdrop is the warm ground, and a brown model
+  disappears into it.
+- `night` is a dark blue sky with stars and a moon on the key's side (as
+  high as the key, kept between 25 and 60 degrees), over a dark floor,
+  with the ambient light 0.4 of the studio's, so a first render is dark:
+  start from `set ambient 1.6` with a moon of `power=0.9`, and let a
+  glow carry the picture.
+
+The sun and the moon stand where the key comes from (the program's
+first directional light, or the one key a program without a `light()`
+has), so every shot of a run shares one sky, except a steep shot under
+the default key, whose sun or moon turns with its key. `set ambient 1.5` scales everything the sky
+gives the model: the light a surface takes from it and what a metal or
+a glossy part reflects of it alike, but not the lights, the disc a
+mirror shows of each, or the backdrop. The open floor near the model is
+solved to show the sky's own floor colour under the sky and every
+directional light, so `set ambient` and a key's `power` leave it as it
+is, short of a scene too dim for any floor to show it; a shadow darkens
+it and a point light brightens it.
+
+A named shot, `camera("hero", azimuth=30, elevation=20, zoom=1.4)` or
 `camera("detail", focus="nameplate", zoom=2)`, is written by `render
 --beauty` as `beauty_<name>.png`, framed on its `focus=` step or object
-when it has one and taking the render's own view for whatever it leaves
-out; `set camera hero` makes that shot the sheet's perspective view and
-`beauty.png` as well (the front, right and top views are unchanged).
-That shot is rendered once, as `beauty.png`, its caption naming the
-camera, and not again as `beauty_hero.png`: the two were the same
-picture marched twice. With `--azimuth`, `--elevation` or `--zoom` over
-it, `beauty.png` is another picture, captioned `camera hero with
---azimuth 60`, and the camera's own shot is rendered as
+when it has one. What a camera leaves out it takes from the render's
+own view: the command line's `--azimuth`, `--elevation` and `--zoom`,
+then the program's `set camera` shot, then `set azimuth`, `set
+elevation` and `set zoom`, then the defaults (azimuth 35, elevation 25,
+zoom 1), as `check` aims it, and a `dof` it leaves out from `set dof`;
+so `--camera
+NAME`, with or without `--beauty-only`, draws exactly the full run's
+`beauty_NAME.png`. `set camera hero` makes that shot the sheet's
+perspective view and `beauty.png` as well (the front, right and top
+views are unchanged). That shot is rendered once, as `beauty.png`, its
+caption naming the camera, and not again as `beauty_hero.png`: the two
+were the same picture rendered twice. With `--azimuth`, `--elevation`
+or `--zoom` over it, `beauty.png` is another picture, captioned `camera
+hero with --azimuth 60`, and the camera's own shot is rendered as
 `beauty_hero.png` too, so the light study, which is always the shot
 `beauty.png` shows, is never read as ignoring the camera. The report's
-Cameras line says where each shot went.
-`check` and the report list the lights, the cameras and the
-environment, so a misspelt name is a warning before any render. With
-two or more lights `render --beauty` also writes `lights.png`, the
-picture under each light alone and then all of them, so what a rim
-light adds is seen rather than guessed from two near-identical shots;
-every frame is the shot `beauty.png` shows, whether `set camera` or
-`--camera` chose it. `--beauty-only` leaves it out (it is four or more
-marches more) unless `--lights` asks for it, and `--no-lights` leaves it
-off a full render. Under
-each of those is what that light adds on its own: the picture under it
-alone minus the picture under no light at all, brightened until its
-brightest part is near white, with the gain printed (`spark adds, ×3`),
-and last the picture under no light, which is the sky's ambient, the
-glows and the metals' reflections. A small point light that changes a
-few pixels of the whole picture (a spark over a ring's stone) fills its
-own frame there, so its reach and its colour can be judged. A glowing
-part is flat grey in that row: its own light is in every frame, and two
-near-white glows differ only in the channels not already full, so a
-flame a light barely touches came out bright green once brightened. The
-frames are half the beauty render's size.
+Cameras line says where each shot went. `check` and the report list
+the lights, the cameras and the environment, so a misspelt name is a
+warning before any render.
 
-The lights go into `model.glb` as well, each a `KHR_lights_punctual`
-light on a node of its own (a point light at its position, an azimuth
-light as a directional one), so an engine lights the model with them;
-the intensities are chosen so an engine agrees with the beauty render on
-a face turned 60 degrees from the light, at `range` from a point light;
-it is darker than `beauty.png` on faces turned square to a light (about
-two thirds), brighter on faces at a slant, and brighter nearer a point
-light than its range (the design notes have the numbers). The cameras and the sky stay out of the GLB, but
-`viewer.html` has them: its Scene button lights the GLB with its own
-lights under the program's sky and ambient, the cameras are buttons, and
-it opens that way when the program declares a light or a sky; its Studio
-button is a grey backdrop and a white key for judging the maps.
+With two or more lights `render --beauty` also writes `lights.png`, so
+what a rim light adds is seen rather than guessed from two
+near-identical shots. Every frame is the shot `beauty.png` shows,
+whether `set camera` or `--camera` chose it, half its size, and all of
+them come from one draft render that keeps each light's share of the
+picture apart. The top row is the picture under each light alone, then
+under all of them, which is that render's own picture. Under each light
+is exactly what it adds: its share of the render, on the model and on
+the floor, on black, brightened by the gain its caption prints (`spark
+adds, ×3`) until the brightest of it (its 99th percentile) shows at
+about 230 of 255, by 1 to 32 times. A small point light that changes a
+few pixels of the whole picture (a spark over a ring's stone) so fills
+its own frame there, and its reach and colour can be judged. Last is the
+picture under no light at all: the sky's light, the glows and the sky in
+the metals. A glow is in no light's share, so what a light adds on a
+flame is that light on the flame's own colour. The study was n + 2
+renders before (one a light, one under all and one under none), and they
+misled twice over: each solved the floor to its own lights, so a light
+alone showed the sky's whole floor colour (the round-11 door's torch
+alone drew its floor at an albedo of 0.95, where the shot's was 0.26,
+0.20 and 0.10), and two pictures with a near-white glow in them differ
+only in the channels not already full, so a flame a light barely
+touched came out bright green once brightened. Each frame's caption is
+in dark or light ink, whichever stands out from the picture under it.
+The frames away from the "all" one take a silhouette's edge pixels as
+the plain mean of their samples, so an edge against a glow can be
+brighter there than in the shot. `--beauty-only` leaves `lights.png`
+out unless `--lights` asks for it, and `--no-lights` leaves it off a
+full render; it takes about a fifth to a third of the time the n + 2
+renders took (0.57 to 1.1 s on four threads for the lantern, round
+10's ring and round 11's door at 512 px, against 1.8 to 4.5 s).
 
-What the lights and the skies can and cannot do, measured in round 9:
+The lights go into `model.glb` too, each a `KHR_lights_punctual` light
+on a node of its own (a point light at its position, an azimuth light
+as a directional one), in linear light as glTF means it, so an engine
+lights the model with them. A directional light of power p is
+π·1.05·p lux (3.30 for power 1), and an engine agrees with `beauty.png`
+on every face at every angle (1.05 is the radiance a light of power 1
+gives a white face turned square to it). A point light is
+π·1.05·p·range² candela, and there the two agree only far off: an
+engine's falloff is the inverse square, twice as bright as `beauty.png`
+at `range` and five times at half of it; with glTF's cutoff, which the
+GLB puts at three times `range`, the two cross at about 1.8 ranges, and
+the engine is dark from three ranges out, where `beauty.png` keeps a
+tenth. A point light without `range=` takes half the model's longest
+side in the GLB too. A light's size (its soft shadow, its disc in a
+mirror) has no glTF counterpart and is left out, and a program without
+a `light()` puts no light in the GLB.
+
+The cameras and the sky stay out of the GLB, but `viewer.html` has
+them. It loads three.js 0.187.0, pinned, from a CDN, and draws both of
+its modes through `beauty.png`'s tone curve. Its Scene button is
+`beauty.png` drawn from the export, and the page opens that way when the
+program declares a light or a sky: the same sky as its environment (the
+studio's cards and dark camera side, a sunset's glow) at the same
+strength (the sky's own ambient times `set ambient`), diffuse light from
+the sky's spherical harmonics as the beauty render takes it, the GLB's
+lights with `beauty.png`'s point-light falloff in place of an engine's
+inverse square (or the beauty render's one key when the program
+declares no light),
+glows at `beauty.png`'s strength, 1.6 times the GLB's, and the floor at
+the colour the beauty render solves for its open floor, faded into the
+horizon far off. The named cameras are buttons, and `◎ beauty.png`
+frames the page as `beauty.png` is framed (a `set camera` shot's own
+button does that when there is one), where Perspective keeps the whole
+model in view. Scene mode cannot show the field's occlusion and the
+contact darkening (the candle inside the lantern's cage reads 17 to 29
+levels lighter than in `beauty.png`), soft shadows (its shadow maps are
+hard), the model reflected in itself, bloom, glass (the GLB carries a
+glass part as an opaque surface of its colour), or the sun's or moon's
+disc and the stars in the backdrop. Its Studio button is the page's own
+studio for judging the maps: a grey backdrop, three.js's room
+environment for the metals to reflect, a hemisphere light and a white
+key, set together so that a white face turned to the key comes to about
+1.1 in linear light and the solid non-metal presets show their base
+colours to within 1.6 levels on average.
+
+What the lights and the skies can and cannot do, measured in round 9
+and since:
 
 - A light with an azimuth is a direction, not a place: `elevation=8`
   means "from the horizon", whatever stands there, and a low light
-  throws a long shadow across a top-down shot. A campfire's warmth on
-  the stones round it is a point light, `light("fire", position=[0,
-  0.4, 0], range=2, color="#ff9a3c", power=1.5)`: at a place, its
-  strength halving `range` away, shadowed by what stands between, and
-  not reaching the far floor. Put it in the air just outside the glowing
-  part (a solid the light sits inside shadows everything; inside a glass
-  shade is fine, since glass lets its light through dimmed, and a bulb
-  beside the light does not shadow what is on the far side of it). A `glow`
-  material lights itself only: a flame does not light the stones round
-  it or the ground under it unless a point light sits in it.
-- `night` scales the ambient light to 0.4 of the studio's, so a first
-  render is dark: start from `set ambient 1.6` with a moon of
-  `power=0.9`, and let a glow carry the picture. `sunset` is a warm
-  band at the horizon under a blue sky, but only a camera near the
-  horizon (`elevation` under about 10) sees the band; from above, the
-  backdrop is the warm ground, and a brown model disappears into it.
-  `overcast` is a white sky, so `chrome` and `silver` reflect it and
-  blow out to white there: give a mirror metal the `studio`, whose room
-  round the camera is dark in a reflection, a `sunset` or a `night`, or
-  use `steel`, `iron` or `brass`. Gold is deep yellow under `studio` and
-  `overcast`, orange under `sunset` and amber under `night`; brass is
-  the greener yellow beside it, bronze and copper the browner and the
-  pinker orange, and `iron` is dark, blackened iron (`steel` is the
-  grey of bare iron). A coloured stone (`transmit` about
-  0.5) shows what is behind it, so in a closed setting it reads dark;
-  open the setting or keep transmit down. `--environment all` writes
-  `environments.png`, the same shot under every sky, for one render;
-  a list, `--environment studio,overcast`, renders only those, and
-  beauty.png takes the first of them (with `all`, beauty.png keeps the
-  program's own sky). The strip's frames are half the beauty render's
-  size, at the full grid, so glass can be judged there, which a quick
-  pass cannot.
+  throws a long shadow across a top-down shot. A warm glow on what
+  stands round a fire is a point light, not a lower key.
+- A coloured stone (`transmit` about 0.5) shows what is behind it, so in
+  a closed setting it reads dark; open the setting or keep transmit
+  down. `--environment all` writes `environments.png`, the same shot
+  under every sky, for one render; a list, `--environment
+  studio,overcast`, renders only those, and beauty.png takes the first
+  of them (with `all`, beauty.png keeps the program's own sky). The
+  strip's frames are half the beauty render's size, at the full grid,
+  in draft quality, so glass can be judged there, which a quick pass
+  cannot.
 - A camera's `elevation` is about the model's centre and may be
   negative: at 0 a perspective camera still looks down on the floor
   round a low model, so a low shot is `elevation=-8`. `elevation=90` is
@@ -1084,7 +1282,7 @@ What the lights and the skies can and cannot do, measured in round 9:
   picture, so a wide scene on a slab never gets closer than the slab;
   a camera with `focus=` frames that step instead (with `zoom=0.8` to
   step back from it), and a step in the middle of a scene makes a good
-  framing proxy for a composition. A focus shot marches the whole
+  framing proxy for a composition. A focus shot traces the whole
   model, so a hole under a counterbore reads as through when the camera
   is steep enough to see its floor (a hole 0.14 across through 0.25
   wants an elevation above about 60), and the rest of the model stays
@@ -1120,48 +1318,77 @@ What the lights and the skies can and cannot do, measured in round 9:
   (`set camera`'s, `--camera`'s, or the render's own view), written
   once as `beauty.png`, and nothing else: no other camera's shot, no
   `lights.png` (`--lights` adds it), no steps, slices, turntable,
-  callouts or exports. `--environment NAME` tries a sky without editing
-  the program. The caption at the foot of
-  `beauty.png` and of each shot names the shot and its size for whoever
-  checks it; `set caption 0` (or `--no-caption`) leaves it off a
-  presentation copy, where at a low camera it can overprint the model.
-- `--quick` meshes at 64 cells, so a glass wall thinner than that cell
-  renders as a frosted solid and a `transmit` material cannot be judged
-  there; judge glass at the full grid. A glowing part inside a glass
-  shell must clear the glass by a cell, or the refraction draws rings
-  and bars where the two surfaces touch. A `loft` or a smooth `union(k=)`
-  is a bound rather than a distance, and glass on one bands the picture
-  behind it (a liquid seen through a lofted flacon drew contour lines;
-  a rounded box rendered clean; `check` warns when a `transmit`
-  material sits on such a field, and a `shell`, a `clearance` or an
-  `overlap` on one is only as true as the field: a loft of two profiles
-  is measured across its slanted wall, like the cone it is, but a
-  smooth union's blend or a twist is a bound); two coincident faces band too, so a
-  liquid filling a cavity is grown a cell into the wall, and its promise
-  is `inside(liquid, cavity) > 0.9`, not `== 1`. `glow` on a `transmit`
-  material is not visible, and a `glow` above 1 washes out the part's
-  own shading, so a lamp's cap reads as a flat disc until a point light
-  beside it lights its surroundings. The first `light()` replaces the
-  default key light, so a program adding a point light declares its key
-  too.
+  callouts or exports. It draws in full quality on the run's threads,
+  the very picture the full run's `beauty.png` is, so a material chosen
+  in the loop is what the final shot shows. `--environment NAME` tries
+  a sky without editing the program. `--quality draft|full` sets how
+  much `beauty.png` and the camera shots sample. `full`, the default
+  and what the committed renders use, traces reflections two bounces
+  deep, four rays for a glossy metal and glass seen through glass two
+  deep, and samples a pixel four times at the edge of a mirror's sharp
+  reflection. `draft` takes one bounce, one glossy ray and one glass
+  deep, without those extra samples, and the same shadows, eight rays a
+  light, so it saves time only where reflections and glass are the work:
+  draft took 0.68 of full's time for round 11's mixer and its polished
+  bowl, 0.82 for the tumbler and 0.93 to 0.97 for the mug and the medal
+  (512 px, one thread, the best of three). `--quick --beauty` is draft
+  unless `--quality full` says otherwise, and `lights.png` and
+  `environments.png` are always draft. No setting in a program chooses
+  it: a program describes a model, and how much to sample is the run's
+  choice. `--threads N` draws
+  the beauty renders on N threads (by default the cores, at most four),
+  each worker evaluating the program again; the picture is the same
+  bytes on any number. The caption at the foot of `beauty.png` and of
+  each shot names the shot and its size for whoever checks it; `set
+  caption 0` (or `--no-caption`) leaves it off a presentation copy,
+  where at a low camera it can overprint the model.
+- Glass (`transmit`) refracts at an index of 1.5 and reflects the share
+  Fresnel's law gives it. The refracted ray is carried through the solid on the field
+  to where it leaves, and past the critical angle it reflects inside and
+  goes on, up to four times, so thick glass renders: a tumbler's base
+  shows the drink and the floor through it, where falling back to the
+  sky at the first such reflection drew white triangles in it. Every
+  stretch inside absorbs by Beer's law, each channel letting
+  exp(-22 (1 - c) t / reach) through over a length t (c the glass's
+  colour in that channel, reach one and a half times the model's
+  diagonal), so a thick base is deeper in colour than a thin wall, the
+  same at any units, and a shadow cast through the glass takes the same
+  tint. `--quick` meshes at 64 cells, so a glass wall thinner than that
+  cell renders as a frosted solid and a `transmit` material cannot be
+  judged there; judge glass at the full grid. A glowing part inside a
+  glass shell must clear the glass by a cell, or the refraction draws
+  rings and bars where the two surfaces touch. A `loft` or a smooth
+  `union(k=)` is a bound rather than a distance, and glass on one bands
+  the picture behind it (a liquid seen through a lofted flacon drew
+  contour lines; a rounded box rendered clean; `check` warns when a
+  `transmit` material sits on such a field, and a `shell`, a
+  `clearance` or an `overlap` on one is only as true as the field: a
+  loft of two profiles is measured across its slanted wall, like the
+  cone it is, but a smooth union's blend or a twist is a bound); two
+  coincident faces band too, so a liquid filling a cavity is grown a
+  cell into the wall, and its promise is `inside(liquid, cavity) > 0.9`,
+  not `== 1`. `glow` on a `transmit` material is not visible, and a
+  `glow` above 1 washes out the part's own shading, so a lamp's cap
+  reads as a flat disc until a point light beside it lights its
+  surroundings. The first `light()` replaces the default key light, so
+  a program adding a point light declares its key too.
 
 ## Settings
 
-`set light_size 2.5` widens the key light in the beauty render (softer
-shadows; 0.5 is a lamp); `set light_azimuth -40` and `set light_elevation
-55` place it (azimuth about y, 0 from the front, 90 from +x; these are
-the defaults, upper left, fixed in the world, not the camera, but for a
-camera looking steeply down: from an elevation of 55 to 75 the default
-key turns, with the elevation, to the frame's top left, because people
-read a picture as lit from above, and a plan view lit from its bottom
-draws a blind pocket as a dome. A program that sets either, or declares
-a `light()`, keeps its key where it put it, so a plan shot with its own
-lights puts the key at the camera's azimuth less 135:
-`light("key", azimuth=-135, elevation=55)` for
-`camera("plan", azimuth=0, elevation=90)`); `set
-ambient 2` lifts the sky and ground light for a shaded interior (0.5 is a
-dark room); `set dof 1` adds depth of field there, blurring away from the
-model's centre; the camera fits the model's box corners with a small
+`set light_size 2.5` widens the default key light in the beauty render
+(its angular radius, size/18 radians: a softer shadow and a broader
+highlight; 0.5 is a lamp); `set light_azimuth -60` and `set
+light_elevation 40` place it (azimuth about y, 0 from the front, 90 from
++x). Left unset, the key is the default one, from the upper left at
+azimuth -40 and about 47 degrees up, fixed in the world, and turned to
+the frame's top left for a camera looking steeply down (Lights, cameras
+and environments). Set one angle and not the other, and the other is
+-40 or 55: `set light_azimuth -40` alone is a key 55 degrees up,
+steeper than the default's 47. None of the three applies once the
+program declares a `light()`. `set ambient 2` lifts the sky's light for
+a shaded interior, on surfaces and in what they reflect alike (0.5 is a
+dark room); `set dof 1` adds depth of field there, blurring away from
+the model's centre; the camera fits the model's box corners with a small
 margin, and `set zoom 1.2` brings it closer, up to the point where the
 box would touch the frame's edge and no further, so a zoom never crops
 (`--zoom` on the command line). Several `decal`s on one shape are read
@@ -1227,7 +1454,7 @@ board. The report's Files line says which planes went where. A `slice_x` given a
 still sets that plane. Sliced through a probe or a cutter, the planes
 go through its volume and the model is drawn in full, so `--slice rods`
 cuts down the holes a promise's ring of rods stands in. A step only sliced
-through is a region. `set beauty 1` always writes the ray-marched
+through is a region. `set beauty 1` always writes the ray-traced
 `beauty.png` (the CLI's `--beauty` does it once). `set sharp 0` falls back
 to rounded vertex placement if a sharp corner ever misbehaves. Edges are
 creases: a vertex whose faces meet at more than 35 degrees (a box's edge,
@@ -1395,7 +1622,11 @@ cells and may show holes or seams (a bowl's wall drawn as a sieve).
 When it dropped any, the pieces count and the footprint are not judged
 on that sheet, since the dropped steps are often the joins or the feet; a bucket's teeth or a rail are
 blobs or gone at a quick cell, so judge a working end at full grid, with
-`--focus` on the step to spend the cells there.
+`--focus` on the step to spend the cells there. `--quick --beauty` adds
+a 320-pixel `beauty.png` in draft quality (one reflection bounce, one
+glossy ray, glass one deep), which is enough to place the lights; judge
+materials, mirrors and glass in a full render, or `--beauty-only`, which
+is full quality on all the run's threads.
 
 ## Layout: `aixle fmt`
 
@@ -1956,8 +2187,8 @@ the shapes.
   a gap of a cell and a half to two between them (a cell is not enough
   for curved faces; see the contact rule) and bridge it with a hub or a
   post, or they mesh as one part with open edges where they touch.
-- The key light comes from above (elevation 55 by default) and does not
-  reach far into an opening: an interior behind a door or a window is
+- The key light comes from above (about 47 degrees up by default) and
+  does not reach far into an opening: an interior behind a door or a window is
   dark unless `set light_elevation` brings the light down, `set ambient`
   lifts the fill, or a `decal` gives the inner walls a lighter colour.
 - A preset with overrides (`material("glass", transmit=0.95)`) is listed
