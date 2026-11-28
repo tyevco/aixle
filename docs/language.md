@@ -1170,24 +1170,26 @@ floor to show it; a shadow darkens it and a point light brightens it.
 A named shot, `camera("hero", azimuth=30, elevation=20, zoom=1.4)` or
 `camera("detail", focus="nameplate", zoom=2)`, is written by `render
 --beauty` as `beauty_<name>.png`, framed on its `focus=` step or object
-when it has one. What a camera leaves out it takes from the render's
-own view: the command line's `--azimuth`, `--elevation` and `--zoom`,
-then the program's `set camera` shot, then `set azimuth`, `set
-elevation` and `set zoom`, then the defaults (azimuth 35, elevation 25,
-zoom 1), as `check` aims it, and a `dof` it leaves out from `set dof`;
-so `--camera NAME`, with or without `--beauty-only`, draws exactly the
-full run's `beauty_NAME.png`. `set camera hero` makes that shot the sheet's
-perspective view and `beauty.png` as well (the front, right and top
-views are unchanged). That shot is rendered once, as `beauty.png`, its
-caption naming the camera, and not again as `beauty_hero.png`: the two
-were the same picture rendered twice. With `--azimuth`, `--elevation`
-or `--zoom` over it, `beauty.png` is another picture, captioned `camera
-hero with --azimuth 60`, and the camera's own shot is rendered as
-`beauty_hero.png` too, so the light study, which is always the shot
-`beauty.png` shows, is never read as ignoring the camera. The report's
-Cameras line says where each shot went. `check` and the report list
-the lights, the cameras and the environment, so a misspelt name is a
-warning before any render.
+when it has one. What a camera leaves out it takes from the render's own
+view: the command line's `--azimuth`, `--elevation` and `--zoom`, then
+the program's `set camera` shot, then `set azimuth`, `set elevation` and
+`set zoom`, then the defaults (azimuth 35, elevation 25, zoom 1), as
+`check` aims it, and a `dof` it leaves out from `set dof`; so `--camera
+NAME`, with or without `--beauty-only`, draws exactly the full run's
+`beauty_NAME.png`, unless an angle is given on the command line too:
+that overrides the camera's own in `beauty.png`, as it does a `set
+camera` shot's, where `beauty_NAME.png` keeps the camera's. `set camera
+hero` makes that shot the sheet's perspective view and `beauty.png` as
+well (the front, right and top views are unchanged). That shot is
+rendered once, as `beauty.png`, its caption naming the camera, and not
+again as `beauty_hero.png`: the two were the same picture rendered
+twice. With `--azimuth`, `--elevation` or `--zoom` over it, `beauty.png`
+is another picture, captioned `camera hero with --azimuth 60`, and the
+camera's own shot is rendered as `beauty_hero.png` too, so the light
+study, which is always the shot `beauty.png` shows, is never read as
+ignoring the camera. The report's Cameras line says where each shot
+went. `check` and the report list the lights, the cameras and the
+environment, so a misspelt name is a warning before any render.
 
 With two or more lights `render --beauty` also writes `lights.png`, so
 what a rim light adds is seen rather than guessed from two
