@@ -1946,18 +1946,19 @@ it a normal map or a glow an emissive factor (the tree, the workshop,
 the Roblox plant and the two lamps).
 
 Wear reads curvature from second differences of `dist`, which is cheap
-(nine calls, paid only by a material that wears) and exact for the
-level set of any field whose sign is right: the Laplacian less the
-second derivative along the normal, over the gradient's length. The
-Laplacian alone is what the roadmap proposed, and it is right only for
-a true distance: a smooth union, a loft, a twist or a non-uniform scale
-bends the field off the surface, and that bending read as curvature (12
-to 24% of the value in a fillet). The probe is 1.2% of the model's
-longest side, about one and a half cells at the default grid, so the
-worn band is a look rather than a resolution and a quick pass shows the
-band the full render will. It is +1 on a sharp convex edge, -1 in a
-crease and h/R on a sphere; wear's threshold falls as the wear rises,
-so more of the surface counts as an edge.
+(nine calls, paid only by a material that wears, and a tenth for a worn
+metal's thinness, below) and exact for the level set of any field whose
+sign is right: the Laplacian less the second derivative along the
+normal, over the gradient's length. The Laplacian alone is what the
+roadmap proposed, and it is right only for a true distance: a smooth
+union, a loft, a twist or a non-uniform scale bends the field off the
+surface, and that bending read as curvature (12 to 24% of the value in a
+fillet). The probe is 1.2% of the model's longest side, about one and a
+half cells at the default grid, so the worn band is a look rather than a
+resolution and a quick pass shows the band the full render will. It
+is +1 on a sharp convex edge, -1 in a crease and h/R on a sphere;
+wear's threshold falls as the wear rises, so more of the surface counts
+as an edge.
 
 On a metal the worn band is rubbed to satin and broken into scuffs; on a
 non-metal it is what it was, a lighter, smoother edge. The band used to
@@ -1981,8 +1982,13 @@ noise), a fractal noise two probes across in the paint frame,
 thresholded to cover a share of the band that grows with its strength
 and the wear, about three fifths of a sharp edge at wear 0.45, so an
 edge reads as a broken, chipped line, and the scuffs move with their
-part (the door's knocker in its poses). Alone they left the bars three
-fifths rubbed. Thinness: one more call to `dist`, two probes in along
+part (the door's knocker in its poses). The band is the field's, in the
+model's units, and the noise the paint frame's, so a part scaled after
+painting scales its scuffs and not its band; measuring the frame's scale
+at every pixel would cost two more `hit` calls, as the bump's slope
+does, and no worn part in the examples, the dogfood or the libraries
+is scaled after painting. Alone the scuffs left the bars three fifths
+rubbed. Thinness: one more call to `dist`, two probes in along
 the normal, which is out the other side of a part thinner than about two
 probes and still inside a thick part's edge (a wedge's inside goes on,
 however sharp); a thin part's share is about 30% (a quarter of the
@@ -1992,11 +1998,16 @@ and rust with lighter rubbed patches, a box's edge a broken lighter
 line, and no part of a worn metal is rubbed whole. The baker reads the
 same thinness and draws the same scuffs, so the GLB's maps carry them.
 The cost is that call and three of the noise per worn metal sample, 9
-calls to 10 and about 14% of a worn sample's finish, and the renders got
-faster, not slower (the lantern 2.13 s to 1.90, the door's three shots
-3.79, 5.25 and 2.64 s to 3.31, 4.74 and 2.63, four interleaved runs each
-at 384 pixels on two threads): polished iron at 0.31 took four traced
+calls to 10, between nothing (the lantern's iron) and a fifth (the
+door's) of a worn sample's finish, and no render got slower. Four
+interleaved runs each at 384 pixels on two threads, measured twice on a
+shared machine, took the lantern from 2.13 and 1.90 s to 1.90 and 1.69,
+the door's hero shot from 3.79 and 3.22 s to 3.31 and 3.30, its iron
+shot from 5.25 and 5.21 s to 4.74 and 4.76 and its torch shot from 2.64
+and 2.70 s to 2.63 and 2.44: polished iron at 0.31 took four traced
 rays a pixel, satin at 0.44 takes one and the unrubbed iron one or none.
+The GLB's bake took the same within its noise (the lantern 4.6 s and
+4.4, the door 21.0 and 22.0, two runs each).
 
 A bump is a height, not geometry: fractal noise in the paint frame,
 shaded by tilting the normal by its slope. The slope is measured along

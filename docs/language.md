@@ -2179,6 +2179,10 @@ the shapes.
 - Wear's band is a share of the whole model's size, so in a big scene a
   small part reads more of its surface as edge, and a metal's scuffs are
   larger; a lantern in a market wears wider than the same lantern alone.
+  The scuffs are laid out in the frame the part is painted in, at that
+  size, so a worn metal scaled after painting scales its scuffs but not
+  its band (finer chips scaled down, longer unbroken rubs scaled up):
+  paint a worn metal at the size it is shown.
 - Only `model.glb` carries the normal, metallic-roughness and emissive
   maps. The OBJ's MTL names `model.png`, the colour with wear in it; the
   Roblox GLB and the Bedrock texture take the pattern's colour alone, no

@@ -149,7 +149,7 @@ describe("surface and curvature", () => {
       n++;
       if (Math.abs(s.color[0] - iron.color[0]) < 0.02 && Math.abs(s.rough - iron.rough) < 0.02) own++;
       if (s.color[0] > iron.color[0] + 0.08) rubbed++;
-      // New, the same bar is the metal's own surface everywhere.
+      // Unworn, the same bar is the metal's own surface everywhere.
       const p = surface(plain, x, y, z, c, h, thin[0]);
       expect([p.color, p.rough, p.metal]).toEqual([iron.color, iron.rough, iron.metal]);
     }
@@ -419,6 +419,8 @@ describe("PBR in the GLB", () => {
     const shape = O.paint(P.cylinder(0.03, 1), iron);
     const mesh = surfaceNets(shape, { resolution: 100 }).mesh;
     const at = bakeAtlas(mesh, { size: 256, fields: [{ range: [0, mesh.indices.length / 3], dist: shape.dist, offset: [0, 0, 0] }], cellSize: 0.01, wearProbe: 0.04 });
+    // A bar rubbed alike all over takes one roughness at every texel, which the baker writes as a factor, not a map.
+    expect(at.metalRough, "the bar's roughness varies over it").toBeDefined();
     const mr = at.metalRough!.data;
     let own = 0, n = 0;
     for (let i = 0; i < mr.length; i += 4) {
