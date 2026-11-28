@@ -1231,7 +1231,12 @@ lantern's worn rusty iron read as polished chrome, because `wear` rubs a
 thin part bright all round and the new render draws bare polished iron
 as steel. What it found that the language got wrong, text() mirroring
 lettering under an arc, is fixed. The worn metal and the faint engraving
-are being answered before this round, so the round tests the fixes.
+were answered before this round and read blind again (design.md, the end
+of "Read blind"): worn studs, rings and bars now read as old rusty iron,
+and a polished engraving's lips no longer glint. Two things stayed open:
+the lantern's flat iron faces still read as light, silvery metal under
+the studio's overhead strip, and the ring's FOREVER, 50 by 5 pixels at
+384, is darker marks but still no letters. The round tests the fixes.
 
 **What.** A round of four fresh agents, briefed as `dogfood/README.md`
 describes, each brief chosen to need what the redesign changed:
@@ -1574,6 +1579,21 @@ occlusion (design.md, "A grid over the pieces").
   record of shapes is never taken for a shape. The workshop example
   carries its bench's size in one and renders byte for byte as before.
   Not built: string keys, and iterating a record's fields.
+- Found while answering the blind check, not fixed:
+  - A field that is a bound (a scaled shape) reads as a hollow to the
+    cavity term, so its reflections are dimmed in open air: K is 0.53 to
+    0.64 on the Roblox wings' scaled-sphere boss, about 15 to 26% off
+    since the kernel, and the cafe set's scaled rug is the same. The bend
+    gate keeps it off the highlights (12% at the boss's peak). A fix
+    would measure the occlusion against the gradient's length.
+  - The steps sheet truncates a step's name but not its size-and-tag
+    line, so a cut with three two-decimal sizes runs into the next
+    caption (the teapot's `bore` reads "CUT2.26"). Scanned over all 126
+    programs, 140 step captions overflow. A fix moves about 60 steps
+    sheets.
+  - When `void()` fails it can name the cutter's step for a solid point
+    (a pot unioned after its bored spout is reported "in 'bore'"): the
+    attribution prefers a cutter whose volume holds the point.
 
 ## What was considered and set aside
 

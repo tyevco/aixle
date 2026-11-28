@@ -1233,9 +1233,10 @@ Both renders shared some misreadings: the hardware chain's six links
 read as four, the ring's chrome inlay as a reflection and its round cup
 as a box, the teapot's capped handle as an open tube, the door's walnut
 torch handle as black iron, the medal's brass letters as gold, and the
-straw below the drink was not seen at all. One shared misreading is the
-language's, not the renderer's: both show the medal's lower legend
-mirror-reversed, because that is what `text()` builds on a negative arc.
+straw below the drink was not seen at all. One shared misreading was the
+language's, not the renderer's: both showed the medal's lower legend
+mirror-reversed, because that is what `text()` built on a negative arc
+until 55de603, which bends it upright and left to right.
 Two of the teapot's answers were about its model, not the renderer: its
 handle stopped short of the pot, so the free, flat end the reader took
 for an open tube was there to be seen, and its spout, which the reader
@@ -1258,8 +1259,43 @@ before the legibility pass, had read the same frame as white enamel. No
 count or lettering was read wrongly from the new render alone, and the
 one count that differed between the two, the bands on the tumbler's
 straw, the new render got right. The two pairs and the lantern's iron
-are left open; the plan's next step for legibility is a dogfooding round
+were left open; the plan's next step for legibility is a dogfooding round
 that judges the renders.
+
+Three of the misses were answered before that round, and the models they
+touch were read blind again the same way, each pair setting the render
+at 67ba88d against the answer's:
+
+- **Worn metal** (the lantern and the door). `wear` now rubs a metal's
+  edge to satin and breaks it into scuffs, fewer on a thin part ("The
+  finish, and the maps that carry it"). Nothing was read wrongly from the new
+  render alone. The door's studs and knocker ring, read as "clean,
+  polished or oiled" and "newer" than the straps at 67ba88d, now read as
+  one old rusty iron with them. The lantern reads old and rusting all
+  over, its frame one metal and "much less chrome-like", but its bare
+  metal is "still bright and silvery", hedged as rusted steel or
+  galvanised. That is the flat faces, which wear never touches: the roof,
+  the largest iron in the picture, is the rust preset's dark iron
+  (F0 0.20, rough 0.55) taking the studio's overhead strip, and is as
+  light at wear 0. The lantern's iron is still open.
+- **The faint engraving** (the ring, with the medal and the nameplate as
+  controls). A light's highlight now takes the cavity term where the
+  field bends ("The BRDF is the viewer's"), so a groove's lips stop
+  glinting. Every changed pixel in the three pairs got darker. The
+  lettering read as well on both sides of every pair: AIXLE MODELS / FOR
+  MACHINES 22 of 22, Ada Lovelace / Analyst 18 of 18, and the ring's
+  FOREVER 0 of 7 on both. Nothing was read wrongly from the new render
+  alone. The ring's inscription is about 50 by 5 pixels at 384, its
+  strokes 1.75 cells wide: darker marks, but not letters. The reader,
+  forced to choose, preferred the old side's thinner marks, and on the
+  nameplate offered "black infill" for grooves that are bare brass, which
+  is the risk of an engraving that reads as dark marks. The guide's row
+  for sparkling letters gives a satin finish or strokes about three cells
+  wide, measured on the ring.
+- **The teapot** is the model's fix described above.
+
+The mixer's beater among its bowl's reflections is not a renderer fault:
+a bowl at `rough` 0.2 mirrors what it holds. The guide has a row for it.
 
 ## Minecraft geometry
 
