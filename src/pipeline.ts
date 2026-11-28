@@ -1471,10 +1471,13 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       for (const j of joints) axes[j.joint!.name] = j.joint!.axis;
       return { name: a.name, seconds: a.seconds, loop: a.loop, times, samples, axes };
     });
-  // `set camera hero` makes a declared shot the sheet's and the beauty render's view; the CLI still overrides.
-  const shotName = opts.camera ?? (typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined);
+  // `set camera hero` makes a declared shot the sheet's and the beauty render's view; the CLI still overrides. --camera
+  // naming no camera of the program is warned about and otherwise left out, so the run is the one without it: the
+  // program's shot (beauty.png took the plain settings' view, though the render's own view, below, is that shot).
+  const cliCamera = opts.camera && evaluation.cameras.some((c) => c.name === opts.camera) ? opts.camera : undefined;
+  const shotName = cliCamera ?? (typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined);
   const shot = shotName ? evaluation.cameras.find((c) => c.name === shotName) : undefined;
-  if (opts.camera && !shot) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? "beauty.png takes the render's own view" : "every shot is rendered"}`);
+  if (opts.camera && !cliCamera) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? "beauty.png takes the render's own view" : "every shot is rendered"}`);
   // What a camera leaves out it takes from the render's own view: the command line's angles, then the program's own
   // `set camera` shot, then `set azimuth` and the rest (as check's aim takes them). --camera naming another camera
   // changes the shot, not that view, so --beauty-only --camera close draws the very beauty_close.png of the full run
@@ -2095,7 +2098,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       for (const c of evaluation.cameras) {
         const isShot = !!shot && c.name === shot.name;
         // --camera naming no camera leaves every shot to be rendered, as its warning says.
-        if (!isShot && ((opts.camera && shot) || opts.shots === false)) continue;
+        if (!isShot && ((cliCamera && shot) || opts.shots === false)) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
         // Framed on its own focus=, else as beauty.png is without one (measured: with `set camera hero` focused on a
         // ball, beauty_wide.png was framed on the ball's box, fitted to neither the ball nor the model, where
@@ -2328,7 +2331,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": `orbit the GLB in a browser (self-contained; loads three.js from a CDN), under its own studio or the program's scene (the GLB's lights, the ${environment ?? "studio"} sky and ambient${evaluation.cameras.length ? ", the cameras as viewpoints" : ""}), opening in the ${evaluation.lights.length || evaluation.settings.environment !== undefined ? "scene" : "studio"}`,
-    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}${beautyQuality(opts) === "draft" ? ", in draft (one reflection bounce, one glossy ray, one glass deep; --quality full for the full render)" : ""}`,
+    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${cliCamera ? " (--camera)" : " (set camera)"}` : ""}${beautyQuality(opts) === "draft" ? ", in draft (one reflection bounce, one glossy ray, one glass deep; --quality full for the full render)" : ""}`,
     "lights.png": "the beauty render under each declared light alone, then all of them, from one half-size draft render that keeps each light's share apart; under each, exactly what that light adds (its share of that render, on the model and the floor), brightened by the gain shown, and the picture under no light at all",
     "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}, each a half-size draft render`,
     ...cameraFiles,

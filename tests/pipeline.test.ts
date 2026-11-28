@@ -623,7 +623,7 @@ describe("round-11 renders", () => {
     // --camera naming no camera renders every shot, as its warning says; in the one-shot loop beauty.png is the
     // render's own view and the warning says that instead.
     const none = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "nope" });
-    expect(none.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_hero.png", "beauty_knob.png"]);
+    expect(none.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_knob.png"]);
     expect(none.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; every shot is rendered$/)]));
     const noneOnly = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, camera: "nope" });
     expect(noneOnly.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
@@ -631,6 +631,27 @@ describe("round-11 renders", () => {
     // --lights asks for the study in the loop; --no-lights leaves it off a full run.
     expect(run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, lights: true }).files).toContain("lights.png");
     expect(run(lit + "show both", "lit.aix", c, { ...opts, lights: false }).files).not.toContain("lights.png");
+  });
+
+  it("treats --camera naming no camera as no --camera: beauty.png is the program's set camera shot, byte for byte", () => {
+    // Before, beauty.png took the plain settings' view (azimuth 35, elevation 25) where the run without --camera
+    // took hero's, though the render's own view is defined as the command line, then the set camera shot, then the
+    // settings; and the full run wrote hero's shot again as beauty_hero.png.
+    const src = lit + "set camera hero\nshow both";
+    for (const o of [opts, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64 }]) {
+      const a = tmp(), b = tmp();
+      const plain = run(src, "lit.aix", a, o);
+      const nope = run(src, "lit.aix", b, { ...o, camera: "nope" });
+      expect(bytes(b, "beauty.png").equals(bytes(a, "beauty.png"))).toBe(true);
+      expect(nope.files).toEqual(plain.files);
+      // Every picture but the sheet, whose title counts the run's warnings (one more: the --camera one).
+      const pictures = plain.files.filter((f) => f.endsWith(".png") && f !== "sheet.png");
+      expect(pictures).toContain("beauty.png");
+      for (const f of pictures) expect(bytes(b, f).equals(bytes(a, f)), f).toBe(true);
+      expect(nope.warnings.filter((w) => !w.startsWith("--camera nope:"))).toEqual(plain.warnings);
+      expect(nope.warnings.some((w) => /^--camera nope: no such camera; cameras: hero, knob; /.test(w))).toBe(true);
+      expect(nope.report).toMatch(/`beauty\.png`: [^\n]*from camera hero \(set camera\)/);
+    }
   });
 
   it("draws lights.png from the shot beauty.png shows, whether set camera or --camera chose it", () => {
