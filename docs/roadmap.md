@@ -1276,7 +1276,8 @@ candle inside its cage is 17 to 29 levels brighter, the medal's
 lettering barely reads, and metals are 15 to 50 levels brighter.
 `beauty.png` darkens all three with the field's occlusion (five taps
 along the normal, to the power 1.5) and its cavity term (the first three
-taps, cubed, on what a surface reflects), and the GLB carries neither,
+taps, cubed, on what a surface reflects and on a light's highlight where
+the field bends), and the GLB carries neither,
 so every engine that loads it has the same gap (23).
 
 **What.** `model.glb` gains glTF's core `occlusionTexture`, which the

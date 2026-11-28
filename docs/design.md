@@ -540,6 +540,16 @@ face round them (9 over it without the change), and a pocket's flat
 floor takes the key's highlight exactly as the open face does (with the
 term on every highlight it lost up to 97%).
 
+The kernel has little more to give there: the cavity term to the power 6
+on those highlights reads 43 levels, and a crease in a hollow with no
+highlight at all 48. The rest is the program's, and depth is not it:
+cut twice as deep, the ring's letters read as before (36 levels), where
+strokes 2.9 cells wide in place of 1.75 read 47 and a satin gold
+(`material("gold", rough=0.5)`, the preset is 0.3) 80, on a band that
+is brighter there (the letters' mean luma 80, against 86 in polished
+gold), all with the letters found as above. The guide's row for a
+polished engraving says so.
+
 The occlusion is taken to the power 1.5 on the model's own surfaces, for
 the sky's light and its reflection (`AO_POWER`). It was tuned by eye in
 the old renderer, which multiplied display colours by it; in linear
