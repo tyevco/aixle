@@ -503,3 +503,66 @@ describe("shading: the floor is opaque to lights", () => {
     expect(sha(draw(above).canvas.data)).not.toBe(sha(draw(off(above)).canvas.data));
   });
 });
+
+describe("shading: an engraving in polished metal", () => {
+  it("reads as dark marks: grooves under two cells wide in gold sit well under the face round them, with the key's highlight on their lips", () => {
+    // Four grooves cut into a gold plate, 1.9 cells wide and 2.9 deep (the ring's FOREVER is 1.75 and 2.9), seen low
+    // with the key above and behind the camera, so the half vector between them is the normal of the grooves' far lips
+    // and corners. Without the cavity term on the highlights of creases and edges in a hollow those caught the key, and
+    // the grooves read 9 levels brighter than the face; with it they read 21 under.
+    const gold = materialFromString("gold")!;
+    const plate = O.paint(O.move(P.box(2, 0.2, 1), 0, 0.1, 0), gold);
+    const grooves = O.union([-0.3, -0.1, 0.1, 0.3].map((z) => O.move(P.box(1.6, 0.24, 0.08), 0, 0.2, z)));
+    const cut = O.difference(plate, grooves);
+    // The same plate uncut with the grooves' mouths painted a green glow: which pixels are the grooves.
+    const marked = O.decal(plate, grooves, customMaterial({ color: [0, 1, 0], glow: 2 }));
+    const size = 96;
+    const opts = { size, azimuth: 0, elevation: 15, zoom: 1.3, lights: [{ azimuth: 0, elevation: 50, size: 1.5, color: [1, 1, 1], power: 1 }] as BeautyLight[] };
+    const draw = (s: Shape3) => {
+      const nets = surfaceNets(s, { resolution: 48 });
+      return renderBeauty(s, nets.mesh, s.bounds, { ...opts, cellSize: nets.cellSize });
+    };
+    const picture = draw(cut), mask = draw(marked);
+    const rgb = (v: number) => [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+    const luma = (v: number) => { const [r, g, b] = rgb(v); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const groove = (x: number, y: number) => { const [r, g, b] = rgb(mask.get(x, y)); return g > r + 40 && g > b + 40; };
+    let gs = 0, gn = 0, fs = 0, fn = 0;
+    for (let y = 3; y < size - 3; y++)
+      for (let x = 3; x < size - 3; x++) {
+        if (groove(x, y)) { gs += luma(picture.get(x, y)); gn++; continue; }
+        // The face round them: the gold within three pixels of a groove.
+        let near = false;
+        for (let dy = -3; dy <= 3 && !near; dy++) for (let dx = -3; dx <= 3 && !near; dx++) near = groove(x + dx, y + dy);
+        const [r, , b] = rgb(mask.get(x, y));
+        if (near && r - b > 50) { fs += luma(picture.get(x, y)); fn++; }
+      }
+    expect(gn).toBeGreaterThan(200);
+    expect(fn).toBeGreaterThan(200);
+    expect(fs / fn - gs / gn, `grooves ${(gs / gn).toFixed(1)}, face ${(fs / fn).toFixed(1)}`).toBeGreaterThan(15);
+  });
+
+  it("leaves a light's highlight on a flat floor alone: a pocket's floor takes the key as the open face does", () => {
+    // A pocket 12 cells across and 2.4 deep in a gold plate, seen from above. Its floor's cavity term is under 1 within
+    // six cells of the wall, but the floor is flat, the light's rays find it lit, and its highlight is the face's: the
+    // cavity term dims a highlight only where the field bends (a crease or an edge). Taken on every highlight, it
+    // took up to 97% of this floor's, and round 10's hub's pockets read as domes from above.
+    const gold = materialFromString("gold")!;
+    const slab = O.move(P.box(2, 0.2, 2), 0, 0.1, 0);
+    const pocket = O.paint(O.difference(slab, O.move(P.box(0.5, 0.24, 0.5), 0, 0.22, 0)), gold);
+    const open = O.paint(slab, gold);
+    const opts = { size: 64, azimuth: 20, elevation: 60, ambient: 0, lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }] as BeautyLight[] };
+    const a = shade(pocket, opts, 48), b = shade(open, opts, 48);
+    const D = (r: typeof a) => r.buffers.D as Float32Array;
+    const { flags, normal, depth } = a.buffers as { flags: Uint8Array; normal: Float32Array; depth: Float32Array };
+    const depthB = b.buffers.depth as Float32Array;
+    let n = 0, worst = 0;
+    for (let i = 0; i < 64 * 64; i++) {
+      // The pocket's floor: a model pixel facing straight up, farther than the open face at that pixel.
+      if ((flags[i] & KIND_MASK) !== KIND_MODEL || flags[i] & FLAG_EDGE || normal[i * 3 + 1] < 0.9999 || !(depth[i] > depthB[i] + 0.05)) continue;
+      n++;
+      for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(D(a)[i * 3 + c] - D(b)[i * 3 + c]) / D(b)[i * 3 + c]);
+    }
+    expect(n).toBeGreaterThan(40);
+    expect(worst).toBeLessThan(1e-4);
+  });
+});

@@ -471,13 +471,84 @@ under 0.3, the old renderer's). Specular occlusion is Lagarde's, the
 occlusion as the reflection sees it, tighter for a smooth surface; it
 dims the prefiltered sky. The cavity term is the first three taps (6.4
 cells) to the power 3 (`CAVITY_POWER`), and it multiplies everything a
-reflection brings, the traced rays as well as the sky. That is what
-keeps lettering cut into polished metal readable: from inside a groove
-the traced rays meet the groove's walls, which reflect the sky as
+reflection brings, the traced rays as well as the sky, and the lights'
+highlights on a crease or an edge in a hollow. That is what makes
+lettering cut into polished metal read as dark marks. From inside a
+groove the traced rays meet the groove's walls, which reflect the sky as
 brightly as the face round them, and with the cavity term on the sky
-alone the ring's FOREVER read only at its edges at powers 1, 3 and 5.
-On every reflection, and at a power of 3, the letters read dark at 384
-and 768 pixels, as the old renderer drew them; 5 was no better.
+alone the ring's FOREVER read only at its edges at powers 1, 3 and 5; on
+every reflection, at 3, it read darker, and 5 was no better.
+
+It was not dark enough: the blind check (below) found the ring's
+inscription fainter than the old renderer's. Measured on the hero shot
+at 384, with the letters' pixels found by rendering the program with the
+inscription painted on as a glowing green decal instead of cut (and the
+decal's reflections in the band left out), the cut letters were 70
+levels darker than the same pixels of the uncut band in the old
+renderer, 23 when `CAVITY_POWER` was tuned (247fd67; 4 at a power of 1),
+22 at the stage-2 merge (230a4d5) and 15 at 862f270. The 6 levels lost
+after the merge are one commit's, db438ff (gold to its measured F0
+squared, the occlusion's power): the ring's picture is the merge's byte
+for byte before it and 862f270's after it. So the tuning's "as the old
+renderer drew them" does not hold when measured: the letters were darker
+than at a power of 1, not as dark as the old renderer's. Against the
+band round them (the gold two to four pixels out) every render shows the
+letters well under it, 77 levels in the old renderer and 92 at 862f270,
+since the new band is brighter there; that measure misses what the
+reader saw.
+
+The lights were the rest. With them switched off the cut letters were 60
+levels under the uncut band; with the reflections switched off they were
+13 levels over it. The cavity term never touched a light's highlight,
+and along a groove's lips and in its corners the field's normal (central
+differences half a cell either side) turns through every angle between
+the face and the wall, so some of it meets each light's half vector
+while the light's rays find the point lit. On FOREVER, strokes 1.75
+cells wide, a lip took the key's highlight at 7 to 12 times what a white
+matt face square to the key returns, against 0.1 on the groove's walls
+beside it, and the letters read as gold-on-gold sparkles. The lips'
+cavity term is high (0.74 to 0.82, against 0.59 on a flat gold plate's:
+on the band's convex inside, the face beyond the groove falls away from
+the taps), so it dimmed their reflections little and would dim their
+highlights only by half. Such a point is where the normal's differences
+straddle the crease, and the same six samples say so: their second
+differences, |d(p + e) + d(p − e) − 2 d(p)| over the three axes in units
+of the step e (half a cell), are 1.2 to 1.4 e/R on a smooth surface of
+radius R, and on a right-angled edge 1.4 at the line, falling to 0 half
+a cell off (1.05 to 1.2 on those lips). A light's highlight takes the
+cavity term in proportion to that bend, all of it at 0.5 (`CREASE_BEND`,
+a radius of about a cell) or more. The cut letters are now 37 levels
+under the uncut band, their mean luma 86 against 862f270's 108 and the
+old renderer's 71, 114 levels under the band round them, and 94% of them
+under the band's darkest tenth (862f270 76%, the old renderer 85%); the
+old renderer's darkest quarter is still darker (31 levels, now 67).
+Taken on every highlight (40 levels), the term also took the light off
+flat floors a few cells from a wall, which the light's rays rightly find
+lit: round 10's hub's blind pockets read as domes from above again, and
+its counterbores' steps went black; on creases only, they read as they
+did. Gated by the gradient's length instead (1 on a smooth distance,
+0.80 on those lips), it also dimmed the highlight on the Roblox wings'
+boss, a scaled sphere, whose field is a bound with a gradient under 1
+everywhere and whose cavity term is under 1 in the open. An open convex
+edge keeps its glint, its cavity term 1. The same change takes out the
+dotted line of highlights where two parts meet in a crease (the ring's
+cushion on its plinth, the hub's boss on its flange). Diffuse light is
+left alone: the area lights' rays shadow it into a groove. Two shading
+tests hold it: four grooves under two cells wide in a gold plate, seen
+low with the key's highlight on their lips, read 21 levels under the
+face round them (9 over it without the change), and a pocket's flat
+floor takes the key's highlight exactly as the open face does (with the
+term on every highlight it lost up to 97%).
+
+The kernel has little more to give there: the cavity term to the power 6
+on those highlights reads 43 levels, and a crease in a hollow with no
+highlight at all 48. The rest is the program's, and depth is not it:
+cut twice as deep, the ring's letters read as before (36 levels), where
+strokes 2.9 cells wide in place of 1.75 read 47 and a satin gold
+(`material("gold", rough=0.5)`, the preset is 0.3) 80, on a band that
+is brighter there (the letters' mean luma 80, against 86 in polished
+gold), all with the letters found as above. The guide's row for a
+polished engraving says so.
 
 The occlusion is taken to the power 1.5 on the model's own surfaces, for
 the sky's light and its reflection (`AO_POWER`). It was tuned by eye in
@@ -485,8 +556,9 @@ the old renderer, which multiplied display colours by it; in linear
 light the same factor darkens a groove on the screen only by its 2.2th
 root, and the rope's grooves read flat (their 25th percentile 32 levels
 against the old renderer's 19). At 1.5 they are 18; at 2 they were 11,
-black between the strands. The lights need no occlusion: their area rays
-already shadow them into the grooves.
+black between the strands. The lights' diffuse light needs no
+occlusion: their area rays already shadow it into the grooves. Their
+highlights take the cavity term on creases and edges, as above.
 
 A metal preset's colour is its F0, written in sRGB, as glTF means a
 metal's base colour, so beauty.png, the viewer and an engine read the
