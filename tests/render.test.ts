@@ -14,7 +14,7 @@ import { Canvas, rgb } from "../src/render/canvas.js";
 import { drawText, textWidth } from "../src/render/font.js";
 import { renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
 import { ADDS_TARGET, addsGain, encodePicture, gainText, lightFrames, lightStudy } from "../src/render/lightstudy.js";
-import { BLOOM_THRESHOLD, encode, FLAG_EDGE, FLAG_GLOW } from "../src/render/photometry.js";
+import { BLOOM_THRESHOLD, encode, FLAG_EDGE, FLAG_GLOW, untone } from "../src/render/photometry.js";
 
 const sphere = P.sphere(1);
 const mesh = surfaceNets(sphere, { resolution: 32 }).mesh;
@@ -209,16 +209,22 @@ describe("what a light adds", () => {
     const r = renderBeautyResult(scene, nets.mesh, scene.bounds, { ...opts, splitLights: true });
     const f = lightFrames(r);
     expect(r.hdr!.length).toBe(3);
+    const flags = r.flags!, shown = r.edgeDisplay!;
+    expect(shown.length).toBe(97 * 97 * 9);
+    const edge = (k: number) => (flags[Math.floor(k / 3)] & FLAG_EDGE) !== 0;
     for (let i = 0; i < lights.length; i++) {
       const slot = r.hdr![i + 1];
       let off = 0, worst = 0, gainOff = 0, lit = 0;
       for (let k = 0; k < slot.length; k++) {
+        // What a light adds is its slot times its gain at every pixel, edges included.
+        if (f.hdr.adds[i][k] !== slot[k] * f.gains[i]) gainOff++;
+        if (slot[k] > 0.01) lit++;
+        // At an edge pixel, alone and none are what the render's picture would take there (below); elsewhere slots.
+        if (edge(k)) continue;
         const d = f.hdr.alone[i][k] - f.hdr.none[k];
         // Exact, but for a slot under 2^-29 of the sky's radiance there, which the double-precision sum rounds (one
         // value here: 1.7e-10 beside 0.17, off by 1e-17).
         if (d !== slot[k]) { off++; worst = Math.max(worst, Math.abs(d - slot[k]) / (f.hdr.alone[i][k] * Number.EPSILON)); }
-        if (f.hdr.adds[i][k] !== slot[k] * f.gains[i]) gainOff++;
-        if (slot[k] > 0.01) lit++;
       }
       expect(off, lights[i].name).toBeLessThanOrEqual(1);
       expect(worst, lights[i].name).toBeLessThanOrEqual(1);
@@ -226,8 +232,24 @@ describe("what a light adds", () => {
       expect(lit, lights[i].name).toBeGreaterThan(500);
       expect(f.gains[i]).toBe(addsGain(slot));
     }
-    // The none frame is slot 0, the sky's, unchanged.
-    expect(f.hdr.none).toEqual(Float64Array.from(r.hdr![0]));
+    // Off the edges the none frame is slot 0, the sky's, unchanged; at an edge pixel each frame is the radiance its
+    // samples' mean display colour under that frame's light stands for, as the render untones its own.
+    const want = new Float64Array(3);
+    let edges = 0;
+    for (let p = 0; p < 97 * 97; p++) {
+      if (!(flags[p] & FLAG_EDGE)) {
+        for (let c = 0; c < 3; c++) expect(f.hdr.none[p * 3 + c]).toBe(r.hdr![0][p * 3 + c]);
+        continue;
+      }
+      edges++;
+      for (const [fr, lin] of [f.hdr.none, ...f.hdr.alone].entries()) {
+        untone(shown[p * 9 + fr * 3], shown[p * 9 + fr * 3 + 1], shown[p * 9 + fr * 3 + 2], want, 0);
+        expect([...lin.subarray(p * 3, p * 3 + 3)]).toEqual([...want]);
+      }
+    }
+    expect(edges).toBeGreaterThan(300);
+    // An unsplit render keeps none of it.
+    expect(renderBeautyResult(scene, nets.mesh, scene.bounds, { ...opts, size: 32 }).edgeDisplay).toBeUndefined();
     // Each light's frame differs from the other's where they reach.
     let differ = 0;
     for (let k = 0; k < f.alone[0].data.length; k += 4) if (f.alone[0].data[k] !== f.alone[1].data[k]) differ++;
@@ -254,28 +276,36 @@ describe("what a light adds", () => {
     }
     expect(edges).toBeGreaterThan(50);
     expect(same).toBe(80 * 80 - edges);
-    // And a glow that blooms: under two lights of no power the picture is the sky's slot alone, and the picture under
-    // no light, finished from that slot, is the render's own but at the silhouettes, whose four samples the slots
-    // keep only as their linear mean (61 levels brighter at the glow's edge here), and round them, where the bloom
-    // spreads that a few levels. Without the bloom the glow's halo would be missing.
+    // And a glow that blooms: under two lights of no power the picture is the sky's slot alone, so the picture under
+    // no light and each light alone are the render's own, byte for byte, silhouettes and the bloom round them
+    // included. Composed from the slots, which keep an edge pixel's four samples only as their linear mean where the
+    // picture means them after the tone curve, they differed in 270 edge pixels, by up to 63 levels at the glow's
+    // edge, and the bloom spread up to 6 into 369 more round it (roadmap 29). Without the bloom the glow's halo
+    // would be missing.
     const ember = O.union([matte, O.paint(O.move(P.sphere(0.25), -0.2, 1.25, 0.2), customMaterial({ color: [1, 0.7, 0.3], glow: 3 }))]);
     const e = surfaceNets(ember, { resolution: 32 });
-    const dark: BeautyLight[] = [0, 1].map((k) => ({ name: `l${k}`, azimuth: -40 + 90 * k, elevation: 50, size: 1, color: [1, 1, 1], power: 0 }));
-    const g = renderBeautyResult(ember, e.mesh, ember.bounds, { size: 80, cellSize: e.cellSize, lights: dark, quality: "draft", splitLights: true });
-    const none = lightFrames(g).none, flat = encodePicture(g.hdr![0], 80);
-    let off = 0, worst = 0, haloed = 0;
-    for (let i = 0; i < 80 * 80; i++) {
-      if (none.data[i * 4] !== flat.data[i * 4]) haloed++;
-      if (g.flags![i] & FLAG_EDGE) continue;
-      for (let c = 0; c < 3; c++) {
-        const d = Math.abs(none.data[i * 4 + c] - g.canvas.data[i * 4 + c]);
-        worst = Math.max(worst, d);
-        if (d) off++;
-      }
-    }
+    const lamps = (powers: number[]): BeautyLight[] => powers.map((power, k) => ({ name: `l${k}`, azimuth: -40 + 90 * k, elevation: 50, size: 1, color: [1, 1, 1], power }));
+    const g = renderBeautyResult(ember, e.mesh, ember.bounds, { size: 80, cellSize: e.cellSize, lights: lamps([0, 0]), quality: "draft", splitLights: true });
+    const dark = lightFrames(g), flat = encodePicture(g.hdr![0], 80);
+    for (const frame of [dark.none, ...dark.alone]) expect(Buffer.from(frame.data).equals(Buffer.from(g.canvas.data))).toBe(true);
+    let haloed = 0;
+    for (let i = 0; i < 80 * 80; i++) if (dark.none.data[i * 4] !== flat.data[i * 4]) haloed++;
     expect(haloed).toBeGreaterThan(300);
-    expect(worst).toBeLessThanOrEqual(8);
-    expect(off).toBeLessThan(80 * 80 * 3 * 0.03);
+    // One light lit and one of no power: the lit light alone is the render's own picture. At an edge pixel it is the
+    // same samples' display mean to the bit; off the edges its slots, each rounded to a float before they are summed,
+    // may move a pixel a level. Composed from the slots' linear means it differed in 289 edge channels, by up to 60
+    // levels at the glow's edge.
+    const half = renderBeautyResult(ember, e.mesh, ember.bounds, { size: 80, cellSize: e.cellSize, lights: lamps([0, 1]), quality: "draft", splitLights: true });
+    const lit = lightFrames(half).alone[1];
+    let moved = 0, most = 0;
+    for (let i = 0; i < 80 * 80; i++)
+      for (let c = 0; c < 3; c++) {
+        const d = Math.abs(lit.data[i * 4 + c] - half.canvas.data[i * 4 + c]);
+        if (d) moved++;
+        most = Math.max(most, d);
+      }
+    expect(most).toBeLessThanOrEqual(1);
+    expect(moved).toBeLessThan(10);
   });
 
   it("brightens a light's share until most of what it reaches shows near white, 1 to 32 times", () => {

@@ -1241,13 +1241,14 @@ alone drew its floor at an albedo of 0.95, where the shot's was 0.26,
 only in the channels not already full, so a flame a light barely
 touched came out bright green once brightened. Each frame's caption is
 in dark or light ink, whichever stands out from the picture under it.
-The frames away from the "all" one take a silhouette's edge pixels as
-the plain mean of their samples, so an edge against a glow can be
-brighter there than in the shot. `--beauty-only` leaves `lights.png`
-out unless `--lights` asks for it, and `--no-lights` leaves it off a
-full render; it takes about a fifth to a third of the time the n + 2
-renders took (0.57 to 1.1 s on four threads for the lantern, round
-10's ring and round 11's door at 512 px, against 1.8 to 4.5 s).
+Every frame draws a silhouette as the shot draws its own, each of an
+edge pixel's samples through the tone curve before they are averaged,
+so an edge is what the shot would show under that frame's lights.
+`--beauty-only` leaves `lights.png` out unless `--lights` asks for it,
+and `--no-lights` leaves it off a full render; it takes about a fifth
+to a third of the time the n + 2 renders took (0.57 to 1.1 s on four
+threads for the lantern, round 10's ring and round 11's door at 512 px,
+against 1.8 to 4.5 s).
 
 The lights go into `model.glb` too, each a `KHR_lights_punctual` light
 on a node of its own (a point light at its position, an azimuth light
