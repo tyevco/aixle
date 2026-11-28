@@ -767,7 +767,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       return v;
     };
     const azimuth = num("azimuth", -40), elevation = num("elevation", 55), size = num("size", 1), power = num("power", 1);
-    if (size <= 0) throw new RuntimeError(`light("${name}"): size is the light's apparent size, above 0 (0.5 a lamp, 3 a window)`, line);
+    if (size <= 0) throw new RuntimeError(`light("${name}"): size is the light's angular size (its radius is size/18 radians), above 0 (0.5 a lamp, 3 a window)`, line);
     if (power < 0) throw new RuntimeError(`light("${name}"): power is 0 or more (1 is the default key light)`, line);
     if (elevation < -90 || elevation > 90) throw new RuntimeError(`light("${name}"): elevation is degrees above the floor, -90 to 90`, line);
     const colorV = values.find((x) => x.name === "color")?.value ?? "white";

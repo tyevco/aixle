@@ -20,7 +20,7 @@ Layers, each pure and under test:
 | `src/mesh/` | surface nets with dual contouring, mesh measures, the print measures (`print.ts`: walls, support, the bed), decimation, a mesh sampled to a field for imports |
 | `src/import/` | OBJ and GLB readers (positions and triangles only), and the on-disk cache of an import's samples (`cache.ts`, injected by the CLI) |
 | `src/export/` | the texture atlas baker (colour, normal, metallic-roughness and emissive maps), the scene node tree (`hierarchy.ts`), OBJ+MTL, GLB, STL and 3MF writers (with a small zip writer), the self-contained viewer page |
-| `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-marched beauty render |
+| `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-traced beauty render (`beauty.ts` over the `pbr.ts` kernel, with `rays.ts`, `bvh.ts`, `environment.ts` and the worker pool) |
 | `src/pipeline.ts`, `src/cli.ts` | one run from source to a folder; the command line over it |
 | `tools/examples.ts`, `tools/dogfood.ts` | render `examples/*.aix` and `dogfood/**/*.aix` into their `renders/` folders (shared code in `tools/render-set.ts`) |
 | `dogfood/` | the dogfooding record: each round's agent-written programs, probes and reports, unchanged; rendered by CI like the examples |

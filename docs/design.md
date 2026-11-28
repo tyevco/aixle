@@ -921,8 +921,20 @@ could reach.
 
 The floor reflects nothing. A sheen on it, in the shading prototype,
 drew a faint ghost of the model under its contact line, which a shot
-from above could take for a part. The floor is not an occluder either: a
-light below the horizon lights the model's side faces through it.
+from above could take for a part. It does stop the lights that come
+from under it. A directional light below the horizon, or a point light
+below the floor (under min(0, the model's lowest point)), lights
+nothing: not the model's sides, which it used to light through the
+floor, not the floor, not a mirror (it has no softbox) and nothing
+through glass. That is one flag a light, the same flag that already
+skipped a light of power 0 at every place a light is evaluated, so it
+costs nothing a pixel and every thread count agrees. The test is on the
+light's centre, as the floor's own lighting was: a directional light at
+elevation 0 still lights the faces turned to it in full while the floor
+takes nothing from it, and a disc that dips below the horizon is not
+clipped by it. The viewer's Scene mode and an engine reading the GLB
+still light from below, since the viewer's ground takes shadows but
+casts none.
 
 ## Threads
 

@@ -278,7 +278,7 @@ describe("interpreter", () => {
     expect(() => run('light("k", position=[1, 2])')).toThrow(/position is \[x, y, z\]/);
     expect(() => run('light("k", range=2)')).toThrow(/range goes with position/);
     expect(() => run('light("k", position=[0, 1, 0], range=0)')).toThrow(/range is the distance/);
-    expect(() => run('light("k", size=0)')).toThrow(/size is the light's apparent size, above 0/);
+    expect(() => run('light("k", size=0)')).toThrow(/size is the light's angular size \(its radius is size\/18 radians\), above 0/);
     expect(() => run('light("k", colour="red")')).toThrow(/no parameter named 'colour'/);
     expect(() => run('light("k", color="nope")')).toThrow(/light\("k"\): color: "nope" is not a material preset or a colour/);
     expect(() => run('camera("c", zoom=0)')).toThrow(/zoom is above 0/);

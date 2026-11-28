@@ -610,7 +610,7 @@ describe("round-11 renders", () => {
     expect(full.files).toContain("lights.png");
     expect(full.timings["beauty:hero"]).toBeUndefined();
     expect(full.report).toMatch(/Cameras: hero \(azimuth -20, elevation 10, zoom 1\.2\) → beauty\.png; knob \(azimuth 60, elevation 30, zoom 1, on k\) → beauty_knob\.png/);
-    expect(full.report).toMatch(/`beauty\.png`: the field ray-marched with soft shadows and ambient occlusion, from camera hero \(set camera\)/);
+    expect(full.report).toMatch(/`beauty\.png`: the field ray traced: glTF PBR shading, traced reflections, soft shadows from lights with a size, refraction, tone-mapped, from camera hero \(set camera\)/);
     // --camera knob: beauty.png is knob's shot, the very picture the full run wrote as beauty_knob.png, and the only one.
     const one = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "knob" });
     expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);

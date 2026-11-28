@@ -1112,7 +1112,12 @@ default suits a model of any size. Put a point light in the air just
 outside the glowing part: a solid the light sits inside shadows
 everything, though inside a glass shade is fine (glass lets its light
 through, tinted), and a bulb beside the light does not shadow what is on
-the far side of it. A `glow` material lights itself only, unshadowed,
+the far side of it. The floor stops a light that comes from under it:
+a light below the horizon (an `elevation` under 0) or a point light
+under the floor lights nothing in `beauty.png` and the shots, and what
+it adds in `lights.png` is black, as a light of power 0's is (the viewer
+page's Scene mode and an engine reading the GLB still light from
+below). A `glow` material lights itself only, unshadowed,
 with a soft bloom round it where it is brighter than a white face in the
 key's light: a flame does not light the stones round it or the ground
 under it unless a point light sits in it.
@@ -1189,7 +1194,11 @@ camera's own shot is rendered as `beauty_hero.png` too, so the light
 study, which is always the shot `beauty.png` shows, is never read as
 ignoring the camera. The report's Cameras line says where each shot
 went. `check` and the report list the lights, the cameras and the
-environment, so a misspelt name is a warning before any render.
+environment, so a misspelt name is a warning before any render. A
+`--camera NAME` that names no camera of the program is warned about
+and is otherwise as if it were not given: `beauty.png` is the `set
+camera` shot (or the render's own view when there is none), byte for
+byte the run without it, and the warning says which.
 
 With two or more lights `render --beauty` also writes `lights.png`, so
 what a rim light adds is seen rather than guessed from two
@@ -1250,7 +1259,8 @@ strength (the sky's own ambient times `set ambient`), diffuse light from
 the sky's spherical harmonics as the beauty render takes it, the GLB's
 lights with `beauty.png`'s point-light falloff in place of an engine's
 inverse square (or the beauty render's one key when the program
-declares no light), glows at `beauty.png`'s strength, 1.6 times the
+declares no light, the world's default key even when `beauty.png` is
+a steep shot whose key turned to the frame's top left), glows at `beauty.png`'s strength, 1.6 times the
 GLB's, and the floor at the colour the beauty render solves for its
 open floor, faded into the horizon far off. The named cameras are
 buttons, and `◎ beauty.png`
@@ -1344,7 +1354,8 @@ and since:
   saves time only where reflections and glass are the work: draft took
   0.68 of full's time for round 11's mixer and its polished bowl, 0.82
   for the tumbler and 0.93 to 0.97 for the mug and the medal (512 px,
-  one thread, the best of three). `--quick --beauty` is draft unless
+  one thread, the best of three). `--quick --beauty`, and `--quick
+--beauty-only`, is draft unless
   `--quality full` says otherwise, and `lights.png` and
   `environments.png` are always draft. No setting in a program chooses
   it: a program describes a model, and how much to sample is the run's

@@ -116,7 +116,7 @@ export interface RunOptions {
   texture?: number;
   /** The most triangles the GLB, OBJ and viewer carry, decimated past it (or `set triangles`); 0 for the full mesh. Default WEB_TRIANGLES. */
   triangles?: number;
-  /** Ray-march the field for beauty.png. Default false: it costs seconds. */
+  /** Ray trace the field for beauty.png. Default false: it costs seconds. */
   beauty?: boolean;
   /** Pixels for the beauty render; default `size`. */
   beautySize?: number;
@@ -2333,7 +2333,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": `orbit the GLB in a browser (self-contained; loads three.js from a CDN), under its own studio or the program's scene (the GLB's lights, the ${environment ?? "studio"} sky and ambient${evaluation.cameras.length ? ", the cameras as viewpoints" : ""}), opening in the ${evaluation.lights.length || evaluation.settings.environment !== undefined ? "scene" : "studio"}`,
-    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${cliCamera ? " (--camera)" : " (set camera)"}` : ""}${beautyQuality(opts) === "draft" ? ", in draft (one reflection bounce, one glossy ray, one glass deep; --quality full for the full render)" : ""}`,
+    "beauty.png": `the field ray traced: glTF PBR shading, traced reflections, soft shadows from lights with a size, refraction, tone-mapped${shot ? `, from ${shotLabel}${cliCamera ? " (--camera)" : " (set camera)"}` : ""}${beautyQuality(opts) === "draft" ? ", in draft (one reflection bounce, one glossy ray, one glass deep; --quality full for the full render)" : ""}`,
     "lights.png": "the beauty render under each declared light alone, then all of them, from one half-size draft render that keeps each light's share apart; under each, exactly what that light adds (its share of that render, on the model and the floor), brightened by the gain shown, and the picture under no light at all",
     "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}, each a half-size draft render`,
     ...cameraFiles,

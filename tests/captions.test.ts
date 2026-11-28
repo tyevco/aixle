@@ -42,7 +42,7 @@ describe("beauty captions", () => {
       const turned = run(src, "ball.aix", dir, { ...opts, azimuth: 60 });
       expect(labels).toEqual(["m, camera hero with --azimuth 60  2 × 2 × 2", "m, camera hero  2 × 2 × 2"]);
       expect(turned.files).toContain("beauty_hero.png");
-      expect(turned.report).toMatch(/`beauty\.png`: the field ray-marched with soft shadows and ambient occlusion, from camera hero with --azimuth 60 \(set camera\)/);
+      expect(turned.report).toMatch(/`beauty\.png`: the field ray traced: glTF PBR shading, traced reflections, soft shadows from lights with a size, refraction, tone-mapped, from camera hero with --azimuth 60 \(set camera\)/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

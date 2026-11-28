@@ -1,6 +1,6 @@
 /**
- * The beauty render: the distance field itself, ray-marched, with shadows, ambient occlusion and a studio floor. The
- * checking views draw the extracted mesh because that is the file you get; this one draws the field because that is
+ * The beauty render: the distance field itself, ray traced, with glTF PBR shading, traced reflections, soft shadows
+ * from lights with a size, refraction through glass, an environment as light and a floor. The checking views draw the extracted mesh because that is the file you get; this one draws the field because that is
  * the model you meant, at full sharpness.
  *
  * This file is the orchestrator. The shading is a kernel (kernel.ts; the one every render uses is pbr.ts), which draws a
@@ -22,13 +22,14 @@ import { allocBuffers, beautyCache, materialIds, materialKey, type BeautyCache, 
 
 export { beautyCache, type BeautyCache, type Kernel, type KernelResult } from "./kernel.js";
 
-/** One light in the beauty render: a direction, an apparent size, a colour and a power. */
+/** One light in the beauty render: a direction (or a place), a size, a colour and a power. */
 export interface BeautyLight {
   name?: string;
   /** Degrees about y (0 is +z, the front; 90 is +x) and above the floor. */
   azimuth: number;
   elevation: number;
-  /** Apparent size: 0.5 is a small lamp with crisp shadows, 3 a window. */
+  /** Size: the light's angular radius is size/18 radians (photometry.lightAngle), 0.5 a small lamp with crisp shadows,
+   * 3 a window; a point light's sphere is 0.02 x range x size. */
   size: number;
   color: Vec3;
   /** 1 is the default key light's strength. */
@@ -47,11 +48,13 @@ export interface BeautyOptions {
   azimuth?: number;
   elevation?: number;
   label?: string;
-  /** Apparent size of the key light: 0.5 is a small lamp with crisp shadows, 3 a window; default 1. */
+  /** Size of the key light, as for BeautyLight.size: 0.5 is a small lamp with crisp shadows, 3 a window; default 1. */
   lightSize?: number;
   /** Depth of field: 0 off; 1 blurs a plane one model-size away by about 1% of the image. */
   dof?: number;
-  /** Where the key light comes from, in degrees: azimuth about y (0 is +z, the front; 90 is +x) and elevation above the floor. Default -40 and 55. */
+  /** Where the key light comes from, in degrees: azimuth about y (0 is +z, the front; 90 is +x) and elevation above the floor.
+   * Both unset, the key is defaultKey (about -40.2 and 46.6, turned for a steep camera); one set alone takes -40 or 55
+   * for the other. */
   lightAzimuth?: number;
   lightElevation?: number;
   /** Multiplier on the sky and ground light, 1 by default: 2 lifts a shaded interior, 0.5 is a dark room. */
