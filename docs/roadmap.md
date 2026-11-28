@@ -1104,7 +1104,8 @@ regenerated and read at each:
   found one answer wrong only for the new: the lantern's iron read as
   white enamel, since a measured metal colour reads pale in a bright
   room. So the studio has two rigs, one for the light a surface takes and
-  a darker one for what it mirrors; `iron` is magnetite (#7c7c7c),
+  a darker one for what it mirrors; `iron` was polished magnetite
+  (#7c7c7c, an oxide skin's #595959 since: design.md, "Read blind"),
   `steel` is iron's measured reflectance (#c6c6c8), and gold, brass,
   copper and bronze are their measured F0 squared; the occlusion is taken to the power
   1.5; and a steep shot's default key turns to the frame's top left. In a

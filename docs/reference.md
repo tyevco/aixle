@@ -626,7 +626,7 @@ A custom material, from a colour or from a preset with some of its fields change
 - `glow`: light the surface gives off, 0..2 (unshadowed, for flames and lamps)
 - `bump`: bumps finer than the mesh, this high either way, in units: shaded in the beauty render and baked into the GLB's normal map, no geometry added
 - `bump_scale`: the bumps' feature size in units (default ten times bump)
-- `wear`: 0..1, how used it looks: convex edges lighter and smoother, cavities darker and rougher, read from the shape's curvature; on a metal the edges are rubbed to satin (about halfway to bare metal) in scuffs, fewer on a part thinner than about 2.4% of the model's size
+- `wear`: 0..1, how used it looks: convex edges lighter and smoother, cavities darker and rougher, read from the shape's curvature; on a metal the edges are rubbed to satin (iron's dark skin to about twice its reflectance, short of bare metal) in scuffs, fewer on a part thinner than about 2.4% of the model's size
 - `image`: a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape
 - `projection`: how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)
 
