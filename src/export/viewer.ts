@@ -49,7 +49,6 @@ export interface ViewerScene {
   sky: Vec3;
   horizon?: Vec3;
   ground: Vec3;
-  floor: Vec3;
   /** E: the sky's light on surfaces, diffuse and reflected, as the beauty render takes it (the palette's intensity times `set ambient`); three.js's environmentIntensity. */
   ambient: number;
   /**

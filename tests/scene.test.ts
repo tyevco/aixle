@@ -631,7 +631,7 @@ function sceneFor(overrides: Partial<ViewerScene> = {}): ViewerScene {
   const sky = buildSky("studio", 35, DEFAULT_LIGHT_DIRECTION);
   const map = environmentLatLong(sky);
   return {
-    environment: "studio", sky: [1, 1, 1], ground: [1, 1, 1], floor: [1, 1, 1], ambient: 1,
+    environment: "studio", sky: [1, 1, 1], ground: [1, 1, 1], ambient: 1,
     light: { width: map.width, height: map.height, data: map.data, sh: Array.from(map.diffuseSH) },
     floorAlbedo: [0.5, 0.5, 0.5], floorFade: { min: [0, 0, 0], max: [1, 1, 1], reach: 2, horizon: [0.8, 0.8, 0.8] },
     cameras: [], start: true, ...overrides,

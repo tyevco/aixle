@@ -1812,7 +1812,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       };
       return {
         environment: env,
-        sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground, floor: pal.floor,
+        sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground,
         ambient: Number(E.toFixed(5)),
         light: { width: map.width, height: map.height, data: map.data, sh: Array.from(map.diffuseSH, (v) => Number(v.toPrecision(6))) },
         floorAlbedo,
