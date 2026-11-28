@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -200,5 +200,27 @@ describe("render --show", () => {
     }
     expect(status).toBe(1);
     expect(err).toMatch(/s\.aix: --show prob: no such step; the shapes are stand, probe\n/);
+  });
+});
+
+describe("--quality", () => {
+  it("takes draft or full, draft with --quick --beauty, and refuses anything else", { timeout: 60000 }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-quality-"));
+    const file = join(dir, "q.aix");
+    writeFileSync(file, 'ball = sphere(0.4) | move(-0.5, 0.4, 0) | paint("chrome")\nblock = box(0.6, 0.8, 0.6) | move(0.5, 0.4, 0)\nshow ball + block\n');
+    const beautyLine = (...args: string[]) => cli("render", file, "--out", join(dir, "out"), "--size", "64", "--grid", "16", "--threads", "1", ...args).split("\n").find((l) => l.startsWith("beauty render"));
+    expect(beautyLine("--beauty-only", "--quality", "draft")).toMatch(/^beauty render 64px, draft, 1 thread, in [\d.]+ s$/);
+    expect(beautyLine("--quick", "--beauty")).toMatch(/^beauty render 64px, draft, /);
+    expect(beautyLine("--quick", "--beauty", "--quality", "full")).toMatch(/^beauty render 64px, full, /);
+    let err = "", status = 0;
+    try {
+      cli("render", file, "--out", join(dir, "out"), "--quality", "best");
+    } catch (e) {
+      err = (e as { stderr: string }).stderr;
+      status = (e as { status: number }).status;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    expect(status).toBe(2);
+    expect(err).toMatch(/^--quality best: the quality is draft or full$/m);
   });
 });

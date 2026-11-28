@@ -1,10 +1,12 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BEAUTY_ONLY, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { BEAUTY_ONLY, beautyQuality, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
+import { decodePng } from "../src/render/png.js";
+import { renderSet } from "../tools/render-set.js";
 
 describe("pipeline", () => {
   it("renders a program into a folder of pictures, exports and a report", () => {
@@ -697,7 +699,7 @@ describe("round-11 renders", () => {
   });
 });
 
-describe("strips: one shot framed as the full run frames it", () => {
+describe("strips: the quality, lights.png from one render, and one shot framed as the full run frames it", () => {
   const opts = { grid: 20, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 };
   const dirs: string[] = [];
   const tmp = () => { const d = mkdtempSync(join(tmpdir(), "aixle-strips-")); dirs.push(d); return d; };
@@ -723,5 +725,57 @@ describe("strips: one shot framed as the full run frames it", () => {
     const c = tmp();
     run(src.replace("set camera hero\n", ""), "cams.aix", c, { ...opts, lights: false });
     expect(bytes(c, "beauty_bare.png").equals(bytes(a, "beauty_bare.png"))).toBe(false);
+  });
+
+  it("renders beauty.png in full, or in draft on a quick pass and with quality draft, and says which; the render sets render full", () => {
+    const src = lit + "show both";
+    const lines = (o: object) => { const out: string[] = []; const d = tmp(); const r = run(src, "q.aix", d, { ...opts, lights: false, ...o, log: (l) => out.push(l) }); return { r, d, beauty: out.find((l) => l.startsWith("beauty render")) }; };
+    const full = lines({}), quick = lines({ quick: true }), draft = lines({ quality: "draft" }), quickFull = lines({ quick: true, quality: "full" });
+    expect(full.beauty).toMatch(/^beauty render 64px, full, 1 thread, in [\d.]+ s$/);
+    expect(quick.beauty).toMatch(/^beauty render 64px, draft, 1 thread, in [\d.]+ s$/);
+    expect(draft.beauty).toMatch(/, draft, /);
+    expect(quickFull.beauty).toMatch(/, full, /);
+    expect(bytes(quick.d, "beauty.png").equals(bytes(draft.d, "beauty.png"))).toBe(true);
+    expect(bytes(quickFull.d, "beauty.png").equals(bytes(full.d, "beauty.png"))).toBe(true);
+    expect(bytes(draft.d, "beauty.png").equals(bytes(full.d, "beauty.png"))).toBe(false);
+    expect(draft.r.report).toMatch(/`beauty\.png`: [^\n]*, in draft \(one reflection bounce/);
+    expect(full.r.report).not.toMatch(/in draft/);
+    expect(beautyQuality({})).toBe("full");
+    expect(beautyQuality({ quick: true })).toBe("draft");
+    // The render sets: their beauty is a full render's, byte for byte.
+    const set = tmp(), out = tmp();
+    writeFileSync(join(set, "q.aix"), "set grid 20\n" + src);
+    const quiet = vi.spyOn(console, "log").mockImplementation(() => {});
+    try { renderSet(set, out, "strips-test", { only: ["q"], sheetAndBeautyOnly: true }); } finally { quiet.mockRestore(); }
+    const own = tmp();
+    run("set grid 20\n" + src, "q.aix", own, { ...opts, lights: false, defaultGrid: 112, size: 384, beautySize: 384, quality: "full", threads: 2 });
+    expect(bytes(out, "q_beauty.png").equals(bytes(own, "beauty.png"))).toBe(true);
+  });
+
+  it("draws lights.png from one draft render: the same bytes on one thread and on four, its 'all' frame a separate draft render of the shot", () => {
+    const src = lit + "show both";
+    const logs: string[][] = [[], []];
+    const dirsByThreads = [1, 4].map((threads, k) => { const d = tmp(); run(src, "l.aix", d, { ...opts, threads, environment: "studio,overcast", log: (l) => logs[k].push(l) }); return d; });
+    const [one, four] = dirsByThreads;
+    expect(bytes(one, "lights.png").equals(bytes(four, "lights.png"))).toBe(true);
+    expect(bytes(one, "environments.png").equals(bytes(four, "environments.png"))).toBe(true);
+    expect(logs[0]).toEqual(expect.arrayContaining([expect.stringMatching(/^lights\.png: 2 lights from one render, 96px frames, draft, 1 thread, in [\d.]+ s$/), expect.stringMatching(/^environments\.png: 2 skies, 96px frames, draft, 1 thread, in [\d.]+ s$/)]));
+    expect(logs[1]).toEqual(expect.arrayContaining([expect.stringMatching(/^lights\.png: 2 lights from one render, 96px frames, draft, 4 threads, in [\d.]+ s$/)]));
+    // The 'all' frame (top right of lights.png) is environments.png's studio frame, drawn by a render of its own, to
+    // the byte but for the caption at its foot.
+    const lights = decodePng(bytes(one, "lights.png")), skies = decodePng(bytes(one, "environments.png"));
+    const at = (p: { width: number; rgba: Uint8Array }, x0: number, y0: number, x: number, y: number) => [0, 1, 2].map((c) => p.rgba[((y0 + y) * p.width + x0 + x) * 4 + c]).join(",");
+    let differ = 0, varied = new Set<string>();
+    for (let y = 0; y < 96 - 14; y++)
+      for (let x = 0; x < 96; x++) {
+        const v = at(lights, 6 + 2 * (96 + 6), 32, x, y);
+        varied.add(v);
+        if (v !== at(skies, 6, 32, x, y)) differ++;
+      }
+    expect(differ).toBe(0);
+    expect(varied.size).toBeGreaterThan(200);
+    const report = readFileSync(join(one, "report.md"), "utf8");
+    expect(report).toMatch(/`lights\.png`: [^\n]*from one half-size draft render[^\n]*exactly what that light adds/);
+    expect(report).toMatch(/`environments\.png`: [^\n]*each a half-size draft render/);
   });
 });

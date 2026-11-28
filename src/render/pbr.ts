@@ -138,6 +138,10 @@ export const pbr: Kernel<PbrTables> = {
       { name: "luma", type: "f32", per: 1 },
       // An edge pixel's mean of its four samples' tone-mapped colours.
       { name: "E", type: "f32", per: 3 },
+      // With splitLights, the slots' sum as the rows had it in double precision: the picture is composed from it, so
+      // a split render draws what the same render unsplit draws (summing the slots once each was rounded to a float
+      // moved one byte in a hundred thousand).
+      ...(opts.splitLights ? [{ name: "T", type: "f32", per: 3 } as BufferSpec] : []),
     ];
   },
   prepare: (ctx) => {
@@ -705,6 +709,13 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const R = buffers.R as Float32Array, Dbuf = buffers.D as Float32Array, Vbuf = buffers.V as Float32Array;
   const depthBuf = buffers.depth as Float32Array, normalBuf = buffers.normal as Float32Array, matBuf = buffers.mat as Int32Array;
   const flagBuf = buffers.flags as Uint8Array, lumaBuf = buffers.luma as Float32Array, Ebuf = buffers.E as Float32Array;
+  const Tbuf = buffers.T as Float32Array | undefined;
+  /** With splitLights, the slots' sum of `src` (W floats from 0), times `k`, into the total's buffer at pixel i. */
+  const total = (src: Float64Array, k: number, i: number): void => {
+    let r = 0, g = 0, b = 0;
+    for (let s = 0; s < W; s += 3) { r += src[s]; g += src[s + 1]; b += src[s + 2]; }
+    Tbuf![i * 3] = r * k; Tbuf![i * 3 + 1] = g * k; Tbuf![i * 3 + 2] = b * k;
+  };
   // The sample's registers besides its radiance (COL at depth 0) and its lights (DL, VL).
   let sDepth = 0, sNx = 0, sNy = 0, sNz = 0, sMat = 0, sFlags = 0;
 
@@ -796,6 +807,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       pixX = px; pixY = py; pixS = 0;
       sample(px + 0.5, py + 0.5, prime[i], true);
       for (let k = 0; k < W; k++) R[i * W + k] = COL[k];
+      if (split) total(COL, 1, i);
       for (let k = 0; k < NL * 3; k++) Dbuf[i * NL * 3 + k] = DL[k];
       for (let k = 0; k < NL; k++) Vbuf[i * NL + k] = VL[k];
       depthBuf[i] = sDepth; normalBuf[i * 3] = sNx; normalBuf[i * 3 + 1] = sNy; normalBuf[i * 3 + 2] = sNz; matBuf[i] = sMat;
@@ -847,6 +859,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
         DACC[0] += TM[0]; DACC[1] += TM[1]; DACC[2] += TM[2];
       }
       for (let k = 0; k < W; k++) R[i * W + k] = ACC[k] / 4;
+      if (split) total(ACC, 1 / 4, i);
       for (let k = 0; k < NL * 3; k++) Dbuf[i * NL * 3 + k] = 0;
       for (let k = 0; k < NL; k++) Vbuf[i * NL + k] = 1;
       Ebuf[i * 3] = DACC[0] / 4; Ebuf[i * 3 + 1] = DACC[1] / 4; Ebuf[i * 3 + 2] = DACC[2] / 4;
@@ -864,7 +877,7 @@ const smoothstep = (a: number, b: number, v: number): number => {
 
 /**
  * The finish: each light's visibility filtered, the slots composed, bloom, depth of field, the tone curve and the
- * dither, the caption. Returns the linear radiance per slot, composed, before bloom.
+ * dither, the caption. Returns the linear radiance per slot, composed, before bloom, and the guides' flags.
  */
 function pbrFinish(ctx: KernelContext<PbrTables>) {
   const { size, opts, buffers, camera, bounds, cell } = ctx;
@@ -887,9 +900,18 @@ function pbrFinish(ctx: KernelContext<PbrTables>) {
     }
   }
   // The picture in linear light: the slots' sum, and at an edge pixel the radiance its four samples' mean display
-  // colour stands for (they are tone-mapped before they are averaged).
+  // colour stands for (they are tone-mapped before they are averaged). Split, the sum is the rows' own total and
+  // each light's direct light added to it in turn, as the one slot of an unsplit render takes them.
   const lin = new Float32Array(n * 3);
-  for (let s = 0; s < S; s++) { const h = hdr[s]; for (let k = 0; k < n * 3; k++) lin[k] += h[k]; }
+  const T = buffers.T as Float32Array | undefined;
+  if (S > 1 && T) {
+    lin.set(T);
+    for (let i = 0; i < n; i++)
+      for (let l = 0; l < NL; l++) {
+        const v = Vf[i * NL + l], o = (i * NL + l) * 3;
+        lin[i * 3] += D[o] * v; lin[i * 3 + 1] += D[o + 1] * v; lin[i * 3 + 2] += D[o + 2] * v;
+      }
+  } else for (let s = 0; s < S; s++) { const h = hdr[s]; for (let k = 0; k < n * 3; k++) lin[k] += h[k]; }
   for (let i = 0; i < n; i++) if (flags[i] & FLAG_EDGE) untone(Eb[i * 3], Eb[i * 3 + 1], Eb[i * 3 + 2], lin, i * 3);
   bloom(lin, flags, size);
   if (opts.dof && opts.dof > 0) depthOfField(lin, depth, size, opts.dof, boundsCenter(bounds), camera);
@@ -901,9 +923,8 @@ function pbrFinish(ctx: KernelContext<PbrTables>) {
       tonemap(lin[i * 3], lin[i * 3 + 1], lin[i * 3 + 2], tm, 0);
       canvas.set(px, py, rgbDithered(toSrgb(tm[0]), toSrgb(tm[1]), toSrgb(tm[2]), px, py));
     }
-  if (opts.glowMask) for (let i = 0; i < n; i++) if (flags[i] & FLAG_GLOW) opts.glowMask[i] = 1;
   if (opts.label) drawText(canvas, 8, size - 12, opts.label, INK.dim, 1);
-  return { canvas, hdr };
+  return { canvas, hdr, flags };
 }
 
 /**

@@ -13,7 +13,7 @@ import type { Vec3 } from "../core/vec.js";
 import { boundsSize, type Bounds, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { perspective, type Camera } from "./camera.js";
-import { Canvas, rgbf } from "./canvas.js";
+import type { Canvas } from "./canvas.js";
 import { createTarget, renderMesh } from "./raster.js";
 import type { BeautyPool } from "./beauty-pool.js";
 import { pbr } from "./pbr.js";
@@ -67,8 +67,6 @@ export interface BeautyOptions {
   reachBounds?: Bounds;
   /** The distance wear reads curvature over (the worn band's width); default `wearProbe` of the model's longest side, as the atlas baker uses. */
   wearProbe?: number;
-  /** size * size flags, set to 1 where the surface a pixel sees glows (left as they are elsewhere): what lights.png's frames of what a light adds leave out. */
-  glowMask?: Uint8Array;
   /** How much a kernel samples: full for beauty.png and the shots, draft for the strips (one reflection bounce, one glossy ray, one glass deep, no contrast pass). */
   quality?: "draft" | "full";
   /** Keep what each light brings apart, for lights.png (a kernel without slots ignores it). */
@@ -144,40 +142,4 @@ export function renderBeautyResult(shape: Shape3, mesh: Mesh, bounds: Bounds, op
   for (let y = 0; y < size; y++) rows.primary(y);
   for (let y = 0; y < size; y++) rows.edges(y);
   return kernel.finish(ctx);
-}
-
-/** What lights.png draws where a glowing part is, in the frames of what a light adds: flat, so no false colour reads there. */
-export const GLOW_GREY = 0x585858;
-
-/**
- * What one light adds to a picture: the render under that light alone minus the render under no light at all (the
- * ambient sky, the glows and the reflections), brightened so its brightest part is near white, on black. A small
- * point light adds a few dim pixels to a whole render (round 10: a ring's spark could be seen in lights.png but not
- * judged); here its reach and its colour fill the frame. The gain is the brightening, 1 to 32; both pictures must be
- * the same shot, unlabelled. Where `glow` flags a glowing surface the frame is flat grey and the gain ignores it: a
- * glow near white in both pictures differs only in the channels that were not already full, so a flame a light
- * barely touches came out bright green, brightened (round 11).
- */
-export function lightContribution(alone: Canvas, none: Canvas, glow?: Uint8Array): { canvas: Canvas; gain: number } {
-  const w = alone.width, h = alone.height;
-  const out = new Canvas(w, h, 0);
-  const diff = new Float32Array(w * h * 3);
-  const peaks: number[] = [];
-  for (let i = 0; i < w * h; i++) {
-    if (glow?.[i]) continue;
-    let peak = 0;
-    for (let c = 0; c < 3; c++) {
-      const d = Math.max(0, alone.data[i * 4 + c] - none.data[i * 4 + c]);
-      diff[i * 3 + c] = d;
-      peak = Math.max(peak, d);
-    }
-    if (peak > 1) peaks.push(peak);
-  }
-  // The brightest part is a near-white highlight, but a few saturated pixels should not set the gain: the 99th
-  // percentile of what the light reaches does.
-  peaks.sort((a, b) => a - b);
-  const p = peaks.length ? peaks[Math.min(peaks.length - 1, Math.floor(peaks.length * 0.99))] : 0;
-  const gain = p > 0 ? Math.max(1, Math.min(32, 230 / p)) : 1;
-  for (let i = 0; i < w * h; i++) out.set(i % w, Math.floor(i / w), glow?.[i] ? GLOW_GREY : rgbf((diff[i * 3] * gain) / 255, (diff[i * 3 + 1] * gain) / 255, (diff[i * 3 + 2] * gain) / 255));
-  return { canvas: out, gain };
 }

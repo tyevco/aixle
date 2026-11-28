@@ -25,7 +25,8 @@ import { Canvas } from "./render/canvas.js";
 import { drawText, textWidth } from "./render/font.js";
 import { viewerHtml, type ViewerScene } from "./export/viewer.js";
 import { BENT_DEGREES } from "./export/atlas.js";
-import { beautyCache, DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightContribution, lightDirection, renderBeauty, type BeautyLight, type Environment } from "./render/beauty.js";
+import { beautyCache, DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightDirection, renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions, type Environment } from "./render/beauty.js";
+import { lightStudy } from "./render/lightstudy.js";
 import { openBeautyPool, type BeautyPool } from "./render/beauty-pool.js";
 import { perspective } from "./render/camera.js";
 import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
@@ -61,6 +62,18 @@ export const QUICK: RunOptions = { quick: true, grid: 64, size: 320, views: [], 
  * also wrote the shot again and lights.png, 28 s against the shot's 8).
  */
 export const BEAUTY_ONLY: RunOptions = { beauty: true, views: [], steps: false, slices: false, turntable: false, callouts: false, poses: false, animations: false, obj: false, glb: false, viewer: false, shots: false, lights: false };
+
+/** The beauty renders' qualities: full samples everything; draft takes one reflection bounce, one glossy ray, one glass deep and no contrast pass. */
+export const QUALITIES = ["draft", "full"] as const;
+export type Quality = (typeof QUALITIES)[number];
+
+/**
+ * The quality of beauty.png and the camera shots: the run's `quality`, else draft on a quick pass (--quick --beauty)
+ * and full otherwise, which the render sets take. lights.png and environments.png are draft whatever this is.
+ */
+export function beautyQuality(opts: RunOptions): Quality {
+  return opts.quality ?? (opts.quick ? "draft" : "full");
+}
 
 export interface RunOptions {
   /** A quick pass: the grid is coarse for speed, so thin-part warnings are judged at the grid a full render would use. */
@@ -105,6 +118,8 @@ export interface RunOptions {
   beauty?: boolean;
   /** Pixels for the beauty render; default `size`. */
   beautySize?: number;
+  /** How much beauty.png and the shots sample (beautyQuality): full by default, draft on a quick pass. */
+  quality?: Quality;
   /** Threads for the beauty renders: the main one and threads - 1 workers that evaluate the program again; the bytes are the same for any number. Default 1. */
   threads?: number;
   /** Vertex placement: sharp (dual contouring, default) or the rounded surface-nets mean. */
@@ -1982,18 +1997,22 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       const beautyFrame = shotFocus ? shotFocus.frame : focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
       // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
       // (measured: a focused beauty render fitted every point and framed the whole mug).
+      // beauty.png and every shot in the run's quality: full, or draft for a quick pass with --beauty or --quality draft.
+      const quality = beautyQuality(opts);
       const shoot = (file: string, b: Bounds, focused: boolean, az: number, el: number, zm: number | undefined, df: number | undefined, label: string) =>
-        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label: captioned ? label : undefined, wearProbe: wearScale, pool: session.pool, cache: beautyTables }).toPng());
+        write(file, renderBeauty(output, mesh!, b, { size: bsize, cellSize, azimuth: az, elevation: el, lightSize, dof: df, lightAzimuth, lightElevation, ambient, zoom: zm, lights, environment, fitPoints: focused ? pointsWithin(mesh!, b) : undefined, reachBounds: focused ? modelBounds : undefined, label: captioned ? label : undefined, wearProbe: wearScale, pool: session.pool, cache: beautyTables, quality }).toPng());
       // beauty.png is the shot: the camera `set camera` or --camera names, with what the command line overrides, framed
       // on its focus=, its caption naming the camera as that camera's own shot would. The light study and the skies
       // are the same shot, so each can be set beside it.
       const shotDof = shot?.dof ?? dof;
       const shotFocused = !!(shotFocus || focusName);
       time("beauty", () => shoot("beauty.png", beautyFrame, shotFocused, azimuth, elevation, zoom, shotDof, `${shownName}${shot ? `, ${shotLabel}` : ""}${shotFocus ? ` → ${shot!.focus}` : ""}  ${dimsLabel(!shotFocus && shownSize ? shownSize : beautyFrame)}`));
-      // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders.
+      // The strips' frames: half the beauty render's size, so a strip of four is as wide as two renders, and in draft
+      // whatever the run's quality (one reflection bounce, one glossy ray, one glass deep): a strip is for comparing.
       const stripFrame = Math.max(96, Math.round(bsize * 0.5));
-      const stripShot = (o: Partial<Parameters<typeof renderBeauty>[3]>) =>
-        renderBeauty(output, mesh!, beautyFrame, { size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: shotFocused ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocused ? modelBounds : undefined, wearProbe: wearScale, pool: session.pool, cache: beautyTables, ...o });
+      const stripOptions = (o: Partial<BeautyOptions>): BeautyOptions => ({ size: stripFrame, cellSize, azimuth, elevation, lightSize, lightAzimuth, lightElevation, ambient, zoom, lights, environment, fitPoints: shotFocused ? pointsWithin(mesh!, beautyFrame) : undefined, reachBounds: shotFocused ? modelBounds : undefined, wearProbe: wearScale, pool: session.pool, cache: beautyTables, quality: "draft", ...o });
+      const drewOn = session.pool?.live ? session.pool.threads : 1;
+      const threadText = `${drewOn} thread${drewOn === 1 ? "" : "s"}`;
       // Every sky at once, or the ones listed, for choosing one: environments.png beside beauty.png.
       if (skies && skies.length) {
         const gutter = 6, bar = 26;
@@ -2001,48 +2020,27 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
         strip.fill(0, 0, strip.width, bar, INK.bar);
         barTitle(strip, `ENVIRONMENTS   the same shot under ${skyArg === "all" ? "each sky" : skies.join(", ")}`);
         time("environments", () => {
-          skies.forEach((env, i) => strip.blit(stripShot({ environment: env, label: env }), gutter + i * (stripFrame + gutter), bar + gutter));
+          skies.forEach((env, i) => strip.blit(renderBeauty(output, mesh!, beautyFrame, stripOptions({ environment: env, label: env })), gutter + i * (stripFrame + gutter), bar + gutter));
         });
         write("environments.png", strip.toPng());
       }
-      const drewOn = session.pool?.live ? session.pool.threads : 1;
-      log(`beauty render ${bsize}px in ${timings.beauty} ms on ${drewOn} thread${drewOn === 1 ? "" : "s"}${shot ? `, ${shotLabel}` : ""}`);
+      log(`beauty render ${bsize}px, ${quality}, ${threadText}, in ${seconds(timings.beauty)}${shot ? `, ${shotLabel}` : ""}`);
+      if (timings.environments !== undefined) log(`environments.png: ${skies!.length} sk${skies!.length === 1 ? "y" : "ies"}, ${stripFrame}px frames, draft, ${threadText}, in ${seconds(timings.environments)}`);
       // Each declared light alone, in a strip, so what a rim light adds can be seen rather than guessed from two
       // near-identical pictures (round 9: two agents could not tell whether a light did anything); under it, what each
       // light adds on its own, brightened, so a small point light's reach and colour can be judged (round 10: a
-      // ring's spark was a few pixels in the strip), and last the picture under no light at all.
-      // A light study is four or more marches more, so --beauty-only leaves it to --lights (round 11: 28 s of a material
-      // loop's 36 went on lights.png and a second copy of the shot).
+      // ring's spark was a few pixels in the strip), and last the picture under no light at all. One draft render
+      // that keeps each light's light apart draws every frame (lightstudy.ts): what a light adds is exactly its share
+      // of the picture, the floor's included, where n + 2 renders each solved the floor to its own lights.
+      // A light study is a render more, so --beauty-only leaves it to --lights (round 11: 28 s of a material loop's 36
+      // went on lights.png and a second copy of the shot).
       if (lights && lights.length >= 2 && opts.lights !== false) {
-        const gutter = 6, bar = 26, rowBar = 16;
-        const cols = lights.length + 1;
-        const strip = new Canvas((stripFrame + gutter) * cols + gutter, bar + (stripFrame + gutter) * 2 + rowBar + gutter, INK.page);
-        strip.fill(0, 0, strip.width, bar, INK.bar);
-        barTitle(strip, `LIGHTS   each alone, then all ${lights.length}`);
-        const rowY = bar + gutter + stripFrame + gutter;
-        // The row's key, as much of it as the strip is wide for (a quick pass's strip cut the long one short).
-        const key = ["what each adds on its own, brightened by the gain shown, a glowing part flat grey. last: no light at all, the sky's ambient and the glows", "what each adds, brightened by the gain shown, glows grey. last: no light at all", "what each adds, glows grey. last: no light"].find((t) => textWidth(t, 1) + 20 <= strip.width) ?? "what each adds";
-        drawText(strip, 10, rowY + 3, key, INK.dim, 1);
-        const label = (c: Canvas, text: string, color = INK.dim) => drawText(c, 8, c.height - 12, text, color, 1);
-        time("lights", () => {
-          // No light: the same shot with one light of no power, so the lights' floor shares and the sky stay as they are.
-          // Where a glowing part is: the frames of what a light adds draw it flat grey (round 11: a flame read green).
-          const glow = new Uint8Array(stripFrame * stripFrame);
-          const none = stripShot({ lights: [{ ...lights[0], power: 0 }], glowMask: glow });
-          lights.forEach((l, i) => {
-            const desc = l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`;
-            const alone = stripShot({ lights: [l] });
-            const adds = lightContribution(alone, none, glow);
-            label(alone, `${l.name}  ${desc}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}`);
-            label(adds.canvas, `${l.name} adds${adds.gain > 1.05 ? `, ×${fmt(Number(adds.gain.toPrecision(2)))}` : ""}`, 0xb0b0b0);
-            strip.blit(alone, gutter + i * (stripFrame + gutter), bar + gutter);
-            strip.blit(adds.canvas, gutter + i * (stripFrame + gutter), rowY + rowBar);
-          });
-          strip.blit(stripShot({ label: "all" }), gutter + lights.length * (stripFrame + gutter), bar + gutter);
-          label(none, "no light");
-          strip.blit(none, gutter + lights.length * (stripFrame + gutter), rowY + rowBar);
+        const study = time("lights", () => {
+          const r = renderBeautyResult(output, mesh!, beautyFrame, stripOptions({ splitLights: true, label: "all" }));
+          return lightStudy(r, lights.map((l) => ({ name: l.name ?? "light", caption: `${l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}` })));
         });
-        write("lights.png", strip.toPng());
+        write("lights.png", study.toPng());
+        log(`lights.png: ${lights.length} lights from one render, ${stripFrame}px frames, draft, ${threadText}, in ${seconds(timings.lights)}`);
       }
       // Every declared camera is a shot of its own, framed on its focus= when it has one; --camera NAME and
       // --beauty-only render the one shot beauty.png is. The shot beauty.png already shows is not rendered again as
@@ -2282,9 +2280,9 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
     "model.animation.json": "the animations as Bedrock keyframes on the joint bones",
     "poses.png": `every pose, rest first${focusNote}`,
     "viewer.html": `orbit the GLB in a browser (self-contained; loads three.js from a CDN), under its own studio or the program's scene (the GLB's lights, the ${environment ?? "studio"} sky and ambient${evaluation.cameras.length ? ", the cameras as viewpoints" : ""}), opening in the ${evaluation.lights.length || evaluation.settings.environment !== undefined ? "scene" : "studio"}`,
-    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}`,
-    "lights.png": "the beauty render under each declared light alone, then all of them; under each, what that light adds on its own, brightened, and the picture under no light at all",
-    "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}`,
+    "beauty.png": `the field ray-marched with soft shadows and ambient occlusion${shot ? `, from ${shotLabel}${opts.camera ? " (--camera)" : " (set camera)"}` : ""}${beautyQuality(opts) === "draft" ? ", in draft (one reflection bounce, one glossy ray, one glass deep; --quality full for the full render)" : ""}`,
+    "lights.png": "the beauty render under each declared light alone, then all of them, from one half-size draft render that keeps each light's share apart; under each, exactly what that light adds (its share of that render, on the model and the floor), brightened by the gain shown, and the picture under no light at all",
+    "environments.png": `the beauty render under ${skyArg === "all" ? "each sky, from --environment all" : `${skies?.join(", ")}, from --environment ${skyArg}`}, each a half-size draft render`,
     ...cameraFiles,
   };
   for (const f of files) lines.push(`- \`${f}\`: ${descriptions[f] ?? (f.startsWith("anim_") ? "frames through the animation" : "")}`);

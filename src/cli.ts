@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { defaultThreads } from "./render/beauty-pool.js";
 import { nearestNames, referenceEntry, referenceMarkdown } from "./doc.js";
-import { AssertClock, assertLabel, assertsRow, BEAUTY_ONLY, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, contactLines, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
+import { AssertClock, assertLabel, assertsRow, BEAUTY_ONLY, QUALITIES, restAssertWarningsFor, cameraSight, cellFor, check, collectAsserts, contactLines, diff, cutWarnings, fitText, fmtMm, foldThinWarnings, glassWarnings, minecraftThinWarnings, nearlyThin, paintState, paintWarnings, presentationLines, printBed, printUnits, QUICK, run, thinWarnings, tightBounds, unitsText, type PaintState } from "./pipeline.js";
 import { bedFit, boxCorners } from "./mesh/print.js";
 import { surfaceNets } from "./mesh/surfaceNets.js";
 import { ENVIRONMENTS } from "./render/beauty.js";
@@ -109,6 +109,7 @@ function usage(): never {
       "                          [--no-asserts]                     skip the program's asserts while placing parts (a quick pass that spent most of its time on them says so)",
       "                          [--beauty [--beauty-size N]] [--soft] [--crease DEG] [--texture N | --no-texture]",
       "                          [--threads N]                      threads for the beauty renders, the same picture on any number (default: the cores, at most 4)",
+      "                          [--quality draft|full]             how much beauty.png and the shots sample: full, or draft with --quick (lights.png and environments.png are always draft)",
       "                          [--triangles N]                    the most triangles the GLB, OBJ and viewer carry, decimated past it (default 200000; 0 for all)",
       "                          [--beauty-only]                    the sheet and one beauty render, the set camera's shot or --camera's, written once: a lighting loop",
       "                          [--lights | --no-lights]           lights.png, each light alone (with two or more lights): on with --beauty, off with --beauty-only",
@@ -585,6 +586,10 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
     console.error(`--threads ${opts.threads}: the number of threads is a whole number, 1 or more`);
     return 2;
   }
+  if (opts.quality !== undefined && !QUALITIES.includes(opts.quality as never)) {
+    console.error(`--quality${typeof opts.quality === "string" ? ` ${opts.quality}` : ""}: the quality is ${QUALITIES.join(" or ")}`);
+    return 2;
+  }
   try {
     const quick = opts.quick ? QUICK : {};
     const given: Record<string, unknown> = {
@@ -607,6 +612,7 @@ function renderOnce(source: string, file: string, outDir: string, opts: Record<s
       show: typeof opts.show === "string" ? opts.show.split(",").map((x) => x.trim()).filter(Boolean) : undefined,
       beautySize: typeof opts["beauty-size"] === "string" ? Number(opts["beauty-size"]) : undefined,
       threads,
+      quality: typeof opts.quality === "string" ? opts.quality : undefined,
       sharp: opts.soft ? false : undefined,
       crease: typeof opts.crease === "string" ? Number(opts.crease) : undefined,
       roblox: opts.roblox ? true : undefined,
