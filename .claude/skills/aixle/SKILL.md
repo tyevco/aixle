@@ -108,7 +108,15 @@ Reference: `docs/reference.md` (every function, generated from the code;
    tool: `sed` trips on their `|` pipes.
 6. **Compare with the plan.** Fix, back to 3. Done when the sheet matches
    the plan and the report has no warning you cannot explain. Then
-   `--beauty` for the presentation picture, and `--minecraft` when the
+   `--beauty` for the presentation picture: the field ray-traced and
+   shaded as the viewer and engines shade the GLB, in full quality on
+   all cores (at most four; `--threads N`, the same bytes on any
+   number). `--beauty-only` is the lighting loop, the sheet and the one
+   shot, also in full, so the picture it settles is the full run's;
+   `--quick --beauty` is a draft (one reflection bounce, one glossy
+   ray, one glass deep; `--quality full` over it, `--quality draft`
+   for any run), and `lights.png` and `environments.png` are always
+   draft. Add `--minecraft` when the
    model is for Bedrock: `model.geo.json` and its texture, the model
    voxelised at 16 pixels to the block (one unit is a block; keep every
    member at least 1/16 thick, or `set minecraft 32`; `--minecraft-entity`
@@ -133,10 +141,24 @@ Reference: `docs/reference.md` (every function, generated from the code;
    row says how far they stray, each mesh's share and the cap below
    which detail starts to go; past it merged faces carry the field's
    normal in the normal map but their outlines are coarser, so read the
-   viewer). The GLB carries the program's lights; `viewer.html` opens
-   in the program's scene (its lights, sky and cameras) when it declares
-   lights or a sky, with a Studio button for judging the maps, and that
-   is the picture to set beside `beauty.png`. Small round parts keep the
+   viewer). The GLB carries the program's lights in linear light: a
+   directional one lights every face angle as `beauty.png` does; a
+   point light, under an engine's inverse square, is twice as bright at
+   its `range`, five times at half of it, the same at about 1.8 ranges,
+   dark from three.
+   `viewer.html` (three.js 0.187.0) is on `beauty.png`'s tone curve.
+   Its Scene mode, which it opens in when the program declares lights
+   or a sky, is `beauty.png` drawn from the export: the same sky, lights,
+   point-light falloff and glow strength, the cameras and `◎ beauty.png`
+   as buttons, non-metals within 1 to 4 levels on average where
+   nothing occludes them; it cannot show occlusion (a candle in a
+   cage reads 17 to 29 levels brighter,
+   lettering on a medal barely reads), soft shadows, the model reflected
+   in itself (metals read brighter), bloom, glass, or the sun's disc and
+   the stars, and a steep shot's turned key is `beauty.png`'s alone. Its
+   Studio mode, calibrated so non-metal presets show their base colours,
+   is for judging the maps. Judge form, lettering, metals and glass in
+   `beauty.png`. Small round parts keep the
    mesh's polygon outline in the export where the beauty render draws
    them round. An `import()`
    is sampled once and cached on disk for the next `check` or `render`
@@ -154,6 +176,13 @@ Reference: `docs/reference.md` (every function, generated from the code;
   "too fine for this thumbnail" is a tiny part the thumbnail's grid could
   not draw, nothing wrong with the model.
 - Slices are the truth about interiors: filled means solid.
+- `lights.png` (two or more lights) is one half-size draft render of
+  the shot `beauty.png` shows, each light's light kept apart: the top
+  row each light alone, then all; the bottom row exactly what each
+  light adds, floor included, at the gain printed (`spark adds, ×2.6`),
+  a flame showing the light on its own colour; last, the shot under no
+  light at all. A silhouette against a glow can be tens of levels
+  brighter there than in `beauty.png`: judge edges in `beauty.png`.
 
 ## The language in one screen
 
@@ -266,13 +295,19 @@ show arm
 | a smooth profile's base rocks, or its box passes x = 0 | the spline overshoots at a sharp turn | give the axis points and the foot's edge twice: corners, straight between |
 | a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
 | stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
-| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `--beauty` (`--quick --beauty-only` is one shot in a few seconds, but it cannot judge glass: its grid is coarse) |
+| gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `beauty.png`, which reads them: gold deep yellow, brass greener, `steel` grey, `iron` dark (`--beauty-only` is the one shot in full quality; `--quick --beauty-only` is a draft in a few seconds that cannot judge glass: its grid is coarse) |
 | the model looks new, like plastic | one smooth colour everywhere | `wear=0.4` (edges bright, creases dark), `bump=` (roughness below the mesh), `"rust"`; judge in `--beauty`, never on the sheet; the GLB carries them as maps (the report's Maps row) |
 | a thin rod or ring is worn bright all over | wear's band is ~1.2% of the model's size; thinner than two bands is all edge | thicken it, or less wear on that part |
-| chrome is a white blob; a night scene is black; a low shot looks down | `overcast` reflects white; `night` cuts the ambient; elevation is about the centre | `studio`, `sunset`/`night` or `steel` for a mirror; `set ambient 1.6`; `elevation=-8`; a glow lights only itself, so a lamp or a fire lighting its neighbours is `light(..., position=[x, y, z], range=2)` just outside it |
-| a plan shot's blind holes read as bumps | lit from the frame's bottom, a hole reads as a dome | no `light()`: a steep camera keys from the frame's top left itself; with your own lights, key at the camera's azimuth less 135 |
+| chrome reads as a dark mirror, silver as a bright one | in the `studio` a mirror shows a dark room round the camera, bright cards and each light's softbox | that is metal reading as metal; a `size=3` key gives a larger highlight |
+| chrome, silver or steel reads near white | `overcast` is the white sky for mirror metals | `studio`, `sunset` or `night` for a mirror, or a rougher metal |
+| metal lettering or a metal face turned to the camera reads dark | it mirrors the dark room behind the camera (the patterns plate's iron labels) | paint the letters a non-metal, or turn the face towards the light |
+| a polished engraving is faint | face and groove floor mirror the same room; only the walls and the cavity term tell them apart | `rough=0.2` or more, or cut it deeper |
+| a point light's pool is wider than expected | its strength halves `range` away in linear light, which shows wide | a smaller `range` |
+| a soft shadow is too hard or too soft | `size` is an angle: an angular radius of size/18 radians (1 about 3.2 degrees, 3 about 9.5) for the shadow, the highlight and the softbox | a larger `size` is softer (3 a window), a smaller harder (0.5 a lamp) |
+| a night scene is black; a low shot looks down | `night` cuts the ambient; elevation is about the centre | `set ambient 1.6`; `elevation=-8`; a glow lights only itself, so a lamp or a fire lighting its neighbours is `light(..., position=[x, y, z], range=2)` just outside it |
+| a plan shot's blind holes read as domes | lit from the frame's bottom, a hole reads as a dome (round 10's hub, with its own key) | no `light()` and no `set light_azimuth`/`light_elevation`: a camera above 55 turns the default key to the frame's top left itself; with your own lights, key at the camera's azimuth less 135 |
 | slices show a plant or a lamp as a floating blob | the planes go through the model's centre, off its stem | `--slice plant`: the planes through that step's own solid |
-| a small point light cannot be judged in `lights.png` | it changes a few pixels of the whole picture | the bottom row is what each light adds on its own, brightened |
+| a small point light cannot be judged in `lights.png` | it changes a few pixels of the whole picture | the bottom row is exactly what each light adds, floor included, brightened by the gain shown |
 | `overlap(a, b)` fails at 0 | they only touch, stand apart, or overlap thinner than the lattice: the failure says which | sink one into the other, or promise a chunk of the part |
 | a rig part swings about the wrong point | the pivot is not at the hinge | give `joint` the hinge's world point, after the part is in place |
 | a part meant to sit on or lean on another floats, sinks a hair, or needs trigonometry | the contact is worked out by hand | `rest(on)` / `lean(on, pivot, axis)`: moved or turned until it touches, a millionth of its size from touching (a ten-thousandth on a displaced skin), at any scale |

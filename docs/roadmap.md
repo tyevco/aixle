@@ -417,7 +417,7 @@ Six topics were researched in November 2026: field evaluation, mesh extraction, 
 
 Round 11's fixes are in and are assumed below. They added `support()` and `stands()`; fix `void()` on a thin skin, the `overlap()` hang and `clearance()` at a sunk corner; place each object's open edges; share the export's triangle cap by error; add decimetres and feet; clear parts by a cell and a half; and give the viewer the program's scene.
 
-Shading, reflections, path tracing, the mesh BVH and worker threads belong to the renderer redesign (render/shading, render/pathtrace, render/accel). What the research found for that effort is in the notes after the proposals.
+Shading, reflections, path tracing, the mesh BVH and worker threads belonged to the renderer redesign, which is built without path tracing (31). Its record, with what became of the research's notes for it, follows proposal 25, and the follow-ups it left are 26 to 33.
 
 ### 14. Manifold surface nets, with a contacts row in place of open edges
 
@@ -711,7 +711,7 @@ The audit mutates each step the output uses: it moves the step 2 and 4 cells alo
 **How.**
 - **Reach.** The prototype mutated source lines, which reaches only top-level steps written on one line. Parts made in a loop or a def (the shelf's books, library parts, the chess pieces) need a hook in the interpreter that replaces a step's value as it is made.
 - **Equivalence.** A mutant is equivalent when the XOR of the two outputs' signs on a 48³ lattice is under a cell's volume; that takes about 60 ms.
-- **Runtime** is the hard part. A mutant costs 60 ms to 2.9 s, because pieces(), overhang() and wall() re-mesh, so the three programs took 13 s to 9 minutes on one thread. The audit needs the narrow band (15), the evaluation's mesh cache shared across mutants that leave a step alone, and the worker pool the render effort is adding.
+- **Runtime** is the hard part. A mutant costs 60 ms to 2.9 s, because pieces(), overhang() and wall() re-mesh, so the three programs took 13 s to 9 minutes on one thread. The audit needs the narrow band (15), the evaluation's mesh cache shared across mutants that leave a step alone, and a worker pool like the one the renderer redesign built (`src/render/beauty-pool.ts`), which today draws only the beauty renders.
 
 The prototype's other find was the hub's void() passing a 0.01 intrusion. That was the thin-skin bug the round-11 query branch fixes.
 
@@ -922,23 +922,23 @@ Measured on scratch:
 
 Three Khronos extensions fit Aixle's glass:
 - **KHR_materials_transmission** is thin-walled transmission with no refraction. Its transmissionFactor is Aixle's transmit, one to one. A renderer without the extension draws the surface opaque, which is what Aixle writes today.
-- **KHR_materials_ior** defaults to 1.5, the beauty render's fixed index.
-- **KHR_materials_volume**'s attenuationColor and attenuationDistance are Beer's law. The beauty render's absorption is exactly attenuationColor = exp(−1.5(1 − c)) over 0.15 of its reach (shadeGlass in beauty.ts).
+- **KHR_materials_ior** defaults to 1.5, the beauty render's fixed index (`IOR` in `pbr-glass.ts`, which every glass has).
+- **KHR_materials_volume**'s attenuationColor and attenuationDistance are Beer's law. The beauty render absorbs by `photometry.ts`'s `beer`: σ = BEER(1 − c)/reach per channel, with BEER = 22, c the glass's colour as the program gives it (sRGB, not decoded: `rays.ts` reads the material's colour as it is) and reach 1.5 times the model's diagonal, the law its refraction and its shadows through glass both take. In glTF's terms that is exactly attenuationColor = exp(−(1 − c)) over an attenuationDistance of reach/22.
 
 three.js, Blender and Babylon read all three. Unity's glTFast approximates transmission ("100% correct" only for clear glass). Godot ignores them, which is today's opaque fallback. The prototype tumbler passes the Khronos glTF-Validator with 0 issues.
 
 **What.** Transmission and ior on every material with transmit > 0, in the GLB and the viewer, with nothing new in the language. Volume follows only for a material whose region is a closed surface of its own. The extension requires a manifold volume, and a material cut out of the fused mesh is open wherever glass meets another material.
 
 **How.**
-- **The factors** take a few lines in glb.ts. attenuationColor is written in linear, since glTF colour factors are linear and Aixle's colours are sRGB.
+- **The factors** take a few lines in glb.ts. glTF colour factors are linear and Aixle's colours are sRGB, but attenuationColor is exp(−(1 − c)) of the sRGB colour as it stands, already a linear factor: decoding c first would absorb differently from `beauty.png`.
 - **Thickness** comes from marches inward through the same material, as wall() marches. The tumbler's glass reads a median of 0.191 from 56,256 marches in 0.26 s.
 - **Contents** need more. In three.js the tumbler's amber drink is invisible through the transmissive wall, because the union's mesh has no face between glass and drink. Each material's region has to be extracted as a closed surface of its own, following the labels hit() returns. paint, decal and regions assign materials too, so a distance difference between two parts is not enough. The same per-material solids would later serve 3MF volumes.
 
 **Prototype first.**
-- Render the tumbler and round 9's perfume bottle in three.js beside beauty.png, with the factors alone.
+- Render the tumbler and round 9's perfume bottle in the viewer's Scene mode beside beauty.png, with the factors alone: the page is now lit as the render is (23), so what differs is the glass.
 - Compare one thickness per material with a thickness texture.
 - Prototype the per-material extraction on the tumbler: whether each region is watertight, how many triangles it adds, and whether the drink then reads through the glass in three.js and Blender.
-- Define the absorption law and the index once, with the render redesign, which is changing the beauty render's glass. A per-material ior= would matter for water and for the ring's stone.
+- The law and the index are now defined once, by the renderer redesign: `photometry.beer` (σ = 22(1 − c)/reach) and an index of 1.5. Write the GLB's factors from those two and nothing else, and test that a glass's attenuation in the GLB is the render's to rounding. A per-material ior= would matter for water and for the ring's stone; it is a language change of its own, and the GLB would follow it.
 
 **Cost.** A day for the factors with one thickness per material; two to four days for per-material surfaces. No committed render changes.
 
@@ -986,11 +986,15 @@ the proposal as it was written.
 
 **Cost.** An hour or two for the reuse, half a day for the cull, one to two days for sweeps and tubes, and as long again for curve2.
 
-### 23. The viewer's light
+### 23. The viewer's light: built
 
-**Why.** viewer.html is where an agent and a person see the GLB, and its Studio mode is badly lit in two ways:
-- **The room is almost dark.** The viewer builds `new RoomEnvironment()` on three 0.160 without the renderer. RoomEnvironment raises its light to 900 cd only when handed a renderer that renders physical lights, as r160 does, so the light stays at 5 cd; from r165 it is 900 unconditionally. The room's six panels then carry nearly all its light. A white face turned down receives 0.004, and a polished metal reflects six panels on black.
-- **There is no tone map,** so linear light is clipped. A white face turned up receives about 1.43 from the key, the hemisphere light and the room. At that level 21 of the 48 opaque non-metal presets clip a channel.
+Built with the renderer redesign, in `src/export/viewer.ts` and
+`src/export/glb.ts`, so that the viewer and the GLB's lights end where
+`beauty.png` does. design.md, "Lights in the export" and "The viewer",
+has the rest. The why was this:
+
+- **The room was almost dark.** The viewer built `new RoomEnvironment()` on three 0.160 without the renderer. RoomEnvironment raises its light to 900 cd only when handed a renderer that renders physical lights, as r160 does, so the light stayed at 5 cd; from r165 it is 900 unconditionally. The room's six panels then carried nearly all its light. A white face turned down received 0.004, and a polished metal reflected six panels on black.
+- **There was no tone map,** so linear light was clipped. A white face turned up received about 1.43 from the key, the hemisphere light and the room. At that level 21 of the 48 opaque non-metal presets clipped a channel.
 
 Round 11's door agent replaced the oak preset because it "read as new pine in the viewer": the viewer's oak came out (153, 113, 78) where the baked atlas is (119, 83, 46).
 
@@ -1002,23 +1006,20 @@ Khronos PBR Neutral is built so that a base colour comes out as itself under uni
 | AgX | 29.3 | 54% |
 | three's ACES | 20.3 | 74% |
 
-**What.** The Studio mode, and the Scene mode the export branch adds, are lit through a tone map. A white face toward the key comes to about 1.0 linear, and a face turned down is not black. Nothing changes in the language.
+**What was built.**
+- **three.js 0.187.0, pinned,** whose prefilter takes a true GGX lobe at each level, as the beauty render's maps do (r181 to r186 blur each level from the one before). r187 has removed PCFSoftShadowMap and warns on it, and warns on Clock, deprecated since r183, so the page uses PCFShadowMap, with a normal bias of about one shadow texel (a tile square to the key showed moiré without it), and Timer.
+- **One tone curve.** Both modes end on `beauty.png`'s: Neutral's toe with a per-channel shoulder, which kept the lantern's flame orange where Neutral's own shoulder turned it salmon. The page takes it as three's CustomToneMapping from `photometry.ts`'s `TONEMAP_GLSL`, generated from the same constants.
+- **Studio** keeps the room environment, a hemisphere light and a white key, calibrated together (room 0.4, hemisphere 0.1, key 1.2 lux, chosen from 104 settings) so that a white face turned to the key is about 1.1 in linear light, its Fresnel included (1.115 measured in the page).
+- **Scene** is `beauty.png` drawn from the export. The sky is environment.ts's own, as a 128 by 64 lat-long of half floats (64 KB of the page's base64), through three's prefilter at the render's intensity E, so a metal shows the studio's cards and dark room or the sunset's glow where `beauty.png`'s does. Diffuse surfaces take the sky's nine SH coefficients in place of the map's irradiance, whose reflection cards would light them 1.8 to 3 times over. Point lights fall off as 1/(d² + range²), the render's law, in place of three's inverse square, and glows show at the render's GLOW, 1.6 times the GLB's emissive. The floor takes the albedo the kernel solves for its open floor and fades into the horizon as the render's does. A `◎ beauty.png` button frames the page as `beauty.png` is framed; Perspective keeps the whole model in view.
+- **The GLB's lights in linear light.** A directional light is π·KEY·p lux (3.30 for power 1), which agrees with `beauty.png` on a face at every angle, where the display-space intensities it replaces agreed at one angle only. A point light is π·KEY·p·range² candela; under an engine's inverse square it is twice the render's strength at `range`, five times at half of it, the same at about 1.8 ranges and dark at three, glTF's cutoff. A point light with no `range` takes the kernel's, half the model's longest side, where it took 2 units.
 
-**How.** Pin three at r165 or later, or pass the renderer on r160 and inject the curve through CustomToneMapping. Calibrate the key, the hemisphere light and scene.environmentIntensity together.
+**Measured** in headless Chromium against `beauty.png`, with the models' metal and glowing pixels masked out. An isolated matte sphere in the studio matches to 0.1 levels mean, so the lighting model is exact and what remains is what the GLB does not carry. Non-metal pixels in Scene mode, mean signed difference: the door 1.0 levels (36.8 before the point-light law was emulated), the medal 2.3, the ring under its sunset 4.2, the lantern 7.7, all of the lantern's excess in its candle, which `beauty.png` darkens with the field's occlusion. Metals read 15 to 50 levels brighter, through the cavity term, specular occlusion and reflections of the model itself. The Studio plate of 36 presets, each square to the key: the 26 solid non-metals within 1.6 levels on average in every channel (−0.75, −0.26, −1.57), 4.1 tile by tile, the darkest channels lowest through Neutral's toe, since a key brings none of the Fresnel lift that the even light all round, which Neutral is built for, does. The Pages viewer pages load on 0.187 with no console warning, and play their animations (the windmill's and the arm's; the robot has none). The environment adds about 70 KB and 0.1 s to a run that draws no beauty render, and nothing to one that does, which shares the sky through the run's cache.
 
-The curve is the render redesign's choice as much as the viewer's, because the viewer should end on the same curve as beauty.png. The two render branches already differ:
-- render/shading takes Neutral's toe with a per-channel shoulder, because Neutral's hue-keeping desaturation turned the lantern's flame salmon;
-- render/pathtrace uses its own shoulder and a 1.35 power.
-
-Pin r187 if the viewer's glossy reflections are to use a true GGX lobe at each level, as render/shading's prefilter does; r181 to r186 blur each level from the one before.
-
-**Prototype first.**
-- Screenshot a plate of presets (white, red, yellow, gold, chrome, the woods) headless and online, since the page loads three from jsDelivr.
-- Compare it with beauty.png at the shared default shot; the camera and key already agree to within 1.5 degrees. The target is about 3 levels mean for non-metals, with no clipped channel.
-- Check that the Pages viewer pages still load and animate on the new three.
-- Read round 11's door in both modes.
-
-**Cost.** About a day. The Pages viewer pages change; no committed render does.
+**What remains.**
+- An occlusion map in the GLB (27 below): the candle's 17 to 29 levels and the medal's lettering, which barely reads in the viewer, are the field's occlusion and cavity term, which no viewer setting can put back without darkening everything else.
+- The sun's disc and the stars in Scene mode's backdrop, which is still the page's own gradient: the star constants are private to environment.ts, and copying them would drift from a later retune. In the default shots the sun and the moon stand on the key's side, out of frame.
+- The point lights' shadow camera keeps three's near plane of 0.5 units, so an occluder within half a unit of a point light casts nothing, whatever the model's scale. Point-light shadows are hard besides, so the door's torch bracket and knocker throw large dark shadows that the render's sphere light dissolves.
+- The far floor fades to one horizon colour, the one `beauty.png`'s shot looks towards. Orbiting towards a sunset's sun, its far edge stays at 140 levels where the render's per-ray fade reaches 180; a fade per direction would follow the camera.
 
 ### 24. A leaner GLB and viewer page
 
@@ -1037,7 +1038,7 @@ viewer.html embeds the GLB as base64, which is why roadmap 13 left "a separate c
 **Prototype first.**
 - Read every example's model.glb back through import() and the sheet, before and after, and confirm the mesh is unchanged.
 - Check that the deflate gives the same bytes on CI's Node.
-- Open each viewer.html headless and online with three 0.160.
+- Open each viewer.html headless and online with three 0.187, which the page now pins (23).
 - Run the Khronos validator on the new GLBs.
 
 **Cost.** About a day. No committed render changes.
@@ -1063,33 +1064,91 @@ Questions written from the description before looking beat a free critique. In C
 
 **Cost.** Hours of docs, and one round.
 
-### Notes for the renderer redesign
+### The renderer redesign: built
 
-- **Read the extraction lattice for ray steps away from the surface.**
-  - surfaceNets fills a Float32Array over the whole lattice and discards it.
-  - A trilinear read costs 43 to 143 ns, against 0.57 to 3.9 µs for dist() on real programs.
-  - At 0.5 to 6 cells from the surface, a read is within a median of 0.000 to 0.013 cells of dist(), and at most 0.54 cells off.
-  - A hybrid that calls dist() within 2 cells of the surface ran the marched render 1.05 to 1.4 times faster (lantern 1.05, door 1.2, medal 1.3), and the path tracer 1.5 to 1.6 times faster at 4 spp, with pictures within 0.2 levels.
-  - Reads must not be biased: shrinking them by half a cell moved 8% of the medal's pixels by more than 24 levels.
-  - Against render/accel's mesh BVH (shadow rays 3.4 to 25 times faster), the lattice's value is that it returns distances, which the soft shadow's d/t needs. Benchmark the two per ray type.
-  - Settle a memory cap: the full lattice is about 540 MB at 512 per side.
-- **One meaning for a light's size.**
-  - light(size=1) is 9.5 degrees in render/shading's highlight (tan = size/6) and 2.9 degrees in render/pathtrace's disc (size/20).
-  - The disc was chosen to look like the marched render's soft shadow, which draws only the outer half of a penumbra. Against a true disc that shadow's mean error over the penumbra is 0.24 to 0.31. Behind a unit cube at size 3 its 50% line lies 0.47 units too far out.
-  - Quilez's inner-penumbra variant with a fixed 1.5-cell thin-sheet guard is better on a 2-cell plate. On plates 4 to 8 cells thick it is worse than today's shadow, at 4.5 times the steps. It waits for a guard that scales with the cone's footprint.
-- **One display transform** for beauty.png, the path tracer and the viewer (23). Choose it by the lantern's flame and gold highlights: at unit light every candidate is close to Neutral by construction, so that test cannot decide.
-- **Pruning and step size.**
-  - Prune the tree per screen tile (Barbier et al., 'Lipschitz Pruning', CGF 44(2), Eurographics 2025: sphere tracing 8 to 629 times faster). The paper's 1.0 to 1.17 active nodes per cell include far-field culling; without it they are 1.43 to 2.56.
-  - Segment-trace with the per-node factors from proposal 15 (Galin et al., CGF 39(2), 2020).
-  - A far-field stand-in, sign(d)(|d| − R), is safe on primary rays only, never in shadows or AO (design.md, "A grid over the pieces").
-- **Over-relaxed sphere tracing does not pay here.** On surfaceExtent's rays it took more evaluations per ray than plain marching (mixer 13.8 to 15.1, rope 14.8 to 16.4, stairs 13.6 to 14.6), gained nothing at ω 1.2 either, and moved hits by up to 0.056. Bán and Valasek (EG 2023) find the variants within 2 to 25% of each other. Rays that miss are 42 to 64% of those evaluations.
-- **Workers re-evaluate the program,** since closures cannot cross threads. That took 5 ms for the tree example, 62 for the mug, 264 for the stairs and 508 to 600 for the rope. The same pool could fill the mesher's lattice by slabs with the same bits; measure that after 15, which shrinks the work.
-- **Blue-noise sample rotations.** Use a 64×64 void-and-cluster mask, built from a fixed seed at load in 67 ms, in place of the per-pixel hash for the Cranley-Patterson offsets.
-  - On one soft-shadow integrand it cut error after a blur by 26% at 4 spp and 20% at 8 (Georgiev and Fajardo, SIGGRAPH 2016 Talks; Heitz and Belcour, EGSR 2019).
-  - Measure it through the real à-trous filter against a 256-spp reference before changing the default spp.
-  - Interleaved gradient noise and Owen-scrambled Sobol did not help at 4 to 8 spp.
-- **Coat and ior.** If the redesign gives materials ior= or a clear coat, the GLB writes KHR_materials_ior and KHR_materials_clearcoat from the same definition. three.js, Blender, Babylon and glTFast read clearcoat; Godot ignores it.
-- **Cone-traced AO on the lattice** (6 cones of 6 reads) correlates with ray-traced AO at 0.77 to 0.97, against 0.62 to 0.85 for the five taps. But it was tuned on the same five programs, and at the measured 57 to 143 ns a read it only breaks even on cost. It is an option for render/shading's marched path once the lattice is kept.
+`beauty.png` is the field itself, ray traced and shaded as the viewer and
+the engines shade the GLB. Three approaches were prototyped on scratch
+copies in November 2026 (a shaded marcher in linear light, a path tracer,
+and the old renderer on a worker pool and a mesh BVH) and judged by three
+agents: on the pictures, on cost and risk, and on fit with the product.
+The plan took the shaded marcher and built it on the third's pool and
+BVH, with the path tracer's glass fixes and its one-pass light study; it
+left out path tracing as a mode, light bounced between parts, a glow
+that lights its neighbours, the floor's sheen (it drew a ghost of the
+model) and any quality setting in the program. It was built in three
+stages, each reviewed adversarially, with every committed render
+regenerated and read at each:
+
+- **The pool and the rays.** Workers that evaluate the program again
+  claim rows as they go, and every pixel is a function of its position
+  and the scene, so `beauty.png`, the shots and `lights.png` are the same
+  bytes on any number of threads (`--threads`, by default the cores, at
+  most four). Secondary rays march the field for three cells, then the
+  mesh's BVH skips empty space, every hit confirmed on the field: against
+  the field alone, hard key shadows disagree on 0.005 to 0.76% of pixels
+  and on none off a shadow's edge, and 99.7 to 100% of mirror hits land
+  within 0.05 of a cell. Parts under a cell cast no far shadow and are
+  missing from reflections.
+- **The shading.** glTF's metallic-roughness model in linear light,
+  through one tone curve (Neutral's toe and a per-channel shoulder, the
+  viewer's too); reflections by roughness, from one traced ray for a
+  mirror to the prefiltered sky alone; a light's size one angle, size/18
+  radians, for its shadow, its highlight and its softbox; shadows from
+  eight rays at the light's disc, filtered on visibility alone; glass at
+  an index of 1.5 that reflects inside up to four times and absorbs by
+  Beer's law (σ = 22(1 − c)/reach); the floor solved to show the old
+  renderer's open floor; and `--quality draft|full`, full by default,
+  draft for `--quick --beauty` and the strips.
+- **Legibility.** A blind check of eight pairs against the old renderer
+  found one answer wrong only for the new: the lantern's iron read as
+  white enamel, since a measured metal colour reads pale in a bright
+  room. So the studio has two rigs, one for the light a surface takes and
+  a darker one for what it mirrors; `iron` is magnetite (#7c7c7c),
+  `steel` is iron's measured reflectance (#c6c6c8), and gold, brass,
+  copper and bronze are their measured F0 squared; the occlusion is taken to the power
+  1.5; and a steep shot's default key turns to the frame's top left. In a
+  second blind check, of ten pairs, this pass read better than the stage
+  before it in all ten, and the lettering of every pair was read right.
+- **The light study and the exports.** `lights.png` is one half-size
+  draft render that keeps each light's light apart, in 0.17 to 0.31 of
+  the time of the separate renders it replaced, and the GLB's lights and
+  `viewer.html` are lit as `beauty.png` is (23).
+
+Measured on the seven benchmark scenes (the medal, the tumbler, the
+lantern, the teapot, the mixer, the door and the ring), the new renderer
+on one thread took 1.13 times the old one's time at 384 pixels and 1.15
+at 768, and 1.17 and 1.22 once the shading's review had fixed its glass;
+on four threads, 0.42 to 0.43 and 0.40 to 0.41 of it. The legibility
+pass slowed no scene by more than 5%. The tumbler alone took 3.2 to 3.5
+times as long on one thread at 384 pixels (2.8 to 3.1 at 768), most of
+it marching inside its glass and its drink and tracing shadows through
+them. A full regeneration of the render sets, the reference and the
+gallery takes about ten minutes on the pool (9 min 45 s at the shading
+stage), on four shared cores.
+
+What became of the research's notes for the redesign: one meaning for a
+light's size and one display transform are built as above, and the
+workers evaluate the program again, as the notes measured they must
+(5 ms for the tree, 0.5 to 0.6 s for the rope). The area shadows' rays
+are turned by interleaved gradient noise and an R2 lattice over the
+pixels, which through the visibility filter keeps 3.0 levels of noise
+on the medal's floor at 768 against 3.6 for a hash per pixel, so the
+blue-noise mask was not built. Over-relaxed sphere tracing does not pay
+here: on surfaceExtent's rays it took more evaluations per ray than
+plain marching (the mixer 13.8 to 15.1, the rope 14.8 to 16.4, the
+stairs 13.6 to 14.6), gained nothing at ω 1.2 and moved hits by up to
+0.056. Not built: reading the extraction lattice (32), pruning per tile
+and segment tracing (33), cone-traced occlusion on the lattice (with
+32), a per-material ior= and a clear coat (the GLB would write
+KHR_materials_ior and KHR_materials_clearcoat from the same
+definition), a bounce of diffuse light (30), path tracing for stills
+(31), and the pool filling the mesher's lattice by slabs, which would
+give the same bits and is still to be measured now that the narrow band
+(15) has shrunk that work. design.md has the rest, in "One mesh, rendered and exported; one
+field, for the beauty render", "Light in linear units, and one curve",
+"The BRDF is the viewer's", "Environments as light", "Reflections",
+"Shadows from lights with a size", "Glass", "The floor", "Threads",
+"What each light adds" and "Lights in the export".
 
 ### Smaller items from the research
 
@@ -1127,7 +1186,7 @@ Questions written from the description before looking beat a free critique. In C
 - **Octree refinement where a program is thin.** It would be 800 to 1200 lines. Its only measured need is synthetic rods under 1.6 cells. At the agents' own grids the manifold mesher split no thin part, and with the band, grid 300 samples in under a second. Revisit by counting the thin parts that split at the grids agents start from.
 - **Exact crossings and a truncated pseudo-inverse QEF, on their own.** The gain is small, no round records friction from them, every render would regenerate, and the error measure misreads bound fields. They can ride along with 14's regeneration.
 - **Subgrid marching tetrahedra** (Baktash, Gillespie and Crane, SIGGRAPH 2026). It needs a new grid and a new algorithm, and by its own account can miss thin tube-like features.
-- **A Hosek-Wilkie sky.** No round asked for a physical sky, render/shading has just rebuilt the skies, and the cited data are XYZ, not RGB.
+- **A Hosek-Wilkie sky.** No round asked for a physical sky, the renderer redesign has just rebuilt the skies, and the cited data are XYZ, not RGB.
 - **Run history and a regression warning.** A broken assert already fails check, agents work in git worktrees, and no report lost a better version. The rollback evidence comes from per-brick generation (BrickGPT) and candidate tournaments (BlenderAlchemy), not an edit loop. The diff overlay above is the part worth having.
 - **`aixle compare` against a reference shape or a photo.** No brief in eleven rounds came with a reference. IoU needs exact registration: a 0.05 shift of the mug drops it to 0.87. Round 3's re-imports were export checks, now partly done by the Exports row.
 - **Coordinate labels, dimension lines and cross-view marks on the sheet.** The literature is sound: VLMs count grid lines poorly, and labelled scaffolds help. But agents take sizes from check's numbers, no report asks for labels, the round-11 evidence offered for it was misread, and every render would regenerate. A reading test with fresh agents comes first.
@@ -1140,6 +1199,347 @@ Questions written from the description before looking beat a free critique. In C
   - The texture transform has nothing to do, since the atlas UVs are already in [0, 1].
   - Instancing saves little, since placements already share a mesh.
   - usdc would be a week of work for a format defined only by OpenUSD's source.
+
+## Proposed after the renderer redesign, November 2026
+
+The redesign (its record follows proposal 25) leaves three kinds of work:
+a round to find out what an agent still misreads in the new pictures
+(26); what its reviews found the exports and the light study still miss,
+or a sky still lacks (27 to 29); and what its plan left out on cost or
+its research measured but did not build (30 to 33). Each says what must
+be measured before it is built.
+
+### 26. Dogfood round 12: modelling by the new pictures
+
+**Why.** Every judgement of the rebuilt beauty render so far was made by
+the engineers who built it, by reviewers who knew what each picture
+should show, and in two blind checks of pairs a reviewer chose. No agent
+has yet modelled with it and judged its own model from it, which is what
+the render is for: an agent that reads gold as champagne, a blind
+pocket as a dome or a metal label as missing makes the wrong edit.
+Lighting friction has so far been found by modelling: round 9's chrome
+bottle under a white sky, round 10's spark a few pixels in the light
+strip, round 11's oak that read as new pine in the viewer.
+
+**What.** A round of four fresh agents, briefed as `dogfood/README.md`
+describes, each brief chosen to need what the redesign changed:
+- a metal object with lettering, engraved and raised: a brass plaque or
+  a gold medal, judged at 384 and 768 pixels;
+- a machined part shot in plan with its own lights: a plate of blind
+  and through holes and a counterbore;
+- glass with something inside: a decanter of liquid, or a lamp with a
+  flame in its glass;
+- a scene of two or more lights, one of them a point light (a desk lamp,
+  a lantern on a table), read through `lights.png` and the viewer's
+  Scene mode.
+
+Each report gives, besides its friction log, what the agent read off
+`beauty.png` that a number later showed wrong (from `check`, a slice or
+an assert), how many renders the lighting took with `--beauty-only`, and
+whether it set the viewer beside `beauty.png` and what differed.
+
+**Prototype first.**
+- Before the round, for each brief, five to eight questions with known
+  answers (what the lettering says; which parts are metal; whether each
+  hole goes through; whether the glass is clear and what is in it;
+  whether the model stands on the floor), put to a fresh subagent shown
+  only the agent's final `beauty.png`, as the legibility pass's blind
+  check put them (the record above). Measure the share answered right
+  by kind of question, against that check's.
+- The guide's new rows are the hypotheses: paint metal letters a
+  non-metal, key a plan shot at the camera's azimuth less 135, keep
+  mirror metals out of `overcast`, lower a point light's `range`. Count
+  how often an agent met each symptom, and whether the row got it out.
+- Renders to done against rounds 9 to 11, and the lighting loop's time
+  per render from the logs.
+
+**Cost.** A round, and the fixes for every friction point in the same
+change, as for every round. It can be the round 25 asks for, if its
+briefs serve both.
+
+### 27. A baked occlusion texture in the GLB
+
+**Why.** The viewer's Scene mode comes within 1 to 2.3 levels of
+`beauty.png` on the door's and the medal's non-metals, but the lantern's
+candle inside its cage is 17 to 29 levels brighter, the medal's
+lettering barely reads, and metals are 15 to 50 levels brighter.
+`beauty.png` darkens all three with the field's occlusion (five taps
+along the normal, to the power 1.5) and its cavity term (the first three
+taps, cubed, on what a surface reflects), and the GLB carries neither,
+so every engine that loads it has the same gap (23).
+
+**What.** `model.glb` gains glTF's core `occlusionTexture`, which the
+viewer reads; nothing changes in a program. The report's Maps row says
+which materials carry it.
+
+**How.** glTF reads occlusion from the red channel, and the
+metallic-roughness texture uses only green and blue, so the baker can
+write it into `model_mr.png`'s free channel where a material has that
+map, and into a map of its own where it does not. A texel's value is the
+field's occlusion at its point, read as the beauty render reads it.
+three.js applies it to the sky's diffuse light and, with an environment
+map, to the reflection through its own specular occlusion; Blender,
+Godot and Filament read it too.
+
+**Prototype first.**
+- Bake it on the lantern, the medal and the door, and measure Scene mode
+  against `beauty.png` on the non-metals (the target: the candle within 5
+  levels mean) and on the metals; read the medal's lettering in the
+  viewer.
+- glTF has one occlusion for diffuse and specular light alike, where the
+  render darkens reflections harder (the cavity term): decide which one
+  value serves both, by the medal's lettering and the lantern's candle.
+- The bake's time and memory beside the four maps' (the lantern's took
+  4.2 s at 1024 against 0.6 s for the colour atlas alone), and the bytes
+  it adds to the GLB and the page.
+- On every plain example, whether a model whose occlusion is near 1
+  everywhere should gain the map at all; decide by the texels that carry
+  something, as the normal map's rule was decided.
+
+**Cost.** About a day. Every GLB that carries it changes; no committed
+render does.
+
+### 28. A reflection rig for overcast
+
+**Why.** The legibility pass gave the studio a second, darker rig for
+what a surface mirrors, and there chrome reads as a dark mirror and steel
+as grey metal. `overcast` has no such rig: it is a white dome brighter
+towards the zenith, so steel under it still reads near white on faces
+turned up, and silver near white (the legibility review's plate of every
+metal under both skies). Four committed programs take `overcast`: round
+9's bracket and round 10's hub and its probe, which are machined steel,
+and round 9's bottle, whose collar and cap are brass and bronze.
+
+**What.** Under `overcast`, what a surface mirrors sees a darker ground
+and horizon on the camera's side, as a photographer flags a shot
+outdoors; the light a surface takes and the backdrop stay as they are.
+Nothing changes in a program.
+
+**How.** A `reflect` rig for `overcast` in environment.ts, read by the
+reflection modes (FILTERED, REFLECT, MIRROR) as the studio's is.
+
+**Prototype first.**
+- The plate of metal presets beside clay under `overcast`, before and
+  after, and the hub's and the bracket's shots: measure steel's faces
+  turned up (luma and saturation) and the hub's form against its studio
+  render.
+- Hold the diffuse side still: the teapot's and the mug's shaded sides
+  under `overcast` must not move, which is what the studio's split was
+  for.
+- A blind check of the four programs' pairs, as the legibility pass had.
+
+**Cost.** Half a day, and the four programs' renders regenerated and
+read.
+
+### 29. `lights.png`'s edge pixels in display space
+
+**Why.** `lights.png`'s frames are composed from the render's per-light
+slots, which hold an edge pixel's four samples only as their linear
+mean, while the render means them after the tone curve. On most
+silhouettes the two differ by a level or two. Against something far
+brighter they do not: a silhouette against a glow is up to 61 levels
+brighter in every frame but "all" than in `beauty.png` (measured on the
+no-light frame of the test scene in tests/render.test.ts), and the bloom
+spreads up to 6 levels round it, so a frame set beside `beauty.png`
+shows a halo that is not there.
+
+**What.** The alone and no-light frames are what the render would show
+at every pixel, edges included. The "all" frame is the render's own
+bytes already; nothing else changes.
+
+**How.** Two ways, to be measured against each other:
+- keep each edge pixel's four samples per slot (four times the lights
+  plus one, three floats each, for the few per cent of pixels that are
+  edges) and tone-map each sample before the mean, as the render does;
+- or scale a frame's edge pixel by the render's own display mean,
+  untoned, over its linear total, which is exact for "none" where the
+  lights bring nothing and an approximation elsewhere.
+
+**Prototype first.**
+- On the lantern, the door and the test scene's glowing ember, the
+  largest edge difference of each frame from the exact answer (each
+  sample tone-mapped from its own slots), and how many pixels it
+  touches.
+- Memory and time against today's one pass (0.57 to 0.81 s on four
+  threads at 256-pixel frames, the best of three on the lantern, the
+  ring and the door).
+- The slot sum, the "all" frame against a separate render, and one
+  thread against four must still hold. `lights.png` is never committed,
+  so no committed render changes.
+
+**Cost.** Half a day to a day.
+
+### 30. An optional bounce of diffuse light
+
+**Why.** The redesign lights a diffuse surface from the sky's SH
+irradiance, dimmed by the field's occlusion, and from the lights; light
+one part throws onto another is not traced. So a glow lights nothing
+round it (round 9's campsite found it, and round 10's alley and round
+11's door each place a point light beside their flames), a red wall does
+not warm the floor in front of it, and the inside of a box or a room
+takes the sky's light through its occlusion rather than what its walls
+pass on. The accelerated prototype's traced lighting had one bounce,
+sixteen cosine rays a pixel reading a radiance cache at the mesh's
+vertices: the model's colour bled onto the floor, and the lantern's
+candle warmed its base plate. The plan left it out of the default: the
+teapot took 3.06 times as long and the tumbler 1.45 even on four
+threads, it showed grain at 768 under its fixed 3-pixel filter, and
+parts on the floor lost their grounding. The path tracer, which made a
+glow an emitter, found it weak at a glow of 2 or less: the point light
+placed by the flame still did most of the lighting.
+
+**What.** A command-line choice for a still, not a program setting (a
+program describes a model, the run's choices are flags): `--bounce`,
+under which a glow lights its neighbours and a diffuse surface takes one
+bounce of what the model and the floor reflect. `beauty.png` without it
+is unchanged.
+
+**How.** On the pool and the BVH: the mesh's vertices shaded once under
+the render's lights and sky, then a few cosine-weighted rays a pixel
+against the BVH read that cache where they land, through the visibility
+filter, hashed by pixel and ray as the area shadows are, so the bytes are
+the same at any thread count.
+
+**Prototype first.**
+- Time at 384 and 768, on one thread and on four, on the seven scenes,
+  against full quality.
+- Noise through the filter on the floors and shaded sides, against 24
+  times the rays, as the area shadows were measured (the path tracer at
+  four samples mottled the medal's floor to 4.70 levels of high-pass
+  against 0.57 to 2.24 for the marchers).
+- Programs that already place a point light beside a glow (the door,
+  the campsite, the alley, the lantern) are lit twice under it: by how
+  much, and whether a glow with a light beside it should be left to the
+  light.
+- Grounding: the contact shadow under a part on the floor no lighter
+  than without the bounce, and a glow of 1 to 2 measured on the
+  surfaces round it (the lantern's base plate, the door's wall).
+- A blind check of the seven scenes with it and without: whether the
+  bounce reads truer, or as a haze that hides form.
+
+**Cost.** Two to three days, behind the flag. No committed render
+changes.
+
+### 31. Path tracing for stills
+
+**Why.** The path tracer was the most photographic of the three
+prototypes (a polished gold medal with its warm bounce on the floor, the
+candle's bar shadows across the lantern's floor) and was turned down as
+the default for its cost and its noise: 5.0 times the old renderer on
+one thread at 384 pixels and 8 samples (2.6 to 12.2 by scene), with four
+threads giving only 1.3 to 2.6 times under load; at 4 samples and 768,
+wide shadows mottled and the tumbler had fireflies; at 8 samples and
+384 the medal's FOR MACHINES could not be read; and a loop that marches
+with a final shot that path traces gives two looks, so what the lighting
+loop settles does not carry over. The pool and the BVH it lacked are
+built now, and the kernel's BRDF, lights and skies are the ones a path
+tracer would sample.
+
+**What.** `--quality path` for a still: `beauty.png` and the shots path
+traced from the same materials, lights and skies. Never the loop's
+default and never a committed render.
+
+**How.** A second kernel (kernel.ts's interface, which the pool runs
+for any kernel), sharing pbr.ts's BRDF and environment.ts's maps, with
+light sampled at the lights' discs and spheres, the glass's inside
+march, and a hashed sampler, so the bytes are the same at any thread
+count.
+
+**Prototype first.**
+- Time at 768 on four threads on the seven scenes at 16, 32 and 64
+  samples, against full quality; the budget is the medal at 768 in under
+  a minute.
+- Noise: the high-pass RMS of the prototype's floor and shaded-side
+  patches against full quality's, and the sample count at which the
+  medal's and the ring's lettering read.
+- Agreement: the mean difference from full quality on non-metal,
+  non-glowing regions, so that what the loop settles holds in the still
+  (within about 5 levels).
+- A blind read, to see whether an agent takes the noise for wear, a bump
+  or rust, as the judges feared.
+
+**Cost.** Three to five days. No committed render changes.
+
+### 32. Reading the extraction lattice for secondary rays
+
+**Why.** surfaceNets fills a Float32Array over the whole lattice and
+discards it. A trilinear read costs 43 to 143 ns, against 0.57 to 3.9 µs
+for dist() on real programs, and at 0.5 to 6 cells from the surface it is
+within a median of 0.000 to 0.013 cells of dist(), at most 0.54 off. The
+redesign's secondary rays use the field for the three cells nearest the
+surface and the BVH beyond, but much of what is left is field evaluation
+near the surface: the tumbler, the one scene still 3.2 to 3.5 times the
+old renderer on one thread, spends about 45% of its render marching inside
+its glass and 30% tracing shadows through it, and every shaded pixel
+reads the field five times for its occlusion.
+
+**What.** Nothing visible but the time, with pictures within a fraction
+of a level.
+
+**How.** Keep the main extraction's lattice, and let a ray read it where
+it is more than two cells from the surface, calling dist() nearer. Since
+the narrow band (15), a block far from the surface holds its centre's
+value at every point, so a read there takes off the block's half-diagonal
+times the field's factor L to stay a lower bound.
+
+**Prototype first.**
+- Where dist() calls go in the kernel today, by purpose (the primary
+  march, the near march, confirming a hit, the inside march, the
+  occlusion's taps, the normal), on the seven scenes.
+- Pictures: the research's hybrid was within 0.2 levels, and reads must
+  not be biased (shrinking them by half a cell moved 8% of the medal's
+  pixels by more than 24 levels). Measure the largest and the mean
+  difference from the field-only render.
+- Time on one thread at 384 and 768, the tumbler first.
+- Memory: the full lattice is about 540 MB at 512 per side; the band's
+  skipped blocks could hold one value each.
+- Cone-traced occlusion on the lattice (6 cones of 6 reads correlated
+  with ray-traced occlusion at 0.77 to 0.97, against 0.62 to 0.85 for the
+  five taps, on the five programs it was tuned on) can be measured in
+  the same change.
+
+**Cost.** About two days. Every beauty render moves by a fraction of a
+level and is regenerated.
+
+### 33. Pruning the tree per screen tile
+
+**Why.** Every evaluation of a large program pays for the whole tree,
+though near any one pixel's hit only a few leaves can be nearest.
+Barbier et al. ('Lipschitz Pruning', CGF 44(2), Eurographics 2025) prune
+it per screen tile and report sphere tracing 8 to 629 times faster;
+their 1.0 to 1.17 active nodes per cell include far-field culling, and
+are 1.43 to 2.56 without it. Aixle's culled unions evaluate 1.7 to 2.3
+children near the surface, against an ideal of 1.0 to 1.15. The mesher's
+version was set aside (above, "Researched and set aside") because what
+cost remains there is inside the primitives, which pruning does not
+touch, and that may hold for the renderer too. Where it pays, a tile is
+the right unit: its primary hits, their normals, occlusion taps and
+cavity terms and its hit() calls all evaluate the tree within the tile's
+own frustum, so one pruned tree serves them all.
+
+**What.** Nothing visible: the same bytes.
+
+**How.** For each tile of 16 pixels square, bound the frustum's segment
+by the mesh's depth and keep the nodes that can be nearest within it,
+from each node's box and its factor L (15); the evaluations near the
+tile's hits take the pruned tree, and a secondary ray that leaves the
+tile the whole one. Segment tracing with the same factors (Galin et al.,
+CGF 39(2), 2020) is the step-size half. A far-field stand-in,
+sign(d)(|d| − R), is safe on primary rays only, never in shadows or the
+occlusion (design.md, "A grid over the pieces").
+
+**Prototype first.**
+- A profile of the kernel's field time split between the booleans and
+  the leaves, on the seven scenes and on the programs with the most
+  leaves (the mixer, the rope, round 11's shelf, round 2's market); stop
+  there if the leaves dominate, as they did in the mesher.
+- Evaluations per call and active nodes per tile on the same programs.
+- Prove that a pruned tree gives the same bits anywhere in its tile (a
+  smooth union's blend widens what must be kept), and check the renders
+  byte for byte against today's.
+- Beauty time on one thread and on four, on the seven scenes.
+
+**Cost.** Three to four days, with a prune case for every operator.
 
 ## Smaller, worth doing when passing
 
