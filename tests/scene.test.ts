@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ import { run } from "../src/pipeline.js";
 import * as pipelineFns from "../src/pipeline.js";
 import { check } from "../src/pipeline.js";
 import { halfBase64, STUDIO, THREE_VERSION, toHalf, viewerHtml, type ViewerScene } from "../src/export/viewer.js";
-import { encode, GLOW, KEY, TONEMAP_GLSL, toLinear } from "../src/render/photometry.js";
+import { encode, glslFloat, GLOW, KEY, TONEMAP_GLSL, toLinear } from "../src/render/photometry.js";
 import { buildSky, DEFAULT_LIGHT_DIRECTION, environmentLatLong, environmentPalette, horizonRadiance, irradiance, lightDirection } from "../src/render/environment.js";
 import { decode } from "../src/render/photometry.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
@@ -765,7 +765,7 @@ describe("the viewer's scene", () => {
     const shader = { uniforms: {} as Record<string, { value: unknown }>, fragmentShader: "#include <envmap_physical_pars_fragment>\n#include <lights_pars_begin>\nvoid main() {}" };
     bulb.onBeforeCompile(shader);
     expect(shader.fragmentShader).toContain("if ( aixleScene > 0.5 ) return max( aixleShIrradiance(");
-    expect(shader.fragmentShader).toContain(`float r = cutoffDistance / ${GLB_RANGE_CUTOFF}.0; return 1.0 / ( lightDistance * lightDistance + r * r );`);
+    expect(shader.fragmentShader).toContain(`float r = cutoffDistance / ${glslFloat(GLB_RANGE_CUTOFF)}; return 1.0 / ( lightDistance * lightDistance + r * r );`);
     // It opens in the scene: the sky at E, and a glow at beauty.png's strength, GLOW times the GLB's, once however many
     // meshes share its material.
     expect(viewer.scene.environmentIntensity).toBe(0.52);
@@ -778,6 +778,31 @@ describe("the viewer's scene", () => {
     expect(bulb.emissiveIntensity).toBe(1);
     viewer.setMode("scene");
     expect(bulb.emissiveIntensity).toBeCloseTo(GLOW, 9);
+  });
+
+  it("writes the GLB's range cutoff into the shader as a GLSL float, whatever its value", async () => {
+    // The page wrote `${GLB_RANGE_CUTOFF}.0`, a float only while the cutoff is a whole number: 2.5 gave "2.5.0", and
+    // every material in the scene failed to compile.
+    const FLOAT = /^(?:(?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?|\d+[eE][+-]?\d+)$/;
+    expect([3, 2.5, 0.1, 1e21, 1e-7, 12345678.5].map(glslFloat)).toEqual(["3.0", "2.5", "0.1", "1e+21", "1e-7", "12345678.5"]);
+    for (const v of [3, 2.5, 0.1, 1e21, 1e-7]) expect(glslFloat(v)).toMatch(FLOAT);
+    expect(() => glslFloat(NaN)).toThrow();
+    // The page itself, with the cutoff a fraction: the shader divides by that very number.
+    vi.resetModules();
+    vi.doMock("../src/export/glb.js", async (original) => ({ ...(await original<typeof import("../src/export/glb.js")>()), GLB_RANGE_CUTOFF: 2.5 }));
+    try {
+      const { viewerHtml: page } = await import("../src/export/viewer.js");
+      const mat: Record<string, any> = { emissive: { r: 0, g: 0, b: 0 }, map: {} };
+      await runPage(page(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], sceneFor()), { traverse: (f) => f({ isMesh: true, material: mat }) });
+      const shader = { uniforms: {} as Record<string, { value: unknown }>, fragmentShader: "#include <envmap_physical_pars_fragment>\n#include <lights_pars_begin>" };
+      mat.onBeforeCompile(shader);
+      const divisor = /float r = cutoffDistance \/ ([^;]*);/.exec(shader.fragmentShader)![1];
+      expect(divisor).toMatch(FLOAT);
+      expect(Number(divisor)).toBe(2.5);
+    } finally {
+      vi.doUnmock("../src/export/glb.js");
+      vi.resetModules();
+    }
   });
 
   it("lights a diffuse surface in the scene with the irradiance the beauty render takes, by the page's own SH", async () => {

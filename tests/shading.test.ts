@@ -469,3 +469,37 @@ describe("shading: the default key in a steep shot", () => {
     }
   });
 });
+
+describe("shading: the floor is opaque to lights", () => {
+  // A block, a mirror ball and a glass pane on the floor, under a key from above: primary surfaces, a mirror's traced
+  // reflection, its secondary shading and glass's paths all evaluate the lights.
+  const src = 'block = box(0.6, 0.8, 0.6) | move(0.5, 0.4, 0) | paint("amber")\nball = sphere(0.4) | move(-0.5, 0.4, 0) | paint("chrome")\npane = box(0.7, 0.6, 0.12) | move(0, 0.3, 0.6) | paint("glass")\nshow block + ball + pane';
+  const shape = check(src, "under.aix").output!;
+  const nets = surfaceNets(shape, { resolution: 40 });
+  const key: BeautyLight = { azimuth: -40, elevation: 50, size: 1, color: [1, 1, 1], power: 1 };
+  const draw = (extra: BeautyLight, splitLights = false) => renderBeautyResult(shape, nets.mesh, shape.bounds, { size: 72, cellSize: nets.cellSize, splitLights, lights: [key, extra] });
+  const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+  const off = (l: BeautyLight): BeautyLight => ({ ...l, power: 0 });
+
+  it("passes over a directional light below the horizon: the picture is the one with that light switched off", () => {
+    // Before, a light from 60 degrees below lit the block's sides through the floor (lights.png: 'under adds' x9).
+    const under: BeautyLight = { azimuth: 30, elevation: -60, size: 1, color: [1, 1, 1], power: 1.5 };
+    expect(sha(draw(under).canvas.data)).toBe(sha(draw(off(under)).canvas.data));
+    // Its slot is black at every pixel (before, 1,190 of them took its light, on the model and at its edges).
+    const split = draw(under, true);
+    expect(split.hdr![2].every((v) => v === 0)).toBe(true);
+    // The same light just above the horizon does light the scene, so the test can tell.
+    const low = { ...under, elevation: 5 };
+    expect(sha(draw(low).canvas.data)).not.toBe(sha(draw(off(low)).canvas.data));
+  });
+
+  it("passes over a point light below the floor: the picture is the one with that light switched off", () => {
+    const under: BeautyLight = { azimuth: 0, elevation: 0, size: 0.5, color: [1, 0.8, 0.6], power: 2, position: [0.1, -0.3, 0.5], range: 1.5 };
+    expect(sha(draw(under).canvas.data)).toBe(sha(draw(off(under)).canvas.data));
+    const split = draw(under, true);
+    expect(split.hdr![2].every((v) => v === 0)).toBe(true);
+    // Raised to just above the floor, it lights the pane and the block.
+    const above = { ...under, position: [0.1, 0.05, 0.5] as [number, number, number] };
+    expect(sha(draw(above).canvas.data)).not.toBe(sha(draw(off(above)).canvas.data));
+  });
+});

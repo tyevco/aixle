@@ -92,8 +92,13 @@ export const pointRadius = (size: number, range: number): number => 0.02 * range
 /** The fraction of one channel a glass of that channel's colour c lets through over a length `len`, with `reach` the model's scale (Beer's law, σ = BEER(1 − c)/reach). */
 export const beer = (c: number, len: number, reach: number): number => Math.exp((-BEER * (1 - c) * len) / reach);
 
-/** A GLSL float literal: always with a decimal point, as GLSL ES requires. */
-const glslFloat = (v: number): string => {
+/**
+ * A GLSL float literal for any finite number: JavaScript's shortest form, which round-trips, given a decimal point
+ * when it has neither one nor an exponent (GLSL ES reads 3 as an int and has no implicit conversion in a division).
+ * JavaScript writes an exponent as GLSL does (1e+21, 1e-7).
+ */
+export const glslFloat = (v: number): string => {
+  if (!Number.isFinite(v)) throw new Error(`no GLSL float literal for ${v}`);
   const s = String(v);
   return /[.eE]/.test(s) ? s : `${s}.0`;
 };

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BEAUTY_ONLY, beautyQuality, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
@@ -621,16 +621,40 @@ describe("round-11 renders", () => {
     expect(bytes(c, "beauty.png").equals(bytes(a, "beauty.png"))).toBe(true);
     expect(only.report).toMatch(/knob \([^)]*\) → not rendered \(one shot\)/);
     // --camera naming no camera renders every shot, as its warning says; in the one-shot loop beauty.png is the
-    // render's own view and the warning says that instead.
+    // set camera's shot, and the warning says that instead.
     const none = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...opts, camera: "nope" });
-    expect(none.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_hero.png", "beauty_knob.png"]);
+    expect(none.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_knob.png"]);
     expect(none.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; every shot is rendered$/)]));
     const noneOnly = run(lit + "set camera hero\nshow both", "lit.aix", b, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, camera: "nope" });
     expect(noneOnly.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
-    expect(noneOnly.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; beauty\.png takes the render's own view$/)]));
+    expect(noneOnly.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; beauty\.png is camera hero \(set camera\)$/)]));
+    // With no set camera the loop's beauty.png is the render's own view, and the warning says so.
+    const noneNoShot = run(lit + "show both", "lit.aix", b, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, camera: "nope" });
+    expect(noneNoShot.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/^--camera nope: no such camera; cameras: hero, knob; beauty\.png takes the render's own view$/)]));
     // --lights asks for the study in the loop; --no-lights leaves it off a full run.
     expect(run(lit + "set camera hero\nshow both", "lit.aix", c, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64, lights: true }).files).toContain("lights.png");
     expect(run(lit + "show both", "lit.aix", c, { ...opts, lights: false }).files).not.toContain("lights.png");
+  });
+
+  it("treats --camera naming no camera as no --camera: beauty.png is the program's set camera shot, byte for byte", () => {
+    // Before, beauty.png took the plain settings' view (azimuth 35, elevation 25) where the run without --camera
+    // took hero's, though the render's own view is defined as the command line, then the set camera shot, then the
+    // settings; and the full run wrote hero's shot again as beauty_hero.png.
+    const src = lit + "set camera hero\nshow both";
+    for (const o of [opts, { ...BEAUTY_ONLY, grid: 16, size: 64, beautySize: 64 }]) {
+      const a = tmp(), b = tmp();
+      const plain = run(src, "lit.aix", a, o);
+      const nope = run(src, "lit.aix", b, { ...o, camera: "nope" });
+      expect(bytes(b, "beauty.png").equals(bytes(a, "beauty.png"))).toBe(true);
+      expect(nope.files).toEqual(plain.files);
+      // Every picture but the sheet, whose title counts the run's warnings (one more: the --camera one).
+      const pictures = plain.files.filter((f) => f.endsWith(".png") && f !== "sheet.png");
+      expect(pictures).toContain("beauty.png");
+      for (const f of pictures) expect(bytes(b, f).equals(bytes(a, f)), f).toBe(true);
+      expect(nope.warnings.filter((w) => !w.startsWith("--camera nope:"))).toEqual(plain.warnings);
+      expect(nope.warnings.some((w) => /^--camera nope: no such camera; cameras: hero, knob; /.test(w))).toBe(true);
+      expect(nope.report).toMatch(/`beauty\.png`: [^\n]*from camera hero \(set camera\)/);
+    }
   });
 
   it("draws lights.png from the shot beauty.png shows, whether set camera or --camera chose it", () => {
@@ -790,5 +814,37 @@ describe("strips: the quality, lights.png from one render, and one shot framed a
     const report = readFileSync(join(one, "report.md"), "utf8");
     expect(report).toMatch(/`lights\.png`: [^\n]*from one half-size draft render[^\n]*exactly what that light adds/);
     expect(report).toMatch(/`environments\.png`: [^\n]*each a half-size draft render/);
+  });
+});
+
+describe("render sets", () => {
+  it("run each program in a folder of their own, removed afterwards, and leave another run's folder alone", () => {
+    // Every worktree's render set wrote into tmpdir()/aixle-<label>-<name> and emptied it first, so two sets at once
+    // (two worktrees, or CI beside a local run) deleted or copied each other's pictures.
+    const scratch = mkdtempSync(join(tmpdir(), "aixle-sets-")), set = join(scratch, "set"), out = join(scratch, "out"), temp = join(scratch, "tmp");
+    for (const d of [set, out, temp]) mkdirSync(d);
+    writeFileSync(join(set, "q.aix"), "set grid 16\nshow box(1) | paint(\"red\")");
+    // Another run of the same program, under the name every run used.
+    const other = join(temp, "aixle-example-q");
+    mkdirSync(other);
+    writeFileSync(join(other, "beauty.png"), "another run's picture");
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = temp;
+    const quiet = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(tmpdir()).toBe(temp);
+      renderSet(set, out, "example", { only: ["q"], sheetAndBeautyOnly: true });
+      expect(readFileSync(join(other, "beauty.png"), "utf8")).toBe("another run's picture");
+      expect(readdirSync(temp)).toEqual(["aixle-example-q"]);
+      expect(readdirSync(out).sort()).toEqual(["q.png", "q_beauty.png"]);
+      // A program whose run fails leaves no folder behind either.
+      writeFileSync(join(set, "bad.aix"), "show nothing_here");
+      expect(() => renderSet(set, out, "example", { only: ["bad"], sheetAndBeautyOnly: true })).toThrow();
+      expect(readdirSync(temp)).toEqual(["aixle-example-q"]);
+    } finally {
+      quiet.mockRestore();
+      if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });

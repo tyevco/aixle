@@ -6,7 +6,7 @@
  * regenerates both and fails if the committed files differ, so a change in
  * a render always comes with the change that caused it.
  */
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { run } from "../src/pipeline.js";
@@ -51,39 +51,44 @@ export function renderSet(srcDir: string, outDir: string, label: string, opts: R
   for (const file of files) {
     // A program in a subfolder keeps the folder in its render's name, so round-2/frog and round-3/frog do not collide.
     const name = file.replace(/\.aix$/, "").replace(/\//g, "_");
-    const tmp = join(tmpdir(), `aixle-${label}-${name}`);
-    rmSync(tmp, { recursive: true, force: true });
-    const t0 = performance.now();
-    const result = run(readFileSync(join(srcDir, file), "utf8"), `${relative(process.cwd(), srcDir)}/${file}`, tmp, {
-      defaultGrid: 112,
-      size: 384,
-      views: [],
-      turntable: false,
-      obj: false,
-      glb: false,
-      beauty: true,
-      beautySize: 384,
-      threads,
-      // lights.png is never copied into a render set, so it is not drawn.
-      lights: false,
-      steps: !opts.sheetAndBeautyOnly,
-      slices: !opts.sheetAndBeautyOnly,
-    });
-    copyFileSync(join(tmp, "sheet.png"), join(outDir, `${name}.png`));
-    if (!opts.sheetAndBeautyOnly) {
-      copyFileSync(join(tmp, "slices.png"), join(outDir, `${name}_slices.png`));
-      copyFileSync(join(tmp, "steps.png"), join(outDir, `${name}_steps.png`));
+    // Each run writes into a folder of its own, made fresh and removed afterwards. A fixed name (aixle-<label>-<name>)
+    // was the same in every worktree, so two render sets at once (two worktrees, or CI beside a local run) deleted or
+    // copied each other's pictures.
+    const tmp = mkdtempSync(join(tmpdir(), `aixle-${label}-${name}-`));
+    try {
+      const t0 = performance.now();
+      const result = run(readFileSync(join(srcDir, file), "utf8"), `${relative(process.cwd(), srcDir)}/${file}`, tmp, {
+        defaultGrid: 112,
+        size: 384,
+        views: [],
+        turntable: false,
+        obj: false,
+        glb: false,
+        beauty: true,
+        beautySize: 384,
+        threads,
+        // lights.png is never copied into a render set, so it is not drawn.
+        lights: false,
+        steps: !opts.sheetAndBeautyOnly,
+        slices: !opts.sheetAndBeautyOnly,
+      });
+      copyFileSync(join(tmp, "sheet.png"), join(outDir, `${name}.png`));
+      if (!opts.sheetAndBeautyOnly) {
+        copyFileSync(join(tmp, "slices.png"), join(outDir, `${name}_slices.png`));
+        copyFileSync(join(tmp, "steps.png"), join(outDir, `${name}_steps.png`));
+      }
+      copyFileSync(join(tmp, "beauty.png"), join(outDir, `${name}_beauty.png`));
+      const extras = readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_") || f.startsWith("beauty_"));
+      for (const extra of extras) copyFileSync(join(tmp, extra), join(outDir, `${name}_${extra}`));
+      // A pose sheet, strip or camera shot this program no longer writes goes too (round 11: the shot `set camera` names
+      // is written once, as beauty.png, so its old beauty_<name>.png copy would have stayed behind).
+      const kept = new Set(extras.map((e) => `${name}_${e}`));
+      for (const old of readdirSync(outDir))
+        if ((old === `${name}_poses.png` || old.startsWith(`${name}_anim_`) || old.startsWith(`${name}_beauty_`)) && !kept.has(old)) rmSync(join(outDir, old));
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      console.log(`${name.padEnd(10)} ${secs}s  ${result.warnings.length ? result.warnings.join(" | ") : "ok"}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
     }
-    copyFileSync(join(tmp, "beauty.png"), join(outDir, `${name}_beauty.png`));
-    const extras = readdirSync(tmp).filter((f) => f === "poses.png" || f.startsWith("anim_") || f.startsWith("beauty_"));
-    for (const extra of extras) copyFileSync(join(tmp, extra), join(outDir, `${name}_${extra}`));
-    // A pose sheet, strip or camera shot this program no longer writes goes too (round 11: the shot `set camera` names
-    // is written once, as beauty.png, so its old beauty_<name>.png copy would have stayed behind).
-    const kept = new Set(extras.map((e) => `${name}_${e}`));
-    for (const old of readdirSync(outDir))
-      if ((old === `${name}_poses.png` || old.startsWith(`${name}_anim_`) || old.startsWith(`${name}_beauty_`)) && !kept.has(old)) rmSync(join(outDir, old));
-    const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    console.log(`${name.padEnd(10)} ${secs}s  ${result.warnings.length ? result.warnings.join(" | ") : "ok"}`);
-    rmSync(tmp, { recursive: true, force: true });
   }
 }

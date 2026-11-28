@@ -22,7 +22,8 @@
  * Glass is pbr-glass.ts. The floor is solved so that the open floor near the model shows what the old renderer showed
  * under the sky and every directional light, lit by each light at full strength with the area light's shadows near
  * the model, darkened under it by the field's occlusion and a wider contact term (the sky's light and the lights'
- * alike), and faded far off into the sky's horizon. It reflects nothing (a sheen on it drew a ghost of the model).
+ * alike), and faded far off into the sky's horizon. It reflects nothing (a sheen on it drew a ghost of the model). It is
+ * opaque: a directional light below the horizon, or a point light below the floor, reaches nothing.
  *
  * Primary visibility is the field's, primed by the mesh's depth, as the classic renderer had it. Secondary rays march
  * the field for three cells and then let the mesh's BVH skip empty space, every hit confirmed on the field (rays.ts).
@@ -174,7 +175,7 @@ export const pbr: Kernel<PbrTables> = {
   finish: (ctx) => pbrFinish(ctx),
 };
 
-/** Per light, packed: towards it, its place, point or not, range², tan of its angular radius, its sphere's radius, its linear radiance on a white face, its slot's offset, its soft march's constant. */
+/** Per light, packed: towards it, its place, point or not, range², tan of its angular radius, its sphere's radius, its linear radiance on a white face, its slot's offset, its soft march's constant, whether it reaches anything. */
 const LS = 16;
 
 function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
@@ -211,7 +212,12 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     LP[o + 10] = toLinear(l.color[0]) * l.power * KEY; LP[o + 11] = toLinear(l.color[1]) * l.power * KEY; LP[o + 12] = toLinear(l.color[2]) * l.power * KEY;
     LP[o + 13] = split ? (i + 1) * 3 : 0;
     LP[o + 14] = softnessFor(ang);
-    LP[o + 15] = l.power > 0 ? 1 : 0;
+    // Whether the light reaches anything: some power, and not under the floor. The floor is an opaque plane under
+    // everything the kernel lights (the model stands on or above y = floorY, and the floor is lit on its top), but the
+    // area and occlusion rays see only the model, so a light under it lit the model's sides through it. One test per
+    // light: a directional light pointing below the horizon, or a point light below the plane, reaches no point above
+    // it, and is passed over wherever lights are evaluated, as a light of no power is.
+    LP[o + 15] = l.power > 0 && (l.pos ? l.pos[1] >= floorY : l.dir[1] >= 0) ? 1 : 0;
     RL.push(l.pos ? { point: true, x: l.pos[0], y: l.pos[1], z: l.pos[2], radius: r, index: i } : { point: false, x: l.dir[0], y: l.dir[1], z: l.dir[2], radius: lightAngle(l.size), index: i });
   });
 
@@ -350,7 +356,8 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     if (see === SEE_BACKDROP) { skyAt(SKY, dx, dy, dz, out, o, BACKDROP); return; }
     skyAt(SKY, dx, dy, dz, out, o, REFLECT);
     out[o] *= E; out[o + 1] *= E; out[o + 2] *= E;
-    for (let i = 0; i < NL; i++) if (!LP[i * LS + 6]) softboxAt(SKY, i, dx, dy, dz, out, o + LP[i * LS + 13]);
+    // A light under the floor is not seen in a mirror either (from above the floor, the floor is in the way).
+    for (let i = 0; i < NL; i++) if (!LP[i * LS + 6] && LP[i * LS + 15]) softboxAt(SKY, i, dx, dy, dz, out, o + LP[i * LS + 13]);
   };
 
   /**
