@@ -83,6 +83,29 @@ export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Ve
 /** The default key light's direction (towards the light): upper left, from the front. */
 export const DEFAULT_LIGHT_DIRECTION: Vec3 = normalize([-0.55, 0.9, 0.65]);
 
+/**
+ * The camera elevations (degrees) over which the default key turns from DEFAULT_LIGHT_DIRECTION to the frame's top
+ * left: below the first it is the default key, from the second up it comes from the frame's top left.
+ */
+export const STEEP: readonly [number, number] = [55, 75];
+
+/**
+ * The key a shot takes when its program places no light and sets no light direction. People read a picture as lit
+ * from above, and a camera looking steeply down has the far side of the floor at its frame's top: there the default
+ * key, from the front, lit the frame from its bottom, and a plan view's blind pockets read as domes (the hub, round
+ * 10). So from STEEP[0] up its azimuth turns, smoothly with the elevation, to 135° round from the camera's own, the
+ * frame's top left in a plan view, at the default key's elevation. Every shot below STEEP[0] keeps the default key.
+ */
+export function defaultKey(cameraAzimuth: number, cameraElevation: number): Vec3 {
+  const t = smooth(STEEP[0], STEEP[1], cameraElevation);
+  if (t <= 0) return DEFAULT_LIGHT_DIRECTION;
+  const d = DEFAULT_LIGHT_DIRECTION;
+  const az = (Math.atan2(d[0], d[2]) * 180) / Math.PI, el = (Math.asin(d[1]) * 180) / Math.PI;
+  // The shortest way round from the default key's azimuth to the frame's top left.
+  const turn = ((((cameraAzimuth - 135 - az) % 360) + 540) % 360) - 180;
+  return lightDirection(az + turn * t, el);
+}
+
 /** A light's direction from its azimuth about y (0 is +z, 90 is +x) and elevation, in degrees. */
 export function lightDirection(azimuth: number, elevation: number): Vec3 {
   const az = (azimuth * Math.PI) / 180, el = (elevation * Math.PI) / 180;
@@ -128,27 +151,44 @@ const MODE_BITS = [STRUCT, STRUCT | CARDS, DISC | STARS, STRUCT | CARDS | DISC |
  * the 0.6 it took off diffuse light alone. What does: the walls and the flag reach their darkness right at the
  * horizon (the bright band either side of it lit a shaded side and almost no reflection), and the model's own shadow
  * on the floor opposite the key, which is what a shaded side faces and what the old uniform ground left out.
+ *
+ * The rig has two sets of walls, ceiling and flag: the light a surface takes (DIFFUSE, its SH irradiance) and what
+ * it mirrors (`reflect`: FILTERED, REFLECT, MIRROR). A photographer flags reflections harder than light: the room round
+ * and behind the camera is black in a metal and still bounces light into a shaded side. With one set at the light's
+ * darkness every metal mirrored a mostly white room and read white, cream or ceramic (rough iron facing up returned
+ * 0.8 of the sky); at the reflections' darkness a white mug's shaded side fell from the old renderer's 89 levels to 53.
  */
 export const STUDIO = {
-  /** The walls on the camera's side, above the horizon, reaching their darkness `wallsRise` of dy up. */
+  /**
+   * The walls on the camera's side, above the horizon, reaching their darkness `wallsRise` of dy up. Retuned for form
+   * against the old renderer's shaded sides (teapot 90 levels, mug 89, the rope's grooves 19 at the 25th percentile;
+   * the kernel had 117, 104 and 32): reaching further round, the ceiling and the flag darker, the flag lifted less on
+   * the key's side, they give 103, 82 and 18 with the occlusion's power (pbr.ts, AO_POWER).
+   */
   walls: 0.92,
   wallsRise: 0.02,
   /** How far round the walls reach: from none to full darkness as a look's horizontal part along the camera's way runs from the first to the second. */
-  wallsAcross: [-0.3, 0.35],
+  wallsAcross: [-0.5, 0.15],
   /** The ceiling: the gradient at the zenith, as a share of the sky colour (reached from dy = 0.4 up). */
-  zenith: 0.2,
+  zenith: 0.15,
   /** The flag on the floor on the camera's side, below the horizon, reaching its darkness `flagRise` of −dy down. */
-  flag: 0.8,
+  flag: 0.85,
   flagRise: 0.02,
-  flagAcross: [-0.15, 0.3],
+  flagAcross: [-0.4, 0.15],
   /**
    * The flag lifted on the key's side, by this share, as a look's horizontal part towards the key runs from 0 to
    * `flagKeyTo`: the floor the key lights is bright, and a metal turned to the camera and the key (a medal's face, which
    * reflects the floor at the camera's side towards the key) reflects it; a shaded side faces away from the key and
    * still sees the flag.
    */
-  flagKey: 1,
+  flagKey: 0.7,
   flagKeyTo: 0.6,
+  /**
+   * What reflections see: the walls darker and round to the sides (only the sweep behind the model is left bright),
+   * the ceiling near black, the flag darker and wider, still lifted on the key's side for a face turned to the camera
+   * and the key. Measured on the mixer's bowl (polished, with its dark and its bright), the lantern and the trophies.
+   */
+  reflect: { walls: 0.95, wallsAcross: [-0.7, -0.1], zenith: 0.08, flag: 0.9, flagAcross: [-0.6, 0], flagKey: 1, flagKeyTo: 0.6 },
   /**
    * The model's shadow on the floor: the ground away from the key darkened by `strength`, as the look's horizontal
    * part along the key's way (horizontal, away from it) runs from `from` to `to`, reached `rise` of −dy down (the far
@@ -230,6 +270,8 @@ export interface SkyTables {
   flagAcross1: number;
   flagKey: number;
   flagKeyTo: number;
+  /** The rig as reflections see it (the modes with the cards): the same fields, darker and further round. */
+  reflect: Rig;
   /** The backdrop above the horizon by dy, GRAD_N + 1 entries of linear RGB. */
   grad: Float64Array;
   /** The backdrop below the horizon (linear RGB). */
@@ -243,6 +285,19 @@ export interface SkyTables {
   sh: Float64Array;
   /** The GGX-prefiltered maps of FILTERED, one per PREFILTER entry: lat-long, row 0 at the zenith, 3 floats a texel. */
   levels: Float32Array[];
+}
+
+/** The studio's rig as one kind of look sees it: the walls, the ceiling and the flag (see STUDIO). */
+export interface Rig {
+  walls: number;
+  wallsAcross0: number;
+  wallsAcross1: number;
+  zenith: number;
+  flag: number;
+  flagAcross0: number;
+  flagAcross1: number;
+  flagKey: number;
+  flagKeyTo: number;
 }
 
 /** A sky for one render: its tables, and each light's softbox (BOX floats a light, in the order the lights were given; a point light's is dark). */
@@ -318,15 +373,19 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   const rig = (v: readonly number[]): Vec3 => [v[0] * rx + v[2] * fx, v[1], v[0] * rz + v[2] * fz];
   const cards: number[] = [];
   let walls = 0, zenith = 1, flag = 0, stars = 0, shadow = 0;
+  let reflect: Rig = { walls: 0, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], zenith: 1, flag: 0, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo };
   const kh = Math.hypot(key[0], key[2]);
   const sx = kh > 1e-9 ? -key[0] / kh : 0, sz = kh > 1e-9 ? -key[2] / kh : 0;
   const disc: number[] = [];
   const keyAz = Math.atan2(key[0], key[2]);
   if (env === "studio") {
     walls = STUDIO.walls; zenith = STUDIO.zenith; flag = STUDIO.flag; shadow = STUDIO.shadow.strength;
+    const R = STUDIO.reflect;
+    reflect = { walls: R.walls, wallsAcross0: R.wallsAcross[0], wallsAcross1: R.wallsAcross[1], zenith: R.zenith, flag: R.flag, flagAcross0: R.flagAcross[0], flagAcross1: R.flagAcross[1], flagKey: R.flagKey, flagKeyTo: R.flagKeyTo };
     for (const c of STUDIO.cards) card(cards, rig(c.at), c.half[0], c.half[1], c.soft, c.radiance);
   } else if (env === "overcast") {
     zenith = OVERCAST_ZENITH;
+    reflect = { ...reflect, zenith };
   } else if (env === "sunset") {
     const e = (SUN_ELEVATION * Math.PI) / 180;
     disc.push(Math.sin(keyAz) * Math.cos(e), Math.sin(e), Math.cos(keyAz) * Math.cos(e), Math.cos(SUN_RADIUS), 40, 22, 9, 2.4, 1.1, 0.35, 0.012, 0.7, 0.3, 0.1, 0.25);
@@ -359,7 +418,7 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   cardArr.set(cards);
   const discArr = f64(disc.length, shared);
   discArr.set(disc);
-  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
+  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], reflect, grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
 }
 
 /** Each light's softbox: direction, the squared chord (2 − 2cos) where its edge starts and ends, and its radiance. */
@@ -626,6 +685,8 @@ function filterRow(src: Float32Array, data: Float32Array, o: number, w: number, 
 export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, dz: number, out: Float64Array | Float32Array | number[], o: number, mode: SkyMode): void {
   const bits = MODE_BITS[mode];
   const lit = (bits & STRUCT) !== 0;
+  // The rig: as reflections see it in the modes with the cards, as the light a surface takes in DIFFUSE.
+  const rg: Rig = bits & CARDS ? s.reflect : s;
   const G = s.grad;
   let r: number, g: number, b: number;
   if (dy >= 0) {
@@ -633,8 +694,8 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     r = G[q] + (G[q + 3] - G[q]) * u; g = G[q + 1] + (G[q + 4] - G[q + 1]) * u; b = G[q + 2] + (G[q + 5] - G[q + 2]) * u;
     if (lit) {
       let m = 1;
-      if (s.zenith !== 1 && dy > 0.4) m += (s.zenith - 1) * ((dy - 0.4) / 0.6);
-      if (s.walls > 0) m *= 1 - s.walls * smooth(s.wallsAcross0, s.wallsAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
+      if (rg.zenith !== 1 && dy > 0.4) m += (rg.zenith - 1) * ((dy - 0.4) / 0.6);
+      if (rg.walls > 0) m *= 1 - rg.walls * smooth(rg.wallsAcross0, rg.wallsAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
       r *= m; g *= m; b *= m;
     }
   } else if (!lit) {
@@ -643,9 +704,9 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     // From the horizon's colour to the ground's, then the flag on the camera's side.
     const u = smooth(0, HORIZON_BLEND, -dy);
     r = G[0] + (s.below[0] - G[0]) * u; g = G[1] + (s.below[1] - G[1]) * u; b = G[2] + (s.below[2] - G[2]) * u;
-    if (s.flag > 0) {
-      let k = s.flag * smooth(s.flagAcross0, s.flagAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.flagRise, -dy);
-      if (s.flagKey > 0) k *= 1 - s.flagKey * smooth(0, s.flagKeyTo, -(dx * s.sx + dz * s.sz));
+    if (rg.flag > 0) {
+      let k = rg.flag * smooth(rg.flagAcross0, rg.flagAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.flagRise, -dy);
+      if (rg.flagKey > 0) k *= 1 - rg.flagKey * smooth(0, rg.flagKeyTo, -(dx * s.sx + dz * s.sz));
       const m = 1 - k;
       r *= m; g *= m; b *= m;
     }

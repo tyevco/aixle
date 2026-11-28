@@ -77,20 +77,35 @@ const PRESET_LIST: Material[] = [
   ...Object.entries(NAMED_COLORS)
     .filter(([n]) => n !== "clay" && n !== "grey")
     .map(([n, c]) => make(n, { color: c })),
-  // A metal's colour is its reflectance at normal incidence (F0), as glTF means it: measured values, linear, written
-  // in sRGB. Gold is Lagarde's ("Feeding a physically based shading model", 2011: linear 1.000, 0.766, 0.336);
-  // silver, copper, iron, brass (C260 cartridge brass) and chrome (chromium) are Real-Time Rendering 4th ed., table
-  // 9.2; steel is stainless steel from physicallybased.info (refractiveindex.info's data: 0.669, 0.639, 0.598). No
-  // table measures bronze: it is the mean of the copper and brass rows, the alloys either side of it (0.933, 0.708,
-  // 0.481). A metal reads by what it reflects, so a measured F0 is pale: the beauty render's environment gives it its
-  // colour, and the GLB means the same.
-  make("gold", { color: hex("#ffe39d"), metal: 1, rough: 0.3 }),
+  // A metal's colour is its reflectance at normal incidence (F0), as glTF means it, written in sRGB; the viewer and
+  // any engine read the same colour. Silver and chrome (chromium) are measured F0, Real-Time Rendering 4th ed., table
+  // 9.2 (linear 0.972, 0.960, 0.915 and 0.549, 0.556, 0.554).
+  //
+  // Steel is iron's measured F0 from the same table (0.562, 0.565, 0.578): steel is iron with under 2% carbon and has
+  // its reflectance, a neutral grey. The stainless value it had (0.669, 0.639, 0.598, chromium-nickel alloy) is warm,
+  // and a steel hub, gear and bracket read ivory and ceramic under a warm key.
+  //
+  // Iron is the iron things are made of, wrought, cast or blackened, under its skin of black oxide: magnetite (Fe3O4,
+  // most of mill scale and of a blacking), which reflects about 20% across the visible spectrum (ore microscopy's
+  // reflectance tables: 20 to 21% at 470 to 650 nm), neutral, linear 0.20. Bare polished iron (0.56) rendered a bench's
+  // arms and a door's hinges as chrome tubing and a lantern as white enamel; a worn edge (`wear`) still rubs through to
+  // about that bare iron. The rust preset is the same iron, rusting.
+  //
+  // Gold, brass, copper and bronze are their measured F0 squared, the colour of the light after two bounces off the
+  // metal: gold is Lagarde's (2011: 1.000, 0.766, 0.336), brass (C260 cartridge brass) and copper are RTR4's table 9.2,
+  // and bronze, which no table measures, the mean of the copper and brass rows, the alloys either side of it (0.933,
+  // 0.708, 0.481). A measured F0 is pale (gold #ffe39d): in a neutral room the trophies' gold read as champagne, the
+  // sign's brass letters as cream and the bottle's bronze collar as pink, however dark the room round them (darker, they
+  // went khaki). Gold reads gold through its own interreflections and warm, dark surroundings; squared, each keeps its
+  // measured hue and the order between them and takes the saturation a picture of the metal has (the medal's face:
+  // 0.73 against 0.46 at F0 and the old renderer's 0.68), in this render and in any glTF viewer.
+  make("gold", { color: hex("#ffc95e"), metal: 1, rough: 0.3 }),
   make("silver", { color: hex("#fcfaf5"), metal: 1, rough: 0.25 }),
-  make("copper", { color: hex("#fad1c2"), metal: 1, rough: 0.35 }),
-  make("bronze", { color: hex("#f7dbb8"), metal: 1, rough: 0.4 }),
-  make("steel", { color: hex("#d6d1cb"), metal: 1, rough: 0.45 }),
-  make("iron", { color: hex("#c6c6c8"), metal: 1, rough: 0.6 }),
-  make("brass", { color: hex("#f5e4ae"), metal: 1, rough: 0.35 }),
+  make("copper", { color: hex("#f5ab92"), metal: 1, rough: 0.35 }),
+  make("bronze", { color: hex("#f0bc84"), metal: 1, rough: 0.4 }),
+  make("steel", { color: hex("#c6c6c8"), metal: 1, rough: 0.45 }),
+  make("iron", { color: hex("#7c7c7c"), metal: 1, rough: 0.6 }),
+  make("brass", { color: hex("#ebcc75"), metal: 1, rough: 0.35 }),
   make("chrome", { color: hex("#c4c5c4"), metal: 1, rough: 0.1 }),
   make("wood", { color: hex("#b07d4a"), color2: hex("#7a4f2a"), pattern: "wood", scale: 0.25, rough: 0.7 }),
   make("oak", { color: hex("#c69a63"), color2: hex("#8f6539"), pattern: "wood", scale: 0.3, rough: 0.7 }),
@@ -120,8 +135,9 @@ const PRESET_LIST: Material[] = [
   make("porcelain", { color: hex("#f6f4ee"), rough: 0.2 }),
   make("snow", { color: hex("#f8f9fb"), color2: hex("#dfe6ef"), pattern: "noise", scale: 0.3, rough: 0.9 }),
   make("lava", { color: hex("#f06a1a"), color2: hex("#3a1a10"), pattern: "marble", scale: 0.8, rough: 0.6 }),
-  // Iron with patches of rust: the patches are rough and not metal, so it bakes a metallic-roughness map.
-  make("rust", { color: hex("#c6c6c8"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
+  // Iron with patches of rust: the iron preset's own dark iron (a rusty lantern is old iron, not polished), and patches
+  // that are rough and not metal, so it bakes a metallic-roughness map.
+  make("rust", { color: hex("#7c7c7c"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
 ];
 
 export const PRESETS: ReadonlyMap<string, Material> = new Map(PRESET_LIST.map((m) => [m.name, m]));

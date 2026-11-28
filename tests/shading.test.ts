@@ -8,9 +8,9 @@ import type { Material, Shape3 } from "../src/sdf/types.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
 import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
-import { pbr, type PbrTables } from "../src/render/pbr.js";
-import { project, toView, type Camera } from "../src/render/camera.js";
-import { buildEnvironment, ENVIRONMENTS, environmentPalette, prefilterLevels, projectSh, type EnvironmentState } from "../src/render/environment.js";
+import { pbr, sceneLights, type PbrTables } from "../src/render/pbr.js";
+import { perspective, project, toView, type Camera } from "../src/render/camera.js";
+import { buildEnvironment, DEFAULT_LIGHT_DIRECTION, defaultKey, ENVIRONMENTS, environmentPalette, lightDirection, prefilterLevels, projectSh, STEEP, type EnvironmentState } from "../src/render/environment.js";
 import { encode, FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
 import { lastPoolRows, openBeautyPool } from "../src/render/beauty-pool.js";
 import { check } from "../src/pipeline.js";
@@ -64,7 +64,7 @@ function constantSky(L: number): EnvironmentState {
   const s = buildEnvironment("studio", { cameraAzimuth: 35, lights: [] });
   const flat = (_x: number, _y: number, _z: number, out: Float64Array) => { out[0] = L; out[1] = L; out[2] = L; };
   return {
-    ...s, ambient: 1, walls: 0, zenith: 1, flag: 0, shadow: 0, stars: 0,
+    ...s, ambient: 1, walls: 0, zenith: 1, flag: 0, shadow: 0, stars: 0, reflect: { ...s.reflect, walls: 0, zenith: 1, flag: 0 },
     grad: new Float64Array(s.grad.length).fill(L), below: new Float64Array(3).fill(L),
     cards: new Float64Array(0), disc: new Float64Array(0), boxes: new Float64Array(0),
     sh: projectSh(flat), levels: prefilterLevels(flat),
@@ -357,5 +357,79 @@ describe("shading: glass", () => {
     const full = peak("full"), draft = peak("draft");
     expect(full).toBeGreaterThan(1);
     expect(Math.abs(draft - full) / full).toBeLessThan(0.05);
+  });
+});
+
+describe("shading: the default key in a steep shot", () => {
+  const unit = { min: [-1, 0, -1] as [number, number, number], max: [1, 1, 1] as [number, number, number] };
+  /** Where a light lies in a camera's frame: its share along the frame's right and up. */
+  const inFrame = (az: number, el: number, l: readonly number[]) => {
+    const cam = perspective(unit, 64, 64, az, el);
+    return { right: l[0] * cam.right[0] + l[1] * cam.right[1] + l[2] * cam.right[2], up: l[0] * cam.up[0] + l[1] * cam.up[1] + l[2] * cam.up[2] };
+  };
+
+  it("is the default key below STEEP's first elevation, at any azimuth", () => {
+    for (const az of [-170, -40, 0, 35, 90, 180]) for (let el = -10; el <= STEEP[0]; el += 5) expect(defaultKey(az, el)).toBe(DEFAULT_LIGHT_DIRECTION);
+  });
+
+  it("comes from the frame's top left when the camera looks steeply down, at every azimuth", () => {
+    for (const az of [-170, -90, -40, 0, 35, 90, 135, 180]) {
+      // The default key from a plan view comes from the frame's bottom for most azimuths: the reason for the rule.
+      if (az === 0 || az === 35) expect(inFrame(az, 90, DEFAULT_LIGHT_DIRECTION).up, `default key at ${az}`).toBeLessThan(0);
+      for (const el of [STEEP[1], 80, 89, 90]) {
+        const { right, up } = inFrame(az, el, defaultKey(az, el));
+        expect(up, `up at ${az}, ${el}`).toBeGreaterThan(0.3);
+        expect(right, `right at ${az}, ${el}`).toBeLessThan(-0.3);
+      }
+      // At the default key's own elevation.
+      expect(defaultKey(az, 90)[1]).toBeCloseTo(DEFAULT_LIGHT_DIRECTION[1], 12);
+    }
+  });
+
+  it("turns smoothly with the elevation, never by more than 10 degrees a degree (a step would turn it up to 180 at once)", () => {
+    for (const az of [0, 35, -85, -120, 180]) {
+      let prev = defaultKey(az, STEEP[0] - 1);
+      for (let el = STEEP[0]; el <= 90; el += 1) {
+        const k = defaultKey(az, el);
+        const turn = (Math.acos(Math.min(1, prev[0] * k[0] + prev[1] * k[1] + prev[2] * k[2])) * 180) / Math.PI;
+        expect(turn, `${az} at ${el}`).toBeLessThan(10);
+        prev = k;
+      }
+    }
+  });
+
+  it("is taken only when the program places no light and sets no light direction", () => {
+    const model = { min: [-1, 0, -1] as [number, number, number], max: [1, 2, 1] as [number, number, number] };
+    const plan = { size: 64, cellSize: 0.05, azimuth: 0, elevation: 90 };
+    expect(sceneLights(plan, model)[0].dir).toEqual(defaultKey(0, 90));
+    expect(sceneLights({ ...plan, elevation: 25 }, model)[0].dir).toBe(DEFAULT_LIGHT_DIRECTION);
+    // A program's own lights, and `set light_azimuth`, are kept as they are in a plan view.
+    const key: BeautyLight = { azimuth: -40, elevation: 55, size: 3, color: [1, 1, 1], power: 1 };
+    expect(sceneLights({ ...plan, lights: [key] }, model)[0].dir).toEqual(lightDirection(-40, 55));
+    expect(sceneLights({ ...plan, lightAzimuth: -40 }, model)[0].dir).toEqual(lightDirection(-40, 55));
+    expect(sceneLights({ ...plan, lightElevation: 30 }, model)[0].dir).toEqual(lightDirection(-40, 30));
+  });
+
+  it("lights a plan view from the frame's top left: a block's shadow falls to its bottom right", () => {
+    const block = O.paint(O.move(P.box(1, 0.6, 1), 0, 0.3, 0), customMaterial({ color: [0.8, 0.8, 0.8], rough: 0.7 }));
+    const nets = surfaceNets(block, { resolution: 32 });
+    const size = 96;
+    const c = renderBeauty(block, nets.mesh, block.bounds, { size, cellSize: nets.cellSize, azimuth: 0, elevation: 90, zoom: 0.5 });
+    const cam = beautyCamera(nets.mesh, block.bounds, { size, cellSize: nets.cellSize, azimuth: 0, elevation: 90, zoom: 0.5 });
+    // The floor just past two opposite corners of the block, one towards the frame's top left, one its bottom right.
+    const luma = (p: [number, number, number]): number => {
+      const q = project(cam, toView(cam, p))!;
+      const v = c.get(Math.round(q.x), Math.round(q.y));
+      return 0.2126 * ((v >> 16) & 255) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255);
+    };
+    const corner = (sx: number, sy: number): number => {
+      // The frame's right and up on the floor.
+      const r = [cam.right[0], cam.right[2]], u = [cam.up[0], cam.up[2]];
+      const x = 0.75 * (sx * r[0] + sy * u[0]), z = 0.75 * (sx * r[1] + sy * u[1]);
+      return luma([x, 0, z]);
+    };
+    const corners = { topLeft: corner(-1, 1), topRight: corner(1, 1), bottomLeft: corner(-1, -1), bottomRight: corner(1, -1) };
+    // The shadow is past the bottom right corner; the floor past the top left one, towards the light, is lit.
+    expect(corners.bottomRight, JSON.stringify(corners)).toBeLessThan(Math.min(corners.topLeft, corners.topRight, corners.bottomLeft) * 0.8);
   });
 });

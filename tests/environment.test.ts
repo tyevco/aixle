@@ -368,7 +368,10 @@ describe("environments: the studio's structure", () => {
         const l = Math.hypot(...d);
         return [d[0] / l, d[1] / l, d[2] / l];
       };
-      const card = (d: Vec3): number => look(s, d, FILTERED)[1] - look(s, d, DIFFUSE)[1];
+      // A card is what FILTERED adds over the same sky without the cards (the light a surface takes, DIFFUSE, is
+      // under the other rig, the reflections' being darker).
+      const bare: SkyTables = { ...s, cards: new Float64Array(0) };
+      const card = (d: Vec3): number => look(s, d, FILTERED)[1] - look(bare, d, FILTERED)[1];
       const [fill, strip, rim] = STUDIO.cards;
       expect(card(at(fill.at[0], fill.at[1], fill.at[2])), `fill at ${camAz}`).toBeCloseTo(fill.radiance[1], 6);
       expect(card(at(-fill.at[0], fill.at[1], fill.at[2])), `no fill on the left at ${camAz}`).toBe(0);

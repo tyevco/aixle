@@ -46,7 +46,7 @@ import { bvhFor, type BvhData } from "./bvh.js";
 import { createRays, softnessFor, type RayLight } from "./rays.js";
 import { filterVisibility } from "./denoise.js";
 import { bloom, decode, FLAG_EDGE, FLAG_GLOW, FLAG_SHINY, GLOW, KEY, KIND_FLOOR, KIND_MODEL, KIND_SKY, lightAngle, MAX_LIGHT_ANGLE, pointRadius, tonemap, toLinear, toSrgb, untone } from "./photometry.js";
-import { BACKDROP, buildEnvironment, DEFAULT_LIGHT_DIRECTION, environmentPalette, horizonRadiance, irradiance, lightDirection, prefiltered, REFLECT, skyAt, softboxAt, type EnvironmentState } from "./environment.js";
+import { BACKDROP, buildEnvironment, defaultKey, environmentPalette, horizonRadiance, irradiance, lightDirection, prefiltered, REFLECT, skyAt, softboxAt, type EnvironmentState } from "./environment.js";
 import { createGlass, SEE_BACKDROP, SEE_MIRROR } from "./pbr-glass.js";
 import type { BeautyOptions } from "./beauty.js";
 import type { BufferSpec, Kernel, KernelContext, KernelRows } from "./kernel.js";
@@ -76,7 +76,7 @@ export interface PbrTables {
 }
 
 /** One light as the kernel takes it: towards it (from the model's centre, for a point light), its size, sRGB colour, power, and a point light's place and range. */
-interface SceneLight {
+export interface SceneLight {
   dir: Vec3;
   size: number;
   color: Vec3;
@@ -85,8 +85,12 @@ interface SceneLight {
   range: number;
 }
 
-/** The program's lights, or the one key light the settings describe. A point light with no range reaches half the model's longest side. */
-function sceneLights(opts: BeautyOptions, model: Bounds): SceneLight[] {
+/**
+ * The program's lights, or the one key light the settings describe: `set light_azimuth` or `set light_elevation` where
+ * the program sets them, else the default key for the camera (environment.ts's defaultKey: the frame's top left when it
+ * looks steeply down). A point light with no range reaches half the model's longest side.
+ */
+export function sceneLights(opts: BeautyOptions, model: Bounds): SceneLight[] {
   const centre = boundsCenter(model);
   const halfModel = Math.max(...boundsSize(model)) / 2 || 1;
   if (opts.lights && opts.lights.length)
@@ -94,7 +98,7 @@ function sceneLights(opts: BeautyOptions, model: Bounds): SceneLight[] {
       dir: l.position ? normalize([l.position[0] - centre[0], l.position[1] - centre[1], l.position[2] - centre[2]]) : lightDirection(l.azimuth, l.elevation),
       size: Math.max(0, l.size), color: l.color, power: Math.max(0, l.power), pos: l.position, range: Math.max(1e-6, l.range ?? halfModel),
     }));
-  const dir = opts.lightAzimuth === undefined && opts.lightElevation === undefined ? DEFAULT_LIGHT_DIRECTION : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55);
+  const dir = opts.lightAzimuth === undefined && opts.lightElevation === undefined ? defaultKey(opts.azimuth ?? 35, opts.elevation ?? 25) : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55);
   return [{ dir, size: Math.max(0, opts.lightSize ?? 1), color: [1, 1, 1], power: 1, range: 2 }];
 }
 
@@ -108,6 +112,14 @@ const slotCount = (opts: BeautyOptions): number => (opts.splitLights ? lightCoun
  * the old renderer drew them; at 5 no better.
  */
 export const CAVITY_POWER = 3;
+/**
+ * The power the field's occlusion is taken to on the model's own surfaces, for the sky's light and its reflection. The
+ * occlusion (five taps along the normal, never under 0.3) was tuned by eye in the old renderer, which multiplied display
+ * colours by it; in linear light the same factor darkens a groove only by its 2.2th root on the screen, and the rope's
+ * grooves read flat (their 25th percentile 32 levels against the old 19). At 1.5 they are 18; at 2 they were 11, black
+ * between the strands. The floor keeps its own occlusion and contact term, tuned against the old renderer's floor.
+ */
+export const AO_POWER = 1.5;
 /** Roughness below which a surface is a mirror: one traced ray, and the lights' softboxes in place of their highlights. */
 export const MIRROR_ROUGH = 0.12;
 /** Roughness below which a glossy metal takes several traced GGX rays, and above which only the prefiltered sky. */
@@ -222,16 +234,15 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const f = size / 2 / Math.tan(((cam.fov ?? 30) * Math.PI) / 360);
   const ex = cam.eye[0], ey = cam.eye[1], ez = cam.eye[2];
   // Where the bottom of the frame meets the floor on the camera's side: the studio's flag starts past it, out of shot,
-  // so a metal facing the camera has a dark floor to reflect.
+  // so a metal facing the camera has a dark floor to reflect. A camera looking steeply down sees the floor past its own
+  // place (the frame's bottom edge reaches beyond it), and a flag started at the camera darkened the bottom half of a
+  // plan view's floor.
   let flagFrom: number;
   {
     const y = -(size - size / 2) / f;
     const dx = cam.up[0] * y + cam.forward[0], dy = cam.up[1] * y + cam.forward[1], dz = cam.up[2] * y + cam.forward[2];
-    const camSide = (ex - centre[0]) * SKY.fx + (ez - centre[2]) * SKY.fz;
-    if (dy < -1e-6) {
-      const t = (floorY - ey) / dy;
-      flagFrom = Math.min(camSide, (ex + dx * t - centre[0]) * SKY.fx + (ez + dz * t - centre[2]) * SKY.fz);
-    } else flagFrom = camSide;
+    const t = dy < -1e-6 ? (floorY - ey) / dy : -1;
+    flagFrom = t > 0 ? (ex + dx * t - centre[0]) * SKY.fx + (ez + dz * t - centre[2]) * SKY.fz : (ex - centre[0]) * SKY.fx + (ez - centre[2]) * SKY.fz;
     flagFrom += modelSize * 0.03;
   }
 
@@ -401,7 +412,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       nv = 1e-3;
     }
     occlusion(px, py, pz, nx, ny, nz);
-    const ao = AOK[0], cav = AOK[1];
+    const ao = Math.pow(AOK[0], AO_POWER), cav = AOK[1];
     const cdr = br * (1 - metal), cdg = bg * (1 - metal), cdb = bb * (1 - metal);
     const f0r = 0.04 + (br - 0.04) * metal, f0g = 0.04 + (bg - 0.04) * metal, f0b = 0.04 + (bb - 0.04) * metal;
     const alpha = rough * rough, a2 = alpha * alpha;
@@ -595,13 +606,15 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     }
     // The flag: the floor on the camera's side, beyond the bottom of the frame, is dark, as the sky's ground there is.
     let fl = 1;
-    if (SKY.flag > 0) {
+    // The flag a mirror sees (the reflections' rig): this floor is out of shot, seen only in reflections.
+    const FL = SKY.reflect;
+    if (FL.flag > 0) {
       const cx = fx - centre[0], cz = fz - centre[2];
       const sd = cx * SKY.fx + cz * SKY.fz;
       if (sd > flagFrom) {
-        let k = SKY.flag * smoothstep(flagFrom, flagFrom + modelSize * 0.35, sd);
+        let k = FL.flag * smoothstep(flagFrom, flagFrom + modelSize * 0.35, sd);
         // Lifted on the key's side, as the sky's flag is.
-        if (SKY.flagKey > 0) { const cl = Math.sqrt(cx * cx + cz * cz) || 1; k *= 1 - SKY.flagKey * smoothstep(0, SKY.flagKeyTo, -(cx * SKY.sx + cz * SKY.sz) / cl); }
+        if (FL.flagKey > 0) { const cl = Math.sqrt(cx * cx + cz * cz) || 1; k *= 1 - FL.flagKey * smoothstep(0, FL.flagKeyTo, -(cx * SKY.sx + cz * SKY.sz) / cl); }
         fl = 1 - k;
       }
     }
