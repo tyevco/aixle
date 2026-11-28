@@ -14,7 +14,7 @@ import { surfaceNets } from "../mesh/surfaceNets.js";
 import { meshBounds, triangleCount, type Mesh } from "../mesh/mesh.js";
 import { orthographic, perspective, project, toView, type Camera, type OrthoView } from "./camera.js";
 import { Canvas, mixColor, rgbf, type Color } from "./canvas.js";
-import { drawText, textWidth } from "./font.js";
+import { drawText, GLYPH_WIDTH, textWidth } from "./font.js";
 import { createTarget, renderGhost, renderLine, renderMesh, type RenderTarget } from "./raster.js";
 
 export const INK = {
@@ -59,9 +59,10 @@ export function fmtCell(v: number): string {
 /** A size or a grid step: as fmt prints it, and under 0.005 to two significant figures rather than 0 (a 4 mm part in metres read 0 × 0 × 0, its grid 0). */
 const fmtSize = (v: number): string => (v !== 0 && Math.abs(v) < 0.005 ? String(Number(v.toPrecision(2))) : fmt(v));
 
-export function dimsLabel(b: Bounds): string {
+/** A box's size as `w × h × d`; `sep` is what goes between the three (the steps sheet's narrow cells use "×"). */
+export function dimsLabel(b: Bounds, sep = " × "): string {
   const s = boundsSize(b);
-  return `${fmtSize(s[0])} × ${fmtSize(s[1])} × ${fmtSize(s[2])}`;
+  return `${fmtSize(s[0])}${sep}${fmtSize(s[1])}${sep}${fmtSize(s[2])}`;
 }
 
 /**
@@ -340,14 +341,45 @@ export function meshSteps(steps: StepView[], cellSize = 0, maxResolution = 96, o
   });
 }
 
-/** One perspective thumbnail per step, five per row, labelled with the name and size. */
-export function renderSteps(steps: StepView[], thumb: number, resolution = 48): Canvas {
+/** What a step is, for the line under its size on the steps sheet: nothing for a part the output uses. */
+function stepTag(st: StepView): string {
+  return st.role === "cut" ? "cut" : st.role === "mask" ? "mask" : st.role === "region" ? "region" : st.used ? "" : "unused";
+}
+
+/**
+ * The steps sheet's captions and the cell they fit: per step its number and name (cut short with "…" when long), its
+ * size, and its tag (cut, mask, region, unused) on a line of its own. The tag used to follow the size on one line, and
+ * a cut's three two-decimal sizes and the tag ran past a 134 px cell into the next caption (the teapot's bore read
+ * "CUT2.26"; a region's ran 33 px over): 94 lines over in 27 of the 82 rendered programs. A size is never cut short:
+ * where one does not fit the thumbnail, the sheet drops the spaces round its "×", and where it still does not, the
+ * cells widen to the widest size, so a sheet asked for at a small --size gets thumbnails the captions can sit under.
+ */
+export function stepCaptions(steps: StepView[], thumb: number): { cell: number; lines: string[][] } {
+  const size = (st: StepView, sep: string) => (isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds, sep));
+  const sep = steps.every((st) => textWidth(size(st, " × ")) <= thumb) ? " × " : "×";
+  const cell = Math.max(thumb, ...steps.map((st) => Math.max(textWidth(size(st, sep)), textWidth(stepTag(st)))));
+  const fit = Math.floor((cell + 1) / (GLYPH_WIDTH + 1));
+  const lines = steps.map((st, i) => {
+    const name = [...`${i + 1}. ${st.name}`];
+    const tag = stepTag(st);
+    return [name.length > fit ? name.slice(0, fit - 1).join("") + "…" : name.join(""), size(st, sep), ...(tag ? [tag] : [])];
+  });
+  return { cell, lines };
+}
+
+/** One perspective thumbnail per step, five per row, labelled with the name, the size and what the step is. */
+export function renderSteps(steps: StepView[], thumbAsked: number, resolution = 48): Canvas {
+  const { cell: thumb, lines } = stepCaptions(steps, thumbAsked);
   const cols = Math.min(5, Math.max(1, steps.length));
   const rows = Math.max(1, Math.ceil(steps.length / cols));
-  const labelH = 24, gutter = 6, bar = 30;
+  // A third caption line on a sheet with a tagged step, so the tag is always under the size and never beside it.
+  const labelH = steps.some((st) => stepTag(st) !== "") ? 34 : 24, gutter = 6, bar = 30;
   const out = new Canvas(cols * (thumb + gutter) + gutter, bar + rows * (thumb + labelH + gutter) + gutter, INK.page);
   out.fill(0, 0, out.width, bar, INK.bar);
-  drawText(out, 10, 8, `BUILD STEPS   ${steps.length} named shape${steps.length === 1 ? "" : "s"} in program order`, INK.barText, 2);
+  // The title as long as the sheet is wide: a sheet of three steps cut "in program order" off at "PROGRA".
+  const count = `${steps.length} named shape${steps.length === 1 ? "" : "s"}`;
+  const titles = [`BUILD STEPS   ${count} in program order`, `BUILD STEPS   ${count}`, "BUILD STEPS"];
+  drawText(out, 10, 8, titles.find((t) => 10 + textWidth(t, 2) <= out.width - 6) ?? titles[2], INK.barText, 2);
   steps.forEach((st, i) => {
     const x = gutter + (i % cols) * (thumb + gutter);
     const y = bar + gutter + Math.floor(i / cols) * (thumb + labelH + gutter);
@@ -364,7 +396,8 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
       canvas = renderView(mesh, { name: st.name, bounds: st.shape.bounds }, "persp", thumb, { label: false, solidGlass: allGlass });
       if (triangleCount(mesh) === 0) {
         // Coarse means the thumbnail's grid, not the model, lost it: say so in grey, not in the warning colour.
-        if (st.coarse) drawText(canvas, 8, thumb / 2 - 4, "TOO FINE FOR THIS THUMBNAIL", INK.dim, 1);
+        // Its two lines, as the 27 characters on one ran past a 134 px thumbnail and were cut at its edge.
+        if (st.coarse) ["TOO FINE FOR", "THIS THUMBNAIL"].forEach((t, k) => drawText(canvas, 8, thumb / 2 - 9 + k * 10, t, INK.dim, 1));
         else drawText(canvas, 8, thumb / 2 - 4, "NO SURFACE", INK.warn, 1);
       }
     }
@@ -374,10 +407,10 @@ export function renderSteps(steps: StepView[], thumb: number, resolution = 48): 
     if (!st.used && !region) canvas.rect(0, 0, thumb, thumb, INK.warn);
     if (region) canvas.rect(0, 0, thumb, thumb, INK.dim);
     out.blit(canvas, x, y);
-    const name = `${i + 1}. ${st.name}`;
-    drawText(out, x, y + thumb + 3, name.length > thumb / 6 ? name.slice(0, Math.floor(thumb / 6) - 1) + "…" : name, st.used || region ? INK.text : INK.warn, 1);
-    const tag = st.role === "cut" ? "  cut" : st.role === "mask" ? "  mask" : region ? "  region" : st.used ? "" : "  unused";
-    drawText(out, x, y + thumb + 13, isEmpty(st.shape.bounds) ? "empty" : dimsLabel(st.shape.bounds) + tag, INK.dim, 1);
+    const [name, size, tag] = lines[i];
+    drawText(out, x, y + thumb + 3, name, st.used || region ? INK.text : INK.warn, 1);
+    drawText(out, x, y + thumb + 13, size, INK.dim, 1);
+    if (tag) drawText(out, x, y + thumb + 23, tag, st.used || region ? INK.dim : INK.warn, 1);
   });
   return out;
 }

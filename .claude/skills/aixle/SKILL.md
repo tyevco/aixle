@@ -174,7 +174,8 @@ Reference: `docs/reference.md` (every function, generated from the code;
   perspective view's red, green, blue lines are +x, +y, +z.
 - A red frame in `steps.png` is a shape that never reached the output;
   "too fine for this thumbnail" is a tiny part the thumbnail's grid could
-  not draw, nothing wrong with the model.
+  not draw, nothing wrong with the model. Under each thumbnail: number and
+  name, size, then `cut`, `mask`, `region` or `unused` on a third line.
 - Slices are the truth about interiors: filled means solid.
 - `lights.png` (two or more lights) is one half-size draft render of
   the shot `beauty.png` shows, each light's light kept apart: the top
