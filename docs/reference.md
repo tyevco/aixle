@@ -142,7 +142,7 @@ Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation)
 - `size`: cap height
 - `weight`: stroke width
 - `spacing`: extra gap between letters
-- `arc`: bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom
+- `arc`: bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom, both upright and left to right
 - `face`: "sans" or "serif" (slab serifs on the same letters, set a little wider)
 
 ## 2D to 3D

@@ -231,13 +231,17 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
   }
   if (seg.length === 0) return shape2(() => 1e6, EMPTY_BOUNDS2, 0);
   if (arc !== 0) {
-    // Bend: x along the baseline becomes an angle, y a radius; split each stroke into short pieces first.
+    // Bend: x along the baseline becomes an angle, y a radius; split each stroke into short pieces first. The angle
+    // runs clockwise from the top whatever the side, so x runs rightwards on both: at the top a letter's up is outward
+    // (rr = r + y), at the bottom inward (r - y), and either way it is upright and reads left to right. (The angle
+    // once took the sign as well, which on the bottom put the first letter on the right and mirrored every glyph:
+    // the medal's FOR MACHINES read in a mirror, and a blind reader of its renders said so.)
     const total = cursor - gap * scale - spacing;
     const r = Math.abs(arc), sign = Math.sign(arc);
     const bent: number[] = [];
     bounds = EMPTY_BOUNDS2;
     const map = (x: number, y: number): [number, number] => {
-      const a = ((x - total / 2) / r) * sign;
+      const a = (x - total / 2) / r;
       const rr = r + y * sign;
       return [rr * Math.sin(a), rr * Math.cos(a) * sign];
     };

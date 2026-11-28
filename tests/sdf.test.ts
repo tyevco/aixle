@@ -622,6 +622,28 @@ describe("partial revolve, spline, lowercase, arc text", () => {
     const under = textProfile("ABC", 1, 0.2, 0, -4);
     expect(under.bounds.min[1]).toBeLessThan(-4);
   });
+  it("arc text reads left to right with its letters upright, at the top and at the bottom", () => {
+    // The ink's mean angle along the baseline, left of centre negative, in two bands of radius: next to the
+    // baseline's circle, and far from it towards the cap height. Only an L's stem reaches the cap height, and in "I."
+    // only the I does, so in both the far band's ink sits left of the near band's when the glyph is upright and the
+    // text runs left to right. On the bottom arc the letters stand inward, so there the far band is the smaller
+    // radius. (An angle, not x: on the bottom the far band's smaller circle draws x in towards the centre.)
+    const r = 2;
+    const meanAngle = (p: ReturnType<typeof textProfile>, near: boolean, arc: number): number => {
+      let sum = 0, n = 0;
+      for (let x = -1.5; x <= 1.5; x += 0.01) for (let y = -3.2; y <= 3.2; y += 0.01) {
+        if (p.dist(x, y) >= 0) continue;
+        const out = (Math.hypot(x, y) - r) * Math.sign(arc); // height above the baseline, along the letter's up
+        if (near ? Math.abs(out) < 0.1 : out > 0.6) { sum += Math.atan2(x, y * Math.sign(arc)); n++; }
+      }
+      expect(n).toBeGreaterThan(10);
+      return sum / n;
+    };
+    for (const arc of [r, -r]) for (const text of ["L", "I."]) {
+      const p = textProfile(text, 1, 0.12, 0, arc);
+      expect(meanAngle(p, false, arc), `${text} on arc ${arc}`).toBeLessThan(meanAngle(p, true, arc) - 0.02);
+    }
+  });
   it("arc text knows the radii its ink spans, which check prints (round 10: an engraving broke out over a rim)", () => {
     // The hub's label: size 0.1 and weight 0.03 on an arc of 0.27 spans 0.255 to 0.385 from the origin.
     const label = textProfile("HB-7", 0.1, 0.03, 0, 0.27);
