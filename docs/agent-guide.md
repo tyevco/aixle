@@ -158,10 +158,11 @@ mesh; `--no-cache` samples afresh.
   230 of 255), so a small point light's reach and colour fill the
   frame; a flame a light falls on shows that light on the flame's own
   colour. The last frame is the shot under no light at all: the sky's
-  light, the glows and the sky in the metals. A silhouette against a
-  glow can be a few tens of levels brighter there than in `beauty.png`
-  (a frame means an edge pixel's samples before the tone curve, the
-  render after it), so judge edges in `beauty.png`.
+  light, the glows and the sky in the metals. In every frame but "all",
+  which is `beauty.png`'s own picture, a silhouette against a glow can
+  be a few tens of levels brighter than in `beauty.png` (such a frame
+  means an edge pixel's samples before the tone curve, the render after
+  it), so judge edges in `beauty.png`.
 - The shot `set camera` names is `beauty.png`, captioned with the
   camera's name, and is not written again as `beauty_<name>.png`.
 - A render into a folder removes what the last render wrote there and
@@ -279,30 +280,33 @@ round.
 `viewer.html` (three.js 0.187.0) shows the GLB two ways, both on
 `beauty.png`'s tone curve. **Studio** is its own grey room, a
 hemisphere light and a white key, calibrated so that a white face
-turned to the key is about 1.0 in linear light and the non-metal
-presets show their base colours (within 1.6 levels on average): judge
-the maps there, wear, bumps and the atlas. **Scene** is `beauty.png`
-drawn from the export, and it opens there when the program declares a
-light or a sky: the same sky as light and in the metals (the studio's
-cards and dark room, the sunset's glow) at the same strength, diffuse
-light taken from the sky as the render takes it, the GLB's lights with
-`beauty.png`'s point-light falloff rather than an engine's, glows at the
-render's strength, the floor at the render's colour near the model and
-fading into the horizon, and the named cameras and `◎ beauty.png` as
-buttons that frame each shot as its picture is framed. Measured, its
-non-metal parts come within 1 to 2.3 levels of `beauty.png` on average
-(the door, the medal). What it cannot show: ambient occlusion and the
-darkening where parts meet, which the GLB has no map for (the
-lantern's candle inside its cage is 17 to 29 levels brighter than in
-`beauty.png`, and the medal's lettering barely reads); soft shadows
-(its shadow maps are hard, so a torch's bracket throws a large dark
-shadow); the model reflected in itself (metals read 15 to 50 levels
-brighter); bloom; glass, which the GLB leaves out; and the sun's or
-moon's disc and the stars in the backdrop. A steep shot's default key, turned to the frame's top left, is
-`beauty.png`'s alone: the viewer's camera turns, so its key stays the
-world's. So judge form, lettering, metals, glass and shadows in
-`beauty.png`; judge the maps in Studio, and in Scene, beside
-`beauty.png`, what an engine will make of the GLB's colours and lights.
+turned to the key is about 1.1 in linear light, its Fresnel included,
+and the non-metal presets show their base colours (within 1.6 levels on
+average over a plate of them, 4.1 tile by tile): judge the maps there,
+wear, bumps and the atlas. **Scene** is `beauty.png` drawn from the
+export, and it opens there when the program declares a light or a sky:
+the same sky as light and in the metals (the studio's cards and dark
+room, the sunset's glow) at the same strength, diffuse light taken from
+the sky as the render takes it, the GLB's lights with `beauty.png`'s
+point-light falloff rather than an engine's, glows at the render's
+strength, the floor at the render's colour near the model and fading
+into the horizon, and the named cameras and `◎ beauty.png` as buttons
+that frame each shot as its picture is framed. Measured on non-metal
+parts, the door comes within 1.0 level of `beauty.png` on average, the
+medal 2.3 and the ring under its sunset 4.2; the lantern is 7.7
+brighter, all of it in its candle. What it cannot show: ambient
+occlusion and the darkening where parts meet, which the GLB has no map
+for (the lantern's candle inside its cage is 17 to 29 levels brighter
+than in `beauty.png`, and the medal's lettering barely reads); soft
+shadows (its shadow maps are hard, so a torch's bracket throws a large
+dark shadow); the model reflected in itself (metals read 15 to 50
+levels brighter); bloom; glass, which the GLB carries as opaque; and
+the sun's or moon's disc and the stars in the backdrop. A steep shot's
+default key, turned to the frame's top left, is `beauty.png`'s alone:
+the viewer's camera turns, so its key stays the world's. So judge form,
+lettering, metals, glass and shadows in `beauty.png`; judge the maps in
+Studio, and in Scene, beside `beauty.png`, what an engine will make of
+the GLB's colours and lights.
 
 Past 200 thousand triangles the GLB, OBJ and viewer are
 decimated, the cap shared by error over every mesh so flat faces go

@@ -150,8 +150,9 @@ Reference: `docs/reference.md` (every function, generated from the code;
    Its Scene mode, which it opens in when the program declares lights
    or a sky, is `beauty.png` drawn from the export: the same sky, lights,
    point-light falloff and glow strength, the cameras and `◎ beauty.png`
-   as buttons, non-metals within about 2 levels on average; it cannot
-   show occlusion (a candle in a cage reads 17 to 29 levels brighter,
+   as buttons, non-metals within 1 to 4 levels on average where
+   nothing occludes them; it cannot show occlusion (a candle in a
+   cage reads 17 to 29 levels brighter,
    lettering on a medal barely reads), soft shadows, the model reflected
    in itself (metals read brighter), bloom, glass, or the sun's disc and
    the stars, and a steep shot's turned key is `beauty.png`'s alone. Its
