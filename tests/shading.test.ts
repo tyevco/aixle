@@ -398,6 +398,20 @@ describe("shading: the default key in a steep shot", () => {
     }
   });
 
+  it("turns smoothly with the camera's azimuth too: two cameras a twentieth of a degree apart never get keys a degree apart", () => {
+    // Turned by azimuth the shortest way round, a camera at azimuth −85.2 and one at −85.3, both at elevation 65, had
+    // keys 87° apart: the target lay straight across from the default key, and the two went round opposite ways.
+    const ang = (a: readonly number[], b: readonly number[]): number => (Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) * 180) / Math.PI;
+    for (let el = STEEP[0] + 1; el < STEEP[1]; el += 2) {
+      let worst = 0, at = 0;
+      for (let az = -180; az < 180; az += 0.05) {
+        const t = ang(defaultKey(az, el), defaultKey(az + 0.05, el));
+        if (t > worst) { worst = t; at = az; }
+      }
+      expect(worst, `at elevation ${el}, azimuth ${at.toFixed(2)}`).toBeLessThan(1);
+    }
+  });
+
   it("is taken only when the program places no light and sets no light direction", () => {
     const model = { min: [-1, 0, -1] as [number, number, number], max: [1, 2, 1] as [number, number, number] };
     const plan = { size: 64, cellSize: 0.05, azimuth: 0, elevation: 90 };
@@ -431,5 +445,27 @@ describe("shading: the default key in a steep shot", () => {
     const corners = { topLeft: corner(-1, 1), topRight: corner(1, 1), bottomLeft: corner(-1, -1), bottomRight: corner(1, -1) };
     // The shadow is past the bottom right corner; the floor past the top left one, towards the light, is lit.
     expect(corners.bottomRight, JSON.stringify(corners)).toBeLessThan(Math.min(corners.topLeft, corners.topRight, corners.bottomLeft) * 0.8);
+  });
+
+  it("starts the studio's floor flag past the frame's bottom edge when the camera looks steeply down, out of shot", () => {
+    // A camera past 75° sees the floor beyond its own place at the frame's bottom; a flag started at the camera
+    // darkened that half of a plan view's floor to a quarter (210 levels to 48).
+    const block = O.paint(O.move(P.box(1, 0.6, 1), 0, 0.3, 0), customMaterial({ color: [0.8, 0.8, 0.8], rough: 0.7 }));
+    const nets = surfaceNets(block, { resolution: 32 });
+    for (const [azimuth, elevation] of [[0, 90], [35, 90], [0, 80], [-120, 85]]) {
+      const o = { size: 96, cellSize: nets.cellSize, azimuth, elevation, zoom: 0.5 };
+      const c = renderBeauty(block, nets.mesh, block.bounds, o);
+      const cam = beautyCamera(nets.mesh, block.bounds, o);
+      // The open floor near the frame's top and bottom edges, on its left, clear of the block and its shadow.
+      const edge = (sy: number): number => {
+        const p: [number, number, number] = [1.1 * sy * cam.up[0] - 0.9 * cam.right[0], 0, 1.1 * sy * cam.up[2] - 0.9 * cam.right[2]];
+        const q = project(cam, toView(cam, p))!;
+        expect(q.x > 0 && q.x < 95 && q.y > 0 && q.y < 95, `in frame at ${azimuth}, ${elevation}`).toBe(true);
+        const v = c.get(Math.round(q.x), Math.round(q.y));
+        return 0.2126 * ((v >> 16) & 255) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255);
+      };
+      const top = edge(1), bottom = edge(-1);
+      expect(Math.abs(bottom - top), `top ${top}, bottom ${bottom} at ${azimuth}, ${elevation}`).toBeLessThan(top * 0.05);
+    }
   });
 });

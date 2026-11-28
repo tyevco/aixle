@@ -1762,7 +1762,8 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
     // The program's scene for the viewer's Scene mode: its sky and ambient as the beauty render takes them, its default
     // key when it declares no light, and its named cameras framed as their beauty shots are.
     // With no light declared, the beauty render's one key, placed by `set light_azimuth` and `set light_elevation` when
-    // the program sets either, as renderBeauty places it.
+    // the program sets either, as renderBeauty places it. Unset, it is the world's default key: a steep beauty shot turns
+    // its key to the frame's top left (environment.ts, defaultKey), but the viewer's camera turns, so its key stays put.
     const keyDirection = (): Vec3 => {
       const az = typeof evaluation.settings.light_azimuth === "number" ? evaluation.settings.light_azimuth : undefined;
       const el = typeof evaluation.settings.light_elevation === "number" ? evaluation.settings.light_elevation : undefined;

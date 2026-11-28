@@ -1061,11 +1061,14 @@ What the lights and the skies can and cannot do, measured in round 9:
   band at the horizon under a blue sky, but only a camera near the
   horizon (`elevation` under about 10) sees the band; from above, the
   backdrop is the warm ground, and a brown model disappears into it.
-  `overcast` and `studio` are neutral skies, so `chrome` and `silver`
-  reflect a white sky and blow out to white under them: give a mirror
-  metal a `sunset` or a `night`, or use `steel`, `iron` or `brass`.
-  Gold is flat yellow under the neutral skies, deep and warm under
-  `sunset`, olive under `night`. A coloured stone (`transmit` about
+  `overcast` is a white sky, so `chrome` and `silver` reflect it and
+  blow out to white there: give a mirror metal the `studio`, whose room
+  round the camera is dark in a reflection, a `sunset` or a `night`, or
+  use `steel`, `iron` or `brass`. Gold is deep yellow under `studio` and
+  `overcast`, orange under `sunset` and amber under `night`; brass is
+  the greener yellow beside it, bronze and copper the browner and the
+  pinker orange, and `iron` is dark, blackened iron (`steel` is the
+  grey of bare iron). A coloured stone (`transmit` about
   0.5) shows what is behind it, so in a closed setting it reads dark;
   open the setting or keep transmit down. `--environment all` writes
   `environments.png`, the same shot under every sky, for one render;
@@ -1147,7 +1150,15 @@ What the lights and the skies can and cannot do, measured in round 9:
 `set light_size 2.5` widens the key light in the beauty render (softer
 shadows; 0.5 is a lamp); `set light_azimuth -40` and `set light_elevation
 55` place it (azimuth about y, 0 from the front, 90 from +x; these are
-the defaults, upper left, fixed in the world, not the camera); `set
+the defaults, upper left, fixed in the world, not the camera, but for a
+camera looking steeply down: from an elevation of 55 to 75 the default
+key turns, with the elevation, to the frame's top left, because people
+read a picture as lit from above, and a plan view lit from its bottom
+draws a blind pocket as a dome. A program that sets either, or declares
+a `light()`, keeps its key where it put it, so a plan shot with its own
+lights puts the key at the camera's azimuth less 135:
+`light("key", azimuth=-135, elevation=55)` for
+`camera("plan", azimuth=0, elevation=90)`); `set
 ambient 2` lifts the sky and ground light for a shaded interior (0.5 is a
 dark room); `set dof 1` adds depth of field there, blurring away from the
 model's centre; the camera fits the model's box corners with a small

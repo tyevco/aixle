@@ -358,6 +358,28 @@ describe("environments: the studio's structure", () => {
     expect(look(t, dirOf(camAz + 90 - side, -40), DIFFUSE)[1]).toBeCloseTo(awayFromKey, 9);
   });
 
+  it("gives what a surface mirrors its own rig, darker round the camera than the light a surface takes, and each mode reads only its own", () => {
+    const camAz = 35;
+    const s: SkyTables = { ...buildSky("studio", camAz, DEFAULT_LIGHT_DIRECTION), cards: new Float64Array(0) };
+    const noLight: SkyTables = { ...s, walls: 0, zenith: 1, flag: 0 };
+    const noReflect: SkyTables = { ...s, reflect: { ...s.reflect, walls: 0, zenith: 1, flag: 0 } };
+    // The walls a little away from the camera's side, the ceiling and the floor there: where the two rigs differ.
+    for (const d of [dirOf(camAz + 100, 10), dirOf(camAz + 180, 80), dirOf(camAz + 100, -20)]) {
+      expect(look(noLight, d, FILTERED), `FILTERED reads the light's rig at ${d}`).toEqual(look(s, d, FILTERED));
+      expect(look(noLight, d, REFLECT), `REFLECT reads the light's rig at ${d}`).toEqual(look(s, d, REFLECT));
+      expect(look(noReflect, d, DIFFUSE), `DIFFUSE reads the reflections' rig at ${d}`).toEqual(look(s, d, DIFFUSE));
+      expect(look(noReflect, d, FILTERED)[1], `FILTERED ignores its rig at ${d}`).toBeGreaterThan(look(s, d, FILTERED)[1] * 1.5);
+      expect(look(noReflect, d, REFLECT)[1], `REFLECT ignores its rig at ${d}`).toBeGreaterThan(look(s, d, REFLECT)[1] * 1.5);
+      expect(look(noLight, d, DIFFUSE)[1], `DIFFUSE ignores its rig at ${d}`).toBeGreaterThan(look(s, d, DIFFUSE)[1] * 1.5);
+      // A metal there mirrors less than a surface takes: the room round the camera is flagged harder in reflections.
+      expect(look(s, d, FILTERED)[1], `reflections darker at ${d}`).toBeLessThan(look(s, d, DIFFUSE)[1] * 0.7);
+    }
+    // The backdrop the camera sees behind the model is neither rig's.
+    const behind = dirOf(camAz + 180, 15);
+    expect(look(noReflect, behind, BACKDROP)).toEqual(look(s, behind, BACKDROP));
+    expect(look(noLight, behind, BACKDROP)).toEqual(look(s, behind, BACKDROP));
+  });
+
   it("rigs its cards as a photographer would, from the camera: the fill on its right and low, the rim strip behind on its left", () => {
     for (const camAz of [35, -120]) {
       const s = buildSky("studio", camAz, DEFAULT_LIGHT_DIRECTION);

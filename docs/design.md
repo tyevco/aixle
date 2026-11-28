@@ -1483,6 +1483,24 @@ The key light can be placed (`set light_azimuth`, `set light_elevation`),
 the ambient light scaled, and a material can glow, which is added
 unshadowed so a flame inside a lantern is a flame.
 
+The default key is fixed in the world, upper left from the front, for
+every shot but one kind: a camera looking steeply down. People read a
+picture as lit from above, and in a plan view the front-left key lights
+the frame from its bottom, which draws a blind pocket as a dome (round
+10's hub: its plan shot's pockets read as bumps). So from a camera elevation
+of 55 to 75 the default key turns, smoothly with the elevation, to the
+frame's top left (environment.ts, `defaultKey`). A program that places
+its own lights keeps them: the rule only chooses for a program that did
+not. The viewer page keeps the world's key, since its camera turns.
+
+A metal reflects the room round and behind the camera more than the
+light it takes from it, and the studio flags the two apart: the light a
+surface takes sees walls and a ceiling a white mug's shaded side still
+needs, and what a metal mirrors sees them nearly black, with only the
+sweep behind the model and the cards bright. In one room, light enough
+for the mug, rough iron facing up returned 0.8 of the sky and every
+metal read white, cream or ceramic.
+
 ## The serif face
 
 Serifs are added by rule, not drawn: a slab across every free end of a

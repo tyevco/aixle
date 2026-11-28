@@ -93,17 +93,23 @@ export const STEEP: readonly [number, number] = [55, 75];
  * The key a shot takes when its program places no light and sets no light direction. People read a picture as lit
  * from above, and a camera looking steeply down has the far side of the floor at its frame's top: there the default
  * key, from the front, lit the frame from its bottom, and a plan view's blind pockets read as domes (the hub, round
- * 10). So from STEEP[0] up its azimuth turns, smoothly with the elevation, to 135° round from the camera's own, the
- * frame's top left in a plan view, at the default key's elevation. Every shot below STEEP[0] keeps the default key.
+ * 10). So from STEEP[0] up it turns, smoothly with the elevation, to 135° round from the camera's own azimuth, the
+ * frame's top left in a plan view, at the default key's elevation, reached at STEEP[1]. Every shot below STEEP[0]
+ * keeps the default key.
+ *
+ * Between the two the key is the blend of the two directions, not of their azimuths: turned by azimuth the shortest way
+ * round, two cameras a twentieth of a degree apart either side of the one whose target lay straight across from the
+ * default key (azimuth −85) went round opposite ways, and their keys were 87° apart. The blend passes over the top
+ * there instead, and turns with either of the camera's angles by less than either does.
  */
 export function defaultKey(cameraAzimuth: number, cameraElevation: number): Vec3 {
   const t = smooth(STEEP[0], STEEP[1], cameraElevation);
   if (t <= 0) return DEFAULT_LIGHT_DIRECTION;
   const d = DEFAULT_LIGHT_DIRECTION;
-  const az = (Math.atan2(d[0], d[2]) * 180) / Math.PI, el = (Math.asin(d[1]) * 180) / Math.PI;
-  // The shortest way round from the default key's azimuth to the frame's top left.
-  const turn = ((((cameraAzimuth - 135 - az) % 360) + 540) % 360) - 180;
-  return lightDirection(az + turn * t, el);
+  const el = (Math.asin(d[1]) * 180) / Math.PI;
+  const top = lightDirection(cameraAzimuth - 135, el);
+  if (t >= 1) return top;
+  return normalize([d[0] + (top[0] - d[0]) * t, d[1] + (top[1] - d[1]) * t, d[2] + (top[2] - d[2]) * t]);
 }
 
 /** A light's direction from its azimuth about y (0 is +z, 90 is +x) and elevation, in degrees. */
@@ -125,7 +131,11 @@ export interface EnvironmentLight {
   position?: Vec3;
 }
 
-/** The key: the program's first directional light, or the default key. The sun and the moon stand where it comes from, so every shot and every frame of a run shares one sky. */
+/**
+ * The key: the program's first directional light, or the default key. The sun and the moon stand where it comes from,
+ * so every shot and every frame of a run shares one sky; but for a steep shot of a program with no light, whose key
+ * (defaultKey) turns to the frame's top left, and its sun or moon with it.
+ */
 export function keyDirection(lights?: readonly { dir: Vec3; position?: Vec3 }[]): Vec3 {
   const l = lights?.find((l) => !l.position);
   return l ? l.dir : DEFAULT_LIGHT_DIRECTION;
