@@ -78,9 +78,10 @@ export interface ViewerScene {
  * The studio's lights, in three.js's units: the room environment's intensity, the hemisphere light's and the key's
  * (lux). Calibrated together in headless Chromium on a plate of the presets with every tile turned square to the key:
  * a white face turned to the key comes to 1.1 in linear light, its Fresnel included, a white face turned from it to
- * 0.37 and one facing up to 0.94; the 26 solid non-metal presets show their base colours to 0.8 levels on average
- * (4.1 levels a channel, the darkest channels lowest, since a key brings no Fresnel lift from all round as the
- * furnace Neutral is built for does). The room alone carries the reflections, so it is the larger share of the fill.
+ * 0.37 and one facing up to 0.94; the 26 solid non-metal presets show their base colours to within 1.6 levels on
+ * average in every channel (4.1 levels tile by tile, the darkest channels lowest, since a key brings no Fresnel lift
+ * from all round as the furnace Neutral is built for does). The room alone carries the reflections, so it is the
+ * larger share of the fill.
  */
 export const STUDIO = { room: 0.4, hemi: 0.1, key: 1.2 };
 
