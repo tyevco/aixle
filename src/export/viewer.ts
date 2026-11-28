@@ -241,7 +241,8 @@ grid.position.y = floorY + radius * 0.001; scene.add(grid);
 const axes = new THREE.AxesHelper(radius * 0.5); axes.position.y = floorY; scene.add(axes);
 // The program's scene, built when first asked for: its sky as the backdrop, and as the light the surfaces get from
 // all round at the beauty render's intensity; the floor; the beauty render's key when the GLB brings no light.
-let sceneBits = null, glbLights = [], glows = [], mode = "studio";
+// A glowing material and the GLB's own emissive strength, each once: the copies of a placed part share one material.
+let sceneBits = null, glbLights = [], glows = new Map(), mode = "studio";
 function skyColour(dy) {
   const mix = (a, b, u) => a.map((v, i) => v + (b[i] - v) * u);
   // Below the horizon the floor reaches the horizon's colour before the backdrop shows, as in beauty.png.
@@ -319,9 +320,11 @@ function setMode(m) {
   grid.visible = axes.visible = !inScene;
   if (sceneBits) { sceneBits.ground.visible = inScene; if (sceneBits.keyLight) sceneBits.keyLight.visible = inScene; }
   for (const l of glbLights) l.visible = inScene;
-  for (const [m, k] of glows) m.emissiveIntensity = inScene ? k * GLOW : k;
+  showGlows();
   for (const id of ["studio", "scene"]) el(id)?.classList.toggle("on", id === m);
 }
+// A glow shows at beauty.png's strength in the scene, GLOW times the GLB's, and at the GLB's own in the studio.
+function showGlows() { for (const [m, k] of glows) m.emissiveIntensity = mode === "scene" ? k * GLOW : k; }
 function frameOn(c) {
   camera.fov = c.fov; camera.updateProjectionMatrix();
   camera.position.set(...c.eye); camera.up.set(0, 1, 0);
@@ -343,7 +346,7 @@ new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
       for (const m of [].concat(o.material)) {
         if (!m.map) m.vertexColors = true;
         litAsBeauty(m);
-        if (m.emissive && (m.emissiveMap || m.emissive.r + m.emissive.g + m.emissive.b > 0)) { glows.push([m, m.emissiveIntensity]); if (mode === "scene") m.emissiveIntensity *= GLOW; }
+        if (!glows.has(m) && m.emissive && (m.emissiveMap || m.emissive.r + m.emissive.g + m.emissive.b > 0)) glows.set(m, m.emissiveIntensity);
       }
     }
     // The GLB's own lights light the scene mode only; the studio has its own.
@@ -355,6 +358,7 @@ new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
       o.visible = mode === "scene";
     }
   });
+  showGlows();
   scene.add(model);
   clips = gltf.animations || [];
   mixer = new THREE.AnimationMixer(model);

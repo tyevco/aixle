@@ -15,7 +15,7 @@ import { run } from "../src/pipeline.js";
 import * as pipelineFns from "../src/pipeline.js";
 import { check } from "../src/pipeline.js";
 import { halfBase64, STUDIO, THREE_VERSION, toHalf, viewerHtml, type ViewerScene } from "../src/export/viewer.js";
-import { encode, KEY, TONEMAP_GLSL, toLinear } from "../src/render/photometry.js";
+import { encode, GLOW, KEY, TONEMAP_GLSL, toLinear } from "../src/render/photometry.js";
 import { buildSky, DEFAULT_LIGHT_DIRECTION, environmentLatLong, environmentPalette, horizonRadiance, irradiance, lightDirection } from "../src/render/environment.js";
 import { decode } from "../src/render/photometry.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
@@ -645,6 +645,47 @@ function pageScript(html: string): string {
   return body;
 }
 
+/** three.js 0.187's own lines that the page rewrites, as its shader chunks have them. */
+const THREE_CHUNKS = {
+  tonemapping_pars_fragment: "vec3 NeutralToneMapping( vec3 color ) { return color; }\nvec3 CustomToneMapping( vec3 color ) { return color; }\n",
+  envmap_physical_pars_fragment: "#ifdef USE_ENVMAP\n\tvec3 getIBLIrradiance( const in vec3 normal ) {\n\t\treturn PI * textureLod( envMap, normal, 8.0 ).rgb * envMapIntensity;\n\t}\n#endif\n",
+  lights_pars_begin: "float getDistanceAttenuation( const in float lightDistance, const in float cutoffDistance, const in float decayExponent ) {\n\treturn 1.0 / max( pow( lightDistance, decayExponent ), 0.01 );\n}\n",
+};
+type Stub = Record<string, unknown> & ((...a: unknown[]) => unknown);
+/**
+ * The page's script run in Node against stand-ins: three.js is a stub that takes any call or construction and keeps
+ * what is assigned to it (its shader chunks are the lines above), the DOM has the page's elements, and GLTFLoader
+ * hands `model` back a moment later, as three.js does. Returns what the page puts on window.aixleViewer, the stub
+ * three.js and the page's console warnings.
+ */
+async function runPage(html: string, model: { traverse(f: (o: unknown) => void): void }) {
+  const stub = (seed: Record<PropertyKey, unknown> = {}): Stub => {
+    const store: Record<PropertyKey, unknown> = { ...seed };
+    return new Proxy(function () {}, {
+      get: (_, k) => (k in store ? store[k] : k === Symbol.toPrimitive ? () => 0 : typeof k === "symbol" || k === "then" ? undefined : (store[k] = stub())),
+      set: (_, k, v) => { store[k] = v; return true; },
+      apply: () => stub(),
+      construct: () => stub(),
+    }) as unknown as Stub;
+  };
+  const THREE = stub({ ShaderChunk: { ...THREE_CHUNKS } });
+  class GLTFLoader { parse(_b: unknown, _p: string, onLoad: (g: unknown) => void) { setTimeout(() => onLoad({ scene: model, animations: [] }), 0); } }
+  const modules: Record<string, unknown> = { three: THREE, "three/addons/loaders/GLTFLoader.js": { GLTFLoader }, "three/addons/controls/OrbitControls.js": { OrbitControls: THREE.OrbitControls }, "three/addons/environments/RoomEnvironment.js": { RoomEnvironment: THREE.RoomEnvironment } };
+  const element = () => ({ style: {}, dataset: {} as Record<string, string>, classList: { toggle() {}, remove() {} }, addEventListener() {}, appendChild() {}, textContent: "", value: "1", checked: true });
+  const elements = new Map([...html.matchAll(/ id="([^"]+)"/g)].map((m) => [m[1], element()]));
+  const body = element();
+  const document = { getElementById: (id: string) => elements.get(id) ?? null, querySelectorAll: () => [], createElement: () => ({ getContext: () => ({ fillRect() {} }) }), body };
+  const window: Record<string, unknown> = {};
+  const warnings: string[] = [];
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const script = pageScript(html).replace(/\bimport\(/g, "importModule(");
+  await new AsyncFunction("document", "window", "innerWidth", "innerHeight", "addEventListener", "console", "importModule", script)(
+    document, window, 800, 600, () => {}, { warn: (m: string) => warnings.push(m) }, async (name: string) => modules[name]);
+  await new Promise((r) => setTimeout(r, 5));
+  expect(body.dataset.ready).toBe("1");
+  return { viewer: window.aixleViewer as Record<string, any>, THREE, warnings };
+}
+
 describe("the viewer's scene", () => {
   it("keeps a camera named with markup inside its script", () => {
     // A camera's name is any string the program gives; "</script>" in it ended the page's script, and the viewer died.
@@ -690,6 +731,37 @@ describe("the viewer's scene", () => {
     expect(script).toContain(`const STUDIO = ${JSON.stringify(STUDIO)};`);
     // Glass stays out of the GLB and the page: transmission is its own change (roadmap 21).
     expect(html).not.toMatch(/transmission|KHR_materials_ior|KHR_materials_volume/);
+  });
+
+  it("lights the scene as beauty.png and the studio as its own, on the tone curve, when the page runs", async () => {
+    // A glow's material shared by three meshes (a placed bulb's copies share it in the GLB, and GLTFLoader shares it).
+    const bulb: Record<string, any> = { emissive: { r: 1, g: 0.6, b: 0.2 }, emissiveIntensity: 1, map: {} };
+    const plain: Record<string, any> = { emissive: { r: 0, g: 0, b: 0 }, emissiveIntensity: 1, map: {} };
+    const meshes = [bulb, bulb, bulb, plain].map((material) => ({ isMesh: true, material }));
+    const sc = sceneFor({ ambient: 0.52 });
+    const { viewer, THREE, warnings } = await runPage(viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], sc), { traverse: (f) => meshes.forEach(f) });
+    // three.js 0.187's lines were found: the tone curve replaced its CustomToneMapping stub, and the renderer takes it.
+    expect(warnings).toEqual([]);
+    expect(THREE.ShaderChunk).toMatchObject({ tonemapping_pars_fragment: expect.stringContaining(TONEMAP_GLSL) });
+    expect((THREE.ShaderChunk as Record<string, string>).tonemapping_pars_fragment).not.toContain("vec3 CustomToneMapping( vec3 color ) { return color; }");
+    expect(viewer.renderer.toneMapping).toBe(THREE.CustomToneMapping);
+    // A model's material is lit from the sky's SH and with beauty.png's point-light law, in the scene only.
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, fragmentShader: "#include <envmap_physical_pars_fragment>\n#include <lights_pars_begin>\nvoid main() {}" };
+    bulb.onBeforeCompile(shader);
+    expect(shader.fragmentShader).toContain("if ( aixleScene > 0.5 ) return max( aixleShIrradiance(");
+    expect(shader.fragmentShader).toContain(`float r = cutoffDistance / ${GLB_RANGE_CUTOFF}.0; return 1.0 / ( lightDistance * lightDistance + r * r );`);
+    // It opens in the scene: the sky at E, and a glow at beauty.png's strength, GLOW times the GLB's, once however many
+    // meshes share its material.
+    expect(viewer.scene.environmentIntensity).toBe(0.52);
+    expect(shader.uniforms.aixleScene.value).toBe(1);
+    expect(bulb.emissiveIntensity).toBeCloseTo(GLOW, 9);
+    expect(plain.emissiveIntensity).toBe(1);
+    viewer.setMode("studio");
+    expect(viewer.scene.environmentIntensity).toBe(STUDIO.room);
+    expect(shader.uniforms.aixleScene.value).toBe(0);
+    expect(bulb.emissiveIntensity).toBe(1);
+    viewer.setMode("scene");
+    expect(bulb.emissiveIntensity).toBeCloseTo(GLOW, 9);
   });
 
   it("writes half floats rounded to nearest, clamped to the largest half", () => {
