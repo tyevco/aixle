@@ -1994,7 +1994,10 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       // a low camera it overprinted a terrarium's base and label), with `set caption 0` or --no-caption.
       const captioned = opts.caption ?? evaluation.settings.caption !== 0;
       const shotFocus = shot?.focus ? resolveFocus(shot.focus) : undefined;
-      const beautyFrame = shotFocus ? shotFocus.frame : focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
+      // A shot with no focus= of its own frames the focused step, or the model; the shot `set camera` names frames its
+      // focus= instead, but another camera does not take that focus as it takes the shot's angles.
+      const unfocusedFrame = focusName ? frame : triangleCount(mesh!) > 0 ? meshBounds(mesh!) : frame;
+      const beautyFrame = shotFocus ? shotFocus.frame : unfocusedFrame;
       // The camera fits the mesh's points inside the frame, so a focus, or a camera's focus=, frames that part
       // (measured: a focused beauty render fitted every point and framed the whole mug).
       // beauty.png and every shot in the run's quality: full, or draft for a quick pass with --beauty or --quality draft.
@@ -2052,7 +2055,10 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
         // --camera naming no camera leaves every shot to be rendered, as its warning says.
         if (!isShot && ((opts.camera && shot) || opts.shots === false)) continue;
         const r = c.focus ? resolveFocus(c.focus) : undefined;
-        const b = r ? r.frame : beautyFrame;
+        // Framed on its own focus=, else as beauty.png is without one (measured: with `set camera hero` focused on a
+        // ball, beauty_wide.png was framed on the ball's box, fitted to neither the ball nor the model, where
+        // --beauty-only --camera wide framed the model).
+        const b = r ? r.frame : unfocusedFrame;
         const az = c.azimuth ?? viewAzimuth, el = c.elevation ?? viewElevation, zm = c.zoom ?? viewZoom, df = c.dof ?? dof;
         // A focus mostly hidden from its camera by the rest of the model is said, not discovered in the picture,
         // when another azimuth would see much more of it (a gem in its setting is hidden from every side alike).

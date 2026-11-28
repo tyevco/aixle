@@ -727,6 +727,19 @@ describe("strips: the quality, lights.png from one render, and one shot framed a
     expect(bytes(c, "beauty_bare.png").equals(bytes(a, "beauty_bare.png"))).toBe(false);
   });
 
+  it("frames a camera with no focus= on the model, not on the focus of the shot `set camera` names", () => {
+    // set camera hero, focused on the ball: the full run framed beauty_wide.png on the ball's box (without fitting the
+    // ball, so on neither the part nor the model) where --beauty-only --camera wide framed the model.
+    const src = lit + 'camera("hero", focus="ball", azimuth=25)\ncamera("wide", azimuth=80)\nset camera hero\nshow both';
+    const a = tmp(), b = tmp(), c = tmp();
+    run(src, "cams.aix", a, { ...opts, lights: false });
+    run(src, "cams.aix", b, { ...BEAUTY_ONLY, grid: 20, size: 64, beautySize: 64, camera: "wide" });
+    expect(bytes(b, "beauty.png").equals(bytes(a, "beauty_wide.png"))).toBe(true);
+    // hero leaves wide's elevation and zoom to the defaults, so without `set camera hero` wide is the same picture.
+    run(src.replace("set camera hero\n", ""), "cams.aix", c, { ...opts, lights: false });
+    expect(bytes(c, "beauty_wide.png").equals(bytes(a, "beauty_wide.png"))).toBe(true);
+  });
+
   it("renders beauty.png in full, or in draft on a quick pass and with quality draft, and says which; the render sets render full", () => {
     const src = lit + "show both";
     const lines = (o: object) => { const out: string[] = []; const d = tmp(); const r = run(src, "q.aix", d, { ...opts, lights: false, ...o, log: (l) => out.push(l) }); return { r, d, beauty: out.find((l) => l.startsWith("beauty render")) }; };
