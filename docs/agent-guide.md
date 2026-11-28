@@ -158,9 +158,9 @@ mesh; `--no-cache` samples afresh.
   230 of 255), so a small point light's reach and colour fill the
   frame; a flame a light falls on shows that light on the flame's own
   colour. The last frame is the shot under no light at all: the sky's
-  light, the glows and the sky in the metals. Every frame draws its
-  silhouettes as `beauty.png` draws its own: an edge is what the shot
-  would show under that frame's lights.
+  light, the glows and the sky in the metals. The top row and the last
+  frame draw their silhouettes as `beauty.png` draws its own: an edge is
+  what the shot would show under that frame's lights.
 - The shot `set camera` names is `beauty.png`, captioned with the
   camera's name, and is not written again as `beauty_<name>.png`.
 - A render into a folder removes what the last render wrote there and

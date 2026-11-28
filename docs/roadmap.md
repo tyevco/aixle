@@ -1355,16 +1355,17 @@ Built as the first way, with the tone curve moved to where the samples
 are: the edge pass keeps, beside the picture's own mean, each edge
 pixel's four samples' mean display colour under no light and under each
 light alone (`edgeDisplay` in pbr.ts, a slot's floats a pixel), and
-lightstudy.ts untones it at the frames' edge pixels. Every frame of the
-lantern, the door and the test's ember, lit and under dark lights, is
-now the exact answer to the byte, where the linear mean was off in
-2,495 to 2,699 of the lantern's 5,907 edge pixels a frame, by up to 68
-levels; and the error was two-sided, not a level or two: brighter at a
-glow's edge, darker by up to 23 along a dark part against a lighter
-ground, where the curve's toe bends the other way. The ratio was exact
-only under lights that bring nothing, and elsewhere off by up to 48
-levels in as many pixels. The kernel's buffers grow by a third (145 to
-193 bytes a pixel with three lights) and the counted work is under 2 ms,
+lightstudy.ts untones it at the frames' edge pixels. Every alone and
+no-light frame of the lantern, the door and the test's ember, lit and
+under dark lights, is now the exact answer to the byte, where the linear
+mean was off in 2,495 to 2,699 of the lantern's 5,907 edge pixels a
+frame, by up to 68 levels; and the error was two-sided, not a level or
+two: brighter at a glow's edge, darker by up to 23 along a dark part
+against a lighter ground, where the curve's toe bends the other way. The
+ratio was exact only under lights that bring nothing, and elsewhere off
+by up to 48 levels in as many pixels (on round 10's ring, measured
+since, by up to 101). The kernel's buffers grow by a third (145 to 193
+bytes a pixel with three lights) and the counted work is under 2 ms,
 lost in the noise of a loaded machine; one thread against two and four,
 the slot sum and "all" against an unsplit render hold, and no committed
 render changed. design.md, "What each light adds", has the measurements.

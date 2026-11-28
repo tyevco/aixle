@@ -1241,9 +1241,11 @@ alone drew its floor at an albedo of 0.95, where the shot's was 0.26,
 only in the channels not already full, so a flame a light barely
 touched came out bright green once brightened. Each frame's caption is
 in dark or light ink, whichever stands out from the picture under it.
-Every frame draws a silhouette as the shot draws its own, each of an
-edge pixel's samples through the tone curve before they are averaged,
-so an edge is what the shot would show under that frame's lights.
+The top row and the picture under no light draw a silhouette as the
+shot draws its own, each of an edge pixel's samples through the tone
+curve before they are averaged, so an edge is what the shot would show
+under that frame's lights; what a light adds is its share there as
+everywhere, the mean of its samples' light.
 `--beauty-only` leaves `lights.png` out unless `--lights` asks for it,
 and `--no-lights` leaves it off a full render; it takes about a fifth
 to a third of the time the n + 2 renders took (0.57 to 1.1 s on four
