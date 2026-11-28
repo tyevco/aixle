@@ -19,14 +19,18 @@
  * bright green once brightened (round 11), which needed a grey mask. A slot has no such artefacts: a glow lives in slot
  * 0, so what a light adds on a flame is the light on the flame's colour, and nothing else.
  *
- * A frame other than "all" takes an edge pixel's four samples as their mean in linear light (the slots keep no
- * other), where the render's own picture means them after the tone curve. Most silhouettes differ by a level or two
- * there, but one against something far brighter is brighter: a glow's edge by tens of levels (61 in a test scene),
- * which the bloom then spreads a few levels round it. Everywhere else a frame is finished as the render's own.
+ * An edge pixel's four samples are kept in a slot only as their linear mean, where the render's own picture means
+ * them after the tone curve. Composed from the slots, every frame but "all" drew a glow's edge up to 68 levels
+ * brighter than the render would (the curve's shoulder), with a halo the bloom spread round it, and a dark part's
+ * silhouette against a lighter ground up to 23 darker (its toe), a pixel-wide darkening along most of the lantern's
+ * bars. So the alone and no-light frames take an edge pixel from the render's edgeDisplay, its samples' mean display
+ * colour under that frame's light alone, untoned to the radiance the render's own picture would have there (roadmap
+ * 29). What a light adds keeps the slot's linear mean: it is the light's radiance on black, not a picture the render
+ * would show.
  */
 import { Canvas, rgbDithered } from "./canvas.js";
 import { drawText, GLYPH_HEIGHT, textWidth } from "./font.js";
-import { bloom, decode, tonemap, toSrgb } from "./photometry.js";
+import { bloom, decode, FLAG_EDGE, tonemap, toSrgb, untone } from "./photometry.js";
 import { INK } from "./views.js";
 import type { KernelResult } from "./kernel.js";
 
@@ -89,23 +93,40 @@ export interface LightFrames {
   adds: Canvas[];
   /** Each light's brightening, as addsGain gives it. */
   gains: number[];
-  /** Linear radiance, 3 floats a pixel, before bloom: slot 0; slot 0 plus each light's; each light's times its gain. */
+  /**
+   * Linear radiance, 3 floats a pixel, before bloom: slot 0; slot 0 plus each light's; each light's times its gain. At
+   * an edge pixel the first two are the radiance the samples' mean display colour under that light stands for.
+   */
   hdr: { none: Float64Array; alone: Float64Array[]; adds: Float64Array[] };
 }
 
-/** The frames of the study from one square render with splitLights (one slot for the sky and one per light, and its flags). */
+/**
+ * The frames of the study from one square render with splitLights: one slot for the sky and one per light, its flags,
+ * and its edge pixels' display colours under no light and each light alone.
+ */
 export function lightFrames(result: KernelResult): LightFrames {
   const slots = result.hdr;
   if (!slots || slots.length < 2) throw new Error("lights.png needs a render with splitLights: one slot for the sky and one per light");
   const size = result.canvas.width;
   const n = size * size * 3;
+  const flags = result.flags, shown = result.edgeDisplay, W = slots.length * 3;
+  /** Frame `f` (0 none, i + 1 light i alone) at its edge pixels: the radiance the render's picture takes there, as the render untones its own. */
+  const atEdges = (lin: Float64Array, f: number): Float64Array => {
+    if (flags)
+      for (let i = 0; i < size * size; i++) {
+        if (!(flags[i] & FLAG_EDGE)) continue;
+        if (!shown) throw new Error("lights.png needs a render with splitLights: its edge pixels' display colours under each light alone");
+        untone(shown[i * W + f * 3], shown[i * W + f * 3 + 1], shown[i * W + f * 3 + 2], lin, i * 3);
+      }
+    return lin;
+  };
   const sky = slots[0];
-  const none = Float64Array.from(sky);
+  const none = atEdges(Float64Array.from(sky), 0);
   const alone: Float64Array[] = [], adds: Float64Array[] = [], gains: number[] = [];
-  for (const slot of slots.slice(1)) {
+  for (const [l, slot] of slots.slice(1).entries()) {
     const a = new Float64Array(n);
     for (let k = 0; k < n; k++) a[k] = sky[k] + slot[k];
-    alone.push(a);
+    alone.push(atEdges(a, l + 1));
     const gain = addsGain(slot);
     gains.push(gain);
     const d = new Float64Array(n);

@@ -287,8 +287,9 @@ in full quality, in brightness beside a mirror or glass) is an edge and
 takes four samples, which march on past the window, so a silhouette
 antialiases against the field itself. The four are averaged after the
 tone curve: in linear light one very bright subsample decides the mean,
-and a glow's edge came out up to 61 levels brighter (measured in
-lightstudy.ts, whose frames can only average in linear light).
+and a glow's edge came out up to 68 levels brighter (measured on
+lights.png's frames when they averaged in linear light; see What each
+light adds).
 
 Secondary rays (reflections, refraction, shadows) cannot be primed by
 the camera's depth, and marching the field all the way was the largest
@@ -1294,14 +1295,99 @@ from the slots, each rounded to a float, the split picture differed from
 the unsplit one in about one byte in a hundred thousand. With the total,
 52 of 52 split renders drew their unsplit render byte for byte (every
 example and dogfood program with two or more lights, draft and full, at
-96 and 161 pixels). Light alone less none is that light's slot to the
-last bit except where a slot is under 2^−29 of slot 0, where the sum
-rounds it (one value of 28,227 in the test scene, off by 0.37 of a unit
-in the last place). The one difference left is at silhouettes: the slots
-keep an edge pixel's four samples as their linear mean, where the
-render's own picture means them after the tone curve, so an edge against
-something much brighter, a glow's, is up to 61 levels brighter in the
-alone and none frames, and bloom spreads up to 6 levels round it.
+96 and 161 pixels). Off the silhouettes, light alone less none is that
+light's slot to the last bit except where a slot is under 2^−29 of slot
+0, where the sum rounds it (one value of 28,227 in the test scene, off
+by 0.37 of a unit in the last place).
+
+The silhouettes are exact too. A slot keeps an edge pixel's four samples
+only as their linear mean, where the render's own picture means them
+after the tone curve, and the alone and none frames once took the slots'
+mean. That was not a level or two. At a glow's edge it was brighter, by
+up to 68 levels in a channel, since the glow decides a linear mean and
+the curve's shoulder flattens it, and the bloom spread that round it (by
+up to 6 levels on the test's ember): an orange ring round the lantern's
+candle and the door's torch. Along a dark part against a lighter ground
+it was darker, by up to 23, since the curve's toe bends the other way: a
+pixel-wide darkening down most of the lantern's bars. On the lantern
+2,495 to 2,699 of its 5,907 edge pixels differed in each alone and none
+frame, 1,075 to 1,408 of them by 3 levels or more. So the edge pass
+keeps, beside the picture's own mean, its four samples' mean display
+colour under no light and under each light alone, each sample summed
+from its slots as the picture's own is summed and tone-mapped before the
+mean (the kernel's `edgeDisplay`), and the alone and none frames untone
+it at their edge pixels as the finish untones its own. Under lights that
+bring nothing those frames are the render's picture byte for byte, bloom
+and all; with one light lit and one dark, the lit light alone is
+(tests/render.test.ts, "finishes a frame as the render finishes its own
+picture"). With both lit, each of them is the picture of a render whose
+other lights have no power, to the byte in the test's scene, when they
+are point lights, whose power reaches neither the floor's albedo nor the
+sky ("draws each frame of a lit study ..."); the slots' linear mean was
+off there by up to 63 levels, and edges taken from the picture under all
+the lights, which the earlier tests could not tell from the right
+answer, by up to 157.
+
+Two ways were measured first (roadmap 29) against the exact answer,
+each sample tone-mapped from its own slots, kept in double precision
+for the measurement: on the lantern and the door at 256-pixel frames
+and on the test's glowing ember at 80, lit, and under lights of no
+power, and since on round 10's ring. Each cell is the edge pixels whose
+bytes differ from the exact frame, and the most a channel differs:
+
+| Frame | Edge pixels | Linear mean (before) | Ratio | Samples kept |
+| --- | --- | --- | --- | --- |
+| lantern, none | 5,907 | 2,495, 67 | 2,689, 37 | 0 |
+| lantern, key alone | | 2,699, 63 | 2,294, 48 | 0 |
+| lantern, rim alone | | 2,648, 67 | 2,318, 40 | 0 |
+| lantern, flame alone | | 2,584, 68 | 2,496, 23 | 0 |
+| door, none | 7,828 | 668, 53 | 1,544, 26 | 0 |
+| door, moon alone | | 2,590, 52 | 2,927, 26 | 0 |
+| door, torch alone | | 1,003, 51 | 2,848, 18 | 0 |
+| ember lit, none | 632 | 298, 63 | 281, 36 | 0 |
+| ember lit, each alone | | 219 and 171, 62 and 60 | 217 and 172, 14 and 23 | 0 |
+| ember under dark lights, every frame | | 270, 63 | 0 | 0 |
+| ring (round 10), each frame | 5,314 | 1,233 to 1,577, 52 to 63 | 777 to 1,197, 75 to 101 | 0 |
+
+Off the edges, the bloom moved up to 809 more pixels of a frame by up to
+6 levels under the linear mean and up to 33 by 1 under the ratio.
+
+The ratio scales a frame's edge pixel by the render's own display mean,
+untoned, over its linear total. It is exact where the lights bring
+nothing and nowhere else: it carries the tone curve of all the lights
+into a frame that has only some of them, and it moved as many edge
+pixels as the linear mean, on the door more, and on the ring by more
+levels, up to 101 where the linear mean was 63. Keeping the four samples
+per slot, in single precision, and tone-mapping each in the study gave
+every frame of the lantern, the door and the ember to the byte. That is
+what was built, with one change: the frames are a fixed function of the
+samples, so the edge pass tone-maps them where it has them and keeps the
+means, a slot's floats a pixel (3 for each light and the sky) where the
+samples would be four times that, written only at edge pixels and with
+nothing to compact. The kernel's buffers for the study grow from 145 to
+193 bytes a pixel with three lights (9.1 to 12.1 MiB at 256-pixel
+frames) and from 117 to 153 with two; the four samples per slot would
+have been 192 more a pixel, or 1.4 MB packed to the lantern's edge
+pixels behind an index the threads would have to share. The added work
+is one tone curve per sample per frame at an edge pixel (95,000 on the
+lantern, about 10 ns each) and one inverse per frame at each edge pixel
+in the study, under 2 ms in all. Measured, it is lost in the noise of a
+machine that had three to four of its four cores busy with other work:
+on one thread, warm, interleaved with the old code in one process, the
+best of 7 or 9, the split render took 1,117 and 1,067 ms on the lantern
+before and 1,135 and 1,049 after, the ring 1,773 and 1,669 against 1,844
+and 1,806, the door 2,287 against 2,308, and the study's frames 73 to
+118 ms before and 81 to 116 after; the ring's edge pass alone took 895
+and 900 ms before and 932 and 848 after, where two copies of the old
+code differed by 9% (928 and 1,011). Measured again as `lights.png`'s
+own time in the command line, on two threads at 256-pixel frames, the
+old code and the new run in turn with each going first in half the runs,
+the best of six: the lantern 1.12 s before and 1.14 after, the ring 1.81
+and 1.81, the door 1.98 and 2.07, where one program's six runs spread by
+11 to 33% (two to four and a half of the four cores busy elsewhere), and
+a run with the old code always first had the new 5 to 12% the faster.
+"All" is unchanged, and so is every committed render: no render set
+draws `lights.png`.
 
 On the lantern, the ring and the door, on four threads with 256-pixel
 frames, the study takes about a third of the old one's time: 0.31 to

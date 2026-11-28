@@ -103,6 +103,13 @@ export interface KernelResult {
   hdr?: Float32Array[];
   /** What each pixel's primary ray met (photometry's KIND_ and FLAG_ bits), when the kernel keeps it: for a picture composed again from the slots (lights.png). */
   flags?: Uint8Array;
+  /**
+   * With splitLights, at each edge pixel (FLAG_EDGE) the mean of its samples' tone-mapped colours (linear display
+   * values, 0 to 1) under no light, then under each light alone: 3 floats a frame, one frame more than the lights, a
+   * pixel; zero off the edges. The slots keep an edge pixel's samples only as their linear mean, where the picture
+   * means them after the tone curve, so lights.png's frames take their edge pixels from here.
+   */
+  edgeDisplay?: Float32Array;
 }
 
 export interface Kernel<T = unknown> {

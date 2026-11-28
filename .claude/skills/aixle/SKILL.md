@@ -182,8 +182,8 @@ Reference: `docs/reference.md` (every function, generated from the code;
   row each light alone, then all; the bottom row exactly what each
   light adds, floor included, at the gain printed (`spark adds, ×2.6`),
   a flame showing the light on its own colour; last, the shot under no
-  light at all. A silhouette against a glow can be tens of levels
-  brighter there than in `beauty.png`: judge edges in `beauty.png`.
+  light at all. The top row's and the last frame's edges are what the
+  shot would show under that frame's lights.
 
 ## The language in one screen
 

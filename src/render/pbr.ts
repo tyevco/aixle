@@ -33,8 +33,9 @@
  * with splitLights), each light's unshadowed term on primary surfaces and the floor and its visibility apart, and the
  * guides the visibility filter and the edge pass read. The edge pass samples a pixel four times where its neighbours
  * differ in material, depth, normal or (in full quality, beside a mirror) brightness, and keeps the mean of the four
- * samples' tone-mapped colours. The finish filters visibility, composes, blooms, blurs for depth of field, tone-maps
- * and dithers. Every pixel is a function of its position and the scene: no random numbers, no clock.
+ * samples' tone-mapped colours (with splitLights, also that mean under no light and under each light alone, for
+ * lights.png). The finish filters visibility, composes, blooms, blurs for depth of field, tone-maps and dithers.
+ * Every pixel is a function of its position and the scene: no random numbers, no clock.
  */
 import { normalize, type Vec3 } from "../core/vec.js";
 import { albedo, bumpScaleOf, bumpSlope, fieldCurvature, hasFinish, readsThin, surface, wearProbe } from "../sdf/materials.js";
@@ -278,6 +279,12 @@ export const pbr: Kernel<PbrTables> = {
       // a split render draws what the same render unsplit draws (summing the slots once each was rounded to a float
       // moved one byte in a hundred thousand).
       ...(opts.splitLights ? [{ name: "T", type: "f32", per: 3 } as BufferSpec] : []),
+      // With splitLights, an edge pixel's mean of its four samples' tone-mapped colours under no light (slot 0) and
+      // under each light alone (slot 0 and the light's), as E is under all of them: what lights.png's frames show at
+      // a silhouette. The slots keep the samples only as their linear mean, which displayed up to 68 levels brighter
+      // than the samples' display mean at a glow's edge and up to 23 darker along a dark part against a lighter
+      // ground, where the curve's toe bends the other way (roadmap 29).
+      ...(opts.splitLights ? [{ name: "EL", type: "f32", per: 3 * S } as BufferSpec] : []),
     ];
   },
   prepare: (ctx) => {
@@ -863,7 +870,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const R = buffers.R as Float32Array, Dbuf = buffers.D as Float32Array, Vbuf = buffers.V as Float32Array;
   const depthBuf = buffers.depth as Float32Array, normalBuf = buffers.normal as Float32Array, matBuf = buffers.mat as Int32Array;
   const flagBuf = buffers.flags as Uint8Array, lumaBuf = buffers.luma as Float32Array, Ebuf = buffers.E as Float32Array;
-  const Tbuf = buffers.T as Float32Array | undefined;
+  const Tbuf = buffers.T as Float32Array | undefined, ELbuf = buffers.EL as Float32Array | undefined;
   /** With splitLights, the slots' sum of `src` (W floats from 0), times `k`, into the total's buffer at pixel i. */
   const total = (src: Float64Array, k: number, i: number): void => {
     let r = 0, g = 0, b = 0;
@@ -987,7 +994,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     return CONTRAST && ((flagBuf[i] | flagBuf[j]) & FLAG_SHINY) !== 0 && Math.abs(lumaBuf[i] - lumaBuf[j]) > 0.14;
   };
   const OFFS = [0.25, 0.25, 0.75, 0.25, 0.25, 0.75, 0.75, 0.75];
-  const ACC = new Float64Array(W), DACC = new Float64Array(3);
+  const ACC = new Float64Array(W), DACC = new Float64Array(3), LACC = new Float64Array(W);
   const edges = (py: number): void => {
     for (let px = 0; px < size; px++) {
       const i = py * size + px;
@@ -999,6 +1006,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       if (!Number.isFinite(d)) d = Math.min(px + 1 < size ? prime[i + 1] : Infinity, py + 1 < size ? prime[i + size] : Infinity, px > 0 ? prime[i - 1] : Infinity, py > 0 ? prime[i - size] : Infinity);
       for (let k = 0; k < W; k++) ACC[k] = 0;
       DACC[0] = 0; DACC[1] = 0; DACC[2] = 0;
+      for (let k = 0; k < W; k++) LACC[k] = 0;
       for (let s = 0; s < 4; s++) {
         pixX = px; pixY = py; pixS = s + 1;
         sample(px + OFFS[s * 2], py + OFFS[s * 2 + 1], d, false);
@@ -1011,9 +1019,22 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
         for (let k = 0; k < W; k++) ACC[k] += COL[k];
         displayOf();
         DACC[0] += TM[0]; DACC[1] += TM[1]; DACC[2] += TM[2];
+        // Split, the sample's display colour under no light and under each light alone, summed as displayOf sums
+        // (from 0, the sky's slot first), so a light that brings nothing leaves its frame the picture's own bits.
+        if (split)
+          for (let fr = 0; fr < S; fr++) {
+            let r = 0, g = 0, b = 0;
+            r += COL[0]; g += COL[1]; b += COL[2];
+            if (fr) { r += COL[fr * 3]; g += COL[fr * 3 + 1]; b += COL[fr * 3 + 2]; }
+            tonemap(r, g, b, TM, 0);
+            LACC[fr * 3] += TM[0]; LACC[fr * 3 + 1] += TM[1]; LACC[fr * 3 + 2] += TM[2];
+          }
       }
       for (let k = 0; k < W; k++) R[i * W + k] = ACC[k] / 4;
-      if (split) total(ACC, 1 / 4, i);
+      if (split) {
+        total(ACC, 1 / 4, i);
+        for (let k = 0; k < W; k++) ELbuf![i * W + k] = LACC[k] / 4;
+      }
       for (let k = 0; k < NL * 3; k++) Dbuf[i * NL * 3 + k] = 0;
       for (let k = 0; k < NL; k++) Vbuf[i * NL + k] = 1;
       Ebuf[i * 3] = DACC[0] / 4; Ebuf[i * 3 + 1] = DACC[1] / 4; Ebuf[i * 3 + 2] = DACC[2] / 4;
@@ -1031,7 +1052,8 @@ const smoothstep = (a: number, b: number, v: number): number => {
 
 /**
  * The finish: each light's visibility filtered, the slots composed, bloom, depth of field, the tone curve and the
- * dither, the caption. Returns the linear radiance per slot, composed, before bloom, and the guides' flags.
+ * dither, the caption. Returns the linear radiance per slot, composed, before bloom, the guides' flags and, split, the
+ * edge pixels' display colours under no light and each light alone.
  */
 function pbrFinish(ctx: KernelContext<PbrTables>) {
   const { size, opts, buffers, camera, bounds, cell } = ctx;
@@ -1078,7 +1100,7 @@ function pbrFinish(ctx: KernelContext<PbrTables>) {
       canvas.set(px, py, rgbDithered(toSrgb(tm[0]), toSrgb(tm[1]), toSrgb(tm[2]), px, py));
     }
   if (opts.label) drawText(canvas, 8, size - 12, opts.label, INK.dim, 1);
-  return { canvas, hdr, flags };
+  return { canvas, hdr, flags, edgeDisplay: buffers.EL as Float32Array | undefined };
 }
 
 /**
