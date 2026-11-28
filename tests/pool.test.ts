@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { check, run, type RunOptions } from "../src/pipeline.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
-import { renderBeauty, type BeautyOptions } from "../src/render/beauty.js";
+import { renderBeauty, renderBeautyResult, type BeautyOptions } from "../src/render/beauty.js";
+import { FLAG_GLOW } from "../src/render/photometry.js";
 import { fieldCheck, fieldMatches, lastPoolRows, openBeautyPool, poolWorkerRows } from "../src/render/beauty-pool.js";
 import { importResolver, replayedImports } from "../src/resolvers.js";
 import { encodePng } from "../src/render/png.js";
@@ -146,23 +147,23 @@ const GLASS = 'ball = sphere(0.5) | move(-0.6, 0.5, 0) | paint("gold")\npane = b
 const GLASS_OPTS: Omit<BeautyOptions, "cellSize"> = { size: 96, environment: "sunset", dof: 1, label: "glass and metal", lights: [{ azimuth: -40, elevation: 55, size: 1, color: [1, 1, 1], power: 1 }, { azimuth: 0, elevation: 0, size: 0.5, color: [1, 0.8, 0.6], power: 0.8, position: [0.2, 1.4, 1.0], range: 1.5 }] };
 
 describe("the kernel on the pool", () => {
-  it("draws the same bytes on one thread and on four, and fills the glow mask from every thread's rows", () => {
+  it("draws the same bytes on one thread and on four, and returns the flags of every thread's rows", () => {
     const s = scene(SPHERE, "sphere.aix", 32);
     const g = scene(GLASS, "glass.aix", 40);
     const sphereOpts: BeautyOptions = { size: 96, cellSize: s.cell };
     const glassOpts: BeautyOptions = { ...GLASS_OPTS, cellSize: g.cell };
     for (const [x, opts] of [[s, sphereOpts], [g, glassOpts]] as const) {
-      const glow = new Uint8Array(96 * 96);
-      const want = sha(renderBeauty(x.shape, x.mesh, x.shape.bounds, { ...opts, glowMask: glow }).data);
-      const glowing = glow.reduce((a, b) => a + b, 0);
+      const one = renderBeautyResult(x.shape, x.mesh, x.shape.bounds, opts);
+      const want = sha(one.canvas.data);
+      const glowing = one.flags!.reduce((a, f) => a + (f & FLAG_GLOW ? 1 : 0), 0);
       expect(glowing > 0).toBe(x === g);
       const pool = openBeautyPool(4)!;
       pool.warm(x.ref);
       expect(pool.waitReady()).toBe(true);
-      const mask = new Uint8Array(96 * 96);
-      expect(sha(renderBeauty(x.shape, x.mesh, x.shape.bounds, { ...opts, glowMask: mask, pool }).data)).toBe(want);
-      // The glow mask is filled on the main thread from every thread's rows.
-      expect(mask.reduce((a, b) => a + b, 0)).toBe(glowing);
+      const four = renderBeautyResult(x.shape, x.mesh, x.shape.bounds, { ...opts, pool });
+      expect(sha(four.canvas.data)).toBe(want);
+      // The flags every thread's rows wrote, returned on the main thread (lights.png's bloom reads them).
+      expect(sha(four.flags!)).toBe(sha(one.flags!));
       pool.close();
     }
   });
@@ -257,7 +258,7 @@ describe("the pool under the command line's own node flags", () => {
   for (const [how, entry] of [["tsx's flag", ["--import", "tsx", "src/cli.ts"]], ["tsx's register()", [registered]]] as const)
     it(`draws on the pool with a V8 flag on the command line, through ${how}`, () => {
       const four = render([...entry], 4), one = render([...entry], 1);
-      expect(four.log).toMatch(/beauty render 96px in \d+ ms on 4 threads/);
+      expect(four.log).toMatch(/beauty render 96px, full, 4 threads, in [\d.]+ s/);
       expect(four.log).not.toMatch(/^beauty: /m);
       expect(sha(four.png)).toBe(sha(one.png));
     });

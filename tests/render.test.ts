@@ -9,10 +9,12 @@ import { decodePng, encodePng, encodeApng } from "../src/render/png.js";
 import { albedo, coverage, sampleImage } from "../src/sdf/materials.js";
 import type { ImageTexture } from "../src/sdf/types.js";
 import { orthographic, perspective, project, toView } from "../src/render/camera.js";
-import { preset } from "../src/sdf/materials.js";
+import { customMaterial, materialFromString, preset } from "../src/sdf/materials.js";
 import { Canvas, rgb } from "../src/render/canvas.js";
 import { drawText, textWidth } from "../src/render/font.js";
-import { lightContribution, renderBeauty } from "../src/render/beauty.js";
+import { renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
+import { ADDS_TARGET, addsGain, encodePicture, gainText, lightFrames, lightStudy } from "../src/render/lightstudy.js";
+import { BLOOM_THRESHOLD, encode, FLAG_EDGE, FLAG_GLOW } from "../src/render/photometry.js";
 
 const sphere = P.sphere(1);
 const mesh = surfaceNets(sphere, { resolution: 32 }).mesh;
@@ -188,43 +190,192 @@ describe("canvas and font", () => {
 });
 
 describe("what a light adds", () => {
-  it("is the light-alone frame less the no-light frame, clamped at zero and brightened to near white", () => {
-    const none = new Canvas(10, 10, rgb(40, 40, 40));
-    const alone = new Canvas(10, 10, rgb(40, 40, 40));
-    // Half the frame is lit, more in red than in green; one pixel came out darker than under no light.
-    for (let i = 0; i < 50; i++) alone.set(i % 10, Math.floor(i / 10), rgb(90, 60, 40));
-    alone.set(9, 9, rgb(10, 10, 10));
-    const { canvas, gain } = lightContribution(alone, none);
-    expect(gain).toBeCloseTo(230 / 50, 5);
-    const px = (x: number, y: number) => [...canvas.data.slice((y * 10 + x) * 4, (y * 10 + x) * 4 + 3)];
-    expect(px(0, 0)).toEqual([230, 92, 0]);
-    expect(px(5, 7)).toEqual([0, 0, 0]);
-    expect(px(9, 9)).toEqual([0, 0, 0]);
-    // A light that reaches nothing adds a black frame at a gain of 1.
-    expect(lightContribution(none, none).gain).toBe(1);
+  // Glass, a mirror, a matte ball and a glowing ember under a key and a warm point light: every kind of light a slot
+  // carries (direct, reflected, through glass, on the floor) and a glow, which is in no light's slot.
+  const scene = O.union([
+    O.paint(O.move(P.sphere(0.5), -0.6, 0.5, 0), materialFromString("chrome")!),
+    O.paint(O.move(P.box(0.7, 1, 0.7), 0.6, 0.5, 0), materialFromString("amber")!),
+    O.paint(O.move(P.sphere(0.3), 0.1, 0.3, 0.8), customMaterial({ color: [0.6, 0.6, 0.6], rough: 0.8 })),
+    O.paint(O.move(P.sphere(0.12), -0.3, 0.12, 0.9), customMaterial({ color: [1, 0.7, 0.3], rough: 0.9, glow: 2 })),
+  ]);
+  const nets = surfaceNets(scene, { resolution: 40 });
+  const lights: BeautyLight[] = [
+    { name: "key", azimuth: -40, elevation: 50, size: 1.5, color: [1, 1, 1], power: 1 },
+    { name: "lamp", azimuth: 0, elevation: 0, size: 1, color: [1, 0.75, 0.45], power: 1.2, position: [0.2, 1.3, 1.1], range: 1.2 },
+  ];
+  const opts: BeautyOptions = { size: 97, cellSize: nets.cellSize, lights, quality: "draft", label: "all" };
+
+  it("is each light's own slot of one render: alone less none is the slot exactly, and 'all' is the render unsplit, byte for byte", () => {
+    const r = renderBeautyResult(scene, nets.mesh, scene.bounds, { ...opts, splitLights: true });
+    const f = lightFrames(r);
+    expect(r.hdr!.length).toBe(3);
+    for (let i = 0; i < lights.length; i++) {
+      const slot = r.hdr![i + 1];
+      let off = 0, worst = 0, gainOff = 0, lit = 0;
+      for (let k = 0; k < slot.length; k++) {
+        const d = f.hdr.alone[i][k] - f.hdr.none[k];
+        // Exact, but for a slot under 2^-29 of the sky's radiance there, which the double-precision sum rounds (one
+        // value here: 1.7e-10 beside 0.17, off by 1e-17).
+        if (d !== slot[k]) { off++; worst = Math.max(worst, Math.abs(d - slot[k]) / (f.hdr.alone[i][k] * Number.EPSILON)); }
+        if (f.hdr.adds[i][k] !== slot[k] * f.gains[i]) gainOff++;
+        if (slot[k] > 0.01) lit++;
+      }
+      expect(off, lights[i].name).toBeLessThanOrEqual(1);
+      expect(worst, lights[i].name).toBeLessThanOrEqual(1);
+      expect(gainOff, lights[i].name).toBe(0);
+      expect(lit, lights[i].name).toBeGreaterThan(500);
+      expect(f.gains[i]).toBe(addsGain(slot));
+    }
+    // The none frame is slot 0, the sky's, unchanged.
+    expect(f.hdr.none).toEqual(Float64Array.from(r.hdr![0]));
+    // Each light's frame differs from the other's where they reach.
+    let differ = 0;
+    for (let k = 0; k < f.alone[0].data.length; k += 4) if (f.alone[0].data[k] !== f.alone[1].data[k]) differ++;
+    expect(differ).toBeGreaterThan(97 * 97 * 0.3);
+    // 'all' is the render's own picture, and that is the same render without the split, byte for byte.
+    expect(f.all).toBe(r.canvas);
+    expect(Buffer.from(renderBeauty(scene, nets.mesh, scene.bounds, opts).data).equals(Buffer.from(f.all.data))).toBe(true);
+    // In full quality too.
+    const full = { ...opts, quality: "full" as const, size: 64 };
+    expect(Buffer.from(renderBeauty(scene, nets.mesh, scene.bounds, full).data).equals(Buffer.from(renderBeautyResult(scene, nets.mesh, scene.bounds, { ...full, splitLights: true }).canvas.data))).toBe(true);
   });
-  it("draws a glowing surface flat grey and leaves it out of the gain, where its clipped colour would read as a light's", () => {
-    // Round 11: a flame near white under no light and a little whiter under the moon differs only in green, and at the
-    // moon's gain of 7.9 the flame read bright green in "moon adds".
-    const none = new Canvas(10, 10, rgb(20, 20, 20));
-    const alone = new Canvas(10, 10, rgb(20, 20, 20));
-    for (let i = 0; i < 10; i++) { none.set(i, 0, rgb(255, 200, 90)); alone.set(i, 0, rgb(255, 240, 95)); }
-    for (let i = 0; i < 10; i++) alone.set(i, 5, rgb(60, 60, 60));
-    const glow = new Uint8Array(100);
-    for (let i = 0; i < 10; i++) glow[i] = 1;
-    const { canvas, gain } = lightContribution(alone, none, glow);
-    const px = (x: number, y: number) => [...canvas.data.slice((y * 10 + x) * 4, (y * 10 + x) * 4 + 3)];
-    expect(gain).toBeCloseTo(230 / 40, 5);
-    expect(px(3, 0)).toEqual([0x58, 0x58, 0x58]);
-    expect(px(3, 5)).toEqual([230, 230, 230]);
-    // The beauty render marks the pixels whose surface glows.
-    const shape = O.union([P.box(1, 1, 1), O.paint(O.move(P.sphere(0.3), 0, 0.8, 0), { ...preset("gold")!, glow: 1 })]);
-    const m = surfaceNets(shape, { resolution: 24 }).mesh;
-    const mask = new Uint8Array(48 * 48);
-    renderBeauty(shape, m, shape.bounds, { size: 48, cellSize: 0.1, glowMask: mask });
-    const lit = mask.reduce((a, b) => a + b, 0);
-    expect(lit).toBeGreaterThan(20);
-    expect(lit).toBeLessThan(48 * 48 * 0.3);
+
+  it("finishes a frame as the render finishes its own picture", () => {
+    // No pixel bright enough to bloom: then every pixel the edge pass did not resample is the render's own byte.
+    const matte = O.union([O.move(P.box(1, 1, 1), 0, 0.5, 0), O.move(P.sphere(0.4), 0.9, 0.4, 0.3)]);
+    const m = surfaceNets(matte, { resolution: 32 });
+    const r = renderBeautyResult(matte, m.mesh, matte.bounds, { size: 80, cellSize: m.cellSize, lightSize: 2, quality: "draft" });
+    expect(Math.max(...r.hdr![0])).toBeLessThan(BLOOM_THRESHOLD);
+    const again = encodePicture(r.hdr![0], 80, r.flags);
+    let same = 0, edges = 0;
+    for (let i = 0; i < 80 * 80; i++) {
+      if (r.flags![i] & FLAG_EDGE) { edges++; continue; }
+      if ([0, 1, 2].every((c) => again.data[i * 4 + c] === r.canvas.data[i * 4 + c])) same++;
+    }
+    expect(edges).toBeGreaterThan(50);
+    expect(same).toBe(80 * 80 - edges);
+    // And a glow that blooms: under two lights of no power the picture is the sky's slot alone, and the picture under
+    // no light, finished from that slot, is the render's own but at the silhouettes, whose four samples the slots
+    // keep only as their linear mean (61 levels brighter at the glow's edge here), and round them, where the bloom
+    // spreads that a few levels. Without the bloom the glow's halo would be missing.
+    const ember = O.union([matte, O.paint(O.move(P.sphere(0.25), -0.2, 1.25, 0.2), customMaterial({ color: [1, 0.7, 0.3], glow: 3 }))]);
+    const e = surfaceNets(ember, { resolution: 32 });
+    const dark: BeautyLight[] = [0, 1].map((k) => ({ name: `l${k}`, azimuth: -40 + 90 * k, elevation: 50, size: 1, color: [1, 1, 1], power: 0 }));
+    const g = renderBeautyResult(ember, e.mesh, ember.bounds, { size: 80, cellSize: e.cellSize, lights: dark, quality: "draft", splitLights: true });
+    const none = lightFrames(g).none, flat = encodePicture(g.hdr![0], 80);
+    let off = 0, worst = 0, haloed = 0;
+    for (let i = 0; i < 80 * 80; i++) {
+      if (none.data[i * 4] !== flat.data[i * 4]) haloed++;
+      if (g.flags![i] & FLAG_EDGE) continue;
+      for (let c = 0; c < 3; c++) {
+        const d = Math.abs(none.data[i * 4 + c] - g.canvas.data[i * 4 + c]);
+        worst = Math.max(worst, d);
+        if (d) off++;
+      }
+    }
+    expect(haloed).toBeGreaterThan(300);
+    expect(worst).toBeLessThanOrEqual(8);
+    expect(off).toBeLessThan(80 * 80 * 3 * 0.03);
+  });
+
+  it("brightens a light's share until most of what it reaches shows near white, 1 to 32 times", () => {
+    // 990 pixels at 0.1 and five saturated sparks: the sparks do not set the gain, the 99th percentile does.
+    const slot = (n: number, v: number, sparks = 0) => {
+      const s = new Float32Array((n + sparks + 500) * 3);
+      for (let i = 0; i < n; i++) { s[i * 3] = v; s[i * 3 + 1] = v / 2; }
+      for (let i = n; i < n + sparks; i++) s[i * 3] = 10;
+      return s;
+    };
+    expect(addsGain(slot(990, 0.1, 5))).toBeCloseTo(ADDS_TARGET / 0.1, 4);
+    expect(addsGain(slot(990, 0.001))).toBe(32);
+    expect(addsGain(slot(990, 3))).toBe(1);
+    // A light that reaches nothing is not brightened.
+    expect(addsGain(slot(0, 0))).toBe(1);
+    // The target displays at 230 of 255.
+    const o = new Float64Array(3);
+    encode(ADDS_TARGET, ADDS_TARGET, ADDS_TARGET, o, 0);
+    expect(Math.round(o[0] * 255)).toBe(230);
+    expect(gainText(1.02)).toBe("");
+    expect(gainText(3.27)).toBe(", ×3.3");
+  });
+
+  it("lays each light's frames out in its own column, every frame captioned in ink that stands out from the picture under it", () => {
+    // A mid-grey sky slot (the lantern's rim and flame frames, and its picture under no light, were mid-grey floors
+    // under mid-grey captions: unreadable), a strong key that whitens its frames, a faint fill.
+    const size = 96, n = size * size * 3;
+    const fill = (v: number) => new Float32Array(n).fill(v);
+    const slots = [fill(0.16), fill(0.6), fill(0.03)];
+    const total = new Float32Array(n);
+    for (const s of slots) for (let k = 0; k < n; k++) total[k] += s[k];
+    const r = { canvas: encodePicture(total, size), hdr: slots, flags: new Uint8Array(size * size) };
+    const ref = lightFrames({ ...r, canvas: encodePicture(total, size) });
+    const study = lightStudy(r, [{ name: "key", caption: "az -40 el 50" }, { name: "fill", caption: "az 150 el 20  power 0.1" }]);
+    const luma = (d: Uint8Array, o: number) => 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2];
+    const rowY = 26 + 6, lowY = rowY + size + 6 + 16;
+    const frames: [string, Canvas, number, number][] = [
+      ["key alone", ref.alone[0], 0, rowY], ["fill alone", ref.alone[1], 1, rowY], ["all", ref.all, 2, rowY],
+      ["key adds", ref.adds[0], 0, lowY], ["fill adds", ref.adds[1], 1, lowY], ["no light", ref.none, 2, lowY],
+    ];
+    for (const [name, frame, col, y0] of frames) {
+      const x0 = 6 + col * (size + 6);
+      let glyph = 0, faint = 0, other = 0;
+      for (let y = 0; y < size; y++)
+        for (let x = 0; x < size; x++) {
+          const a = ((y0 + y) * study.width + x0 + x) * 4, b = (y * size + x) * 4;
+          const same = [0, 1, 2].every((c) => study.data[a + c] === frame.data[b + c]);
+          if (same) continue;
+          // What differs is the caption, at the frame's foot; anything else is a frame in the wrong place.
+          if (y < size - 14) { other++; continue; }
+          glyph++;
+          if (Math.abs(luma(study.data, a) - luma(frame.data, b)) < 80) faint++;
+        }
+      expect(other, name).toBe(0);
+      expect(glyph, name).toBeGreaterThan(20);
+      expect(faint, name).toBe(0);
+    }
+  });
+
+  it("shows on a glowing part what the light does to its colour, with no glow in it (round 11: a flame read bright green)", () => {
+    // The same flame with and without its glow: what each light adds is the same, to the byte, since a glow is in
+    // the sky's slot; only the picture under no light changes.
+    const flame = (glow: number) => O.union([
+      O.paint(O.move(P.box(1.4, 0.6, 1), 0, 0.3, -0.3), customMaterial({ color: [0.5, 0.45, 0.4], rough: 0.9 })),
+      O.paint(O.move(P.sphere(0.3), 0, 0.9, 0.2), customMaterial({ color: [1, 0.7, 0.3], rough: 0.9, glow })),
+    ]);
+    const two: BeautyLight[] = [
+      { name: "key", azimuth: -40, elevation: 50, size: 1.5, color: [1, 1, 1], power: 1 },
+      { name: "moon", azimuth: 120, elevation: 40, size: 2, color: [0.62, 0.7, 1], power: 0.35 },
+    ];
+    const study = (glow: number) => {
+      const shape = flame(glow);
+      const mm = surfaceNets(shape, { resolution: 40 });
+      const r = renderBeautyResult(shape, mm.mesh, shape.bounds, { size: 72, cellSize: mm.cellSize, lights: two, quality: "draft", splitLights: true });
+      return { r, f: lightFrames(r) };
+    };
+    const lit = study(2), plain = study(0);
+    for (let i = 0; i < 2; i++) {
+      expect(Buffer.from(lit.f.adds[i].data).equals(Buffer.from(plain.f.adds[i].data)), two[i].name).toBe(true);
+      expect(lit.f.gains[i]).toBe(plain.f.gains[i]);
+    }
+    expect(Buffer.from(lit.f.none.data).equals(Buffer.from(plain.f.none.data))).toBe(false);
+    // On the flame, what the white key adds is the flame's own warm colour, red over green over blue, never grey,
+    // wherever it reaches; the two pictures' difference there, as lights.png took it, is blue (253, 249, 131 under no
+    // light and 254, 251, 150 under the key: the channels not already full).
+    const flags = lit.r.flags!;
+    const px = (c: { data: Uint8Array }, i: number) => [...c.data.slice(i * 4, i * 4 + 3)];
+    let reached = 0, warm = 0, blue = 0;
+    for (let i = 0; i < 72 * 72; i++) {
+      if (!(flags[i] & FLAG_GLOW) || flags[i] & FLAG_EDGE) continue;
+      const [r, g, b] = px(lit.f.adds[0], i);
+      if (r + g + b < 60) continue;
+      reached++;
+      if (r > g && g > b) warm++;
+      const [r0, g0, b0] = px(lit.f.none, i), [r1, g1, b1] = px(lit.f.alone[0], i);
+      if (b1 - b0 > Math.max(r1 - r0, g1 - g0)) blue++;
+    }
+    expect(reached).toBeGreaterThan(80);
+    expect(warm).toBe(reached);
+    expect(blue / reached).toBeGreaterThan(0.9);
   });
 });
 

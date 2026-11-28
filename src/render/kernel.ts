@@ -15,7 +15,7 @@
  * thread and returns tables every thread reads (plain typed arrays, shared, never written after prepare).
  *
  * On the pool each worker has its own shape, built by evaluating the program again (closures cannot cross threads),
- * its own copy of the options (without `pool`, `cache`, `glowMask` and `fitPoints`, which stay on the main thread),
+ * its own copy of the options (without `pool`, `cache` and `fitPoints`, which stay on the main thread),
  * the camera and prime depth the main thread made, and the mesh's arrays shared. Its materials are its own objects,
  * so a kernel names a material by `ids(m)`, which every thread computes alike, never by object identity.
  */
@@ -101,6 +101,8 @@ export interface KernelResult {
   canvas: Canvas;
   /** Linear radiance per slot (3 floats a pixel), when the kernel keeps it: one slot, or one per light and the sky's with splitLights. */
   hdr?: Float32Array[];
+  /** What each pixel's primary ray met (photometry's KIND_ and FLAG_ bits), when the kernel keeps it: for a picture composed again from the slots (lights.png). */
+  flags?: Uint8Array;
 }
 
 export interface Kernel<T = unknown> {

@@ -389,9 +389,9 @@ export class BeautyPool {
     const buffers = allocBuffers(s.layout, s.size, true);
     const ctl = new Int32Array(new SharedArrayBuffer(4 * (ROWS + T + workers.length)));
     const check = fieldCheck(s.shape, s.opts.reachBounds ?? s.bounds);
-    // What stays on the main thread: the pool and cache themselves, the caller's glow mask (finish fills it), and the
-    // camera's fitting points (the camera crosses made).
-    const { pool: _pool, cache: _cache, glowMask: _glow, fitPoints: _fit, ...opts } = s.opts;
+    // What stays on the main thread: the pool and cache themselves, and the camera's fitting points (the camera
+    // crosses made).
+    const { pool: _pool, cache: _cache, fitPoints: _fit, ...opts } = s.opts;
     const tables = shareTables(s.tables);
     workers.forEach((w, k) => {
       const mesh = w.mesh === s.mesh ? undefined : shareMesh(s.mesh);

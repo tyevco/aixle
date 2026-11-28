@@ -1,10 +1,12 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BEAUTY_ONLY, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
+import { BEAUTY_ONLY, beautyQuality, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
 import { referenceMarkdown } from "../src/doc.js";
 import { BUILTINS } from "../src/lang/builtins.js";
+import { decodePng } from "../src/render/png.js";
+import { renderSet } from "../tools/render-set.js";
 
 describe("pipeline", () => {
   it("renders a program into a folder of pictures, exports and a report", () => {
@@ -694,5 +696,99 @@ describe("round-11 renders", () => {
     const scene = run("a = box(1, 1, 1)\nb = sphere(0.3) | move(2, 0, 0)\nprobe = sphere(0.1) | move(0, 1, 0)\nscene a, b", "sc.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["probe"] });
     expect(scene.evaluation.objects.map((o) => o.name)).toEqual(["a", "b", "probe"]);
     expect(() => run(src, "s.aix", dir, { ...QUICK, grid: 16, size: 64, show: ["nope"] })).toThrow(/^--show nope: no such step; the shapes are stand, probe$/);
+  });
+});
+
+describe("strips: the quality, lights.png from one render, and one shot framed as the full run frames it", () => {
+  const opts = { grid: 20, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, obj: false, glb: false, viewer: false, callouts: false, beauty: true, beautySize: 64 };
+  const dirs: string[] = [];
+  const tmp = () => { const d = mkdtempSync(join(tmpdir(), "aixle-strips-")); dirs.push(d); return d; };
+  const bytes = (dir: string, f: string) => readFileSync(join(dir, f));
+  afterAll(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+  // A mirror (which draft and full draw differently), glass, a glowing flame, a key and a point light.
+  const lit = 'ball = sphere(0.4) | move(-0.5, 0.4, 0) | paint("chrome")\nblock = box(0.6, 0.8, 0.6) | move(0.5, 0.4, 0) | paint("amber")\nflame = sphere(0.1) | move(0, 0.1, 0.6) | paint(material("#ffb050", glow=2))\nboth = ball + block + flame\nlight("key", azimuth=-40, elevation=50)\nlight("lamp", position=[0, 1.2, 0.8], color="#ffd8a0", power=0.8)\n';
+
+  it("--beauty-only --camera NAME draws the full run's beauty_NAME.png, a camera taking what it leaves out from the program's shot", () => {
+    // Reviewer's case: with set camera hero (zoom 1.1), --beauty-only --camera close framed close at zoom 1 where the
+    // full run's beauty_close.png took hero's 1.1 (21.5k of 22.5k pixels differed).
+    const src = lit + 'camera("hero", azimuth=25, elevation=15, zoom=1.3)\ncamera("close", focus="ball", azimuth=60)\ncamera("bare")\nset camera hero\nshow both';
+    const a = tmp();
+    const full = run(src, "cams.aix", a, opts);
+    expect(full.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png", "beauty_close.png", "beauty_bare.png"]);
+    for (const name of ["close", "bare"]) {
+      const b = tmp();
+      const one = run(src, "cams.aix", b, { ...BEAUTY_ONLY, grid: 20, size: 64, beautySize: 64, camera: name });
+      expect(one.files.filter((f) => f.startsWith("beauty"))).toEqual(["beauty.png"]);
+      expect(bytes(b, "beauty.png").equals(bytes(a, `beauty_${name}.png`)), name).toBe(true);
+    }
+    // A camera with nothing of its own is the program's shot under its own name and caption: hero's framing.
+    const c = tmp();
+    run(src.replace("set camera hero\n", ""), "cams.aix", c, { ...opts, lights: false });
+    expect(bytes(c, "beauty_bare.png").equals(bytes(a, "beauty_bare.png"))).toBe(false);
+  });
+
+  it("frames a camera with no focus= on the model, not on the focus of the shot `set camera` names", () => {
+    // set camera hero, focused on the ball: the full run framed beauty_wide.png on the ball's box (without fitting the
+    // ball, so on neither the part nor the model) where --beauty-only --camera wide framed the model.
+    const src = lit + 'camera("hero", focus="ball", azimuth=25)\ncamera("wide", azimuth=80)\nset camera hero\nshow both';
+    const a = tmp(), b = tmp(), c = tmp();
+    run(src, "cams.aix", a, { ...opts, lights: false });
+    run(src, "cams.aix", b, { ...BEAUTY_ONLY, grid: 20, size: 64, beautySize: 64, camera: "wide" });
+    expect(bytes(b, "beauty.png").equals(bytes(a, "beauty_wide.png"))).toBe(true);
+    // hero leaves wide's elevation and zoom to the defaults, so without `set camera hero` wide is the same picture.
+    run(src.replace("set camera hero\n", ""), "cams.aix", c, { ...opts, lights: false });
+    expect(bytes(c, "beauty_wide.png").equals(bytes(a, "beauty_wide.png"))).toBe(true);
+  });
+
+  it("renders beauty.png in full, or in draft on a quick pass and with quality draft, and says which; the render sets render full", () => {
+    const src = lit + "show both";
+    const lines = (o: object) => { const out: string[] = []; const d = tmp(); const r = run(src, "q.aix", d, { ...opts, lights: false, ...o, log: (l) => out.push(l) }); return { r, d, beauty: out.find((l) => l.startsWith("beauty render")) }; };
+    const full = lines({}), quick = lines({ quick: true }), draft = lines({ quality: "draft" }), quickFull = lines({ quick: true, quality: "full" });
+    expect(full.beauty).toMatch(/^beauty render 64px, full, 1 thread, in [\d.]+ s$/);
+    expect(quick.beauty).toMatch(/^beauty render 64px, draft, 1 thread, in [\d.]+ s$/);
+    expect(draft.beauty).toMatch(/, draft, /);
+    expect(quickFull.beauty).toMatch(/, full, /);
+    expect(bytes(quick.d, "beauty.png").equals(bytes(draft.d, "beauty.png"))).toBe(true);
+    expect(bytes(quickFull.d, "beauty.png").equals(bytes(full.d, "beauty.png"))).toBe(true);
+    expect(bytes(draft.d, "beauty.png").equals(bytes(full.d, "beauty.png"))).toBe(false);
+    expect(draft.r.report).toMatch(/`beauty\.png`: [^\n]*, in draft \(one reflection bounce/);
+    expect(full.r.report).not.toMatch(/in draft/);
+    expect(beautyQuality({})).toBe("full");
+    expect(beautyQuality({ quick: true })).toBe("draft");
+    // The render sets: their beauty is a full render's, byte for byte.
+    const set = tmp(), out = tmp();
+    writeFileSync(join(set, "q.aix"), "set grid 20\n" + src);
+    const quiet = vi.spyOn(console, "log").mockImplementation(() => {});
+    try { renderSet(set, out, "strips-test", { only: ["q"], sheetAndBeautyOnly: true }); } finally { quiet.mockRestore(); }
+    const own = tmp();
+    run("set grid 20\n" + src, "q.aix", own, { ...opts, lights: false, defaultGrid: 112, size: 384, beautySize: 384, quality: "full", threads: 2 });
+    expect(bytes(out, "q_beauty.png").equals(bytes(own, "beauty.png"))).toBe(true);
+  });
+
+  it("draws lights.png from one draft render: the same bytes on one thread and on four, its 'all' frame a separate draft render of the shot", () => {
+    const src = lit + "show both";
+    const logs: string[][] = [[], []];
+    const dirsByThreads = [1, 4].map((threads, k) => { const d = tmp(); run(src, "l.aix", d, { ...opts, threads, environment: "studio,overcast", log: (l) => logs[k].push(l) }); return d; });
+    const [one, four] = dirsByThreads;
+    expect(bytes(one, "lights.png").equals(bytes(four, "lights.png"))).toBe(true);
+    expect(bytes(one, "environments.png").equals(bytes(four, "environments.png"))).toBe(true);
+    expect(logs[0]).toEqual(expect.arrayContaining([expect.stringMatching(/^lights\.png: 2 lights from one render, 96px frames, draft, 1 thread, in [\d.]+ s$/), expect.stringMatching(/^environments\.png: 2 skies, 96px frames, draft, 1 thread, in [\d.]+ s$/)]));
+    expect(logs[1]).toEqual(expect.arrayContaining([expect.stringMatching(/^lights\.png: 2 lights from one render, 96px frames, draft, 4 threads, in [\d.]+ s$/)]));
+    // The 'all' frame (top right of lights.png) is environments.png's studio frame, drawn by a render of its own, to
+    // the byte but for the caption at its foot.
+    const lights = decodePng(bytes(one, "lights.png")), skies = decodePng(bytes(one, "environments.png"));
+    const at = (p: { width: number; rgba: Uint8Array }, x0: number, y0: number, x: number, y: number) => [0, 1, 2].map((c) => p.rgba[((y0 + y) * p.width + x0 + x) * 4 + c]).join(",");
+    let differ = 0, varied = new Set<string>();
+    for (let y = 0; y < 96 - 14; y++)
+      for (let x = 0; x < 96; x++) {
+        const v = at(lights, 6 + 2 * (96 + 6), 32, x, y);
+        varied.add(v);
+        if (v !== at(skies, 6, 32, x, y)) differ++;
+      }
+    expect(differ).toBe(0);
+    expect(varied.size).toBeGreaterThan(200);
+    const report = readFileSync(join(one, "report.md"), "utf8");
+    expect(report).toMatch(/`lights\.png`: [^\n]*from one half-size draft render[^\n]*exactly what that light adds/);
+    expect(report).toMatch(/`environments\.png`: [^\n]*each a half-size draft render/);
   });
 });
