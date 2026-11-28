@@ -45,8 +45,16 @@ interface Palette {
   sky: Vec3;
   horizon?: Vec3;
   ground: Vec3;
-  /** The open floor's display colour near the model: the kernel solves the floor's albedo to show it. */
+  /** The old palette's floor colour, which the backdrop below the horizon (and the viewer's floor) is made from. */
   floor: Vec3;
+  /**
+   * The open floor near the model as the old renderer displayed it (it lit `floor` and faded it towards `ground`),
+   * measured on the committed renders before the rebuild: the studio's at 211, 208, 204 levels (medal, teapot,
+   * hardware), the overcast's 207, 206, 203 (hub, bracket), the sunset's 115, 93, 79 (ring) and the night's 13, 13, 17
+   * (lamp, alley, campsite). The kernel solves the floor's albedo to show it. Solved to `floor` itself, the studio's
+   * open floor came out 13 levels lighter than it always was, the sunset's 40 and the night's three times as bright.
+   */
+  open: Vec3;
   /** The environment's intensity E for `set ambient 1`: it scales the sky's light on diffuse and reflections alike. */
   ambient: number;
 }
@@ -60,16 +68,16 @@ interface Palette {
  * side against the prototype: within 1.5 levels in all four).
  */
 const PALETTES: Record<Environment, Palette> = {
-  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], ambient: 1 },
-  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], ambient: 0.9 },
-  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], ambient: 0.9 },
-  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], ambient: 0.4 },
+  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], open: [0.83, 0.82, 0.8], ambient: 1 },
+  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], open: [0.81, 0.81, 0.8], ambient: 0.9 },
+  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], open: [0.45, 0.365, 0.31], ambient: 0.9 },
+  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], open: [0.052, 0.05, 0.066], ambient: 0.4 },
 };
 
 /** A sky's display colours and its intensity E for `set ambient 1`: what the viewer's scene mode builds its sky from. */
-export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Vec3; ground: Vec3; floor: Vec3; ambient: number } {
+export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Vec3; ground: Vec3; floor: Vec3; open: Vec3; ambient: number } {
   const p = PALETTES[env ?? "studio"];
-  return { sky: [...p.sky], ...(p.horizon ? { horizon: [...p.horizon] as Vec3 } : {}), ground: [...p.ground], floor: [...p.floor], ambient: p.ambient };
+  return { sky: [...p.sky], ...(p.horizon ? { horizon: [...p.horizon] as Vec3 } : {}), ground: [...p.ground], floor: [...p.floor], open: [...p.open], ambient: p.ambient };
 }
 
 /** The default key light's direction (towards the light): upper left, from the front. */

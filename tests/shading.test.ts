@@ -10,8 +10,8 @@ import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type Beaut
 import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
 import { pbr, type PbrTables } from "../src/render/pbr.js";
 import { project, toView, type Camera } from "../src/render/camera.js";
-import { buildEnvironment, prefilterLevels, projectSh, type EnvironmentState } from "../src/render/environment.js";
-import { FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
+import { buildEnvironment, ENVIRONMENTS, environmentPalette, prefilterLevels, projectSh, type EnvironmentState } from "../src/render/environment.js";
+import { encode, FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
 import { lastPoolRows, openBeautyPool } from "../src/render/beauty-pool.js";
 import { check } from "../src/pipeline.js";
 
@@ -138,6 +138,34 @@ describe("shading: units and energy", () => {
     // ratio to a directional light of the same power straight above is the falloff, range² / (range² + d²) = 1/2.
     const lamp = shade(slab, { ...opts, lights: [{ azimuth: 0, elevation: 0, size: 0.2, color: [1, 1, 1], power: 1, position: [p[0], p[1] + range, p[2]], range }] }, 32);
     for (let c = 0; c < 3; c++) expect(lamp.hdr[i * 3 + c] / sun.hdr[i * 3 + c]).toBeCloseTo(0.5, 2);
+  });
+
+  it("shows the open floor near the model as the old renderer displayed it, in every sky", () => {
+    // The old renderer lit its floor colour and faded it, so the open floor it displayed was darker than the colour
+    // (studio 211 levels, not 224; a night's 13, not 36). Solved to the colour itself, a night's floor came out three
+    // times as bright and the studio's merged with the sweep behind it.
+    const clay = materialFromString("clay")!;
+    const pair = O.union([O.paint(O.move(P.sphere(0.3), -2, 0.3, 0), clay), O.paint(O.move(P.sphere(0.3), 2, 0.3, 0), clay)]);
+    for (const env of ENVIRONMENTS) {
+      const size = 64;
+      const r = shade(pair, { size, environment: env }, 24);
+      const { flags, V } = r.buffers as { flags: Uint8Array; V: Float32Array };
+      // The bottom middle: open floor between the two balls, lit by the key, near enough to be solved, past any contact.
+      const out = [0, 0, 0], shown: number[][] = [];
+      for (let y = size - 8; y < size; y++)
+        for (let x = 24; x < 40; x++) {
+          const i = y * size + x;
+          if ((flags[i] & KIND_MASK) !== KIND_FLOOR || flags[i] & FLAG_EDGE || V[i] < 0.999) continue;
+          encode(r.hdr[i * 3], r.hdr[i * 3 + 1], r.hdr[i * 3 + 2], out);
+          shown.push(out.map((v) => v * 255));
+        }
+      expect(shown.length, env).toBeGreaterThan(100);
+      const open = environmentPalette(env).open;
+      for (let c = 0; c < 3; c++) {
+        const mean = shown.reduce((a, p) => a + p[c], 0) / shown.length;
+        expect(Math.abs(mean - open[c] * 255), `${env} channel ${c}`).toBeLessThan(2.5);
+      }
+    }
   });
 
   it("splits the light into slots that sum to the unsplit render", () => {

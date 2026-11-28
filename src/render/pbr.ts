@@ -19,7 +19,7 @@
  *   lettering cut into polished metal stays readable;
  * - a glow gives off its own colour and lights nothing else.
  *
- * Glass is pbr-glass.ts. The floor is solved so that the open floor near the model shows the palette's floor colour
+ * Glass is pbr-glass.ts. The floor is solved so that the open floor near the model shows what the old renderer showed
  * under the sky and every directional light, lit by each light at full strength with the area light's shadows near
  * the model, darkened under it by the field's occlusion and a wider contact term (the sky's light and the lights'
  * alike), and faded far off into the sky's horizon. It reflects nothing (a sheen on it drew a ghost of the model).
@@ -199,14 +199,15 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     RL.push(l.pos ? { point: true, x: l.pos[0], y: l.pos[1], z: l.pos[2], radius: r, index: i } : { point: false, x: l.dir[0], y: l.dir[1], z: l.dir[2], radius: lightAngle(l.size), index: i });
   });
 
-  // The floor's albedo: what shows the palette's floor colour in the open near the model, under the sky's light from
-  // above and every directional light at full strength.
+  // The floor's albedo: what shows the open floor the old renderer displayed near the model (the palette's `open`, not
+  // its floor colour, which the old renderer lit and faded to that), under the sky's light from above and every
+  // directional light at full strength.
   const UP = new Float64Array(3);
   irradiance(SKY, 0, 1, 0, UP, 0);
   UP[0] *= E; UP[1] *= E; UP[2] *= E;
   const FT = new Float64Array(3);
   const pal = environmentPalette(SKY.env);
-  decode(pal.floor[0], pal.floor[1], pal.floor[2], FT, 0);
+  decode(pal.open[0], pal.open[1], pal.open[2], FT, 0);
   let dirR = 0, dirG = 0, dirB = 0;
   for (let i = 0; i < NL; i++) {
     const q = i * LS;
