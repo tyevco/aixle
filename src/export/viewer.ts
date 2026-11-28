@@ -24,11 +24,11 @@
  * reflection cards would light them two or three times over); the GLB's own
  * lights (KHR_lights_punctual) or the beauty render's default key; a floor of
  * the albedo the beauty render solves for its open floor; the sky's backdrop;
- * and the program's named cameras and beauty.png's own shot as viewpoints.
+ * and the program's named cameras and beauty.png's own framing as viewpoints.
  */
 import type { Bounds } from "../sdf/types.js";
 import type { Vec3 } from "../core/vec.js";
-import { TONEMAP_GLSL } from "../render/photometry.js";
+import { GLOW, TONEMAP_GLSL } from "../render/photometry.js";
 import { GLB_RANGE_CUTOFF } from "./glb.js";
 
 /** The three.js the page loads, pinned: 0.187 prefilters each level of the environment with a true GGX lobe, as the beauty render's maps are. */
@@ -66,7 +66,7 @@ export interface ViewerScene {
   key?: { direction: Vec3; intensity: number };
   /** The program's named cameras as the beauty render frames them. */
   cameras: (ViewerCamera & { name: string })[];
-  /** The camera beauty.png is drawn from: the Perspective view. */
+  /** The camera beauty.png is drawn from, for setting the page beside it. */
   shot?: ViewerCamera;
   /** Open in the scene rather than the studio: the program declares lights or a sky. */
   start: boolean;
@@ -148,7 +148,7 @@ export function viewerHtml(glb: Buffer, name: string, bounds: Bounds, triangles:
 </head>
 <body>
 <div id="bar"><b>${escapeHtml(name)}</b><span>${dims} units · ${triangles} triangles</span>
-  <button data-view="persp">Perspective</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-view="top">Top</button>${(scene?.cameras ?? []).map((c, i) => `<button data-cam="${i}">◎ ${escapeHtml(c.name)}</button>`).join("")}
+  <button data-view="persp">Perspective</button><button data-view="front">Front</button><button data-view="right">Right</button><button data-view="top">Top</button>${scene?.shot && !scene.camera ? `<button id="beauty">◎ beauty.png</button>` : ""}${(scene?.cameras ?? []).map((c, i) => `<button data-cam="${i}">◎ ${escapeHtml(c.name)}</button>`).join("")}
   <button id="wire">Wireframe</button><button id="grid">Grid</button>${scene ? `<button id="studio">Studio</button><button id="scene">Scene: ${escapeHtml(scene.environment)}</button>` : ""}${animations.map((a, i) => `<button data-anim="${i}">▶ ${escapeHtml(a)}</button>`).join("")}<span>drag to orbit · wheel to zoom · right-drag to pan</span></div>
 ${animations.length ? `<div id="anim"><button id="all">▶ All</button><button id="pause">❚❚</button><label><input type="checkbox" id="loop" checked> loop</label><label>speed <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><input type="range" id="scrub" min="0" max="1" step="0.001" value="0"><span id="time">no animation</span></div>` : ""}
 <div id="err">three.js could not be loaded from the CDN; this page needs a network connection the first time.</div>
@@ -158,6 +158,8 @@ const GLB = "${b64}";
 const centre = ${JSON.stringify(centre)}, radius = ${radius}, floorY = ${floorY};
 const SCENE = ${JSON.stringify(page).replace(/</g, "\\u003c")};
 const STUDIO = ${JSON.stringify(STUDIO)};
+// A glow of 1 shows its colour at this radiance in beauty.png; the GLB's emissive is the glow alone.
+const GLOW = ${GLOW};
 // The beauty render's tone curve (photometry.ts): three.js's Neutral below its shoulder, the shoulder per channel.
 const TONEMAP = ${JSON.stringify(TONEMAP_GLSL)};
 let THREE, GLTFLoader, OrbitControls, RoomEnvironment;
@@ -239,7 +241,7 @@ grid.position.y = floorY + radius * 0.001; scene.add(grid);
 const axes = new THREE.AxesHelper(radius * 0.5); axes.position.y = floorY; scene.add(axes);
 // The program's scene, built when first asked for: its sky as the backdrop, and as the light the surfaces get from
 // all round at the beauty render's intensity; the floor; the beauty render's key when the GLB brings no light.
-let sceneBits = null, glbLights = [], mode = "studio";
+let sceneBits = null, glbLights = [], glows = [], mode = "studio";
 function skyColour(dy) {
   const mix = (a, b, u) => a.map((v, i) => v + (b[i] - v) * u);
   // Below the horizon the floor reaches the horizon's colour before the backdrop shows, as in beauty.png.
@@ -317,6 +319,7 @@ function setMode(m) {
   grid.visible = axes.visible = !inScene;
   if (sceneBits) { sceneBits.ground.visible = inScene; if (sceneBits.keyLight) sceneBits.keyLight.visible = inScene; }
   for (const l of glbLights) l.visible = inScene;
+  for (const [m, k] of glows) m.emissiveIntensity = inScene ? k * GLOW : k;
   for (const id of ["studio", "scene"]) el(id)?.classList.toggle("on", id === m);
 }
 function frameOn(c) {
@@ -337,7 +340,11 @@ new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
   model.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = true; o.receiveShadow = true;
-      for (const m of [].concat(o.material)) { if (!m.map) m.vertexColors = true; litAsBeauty(m); }
+      for (const m of [].concat(o.material)) {
+        if (!m.map) m.vertexColors = true;
+        litAsBeauty(m);
+        if (m.emissive && (m.emissiveMap || m.emissive.r + m.emissive.g + m.emissive.b > 0)) { glows.push([m, m.emissiveIntensity]); if (mode === "scene") m.emissiveIntensity *= GLOW; }
+      }
     }
     // The GLB's own lights light the scene mode only; the studio has its own.
     if (o.isLight) {
@@ -404,8 +411,6 @@ function tick() {
   el("pause").textContent = paused || done ? "▶" : "❚❚";
 }
 function view(name) {
-  // Perspective is beauty.png's own shot when the page knows it.
-  if (name === "persp" && SCENE?.shot) return frameOn(SCENE.shot);
   camera.fov = 30; camera.updateProjectionMatrix();
   const d = radius / Math.sin(THREE.MathUtils.degToRad(15)) * 1.1;
   const p = { persp: [Math.sin(0.61) * Math.cos(0.44), Math.sin(0.44), Math.cos(0.61) * Math.cos(0.44)], front: [0, 0, 1], right: [1, 0, 0], top: [0, 1, 0.0001] }[name];
@@ -419,13 +424,16 @@ el("wire").addEventListener("click", () => model?.traverse((o) => { if (o.isMesh
 el("grid").addEventListener("click", () => { grid.visible = !grid.visible; axes.visible = grid.visible; });
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 document.querySelectorAll("[data-cam]").forEach((b) => b.addEventListener("click", () => shot(Number(b.dataset.cam))));
+// beauty.png's own framing, to set the page beside it (a named camera's button is that when "set camera" names one).
+const beautyShot = () => { if (SCENE?.shot) frameOn(SCENE.shot); };
+el("beauty")?.addEventListener("click", beautyShot);
 el("studio")?.addEventListener("click", () => setMode("studio"));
 el("scene")?.addEventListener("click", () => setMode("scene"));
 view("persp");
 setMode(SCENE && SCENE.start ? "scene" : "studio");
 if (SCENE && SCENE.camera) shot(SCENE.cameras.findIndex((c) => c.name === SCENE.camera));
 // For scripts that drive the page (a headless screenshot): the scene, the camera and the switches.
-window.aixleViewer = { THREE, scene, camera, controls, renderer, setMode, shot, view, studio: { hemi, key, floor, grid, axes }, play: (i) => play(clips[i]), get clips() { return clips; }, get mixer() { return mixer; } };
+window.aixleViewer = { THREE, scene, camera, controls, renderer, setMode, shot, view, beautyShot, studio: { hemi, key, floor, grid, axes }, play: (i) => play(clips[i]), get clips() { return clips; }, get mixer() { return mixer; } };
 renderer.setAnimationLoop(() => { timer.update(); controls.update(); if (mixer) mixer.update(timer.getDelta()); tick(); renderer.render(scene, camera); });
 </script>
 </body>
