@@ -102,14 +102,16 @@ npx aixle render model.aix                 sheet, views, slices, steps, turntabl
 npx aixle render model.aix --focus lid     frame every view on one step or object (or `set focus lid`)
 npx aixle render model.aix --pose reach    show a rig in one pose at full size (or `set pose reach`)
 npx aixle render model.aix --no-anims      skip the animation strips (--anim turn draws one); --no-asserts skips the promises while placing parts (a quick pass that spent most of its time on them says so)
-npx aixle render model.aix --beauty        plus beauty.png, ray-marched with shadows (--beauty-size 1024 for a big one)
-npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials (parts thinner than the quick cell are missing from it; with lights and cameras it draws lights.png and every shot too, so --beauty-only for one)
+npx aixle render model.aix --beauty        plus beauty.png, the field ray-traced and shaded as the viewer and engines shade the GLB, in full quality on all cores, at most four, the same bytes on any number (--beauty-size 1024 for a big one)
+npx aixle render model.aix --quick --beauty   a small beauty render in a few seconds to try materials, in draft: one reflection bounce, one glossy ray, one glass deep (--quality full for the full one; parts thinner than the quick cell are missing from it; with lights and cameras it draws lights.png and every shot too, so --beauty-only for one)
 npx aixle render model.aix --focus lid --beauty   the beauty render framed on one part (slices cut through it too)
 npx aixle render model.aix --slice stem    slices.png through one step, framed on it, the rest of the model faint
 npx aixle render model.aix --show probe,cable   the output with those steps drawn in place: a probe seen without editing the program
                                            with light(), camera() and set environment in the program: several lights, a shot per camera as beauty_<name>.png (set camera's is beauty.png), a sky
-npx aixle render model.aix --beauty-only --camera hero   one shot (written once, as beauty.png) and the sheet, nothing else: the lighting loop (--lights adds lights.png)
-npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all)
+npx aixle render model.aix --beauty-only --camera hero   one shot (written once, as beauty.png) and the sheet, nothing else, in full quality on all cores (at most four): the full run's picture, so what the lighting loop settles carries over (--lights adds lights.png)
+npx aixle render model.aix --beauty-only --environment studio,overcast   environments.png under those skies in one run (or all), each a half-size draft frame
+npx aixle render model.aix --beauty --quality draft   beauty.png and the shots in draft, or --quality full over --quick (lights.png and environments.png are always draft)
+npx aixle render model.aix --beauty --threads 2   the beauty renders on that many threads (default: the cores, at most 4); the bytes are the same on any number
 npx aixle render model.aix --grid 200 --size 768   finer mesh, bigger pictures (or `set grid`, `set size`)
 npx aixle render model.aix --no-export --no-viewer   pictures only: skips the OBJ, GLB, atlas and viewer page
 npx aixle render model.aix --3mf           also model.3mf, and the report judges it as a print (both anyway with `set units` or `set bed`); model.stl is always written, in mm, z up
@@ -146,13 +148,20 @@ mesh; `--no-cache` samples afresh.
   the rest of the model (a book on its shelf) the planes across the
   contact go through the contact, so the cut shows what it rests on.
 - **`lights.png`** (two or more lights, with `--beauty`; with
-  `--beauty-only` only if `--lights`): every frame is the shot
-  `beauty.png` shows. The top row is
-  each light alone and then all; the bottom row is what each light adds
-  on its own, brightened by the gain printed under it, so a small point
-  light's reach and colour fill the frame (a glowing part is flat grey
-  there: its light is its own), and last the picture under
-  no light at all.
+  `--beauty-only` only if `--lights`) is one half-size draft render
+  that keeps each light's light apart, and every frame is the shot
+  `beauty.png` shows. The top row is the shot under each light alone
+  and then under all of them. The bottom row is exactly what each light
+  adds, its share of that one render on the model and the floor alike,
+  brightened by the gain printed under it (`spark adds, ×2.6`: a gain
+  of 1 to 32 that shows the 99th percentile of what it brings at about
+  230 of 255), so a small point light's reach and colour fill the
+  frame; a flame a light falls on shows that light on the flame's own
+  colour. The last frame is the shot under no light at all: the sky's
+  light, the glows and the sky in the metals. A silhouette against a
+  glow can be a few tens of levels brighter there than in `beauty.png`
+  (a frame means an edge pixel's samples before the tone curve, the
+  render after it), so judge edges in `beauty.png`.
 - The shot `set camera` names is `beauty.png`, captioned with the
   camera's name, and is not written again as `beauty_<name>.png`.
 - A render into a folder removes what the last render wrote there and
@@ -199,12 +208,17 @@ mesh; `--no-cache` samples afresh.
 | lettering is a blob on the sheet | a 0.05 stroke at a whole model's cell | `--focus name`: the step at its own cell |
 | the report says "separate pieces" for a lidded cup | it is an enclosed void | the report's Cavities row lists it; it is not a loose part |
 | the beauty render leaves the model small in the frame | the camera fits the box's corners, so a diagonal model has empty corners | `set zoom 1.2` or `--zoom 1.2` (it stops where the box would touch the edge) |
-| the beauty render is flat, or one side is black | one key light from the upper left | `light("key", ...)` and `light("rim", azimuth=150, elevation=20, power=0.5)`; `set environment sunset` or `night` for a mood; `camera("detail", focus="part", zoom=1.5)` for a second shot; `--camera NAME` and `--environment NAME` to try one shot or one sky without editing |
+| the beauty render is flat, or one side is black | one default key light, from the upper left and the front | `light("key", ...)` and `light("rim", azimuth=150, elevation=20, power=0.5)`; `set environment sunset` or `night` for a mood; `camera("detail", focus="part", zoom=1.5)` for a second shot; `--camera NAME` and `--environment NAME` to try one shot or one sky without editing |
 | a night scene is black but for the flame | `night` scales the ambient down to 0.4 | `set ambient 1.6` and a moon at `power=0.9`; a glow lights itself only, never its neighbours |
 | a low shot still looks down on the base; a fire does not light its neighbours | elevation is about the model's centre; a glow lights only itself | `camera(..., elevation=-8)`; a point light in the air just outside the flame, `light("fire", position=[0, 0.4, 0], range=2, color="#ff9a3c")` |
-| chrome or silver is a white blob | `overcast` is a white sky, and a mirror reflects it | the `studio` (its room round the camera is dark in a reflection), `sunset` or `night` for a mirror metal, or `steel`, `iron`, `brass` |
-| a plan shot's blind holes read as bumps | a hole lit from the frame's bottom reads as a dome: people see a picture as lit from above | with no `light()` a camera above elevation 55 takes the key from the frame's top left on its own; with your own lights, put the key at the camera's azimuth less 135 (`light("key", azimuth=-135, elevation=55)` for `camera("plan", azimuth=0, elevation=90)`) |
-| glass reads frosted and opaque in `--quick --beauty` | the quick grid is 64 cells and the wall is under a cell | judge glass at the full grid; keep a glowing part a cell clear of its glass |
+| chrome reads as a dark mirror, silver as a bright one, and neither as a white sphere | a mirror metal shows what is round it: in the `studio`, a dark room round and behind the camera with bright cards and each light's softbox | that is the metal reading as metal; a larger key, `size=3` (an angular radius of about 9.5 degrees), is a larger highlight and a larger softbox in the mirror |
+| chrome, silver or steel reads near white | `overcast` is a white sky all round, with no dark room for a mirror to show (steel near white on faces turned up) | the `studio`, `sunset` or `night` for a mirror metal, or a rougher one |
+| metal lettering, or a metal face turned to the camera, reads dark, nearly black | a metal face turned to the camera mirrors the dark room behind the camera (the patterns plate's iron labels were lost on their dark board) | paint the letters a non-metal (the plate's are porcelain now), or turn the face towards the light |
+| a polished engraving is faint, read only at its edges | a polished face and the floor of its letters mirror the same room, so only the walls and the cavity term (the field's occlusion within about six cells) set the letters apart | `rough=0.2` or more, or cut the letters deeper |
+| a point light's pool on a wall or the floor is wider than expected | its strength halves `range` away in linear light, which shows wider than the old renderer's pool did (a torch lights more of a wall) | a smaller `range` |
+| a soft shadow is too hard or too soft | a light's `size` is an angle, its angular radius in radians being size/18 (1 is about 3.2 degrees, 3 about 9.5), and one angle softens its shadow, widens its highlight and sizes its softbox in a mirror; a point light is a sphere whose radius is 2% of its `range` per unit of size | a larger `size` for a softer shadow (3 a window), a smaller one for a harder (0.5 a lamp); a shadow hardens anyway where a part meets the floor |
+| a plan shot's blind holes read as domes or bumps | a hole lit from the frame's bottom reads as a dome: people see a picture as lit from above (round 10's hub, whose plan shot keeps its own key at azimuth -40) | with no `light()` and no `set light_azimuth` or `light_elevation`, a camera above elevation 55 turns the default key towards the frame's top left itself (all the way at 75); with your own lights, put the key at the camera's azimuth less 135 (`light("key", azimuth=-135, elevation=55)` for `camera("plan", azimuth=0, elevation=90)`) |
+| glass reads frosted and opaque in `--quick --beauty` | the quick grid is 64 cells and the wall is under a cell, and a draft traces glass seen through glass one deep | judge glass at the full grid and in full quality; keep a glowing part a cell clear of its glass |
 | contour lines behind glass | a `loft` or a smooth union is a bound, not a distance; or two faces coincide | a rounded box or an exact primitive under `transmit`; grow a liquid a cell into its cavity and promise `inside(liquid, cavity) > 0.9` |
 | "is not part of the output" for a probe or a cavity region | it was warned as unused | it no longer is: a step an assert, a decal or a camera reads is a region, tagged `(region)` in `check` and on the steps sheet |
 | a fine speckle renders as square blocks | `speckle` is a cubic block pattern at `scale` | `"noise"` at a small scale for a soft mottle; `scale` is the block size; `examples/patterns.aix` is a plate of all ten |
@@ -217,13 +231,13 @@ mesh; `--no-cache` samples afresh.
 | a smooth profile's base rocks, or its box in `check` reaches past x = 0 | the spline overshoots where the outline turns sharply | give the points on the axis and at the foot's edge twice: a doubled point is a corner, and the run between two is straight |
 | letters or a label need to go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)`; `bend(deg)` curves about z instead |
 | stripes run the wrong way, or a pattern is missing on a thin sheet | patterns are stacked along the material's axis (y) in the paint frame | `material(..., axis="x")`, or paint the part standing and then lay it down |
-| the counter under the awning is black, the flame is a dark blob | the key light is fixed at the upper left and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |
-| gold looks olive, silver looks charcoal | a metal is mostly what it reflects, and the sheet has no environment | judge metals in the beauty render, which reflects the sky, ground and the model itself |
+| the counter under the awning is black, the flame is a dark blob | the one default key comes from the upper left, so the awning shades the counter, and nothing glows | `set light_azimuth`, `set light_elevation`, `set ambient 2`; `material("#ffc860", glow=1.5)` for the flame |
+| gold or silver look dull, or a metal flat, on the sheet | a metal is mostly what it reflects, and the sheet has no environment | judge metals in `beauty.png`, which reflects the room, the cards, the sky and the model itself: gold reads deep yellow (orange under `sunset`, amber under `night`), brass the greener yellow, `steel` grey, `iron` dark |
 | the model looks new, like plastic, in the beauty render or the viewer | every surface is one smooth colour | `material("iron", wear=0.4)` rubs the edges bright and darkens the creases; `bump=0.003` roughens it below the mesh; `"rust"` (a pattern and a preset) for oxide; all shown in `--beauty` and baked into the GLB, never on the sheet |
 | wear or a bump does not show on the sheet | the sheet draws the mesh and the pattern, not the finish | judge it in `--beauty`; the report's Maps row says which materials the GLB's maps carry |
 | a thin rod or a ring is worn bright all over | wear's band is about 1.2% of the model's size, and a part thinner than two bands is all edge | thicken it, or give it a material with less wear (or none) |
 | slices show a plant, a lamp or a probe as a floating blob | the planes go through the model's centre, and its stem is off them | `--slice plant`: the planes through that step's own solid |
-| a point light's effect is a few pixels in `lights.png` | the light reaches a small part of a whole picture | read the bottom row: what it adds on its own, brightened |
+| a point light's effect is a few pixels in `lights.png` | the light reaches a small part of a whole picture | read the bottom row: exactly what it adds, floor included, brightened by the gain shown |
 | `overlap(a, b) > ...` fails at 0 | the failure says why: they only touch, they stand apart by so much, or they overlap thinner than the lattice | sink one into the other; or promise a chunk, `overlap(rim & box(...), base)` |
 | a steel boss shows a row of blobs at its foot | a metal reflects the model's own cut faces (a ring of counterbores) | nothing is wrong; the slices and the plan view are the truth about holes |
 | `--focus` on a probe region or a cutter | it is not geometry | the frame is the region's, and what is drawn is the model inside it |
@@ -240,23 +254,57 @@ mesh; `--no-cache` samples afresh.
 | one copy a loop made cannot be sliced, focused or found in a warning | a name first assigned in a loop is the loop's own, not a step | `books = books + named("book_" + i, bk)`: a step per copy, `--slice book_9` |
 
 When the model is right, `npx aixle render model.aix --beauty` adds
-`beauty.png`, the field ray-marched with shadows, for showing rather than
-checking; `viewer.html` next to it orbits the mesh in a browser and
-plays a rig's animations (loop, speed, a scrub bar, all in turn), and
-`model.glb` carries the materials as a baked texture (`model.png`), with
-a normal map for bumps and fine `displace` relief, a metallic-roughness
-map for wear and rust and an emissive one for a patterned glow where the
-program has them, and with the program's lights (glTF's
-`KHR_lights_punctual`), so an engine lights it near what `beauty.png`
-shows. The materials travel exactly; the picture does not: an engine has
-its own sky, exposure and tone mapping, and its lights fall off by the
-inverse square where the beauty render's do not, and a part a few cells
-across keeps the mesh's polygon outline where the beauty render draws it
-round. `viewer.html` shows the GLB under its own grey studio, for
-judging the maps, or under the program's scene (Scene: the GLB's lights,
-the sky and ambient, the named cameras as buttons), which it opens in
-when the program declares lights or a sky: compare that with
-`beauty.png`. Past 200 thousand triangles the GLB, OBJ and viewer are
+`beauty.png`, for showing rather than checking: the field itself, ray
+traced and shaded as the viewer and the engines shade the GLB (glTF's
+metallic-roughness model in linear light, through one tone curve), with
+traced reflections, soft shadows from lights with a size and
+refraction through glass. `viewer.html` next to it orbits the mesh in
+a browser and plays a rig's animations (loop, speed, a scrub bar, all
+in turn), and `model.glb` carries the materials as a baked texture
+(`model.png`), with a normal map for bumps and fine `displace` relief,
+a metallic-roughness map for wear and rust and an emissive one for a
+patterned glow where the program has them, and with the program's
+lights (glTF's `KHR_lights_punctual`) in linear light. A directional
+light is 3.30 lux for each unit of `power` (π times the render's 1.05)
+and lights a face at every angle as `beauty.png` does; a point light is
+3.30 candela for each unit of `power` times its `range` squared, and
+since an engine's falls off by the inverse square, it is twice as
+bright as in `beauty.png` at its range, five times at half of it, the
+same at about 1.8 ranges and dark from three, where glTF's cutoff is.
+The materials travel exactly; the picture only in part: an engine has
+its own sky, exposure and tone curve, and a part a few cells across
+keeps the mesh's polygon outline where the beauty render draws it
+round.
+
+`viewer.html` (three.js 0.187.0) shows the GLB two ways, both on
+`beauty.png`'s tone curve. **Studio** is its own grey room, a
+hemisphere light and a white key, calibrated so that a white face
+turned to the key is about 1.0 in linear light and the non-metal
+presets show their base colours (within 1.6 levels on average): judge
+the maps there, wear, bumps and the atlas. **Scene** is `beauty.png`
+drawn from the export, and it opens there when the program declares a
+light or a sky: the same sky as light and in the metals (the studio's
+cards and dark room, the sunset's glow) at the same strength, diffuse
+light taken from the sky as the render takes it, the GLB's lights with
+`beauty.png`'s point-light falloff rather than an engine's, glows at the
+render's strength, the floor at the render's colour near the model and
+fading into the horizon, and the named cameras and `◎ beauty.png` as
+buttons that frame each shot as its picture is framed. Measured, its
+non-metal parts come within 1 to 2.3 levels of `beauty.png` on average
+(the door, the medal). What it cannot show: ambient occlusion and the
+darkening where parts meet, which the GLB has no map for (the
+lantern's candle inside its cage is 17 to 29 levels brighter than in
+`beauty.png`, and the medal's lettering barely reads); soft shadows
+(its shadow maps are hard, so a torch's bracket throws a large dark
+shadow); the model reflected in itself (metals read 15 to 50 levels
+brighter); bloom; glass, which the GLB leaves out; and the sun's or
+moon's disc and the stars in the backdrop. A steep shot's default key, turned to the frame's top left, is
+`beauty.png`'s alone: the viewer's camera turns, so its key stays the
+world's. So judge form, lettering, metals, glass and shadows in
+`beauty.png`; judge the maps in Studio, and in Scene, beside
+`beauty.png`, what an engine will make of the GLB's colours and lights.
+
+Past 200 thousand triangles the GLB, OBJ and viewer are
 decimated, the cap shared by error over every mesh so flat faces go
 first (the report's Exports row says from how many, how far they stray,
 each mesh's share, and the cap below which detail starts to go); past
