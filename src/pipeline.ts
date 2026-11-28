@@ -29,6 +29,8 @@ import { beautyCache, DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette,
 import { lightStudy } from "./render/lightstudy.js";
 import { openBeautyPool, type BeautyPool } from "./render/beauty-pool.js";
 import { perspective } from "./render/camera.js";
+import { buildEnvironment, environmentLatLong, horizonRadiance, irradiance } from "./render/environment.js";
+import { decode, KEY, toLinear } from "./render/photometry.js";
 import { hiddenFraction, hiddenFractionRays, renderCallouts } from "./render/callouts.js";
 import { assertLine, type AssertInfo, type AssertResult, type ContactRecord, evaluate, type Evaluation, type Settings, type ShapeOrigin, type StepRole } from "./lang/interpreter.js";
 import { vecText } from "./lang/builtins.js";
@@ -1792,21 +1794,55 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       return az === undefined && el === undefined ? DEFAULT_LIGHT_DIRECTION : lightDirection(az ?? -40, el ?? 55);
     };
     const viewerScene = (lit: Bounds): ViewerScene => {
-      const pal = environmentPalette(environment);
+      const env = environment ?? "studio";
+      const pal = environmentPalette(env);
       const setAmbient = typeof evaluation.settings.ambient === "number" ? Math.max(0, evaluation.settings.ambient) : 1;
+      // E, as the beauty render takes it: the palette's intensity times `set ambient`. three.js's environmentIntensity.
+      const E = setAmbient * pal.ambient;
       const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      const framed = (b: Bounds, focused: boolean, az: number, el: number, zm: number) => {
+        const cam = perspective(b, 512, 512, az, el, 30, zm, focused ? pointsWithin(mesh!, b) ?? mesh!.positions : mesh!.positions);
+        return { eye: cam.eye.map((v) => Number(v.toFixed(5))) as Vec3, target: boundsCenter(b).map((v) => Number(v.toFixed(5))) as Vec3, fov: 30 };
+      };
       const cameras = evaluation.cameras.map((c) => {
         const r = c.focus ? resolveFocus(c.focus) : undefined;
-        const b = r ? r.frame : focusName ? frame : lit;
-        const cam = perspective(b, 512, 512, c.azimuth ?? azimuth, c.elevation ?? elevation, 30, c.zoom ?? zoom ?? 1, r || focusName ? pointsWithin(mesh!, b) ?? mesh!.positions : mesh!.positions);
-        return { name: c.name, eye: cam.eye.map((v) => Number(v.toFixed(5))) as Vec3, target: boundsCenter(b).map((v) => Number(v.toFixed(5))) as Vec3, fov: 30 };
+        return { name: c.name, ...framed(r ? r.frame : focusName ? frame : lit, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom ?? 1) };
       });
+      // beauty.png's own camera: the shot `set camera` names, or the default, framed as the beauty render frames it.
+      const shotFocus = shot?.focus ? resolveFocus(shot.focus) : undefined;
+      const beautyShot = framed(shotFocus ? shotFocus.frame : focusName ? frame : lit, !!(shotFocus || focusName), azimuth, elevation, zoom ?? 1);
+      // The lights as the beauty render takes them: the program's, or its one default key, for the sky (the sun and
+      // the moon stand where the first directional light comes from) and the floor.
+      const directional = evaluation.lights.length
+        ? evaluation.lights.filter((l) => !l.position).map((l) => ({ dir: lightDirection(l.azimuth, l.elevation), color: l.color, power: Math.max(0, l.power) }))
+        : [{ dir: keyDirection(), color: [1, 1, 1] as Vec3, power: 1 }];
+      const key = directional.length ? directional[0].dir : DEFAULT_LIGHT_DIRECTION;
+      // The sky the beauty render lights this shot with, from the run's cache, so the beauty render finds it built.
+      const sky = buildEnvironment(env, { cameraAzimuth: azimuth, key, cache: beautyTables });
+      const map = environmentLatLong(sky);
+      // The floor's albedo, solved as the beauty render solves it: what shows the palette's open floor near the model
+      // under the sky's light from above and every directional light at full strength.
+      const up = [0, 0, 0], open = [0, 0, 0], lit3 = [0, 0, 0];
+      irradiance(sky, 0, 1, 0, up, 0);
+      decode(pal.open[0], pal.open[1], pal.open[2], open, 0);
+      for (const l of directional) for (let c = 0; c < 3; c++) lit3[c] += toLinear(l.color[c]) * l.power * KEY * Math.max(0, l.dir[1]);
+      const floorAlbedo = [0, 1, 2].map((c) => Number(Math.min(0.95, open[c] / Math.max(1e-4, up[c] * E + lit3[c])).toFixed(5))) as Vec3;
+      // The sky at the horizon the shot looks towards, which the far floor fades into.
+      const horizonAt = (s: typeof sky, c: { eye: Vec3; target: Vec3 }): Vec3 => {
+        const h = [0, 0, 0];
+        horizonRadiance(s, c.target[0] - c.eye[0], c.target[2] - c.eye[2], h, 0);
+        return h.map((v) => Number(v.toPrecision(6))) as Vec3;
+      };
       return {
-        environment: environment ?? "studio",
-        sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground, floor: pal.floor,
-        ambient: Number((0.42 * setAmbient * pal.ambient).toFixed(4)),
-        ...(evaluation.lights.length ? {} : { key: { direction: keyDirection().map((v) => Number(v.toFixed(5))) as Vec3, intensity: Number((2 * Math.PI * Math.pow(0.425, 2.2)).toFixed(4)) } }),
+        environment: env,
+        sky: pal.sky, ...(pal.horizon ? { horizon: pal.horizon } : {}), ground: pal.ground,
+        ambient: Number(E.toFixed(5)),
+        light: { width: map.width, height: map.height, data: map.data, sh: Array.from(map.diffuseSH, (v) => Number(v.toPrecision(6))) },
+        floorAlbedo,
+        floorFade: { min: lit.min.map((v) => Number(v.toFixed(5))) as Vec3, max: lit.max.map((v) => Number(v.toFixed(5))) as Vec3, reach: Number((1.5 * Math.hypot(...boundsSize(lit))).toPrecision(6)), horizon: horizonAt(sky, beautyShot) },
+        ...(evaluation.lights.length ? {} : { key: { direction: keyDirection().map((v) => Number(v.toFixed(5))) as Vec3, intensity: Number((Math.PI * KEY).toPrecision(6)) } }),
         cameras,
+        shot: beautyShot,
         start: evaluation.lights.length > 0 || evaluation.settings.environment !== undefined,
         ...(shot ? { camera: shot.name } : {}),
       };
@@ -1885,7 +1921,8 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
         // The program's lights go into the GLB, so an engine lights the model as the beauty render does (round 11).
         const lit = triangleCount(mesh!) > 0 ? meshBounds(mesh!) : bounds;
         const litSize = boundsSize(lit);
-        const punctual = glbLights(evaluation.lights, boundsCenter(lit), Math.max(0.5 * Math.hypot(litSize[0], litSize[1], litSize[2]), 1e-3));
+        // A point light with no range reaches half the model's longest side, as in the beauty render.
+        const punctual = glbLights(evaluation.lights, boundsCenter(lit), Math.max(0.5 * Math.hypot(litSize[0], litSize[1], litSize[2]), 1e-3), Math.max(...litSize) / 2 || 1);
         const glb = toGlbScene(hierarchy, name, glbAnimations, punctual);
         write("model.glb", glb);
         if (opts.viewer !== false) write("viewer.html", viewerHtml(glb, evaluation.outputName, bounds, hierarchy.triangles, glbAnimations.map((a) => a.name), viewerScene(lit)));
