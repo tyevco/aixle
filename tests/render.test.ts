@@ -13,7 +13,7 @@ import { customMaterial, materialFromString, preset } from "../src/sdf/materials
 import { Canvas, rgb } from "../src/render/canvas.js";
 import { drawText, textWidth } from "../src/render/font.js";
 import { renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
-import { ADDS_TARGET, addsGain, encodePicture, gainText, lightFrames } from "../src/render/lightstudy.js";
+import { ADDS_TARGET, addsGain, encodePicture, gainText, lightFrames, lightStudy } from "../src/render/lightstudy.js";
 import { BLOOM_THRESHOLD, encode, FLAG_EDGE, FLAG_GLOW } from "../src/render/photometry.js";
 
 const sphere = P.sphere(1);
@@ -275,6 +275,42 @@ describe("what a light adds", () => {
     expect(Math.round(o[0] * 255)).toBe(230);
     expect(gainText(1.02)).toBe("");
     expect(gainText(3.27)).toBe(", ×3.3");
+  });
+
+  it("lays each light's frames out in its own column, every frame captioned in ink that stands out from the picture under it", () => {
+    // A mid-grey sky slot (the lantern's rim and flame frames, and its picture under no light, were mid-grey floors
+    // under mid-grey captions: unreadable), a strong key that whitens its frames, a faint fill.
+    const size = 96, n = size * size * 3;
+    const fill = (v: number) => new Float32Array(n).fill(v);
+    const slots = [fill(0.16), fill(0.6), fill(0.03)];
+    const total = new Float32Array(n);
+    for (const s of slots) for (let k = 0; k < n; k++) total[k] += s[k];
+    const r = { canvas: encodePicture(total, size), hdr: slots, flags: new Uint8Array(size * size) };
+    const ref = lightFrames({ ...r, canvas: encodePicture(total, size) });
+    const study = lightStudy(r, [{ name: "key", caption: "az -40 el 50" }, { name: "fill", caption: "az 150 el 20  power 0.1" }]);
+    const luma = (d: Uint8Array, o: number) => 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2];
+    const rowY = 26 + 6, lowY = rowY + size + 6 + 16;
+    const frames: [string, Canvas, number, number][] = [
+      ["key alone", ref.alone[0], 0, rowY], ["fill alone", ref.alone[1], 1, rowY], ["all", ref.all, 2, rowY],
+      ["key adds", ref.adds[0], 0, lowY], ["fill adds", ref.adds[1], 1, lowY], ["no light", ref.none, 2, lowY],
+    ];
+    for (const [name, frame, col, y0] of frames) {
+      const x0 = 6 + col * (size + 6);
+      let glyph = 0, faint = 0, other = 0;
+      for (let y = 0; y < size; y++)
+        for (let x = 0; x < size; x++) {
+          const a = ((y0 + y) * study.width + x0 + x) * 4, b = (y * size + x) * 4;
+          const same = [0, 1, 2].every((c) => study.data[a + c] === frame.data[b + c]);
+          if (same) continue;
+          // What differs is the caption, at the frame's foot; anything else is a frame in the wrong place.
+          if (y < size - 14) { other++; continue; }
+          glyph++;
+          if (Math.abs(luma(study.data, a) - luma(frame.data, b)) < 80) faint++;
+        }
+      expect(other, name).toBe(0);
+      expect(glyph, name).toBeGreaterThan(20);
+      expect(faint, name).toBe(0);
+    }
   });
 
   it("shows on a glowing part what the light does to its colour, with no glow in it (round 11: a flame read bright green)", () => {

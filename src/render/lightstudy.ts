@@ -24,7 +24,7 @@
  * a level or two there, and nowhere else.
  */
 import { Canvas, rgbDithered } from "./canvas.js";
-import { drawText, textWidth } from "./font.js";
+import { drawText, GLYPH_HEIGHT, textWidth } from "./font.js";
 import { bloom, decode, tonemap, toSrgb } from "./photometry.js";
 import { INK } from "./views.js";
 import type { KernelResult } from "./kernel.js";
@@ -80,7 +80,7 @@ export function encodePicture(lin: Float32Array | Float64Array, size: number, fl
   return canvas;
 }
 
-/** The study's frames, unlabelled but for the render's own caption on "all", and the linear radiance each was finished from. */
+/** The study's frames, uncaptioned ("all" is the render's own picture, as it drew it), and the linear radiance each was finished from. */
 export interface LightFrames {
   alone: Canvas[];
   all: Canvas;
@@ -130,9 +130,31 @@ export interface StudyLight {
 /** The gain as its frame prints it: two figures, none at all when it is about 1. */
 export const gainText = (gain: number): string => (gain > 1.05 ? `, ×${Number(gain.toPrecision(2))}` : "");
 
+/** Dark ink on a light picture, light ink on a dark one, and the luma between them that picks one. */
+const DARK_INK = INK.text, LIGHT_INK = 0xe8e6e0;
+const luma = (c: number): number => 0.2126 * ((c >> 16) & 255) + 0.7152 * ((c >> 8) & 255) + 0.0722 * (c & 255);
+const INK_SPLIT = (luma(DARK_INK) + luma(LIGHT_INK)) / 2;
+
+/**
+ * A frame's caption at its foot, where the beauty render places its own, in whichever ink stands out from the
+ * picture under it. The beauty render's mid-grey ink could not be read on a mid-grey floor (the lantern's rim and
+ * flame frames and its picture under no light), nor the adds row's light grey on the floor a key lights.
+ */
+export function caption(c: Canvas, text: string): void {
+  const x0 = 8, y0 = c.height - 12, x1 = Math.min(c.width, x0 + textWidth(text, 1)), y1 = Math.min(c.height, y0 + GLYPH_HEIGHT);
+  let sum = 0, n = 0;
+  for (let y = y0; y < y1; y++)
+    for (let x = x0; x < x1; x++) {
+      const o = (y * c.width + x) * 4;
+      sum += 0.2126 * c.data[o] + 0.7152 * c.data[o + 1] + 0.0722 * c.data[o + 2];
+      n++;
+    }
+  drawText(c, x0, y0, text, n && sum / n < INK_SPLIT ? LIGHT_INK : DARK_INK, 1);
+}
+
 /**
  * lights.png: each light alone, then all of them, across the top; under each, what it adds, and under "all" the
- * picture under no light. `result` is one render of the shot with splitLights, its caption "all".
+ * picture under no light, each frame captioned here. `result` is one render of the shot with splitLights, uncaptioned.
  */
 export function lightStudy(result: KernelResult, lights: StudyLight[]): Canvas {
   const f = lightFrames(result);
@@ -148,15 +170,15 @@ export function lightStudy(result: KernelResult, lights: StudyLight[]): Canvas {
   // The row's key, as much of it as the strip is wide for (a quick pass's strip cut the long one short).
   const key = ["what each adds on its own, exactly, brightened by the gain shown. last: no light at all, the sky's ambient and the glows", "what each adds, brightened by the gain shown. last: no light at all", "what each adds. last: no light"].find((t) => textWidth(t, 1) + 20 <= strip.width) ?? "what each adds";
   drawText(strip, 10, rowY + 3, key, INK.dim, 1);
-  const label = (c: Canvas, text: string, color = INK.dim) => drawText(c, 8, c.height - 12, text, color, 1);
   lights.forEach((l, i) => {
-    label(f.alone[i], `${l.name}  ${l.caption}`);
-    label(f.adds[i], `${l.name} adds${gainText(f.gains[i])}`, 0xb0b0b0);
+    caption(f.alone[i], `${l.name}  ${l.caption}`);
+    caption(f.adds[i], `${l.name} adds${gainText(f.gains[i])}`);
     strip.blit(f.alone[i], gutter + i * (frame + gutter), bar + gutter);
     strip.blit(f.adds[i], gutter + i * (frame + gutter), rowY + rowBar);
   });
+  caption(f.all, "all");
   strip.blit(f.all, gutter + lights.length * (frame + gutter), bar + gutter);
-  label(f.none, "no light");
+  caption(f.none, "no light");
   strip.blit(f.none, gutter + lights.length * (frame + gutter), rowY + rowBar);
   return strip;
 }

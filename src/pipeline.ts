@@ -2039,7 +2039,7 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       // went on lights.png and a second copy of the shot).
       if (lights && lights.length >= 2 && opts.lights !== false) {
         const study = time("lights", () => {
-          const r = renderBeautyResult(output, mesh!, beautyFrame, stripOptions({ splitLights: true, label: "all" }));
+          const r = renderBeautyResult(output, mesh!, beautyFrame, stripOptions({ splitLights: true }));
           return lightStudy(r, lights.map((l) => ({ name: l.name ?? "light", caption: `${l.position ? `at ${l.position.map(fmt).join(", ")}` : `az ${fmt(l.azimuth)} el ${fmt(l.elevation)}`}${l.power !== 1 ? `  power ${fmt(l.power)}` : ""}` })));
         });
         write("lights.png", study.toPng());
