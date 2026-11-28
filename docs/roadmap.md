@@ -1221,6 +1221,17 @@ Lighting friction has so far been found by modelling: round 9's chrome
 bottle under a white sky, round 10's spark a few pixels in the light
 strip, round 11's oak that read as new pine in the viewer.
 
+The last blind check (design.md, "Read blind") did not meet the
+redesign's bar. Six of its eight pairs read at least as well in the new
+render, not seven: round 10's engraved FOREVER is fainter gold on gold,
+and round 11's beater is harder to pick out among the reflections in its
+steel bowl. And one answer was wrong only for the new render: the
+lantern's worn rusty iron read as polished chrome, because `wear` rubs a
+thin part bright all round and the new render draws bare polished iron
+as steel. What it found that the language got wrong, text() mirroring
+lettering under an arc, is fixed. The worn metal and the faint engraving
+are being answered before this round, so the round tests the fixes.
+
 **What.** A round of four fresh agents, briefed as `dogfood/README.md`
 describes, each brief chosen to need what the redesign changed:
 - a metal object with lettering, engraved and raised: a brass plaque or

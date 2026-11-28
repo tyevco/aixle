@@ -1099,10 +1099,17 @@ paid for the new look: the dogfood set went from 728 s to 490 s and then to 364 
 the pool's gain measured locally (see Threads), and the kernel then
 added about 15 s to the three sets (6 s to the examples, 7 to dogfood, 2
 to std) and 8 s to the whole check. The last row's dogfood set is 39 to
-66 s slower than the kernel's on both of its runs, which none of the
-stage's own measurements accounts for (the legibility pass's scenes were
-within 5%, and neither the light study nor the export runs in a render
-set); it is recorded here and not yet explained.
+66 s slower than the kernel's on both of its runs, and that is the
+runner, not the code. Every program in the log took longer, by 1.11 to
+1.27 times (median 1.19), the Roblox props that are mostly meshing and a
+sheet as much as the mixer's camera shots, and the examples by a median
+1.16. The test step rose by as much, from 67 s to 87. A cost the code
+added would fall unevenly: a fixed one on the small programs, the
+renderer's on the shots. On one machine the two commits take the same
+time: five programs (round 7's jack, round 9's owl, round 5's bicycle,
+round 3's excavator and the Roblox hatchling, run by the render set's
+own scripts, interleaved, two runs each) summed to 65.9 and 67.0 s at
+230a4d5 and 65.6 and 65.5 s at 862f270.
 
 The beauty render's share of a render set was measured at 862f270 on the
 same kind of machine (four cores of an Intel Xeon at 2.1 GHz, its load
