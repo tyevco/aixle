@@ -10,7 +10,7 @@ import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type Beaut
 import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
 import { pbr, sceneLights, type PbrTables } from "../src/render/pbr.js";
 import { perspective, project, toView, type Camera } from "../src/render/camera.js";
-import { buildEnvironment, DEFAULT_LIGHT_DIRECTION, defaultKey, ENVIRONMENTS, environmentPalette, lightDirection, prefilterLevels, projectSh, STEEP, type EnvironmentState } from "../src/render/environment.js";
+import { buildEnvironment, DEFAULT_LIGHT_DIRECTION, defaultKey, ENVIRONMENTS, environmentPalette, lightDirection, prefilterLevels, projectSh, skyAt, STEEP, type EnvironmentState } from "../src/render/environment.js";
 import { encode, FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
 import { lastPoolRows, openBeautyPool } from "../src/render/beauty-pool.js";
 import { check } from "../src/pipeline.js";
@@ -447,13 +447,13 @@ describe("shading: the default key in a steep shot", () => {
     expect(corners.bottomRight, JSON.stringify(corners)).toBeLessThan(Math.min(corners.topLeft, corners.topRight, corners.bottomLeft) * 0.8);
   });
 
-  it("starts the studio's floor flag past the frame's bottom edge when the camera looks steeply down, out of shot", () => {
+  it("starts the floor flag (the studio's and the overcast's) past the frame's bottom edge when the camera looks steeply down, out of shot", () => {
     // A camera past 75° sees the floor beyond its own place at the frame's bottom; a flag started at the camera
     // darkened that half of a plan view's floor to a quarter (210 levels to 48).
     const block = O.paint(O.move(P.box(1, 0.6, 1), 0, 0.3, 0), customMaterial({ color: [0.8, 0.8, 0.8], rough: 0.7 }));
     const nets = surfaceNets(block, { resolution: 32 });
-    for (const [azimuth, elevation] of [[0, 90], [35, 90], [0, 80], [-120, 85]]) {
-      const o = { size: 96, cellSize: nets.cellSize, azimuth, elevation, zoom: 0.5 };
+    for (const [azimuth, elevation, environment] of [[0, 90, "studio"], [35, 90, "studio"], [0, 80, "studio"], [-120, 85, "studio"], [35, 90, "overcast"], [-120, 85, "overcast"]] as const) {
+      const o = { size: 96, cellSize: nets.cellSize, azimuth, elevation, zoom: 0.5, environment };
       const c = renderBeauty(block, nets.mesh, block.bounds, o);
       const cam = beautyCamera(nets.mesh, block.bounds, o);
       // The open floor near the frame's top and bottom edges, on its left, clear of the block and its shadow.
@@ -465,8 +465,38 @@ describe("shading: the default key in a steep shot", () => {
         return 0.2126 * ((v >> 16) & 255) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255);
       };
       const top = edge(1), bottom = edge(-1);
-      expect(Math.abs(bottom - top), `top ${top}, bottom ${bottom} at ${azimuth}, ${elevation}`).toBeLessThan(top * 0.05);
+      expect(Math.abs(bottom - top), `top ${top}, bottom ${bottom} at ${azimuth}, ${elevation}, ${environment}`).toBeLessThan(top * 0.05);
     }
+  });
+});
+
+describe("shading: the overcast's flags", () => {
+  it("darken a metal's face turned to the camera, which mirrors the ground on the camera's side, and barely touch a matte part", () => {
+    // A key behind on the right, so the ground behind the camera is away from it and flagged in full.
+    const key: BeautyLight = { azimuth: 150, elevation: 45, size: 1, color: [1, 1, 1], power: 1 };
+    const opts = { size: 64, azimuth: 0, elevation: 20, environment: "overcast" as const, lights: [key] };
+    const flagged = buildEnvironment("overcast", { cameraAzimuth: 0, lights: [{ dir: lightDirection(150, 45), size: 1, color: [1, 1, 1], power: 1 }] });
+    // The same sky with the flags taken down, its reflections' maps drawn again from it: the overcast before its rig.
+    const down = { ...flagged, reflect: { ...flagged.reflect, walls: 0, flag: 0 } };
+    const bare: EnvironmentState = { ...down, levels: prefilterLevels((x, y, z, out, mode) => skyAt(down, x, y, z, out, 0, mode)) };
+    const front = (r: ReturnType<typeof shade>) => {
+      const { flags, normal } = r.buffers as { flags: Uint8Array; normal: Float32Array };
+      return meanOver(r.hdr, (i) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE) && normal[i * 3 + 2] > 0.85 && Math.abs(normal[i * 3 + 1]) < 0.3, 64 * 64);
+    };
+    const model = (r: ReturnType<typeof shade>) => {
+      const { flags } = r.buffers as { flags: Uint8Array };
+      return meanOver(r.hdr, (i) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE), 64 * 64);
+    };
+    // Steel takes its reflection from the prefiltered sky, chrome from a traced ray that meets the flagged floor.
+    for (const name of ["steel", "chrome", "silver"]) {
+      const ball = O.paint(O.move(P.sphere(1), 0, 1, 0), materialFromString(name)!);
+      const a = front(shade(ball, opts, 32, flagged)), b = front(shade(ball, opts, 32, bare));
+      expect(a, `${name}: ${a} against ${b}`).toBeLessThan(b * 0.6);
+    }
+    // A matte part's light is the bare dome's (the same SH); only its faint gloss sees the flags.
+    const clay = O.paint(O.move(P.sphere(1), 0, 1, 0), materialFromString("clay")!);
+    const a = model(shade(clay, opts, 32, flagged)), b = model(shade(clay, opts, 32, bare));
+    expect(Math.abs(a - b) / b, `clay: ${a} against ${b}`).toBeLessThan(0.025);
   });
 });
 

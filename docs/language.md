@@ -1167,13 +1167,24 @@ and what a metal reflects; the lights are the program's own:
   chrome reads as a dark mirror with bright cards in it, silver as a
   bright one, and a shaded side keeps its form.
 - `overcast` is a white dome, brighter towards the zenith, with soft,
-  even light and no rig, so a mirror metal reflects white sky all round:
-  silver comes out near white and chrome and steel pale and even there.
-  A rougher finish does not help, since it blurs the same white: at the
-  centre of a ball, silver at a roughness of 0.6 came to 238 levels,
-  against 216 at its own 0.25. Give a mirror metal the studio, a sunset
-  or a night, or use a darker or a coloured metal (`iron` came to 58
-  there, and `brass` stays yellow).
+  even light. Like the studio it is two rigs: the light a surface takes
+  is the bare dome, and what a surface mirrors is flagged on the
+  camera's side, as a photographer flags a shot outdoors, with a dark
+  band over the horizon and a dark ground there (lifted on the key's
+  side, where the key lights the floor). So a metal's faces turned to
+  the camera mirror the dark and have form, and its faces turned to the
+  sky mirror the white dome: a chrome or silver ball shows a white sky
+  over a dark horizon and ground, steel reads grey with light tops (a
+  steel ball's face turned to the camera came to 96 levels, its top to
+  210), and a hub's rim shades from light on the key's side to dark. A
+  metal seen from above, as in a plan shot, mirrors mostly sky and reads
+  near white, and a darker metal reads darker there. The studio mirrors
+  a dark ceiling over a face turned up, so a mirror metal's top is
+  darker there (a silver ball's top came to 189 levels in the studio,
+  236 under the overcast, chrome's to 112 and 199); a steel part seen
+  from straight above is near white in either (round 10's hub's plan
+  shot: 241 levels on the flat outside its bolt circle, 228 in the
+  studio).
 - `sunset` is a blue sky over a warm band at the horizon, with a sun 3
   degrees up on the key light's side and its glow round it. Only a
   camera near the horizon (`elevation` under about 10) sees the band;
