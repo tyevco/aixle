@@ -254,6 +254,28 @@ describe("what a light adds", () => {
     }
     expect(edges).toBeGreaterThan(50);
     expect(same).toBe(80 * 80 - edges);
+    // And a glow that blooms: under two lights of no power the picture is the sky's slot alone, and the picture under
+    // no light, finished from that slot, is the render's own but at the silhouettes, whose four samples the slots
+    // keep only as their linear mean (61 levels brighter at the glow's edge here), and round them, where the bloom
+    // spreads that a few levels. Without the bloom the glow's halo would be missing.
+    const ember = O.union([matte, O.paint(O.move(P.sphere(0.25), -0.2, 1.25, 0.2), customMaterial({ color: [1, 0.7, 0.3], glow: 3 }))]);
+    const e = surfaceNets(ember, { resolution: 32 });
+    const dark: BeautyLight[] = [0, 1].map((k) => ({ name: `l${k}`, azimuth: -40 + 90 * k, elevation: 50, size: 1, color: [1, 1, 1], power: 0 }));
+    const g = renderBeautyResult(ember, e.mesh, ember.bounds, { size: 80, cellSize: e.cellSize, lights: dark, quality: "draft", splitLights: true });
+    const none = lightFrames(g).none, flat = encodePicture(g.hdr![0], 80);
+    let off = 0, worst = 0, haloed = 0;
+    for (let i = 0; i < 80 * 80; i++) {
+      if (none.data[i * 4] !== flat.data[i * 4]) haloed++;
+      if (g.flags![i] & FLAG_EDGE) continue;
+      for (let c = 0; c < 3; c++) {
+        const d = Math.abs(none.data[i * 4 + c] - g.canvas.data[i * 4 + c]);
+        worst = Math.max(worst, d);
+        if (d) off++;
+      }
+    }
+    expect(haloed).toBeGreaterThan(300);
+    expect(worst).toBeLessThanOrEqual(8);
+    expect(off).toBeLessThan(80 * 80 * 3 * 0.03);
   });
 
   it("brightens a light's share until most of what it reaches shows near white, 1 to 32 times", () => {

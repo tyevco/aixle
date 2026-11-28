@@ -20,8 +20,9 @@
  * 0, so what a light adds on a flame is the light on the flame's colour, and nothing else.
  *
  * A frame other than "all" takes an edge pixel's four samples as their mean in linear light (the slots keep no
- * other), where the render's own picture means them after the tone curve: a silhouette's antialiasing can differ by
- * a level or two there, and nowhere else.
+ * other), where the render's own picture means them after the tone curve. Most silhouettes differ by a level or two
+ * there, but one against something far brighter is brighter: a glow's edge by tens of levels (61 in a test scene),
+ * which the bloom then spreads a few levels round it. Everywhere else a frame is finished as the render's own.
  */
 import { Canvas, rgbDithered } from "./canvas.js";
 import { drawText, GLYPH_HEIGHT, textWidth } from "./font.js";
