@@ -9,7 +9,8 @@
  * - all: the render's own picture;
  * - none: slot 0;
  * - what light i adds: gain_i · slot i + 1, on black.
- * Each is composed in linear light and finished as the render finishes its own (bloom, the tone curve, the dither).
+ * Each is composed in linear light and finished as the render finishes its own: bloom, the tone curve and the dither
+ * (what a light adds without the bloom, so it is that light's radiance and nothing spread from elsewhere).
  *
  * It replaces a render per light, one under no light and one under all (n + 2 of them), which differed in more than
  * the light: the floor's albedo is solved per render from that render's directional lights, so each "alone" and the
