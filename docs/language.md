@@ -522,7 +522,12 @@ otherwise), each laid flat (its x along x, its y along -z), so
 second dimension runs along z. Both path
 functions take `smooth=n` to curve the path through the points; a handle is
 four points and `smooth=6`. A hollow spout is one tube minus a thinner one
-on the same path. `taper=` scales the end relative to the start (a horn,
+on the same path, but round ends seal the bore at the tip, and a bore cut
+from the spout alone stops at the pot's wall: cut the outer tube flat
+(`cap="flat"`), so the thinner one's round end reaches past it, and cut
+the bore after the spout is joined to the pot (`examples/teapot.aix`; a
+thinner rod down the bore and out past the tip,
+`assert void(rod, teapot) == 1`, promises it is open). `taper=` scales the end relative to the start (a horn,
 a tapering tail) and `sweep` also takes `twist=` degrees over the whole
 path, so three circles swept along `helix(r, h, turns)` with
 `twist = 360 * turns` is a rope. `helix()`, `arc(r, from, to, axis="y")` and

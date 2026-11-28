@@ -1163,6 +1163,13 @@ torch handle as black iron, the medal's brass letters as gold, and the
 straw below the drink was not seen at all. One shared misreading is the
 language's, not the renderer's: both show the medal's lower legend
 mirror-reversed, because that is what `text()` builds on a negative arc.
+Two of the teapot's answers were about its model, not the renderer: its
+handle stopped short of the pot, so the free, flat end the reader took
+for an open tube was there to be seen, and its spout, which the reader
+saw closed at the tip, was closed: the bore was sealed at both ends. The
+example now joins the handle to the body at both ends and cuts the bore
+through the pot's wall and out of a tip cut flat, with asserts that say
+so.
 
 The reader trusted the new render in seven pairs of eight: the metals
 read as metal, the glass as clear and the drink in it as translucent,
