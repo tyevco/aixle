@@ -609,10 +609,12 @@ measure:
 The steps toward the surface are asked first, the normal's largest axis
 first, and stop as soon as they make a slope of 0.98; the other three
 sides are asked only when they do not. A tap that reads its height or
-more is asked nothing, so a field that is a distance at every tap draws
-the same bytes. The floor's occlusion and its contact term read their
-taps the same way; under a bound they drew a grey ring on the floor
-round the cafe set's rug, a wide grey band round the lighthouse's
+more is asked nothing, and a tap of a field that is a distance reads its
+own value unless its steps fall short of 0.98 a cell or two from a small
+curved part: the mug drew the same bytes, the stairs, all exact, moved
+32 pixels by one level. The floor's occlusion and its contact term read
+their taps the same way; under a bound they drew a grey ring on the
+floor round the cafe set's rug, a wide grey band round the lighthouse's
 island and a grey patch past the garden's tray.
 
 Measured against the occlusion read from the distance to the mesh (a
@@ -641,10 +643,14 @@ cafe set (15.4), counted over the beauty render's pixels at 384. The
 beauty render took, at two threads, the best of three runs interleaved
 with the base's on a loaded machine, 2.5 s for the stairs against 2.0,
 3.2 against 2.4 for the rope, 3.8 against 2.4 for the frog and 1.9
-against 1.4 for the cafe set. Carrying a tap's slope to the next where
-the field grows at that slope between them took a quarter of the
-samples off the cafe set and a fourteenth off the frog, and was left
-out.
+against 1.4 for the cafe set; timed again on a quieter one, 2.4 against
+2.0, 3.0 against 2.2, 3.5 against 2.4 and 1.5 against 1.2, a fifth to a
+half more. A tap only adds occlusion, so once the sum reads the floor of
+0.3 the taps after it cannot move either term and are not asked: the
+same bytes, and the rope's 3.0 s became 2.8 (its grooves fill), the
+others no faster. Carrying a tap's slope to the next where the field
+grows at that slope between them took a quarter of the samples off the
+cafe set and a fourteenth off the frog, and was left out.
 
 In the three sets 98 of the 104 beauty renders changed and 21 moved by
 more than 8 levels on more than 200 pixels, every one of them lighter
@@ -657,6 +663,43 @@ tree's, the lantern's roof, the sailboat's hull, the floor under the
 anglepoise's shade and under the teapot's handle (its body did not
 move). Of the other 77, none moved by more than 8 levels on more than
 159 pixels, 57 by no more than 8 anywhere and 39 by no more than 2.
+
+What the measure gets wrong shows on the floor more than on the model.
+The slope a tap reads is that of the part whose field is the smallest
+there, and the field is the smallest of the parts' values, not of their
+distances: a part whose field reads low hides a nearer one whose field
+reads a little higher, and where two parts' fields with different slopes
+meet, the reading steps. Under round 3's frog the displaced, blended
+body (slope 0.58) is the smallest field over the pad's notch, and
+divided by its slope the floor's highest tap reads 19 to 27 cells where
+the pad is 14 to 17 away by the mesh: the floor there reads 1.00 where
+the mesh says 0.89 to 0.99 and the raw field read within 0.03 of the
+mesh, a pale wedge with straight sides. The wings' feathers are
+ellipsoids whose slope falls under their ratio to the distance (0.86
+against 0.93 below the boss), so past the kink between two feathers the
+floor reads 0.85 where the mesh says 0.81, against 0.80 on the near
+side: an edge 25 levels high on the floor under the shadow. Round the
+lighthouse's island the blended, displaced rocks' kinks read a slope of
+1 or more on the steeper side (a difference over a step from one branch,
+another from the next), so the correction drops out in specks and the
+soft grey band round the island became a ragged rim. The floor under the
+anglepoise's shade has a faint straight edge too. Measured from 3,000
+points of each program's surface by area and a grid of the floor round
+it, against the mesh's distance, these do not undo the gain (the floor's
+occlusion times its contact term off by 0.0034 on average, against
+0.0058 raw), but they are what a reader sees. Tried against them and not
+kept: the one-sided steps grown to nine tenths of the tap's value (the
+surface's occlusion off by 0.027 against 0.0215: a long step reads a
+curved field's bend as slope); the slope along the descent over nine
+tenths of the tap's value as a second reading, the larger kept (one
+sample more, the same averages, the frog's wedge a little fainter); that
+slope alone (0.018 on average, but 0.62% of the surface's points read
+more than 0.1 too open against 0.38%, and the wedge brighter); the
+larger of the two one-sided gradients in place of the steeper side per
+axis, with a jump at one step (the island's rim smooth, but the stairs,
+all exact, lighter by up to 7 levels, 39 pixels by more than 2: a hollow
+that is a distance must not lighten). Each part's own slope is what
+would answer them, and only the shape tree knows the parts.
 
 A metal preset's colour is its F0, written in sRGB, as glTF means a
 metal's base colour, so beauty.png, the viewer and an engine read the

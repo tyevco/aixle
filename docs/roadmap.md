@@ -1597,6 +1597,20 @@ occlusion (design.md, "A grid over the pieces").
     pixels, all lighter. It costs 5.3 to 13.6 more field evaluations a
     pixel on the four programs counted (11.8 to 15.5 in their whole
     render before), and 25 to 58% more time on their beauty renders.
+  - Left by that measure, not fixed: a tap reads the slope of the part
+    whose field is the smallest there, which is not always the part
+    nearest, and the reading steps where two parts' fields with
+    different slopes meet. It shows on the floor: a pale wedge with
+    straight sides in round 3's frog's notch (1.00 where the mesh's
+    distance says 0.89 to 0.99), an edge 25 levels high under the wings'
+    feathers, a ragged rim round the lighthouse's island where the old
+    soft band was, a faint straight edge under the anglepoise's shade.
+    Steps grown with the tap's value, the slope along the descent and
+    the larger one-sided gradient were each tried, and cost accuracy,
+    lightened an exact hollow or barely helped (design.md, "The BRDF is
+    the viewer's").
+    A fix wants each part's own slope, which only the shape tree has: a
+    union could return the winning part's bound with its value.
   - The steps sheet truncates a step's name but not its size-and-tag
     line, so a cut with three two-decimal sizes runs into the next
     caption (the teapot's `bore` reads "CUT2.26"). Scanned over all 126

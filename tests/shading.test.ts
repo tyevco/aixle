@@ -8,7 +8,7 @@ import type { DistFn3, Material, Shape3 } from "../src/sdf/types.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
 import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
-import { occlusionAt, pbr, sceneLights, type PbrTables } from "../src/render/pbr.js";
+import { boundDistance, occlusionAt, pbr, sceneLights, type PbrTables } from "../src/render/pbr.js";
 import { perspective, project, toView, type Camera } from "../src/render/camera.js";
 import { buildEnvironment, DEFAULT_LIGHT_DIRECTION, defaultKey, ENVIRONMENTS, environmentPalette, lightDirection, prefilterLevels, projectSh, STEEP, type EnvironmentState } from "../src/render/environment.js";
 import { encode, FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
@@ -643,5 +643,45 @@ describe("shading: the field's occlusion on a field that is a bound", () => {
     expect(tk).toBeLessThan(0.65);
     expect(Math.abs(qk - tk)).toBeLessThan(0.02);
     expect(Math.abs(qao - tao)).toBeLessThan(0.02);
+  });
+
+  it("stops asking once the occlusion reads its floor of 0.3, and returns what all five taps return", () => {
+    // A tap only adds occlusion, so once the sum reads 0.3 the later taps cannot move either term. A slot a cell wide
+    // and eight deep in a plate scaled 0.7 along it (a bound, so every short tap takes its slope's seven samples): its
+    // floor reads 0.3 after three taps.
+    const slab = O.scale(O.difference(P.box(2, 0.6, 2), O.move(P.box(0.04, 0.64, 3), 0, 0.3, 0)), 1, 1, 0.7);
+    let calls = 0;
+    const counted: DistFn3 = (x, y, z) => (calls++, slab.dist(x, y, z));
+    const five = (px: number, py: number, pz: number, nx: number, ny: number, nz: number): [number, number] => {
+      let occ = 0, w = 1, k = 1;
+      for (let i = 1; i <= 5; i++) {
+        const h = cell * 1.5 * i * i * 0.4 + cell;
+        occ += w * Math.max(0, h - boundDistance(slab.dist, cell * 0.5, px + nx * h, py + ny * h, pz + nz * h, h, nx, ny, nz));
+        w *= 0.7;
+        if (i === 3) k = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
+      }
+      return [Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4))), k];
+    };
+    // The slot's floor and walls, the plate's face beside it and its edge, every value the same to the bit.
+    const points: number[][] = [];
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20;
+      points.push([0, -0.02 + 0.001 * i, 0.3 * t - 0.15, 0, 1, 0], [0.02, -0.02 + 0.016 * i, 0.1, -1, 0, 0], [0.03 + 0.05 * t, 0.3, 0, 0, 1, 0], [1, 0.3 * t, 0, Math.SQRT1_2, Math.SQRT1_2, 0]);
+    }
+    let floorCalls = 0;
+    for (const [px, py, pz, nx, ny, nz] of points) {
+      calls = 0;
+      occlusionAt(counted, cell, px, py, pz, nx, ny, nz, AOK);
+      const [ao, k] = five(px, py, pz, nx, ny, nz);
+      expect(AOK[0]).toBe(ao);
+      expect(AOK[1]).toBe(k);
+      if (py === -0.02 && ny === 1) floorCalls = calls;
+    }
+    // The slot's floor reads 0.3 and 0.3 from three taps' samples, where all five took 35.
+    occlusionAt(slab.dist, cell, 0, -0.02, 0, 0, 1, 0, AOK);
+    expect(AOK[0]).toBe(0.3);
+    expect(AOK[1]).toBe(0.3);
+    expect(floorCalls).toBeGreaterThan(0);
+    expect(floorCalls).toBeLessThanOrEqual(3 * 7);
   });
 });

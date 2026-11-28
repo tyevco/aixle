@@ -180,7 +180,7 @@ const steeper = (a: number, b: number, j: number): number => (a > b ? (a > j ? b
  * the occlusion asks whether anything is nearer than h.
  *
  * A field that is a bound, not a distance (a non-uniform scale, a smooth union, a loft, a warp, an ellipsoid's far
- * field, a difference's above the mouth of a cut), reads less than its distance in open air, so a tap read h - d of
+ * field, a difference above the mouth of its cut), reads less than its distance in open air, so a tap read h - d of
  * occlusion where nothing is near: the Roblox wings' scaled-sphere boss had a cavity term of 0.53 to 0.64 in the open,
  * and the cafe set's scaled rug its sky light dimmed to a sixth. Where a tap reads less than h, the field's slope there
  * is measured half a cell (`e`) to each side on each axis, and the value divided by it: a bound's slope is its ratio to
@@ -193,6 +193,11 @@ const steeper = (a: number, b: number, j: number): number => (a > b ? (a > j ? b
  * The steps toward the surface are taken first, the normal's largest axis first, and as soon as they alone make a slope
  * of BOUND_SLOPE_ONE the tap is a distance's and reads as it is, after one to three more samples; otherwise the other
  * three sides are asked too. A tap that reads h or more takes none.
+ *
+ * The slope is that of the part whose field is the smallest at the tap, which is not always the part nearest: a part
+ * whose field reads low hides a nearer one whose field reads a little higher, and where two parts' fields with
+ * different slopes meet the reading steps. Both show on the floor more than on the model (design.md, "The BRDF is the
+ * viewer's": round 3's frog's notch, the wings' feathers, the lighthouse's rocks).
  */
 export function boundDistance(dist: DistFn3, e: number, x: number, y: number, z: number, h: number, nx: number, ny: number, nz: number): number {
   const d = dist(x, y, z);
@@ -228,7 +233,8 @@ export function boundDistance(dist: DistFn3, e: number, x: number, y: number, z:
  * The field's occlusion along the unit normal n at a surface point p, in a field meshed at `cell`: five taps from 1.6
  * to 16 cells out, each counting how much nearer than its height the field reads (boundDistance), weighted down by 0.7
  * a tap, never under 0.3 (a concave join still gets bounce light). out[0] is the occlusion over all five, out[1] the
- * cavity term over the first three (6.4 cells).
+ * cavity term over the first three (6.4 cells). A tap only adds occlusion, so once the sum reads 0.3 the later taps
+ * cannot move either term and are not asked: the same values, without their samples.
  */
 export function occlusionAt(dist: DistFn3, cell: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, out: Float64Array): void {
   const e = cell * 0.5;
@@ -238,7 +244,13 @@ export function occlusionAt(dist: DistFn3, cell: number, px: number, py: number,
     const d = boundDistance(dist, e, px + nx * h, py + ny * h, pz + nz * h, h, nx, ny, nz);
     occ += w * Math.max(0, h - d);
     w *= 0.7;
-    if (i === 3) out[1] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
+    const v = 1 - (0.8 * occ) / (cell * 4);
+    if (i === 3) out[1] = Math.max(0.3, Math.min(1, v));
+    if (v <= 0.3) {
+      if (i < 3) out[1] = 0.3;
+      out[0] = 0.3;
+      return;
+    }
   }
   out[0] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
 }
