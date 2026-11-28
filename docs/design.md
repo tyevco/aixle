@@ -267,30 +267,90 @@ three applies (six objects, cutters of one primitive, no sweep).
 
 The checking views draw the extracted mesh, not the field. That was a
 choice between fidelity and honesty: the picture and the OBJ cannot
-disagree, so the agent verifies the file it ships.
+disagree, so the agent verifies the file it ships. The rasteriser is a
+plain z-buffered triangle filler with perspective-correct attributes and
+per-pixel shading; an outline pass darkens depth and normal
+discontinuities, which is what keeps a 384-pixel thumbnail readable.
+Fixed lights in camera space mean every view is lit the same way
+whatever the model's orientation.
 
-`beauty.png` is the other way round: the field itself, ray-marched, with a
-soft shadow (a second march towards the light), ambient occlusion (five
-samples along the normal) and a studio floor, for the picture that shows
-the model as meant. It stays cheap by using the mesh: each ray starts a few
-cells short of where the rasterised depth says the surface is, marches only
-that window, and falls back to the mesh's point if the march misses; empty
-space costs nothing, shadow rays that cannot reach the model's box are
-skipped, and only edge pixels (found by comparing depth, normal and
-material with their neighbours) are sampled four times. A 512-pixel render
-of the mug takes under a second. The rasteriser is a plain z-buffered
-triangle filler with perspective-correct attributes and per-pixel shading;
-an outline pass darkens depth and normal discontinuities, which is what
-keeps a 384-pixel thumbnail readable. The lights are a loop over the
-one the render always had: each adds its diffuse and its highlight in
-its own colour, shadowed towards itself, and the floor takes each
-light's share by power, so a program with no `light()` renders byte for
-byte as before. An environment is a palette (sky, an optional horizon
-band, ground, floor, an ambient scale) that the backdrop, the floor and
-the metals' reflections all read, so a sunset tints a chrome ball's
-rim the way the sky does. A camera is a set of framing choices the
-render already took; its `focus=` reuses the close-up's frame and fits
-the camera to the mesh's points inside it.
+`beauty.png` is the other way round: the field itself, ray traced and
+shaded as the viewer and the engines shade the GLB, for the picture that
+shows the model as meant. Primary rays stay on the field. The mesh is
+rasterised first for its depth, and each camera ray marches the field
+over a window three cells either side of that depth (pbr.ts, `sample`:
+at most 40 steps, a hit within a twentieth of a cell), so empty space
+costs nothing; where the window misses at a pixel's centre, the mesh's
+point stands in. A pixel whose neighbours differ in material, in depth
+by more than four cells, or in normal by more than about 53 degrees (or,
+in full quality, in brightness beside a mirror or glass) is an edge and
+takes four samples, which march on past the window, so a silhouette
+antialiases against the field itself. The four are averaged after the
+tone curve: in linear light one very bright subsample decides the mean,
+and a glow's edge came out up to 61 levels brighter (measured in
+lightstudy.ts, whose frames can only average in linear light).
+
+Secondary rays (reflections, refraction, shadows) cannot be primed by
+the camera's depth, and marching the field all the way was the largest
+part of a heavy render: the old renderer's shadow march was 39% of the
+mixer's beauty time and 63% of the ring's, and a shadow ray cost 20.7 µs
+on the mixer, whose field costs 3.3 µs a call near its surface. So every
+secondary ray marches the field for its first three cells (`NEAR_CELLS`
+in rays.ts), where the mesh is least trustworthy: the surface the ray
+left, creases, a part's contact with the floor. Beyond that a bounding
+volume hierarchy over the mesh's triangles (bvh.ts: binned surface-area
+heuristic, four triangles a leaf, glass and opaque triangles flagged
+apart) skips empty space. A shadow ray asks it whether any opaque
+triangle lies ahead. A ray that must see something asks it for the
+closest triangle and then marches the field over a window of three cells
+either side of it, so every hit the kernel shades has the field's
+position, normal and material; a window the field marches clear to its
+end is the mesh's alone (a thin bar's mesh is fatter than its field) and
+the ray goes on past it. Shading the mesh's hits directly was tried and
+rejected: up to 19.6% of the medal's reflection rays landed more than
+two cells from the field's surface.
+
+The faithfulness was measured against the field alone from the same
+origins, on the seven benchmark scenes at 384 pixels (the medal,
+tumbler, lantern, teapot, mixer, door and ring; tools/rays-bench.ts).
+Mirror rays disagree on hit or miss for 0.008 to 0.24% of rays; 99.67 to
+100% of the hits lie within a twentieth of a cell of the field's, and 0
+to 0.32% more than two cells off. The key's hard shadow disagrees on
+0.005 to 0.76% of the lit pixels whose shadow ray reaches the model's
+box, every one of them on a shadow's edge (the lantern's thin bars are
+the 0.76; of all its lit pixels they are 0.22%). The price: a shadow ray
+beyond the near march costs a median 0.05 to 0.43 µs, a reflection ray
+0.41 to 0.95 times a 128-step march of the field (all of these rerun at
+862f270), and the hierarchy is built once per mesh, in about a second
+for the largest of the render sets (round 2's market, 620,704
+triangles). What is lost is what the mesh does not have: a part thinner
+than a cell casts no shadow further than three cells from itself and
+does not appear in a reflection.
+
+The lights are the program's `light()`s, or the one key the settings
+describe (`sceneLights` in pbr.ts). Each adds Lambert and a GGX
+highlight in its own colour; on a surface the camera sees, its
+unshadowed light and its visibility are kept apart, so the visibility
+can be filtered (see Shadows from lights with a size). A camera is a set
+of framing choices the render already took; its `focus=` reuses the
+close-up's frame and fits the camera to the mesh's points inside it. How
+much is sampled is a choice of the run, not the program
+(`--quality draft|full`): a program describes a model. Full is the
+default and what the render sets commit; draft takes one reflection
+bounce, one glossy ray, one glass deep and no brightness test at
+mirrors, and is what `--quick --beauty`, `lights.png` and
+`environments.png` draw.
+
+The render was designed by building three prototypes, one for shading,
+one a path tracer and one for speed (the worker pool, the hierarchy and
+area shadows), which a panel of judges compared on the same scenes; the
+build took what each did best, and what the sections below call the
+shading prototype is the first. Path tracing, as the default or as a
+mode, was set aside: five times the time on one thread at 384 pixels,
+mottled penumbrae at four samples a pixel, and two looks to keep apart.
+The sections after this one say how the light, the materials, the skies,
+the reflections, the shadows, the glass, the floor and the threads are
+built, and what it all cost.
 
 `callouts.png` maps the picture back to the program. Each mesh vertex
 is attributed to the smallest named step whose field is within a cell
@@ -324,8 +384,783 @@ cylindrical wrap goes by arc length rather than angle so the picture
 keeps its shape and repeats round a lid; one copy stretched round it
 smeared its lettering five to one.
 
-Fixed lights in camera space mean every view is lit the same way whatever
-the model's orientation.
+## Light in linear units, and one curve
+
+The old beauty render worked in display values: it multiplied a display
+colour by a cosine, an occlusion and a shadow, and added a highlight on
+top, so two lights did not add as light does, and a shadow or an
+occlusion that halved a display value took away more than three quarters
+of the light it stood for. The new one carries linear radiance
+throughout (photometry.ts). Every colour a program gives, a material's,
+a light's or a palette's, is sRGB and is decoded before it lights
+anything; the picture is tone-mapped and encoded once, at the end.
+
+`KEY` is 1.05: a light of power 1 brings a white face turned square to
+it to radiance 1.05, so `power` keeps its meaning (1 is the default key)
+and a white face under the key displays near white. Diffuse light is
+weighted by the share Fresnel does not reflect, so the face measures
+1.022, 2.7% under (tests/shading.test.ts). `GLOW` is 1.6: a glow of 1
+gives off its colour at 1.6, brighter than a white face a power-1 light
+reaches, so a flame reads as a source. A glow is added unshadowed,
+lights nothing else and blooms a little; a flame that lights its lantern
+is a glow with a point light just outside it.
+
+The tone curve is Khronos PBR Neutral, the curve three.js calls
+NeutralToneMapping: a small toe below 0.08, the identity from there to
+`TONE_START` (0.76), so a base colour lit square on to unit light
+displays as itself, and a shoulder that rolls highlights off towards 1
+instead of clipping them. One change: the shoulder is taken per channel,
+not on the brightest channel with Neutral's desaturation. Neutral keeps
+a colour's hue as it brightens and desaturates it towards white, and
+that turned the lantern's orange flame salmon pink; per channel, a flame
+or a gold glint goes yellow and then white, as film does. Below the
+shoulder the two curves are the same function (within 1e-7 on 1,000
+colours, tests/environment.test.ts), so a model's colours are what
+three.js shows.
+
+The curve has an exact inverse, `untone` (within 1e-6 over 0 to 20), and
+it is what keeps the backdrops. The palettes are the old renderer's
+display colours, and each is decoded through the inverse curve, so the
+sky the camera sees displays as it always did: within 2 levels
+of the old backdrop at 33 elevations in all four skies. The floor's
+target is decoded the same way (see The floor), and an edge pixel's mean
+of four tone-mapped samples is untoned back into the linear picture
+before what follows.
+
+The finish (pbr.ts, `pbrFinish`) runs in a fixed order on the linear
+picture: each light's visibility is filtered, the lights are composed,
+the model blooms (a channel above 1.25 spills into its neighbours
+through two Gaussians, 1% and 3.5% of the picture; only model pixels
+bloom, because a sunset's bright band bloomed and washed the sky), depth
+of field blurs, and the curve, the sRGB encoding and the dither come
+last. Depth of field is a gather blur whose radius grows with distance
+from the focus plane through the model's centre, weighted so a sharp
+foreground does not smear across a blurred background.
+
+The viewer ends on the same curve. `TONEMAP_GLSL` is the curve written
+as a GLSL function body, generated from the same constants, and the page
+hands it to three.js as its CustomToneMapping, in both of its modes; the
+backdrop it draws in its Scene mode matches beauty.png's pixel for pixel
+(219, 216, 210 in the studio).
+
+## The BRDF is the viewer's
+
+A surface is glTF's metallic-roughness model, as three.js's
+MeshStandardMaterial shades it (pbr.ts, `shade`): a diffuse colour
+base·(1 − metal), a reflectance at normal incidence F0 = mix(0.04, base,
+metal), a GGX lobe of α = rough², height-correlated Smith visibility and
+Schlick's Fresnel, and for the light from all round Karis's analytic fit
+of the split sum and Fdez-Agüera's compensation for the light a rough
+lobe loses to scattering more than once. It is the viewer's and every
+engine's model because the GLB is shaded with it everywhere else: a
+material chosen by reading beauty.png then means the same in the export.
+The old loop, Lambert and a Blinn highlight in display values with a
+tinted mirror for a metal, read gold as yellow plastic. Two tests hold
+the energy: in a constant sky with no lights, a white sphere of
+roughness 0.2 to 1, metal or not, returns the sky within 5% (run at an
+ambient of 0.5 under a palette of 1.3, so that leaving the sky's
+intensity out of the reflections fails it by 54%); a polished metal
+square to the camera returns F0 times the sky within 3%. At roughness
+0.5 the split sum's fit leaves a metal under F0 at normal incidence, the
+more the lower the F0 (copper's red, green and blue at 0.99, 0.90 and
+0.875 of theirs), the model's own loss, not a bug.
+
+Two terms darken what a surface reflects where it is enclosed, both read
+from the field's ambient occlusion (five taps along the normal, never
+under 0.3, the old renderer's). Specular occlusion is Lagarde's, the
+occlusion as the reflection sees it, tighter for a smooth surface; it
+dims the prefiltered sky. The cavity term is the first three taps (6.4
+cells) to the power 3 (`CAVITY_POWER`), and it multiplies everything a
+reflection brings, the traced rays as well as the sky. That is what
+keeps lettering cut into polished metal readable: from inside a groove
+the traced rays meet the groove's walls, which reflect the sky as
+brightly as the face round them, and with the cavity term on the sky
+alone the ring's FOREVER read only at its edges at powers 1, 3 and 5.
+On every reflection, and at a power of 3, the letters read dark at 384
+and 768 pixels, as the old renderer drew them; 5 was no better.
+
+The occlusion is taken to the power 1.5 on the model's own surfaces, for
+the sky's light and its reflection (`AO_POWER`). It was tuned by eye in
+the old renderer, which multiplied display colours by it; in linear
+light the same factor darkens a groove on the screen only by its 2.2th
+root, and the rope's grooves read flat (their 25th percentile 32 levels
+against the old renderer's 19). At 1.5 they are 18; at 2 they were 11,
+black between the strands. The lights need no occlusion: their area rays
+already shadow them into the grooves.
+
+A metal preset's colour is its F0, written in sRGB, as glTF means a
+metal's base colour, so beauty.png, the viewer and an engine read the
+same colour (src/sdf/materials.ts says where each comes from). Silver
+and chrome (as chromium) are measured F0 from Real-Time Rendering, 4th
+edition, table 9.2: linear 0.972, 0.960, 0.915 (#fcfaf5) and 0.549,
+0.556, 0.554 (#c4c5c4). The rest changed when the first measured presets
+were read in the regenerated renders, because a measured metal in a
+picture does not always read as that metal:
+
+- **Steel** is iron's measured F0 from the same table (0.562, 0.565,
+  0.578; #c6c6c8): steel is iron with under 2% carbon and has its
+  reflectance, a neutral grey. The stainless value it had first (0.669,
+  0.639, 0.598) is warm, and the hub, the gear and the bracket read
+  ivory and ceramic under a warm key; the hub's top now measures a
+  saturation of 0.02.
+- **Iron** is the iron things are made of, wrought, cast or blackened,
+  under its skin of black oxide: magnetite, most of mill scale and of a
+  blacking, which reflects about 20% across the visible spectrum (ore
+  microscopy's reflectance tables give 20 to 21% from 470 to 650 nm),
+  neutral, linear 0.20 (#7c7c7c). Bare polished iron's 0.56 drew the
+  bench's arms and the door's hinges as chrome tubing and the lantern as
+  white enamel. A worn edge still rubs through to about bare iron, and
+  the rust preset is the same iron, rusting.
+- **Gold, brass, copper and bronze** are their measured F0 squared: gold
+  Lagarde's (2011: 1.000, 0.766, 0.336), brass (C260 cartridge brass)
+  and copper from table 9.2, and bronze, which no table measures, the
+  mean of the copper and brass rows (0.933, 0.708, 0.481). That gives
+  gold #ffc95e, brass #ebcc75, copper #f5ab92 and bronze #f0bc84. A
+  measured F0 is pale (gold #ffe39d): in a neutral room the trophies'
+  gold read as champagne, the sign's brass letters as cream and the
+  bottle's bronze collar as pink, and a darker room alone turned them
+  khaki (the round-4 trophy's cup went from 170, 147, 89 to 129, 109,
+  59, where the old renderer drew it 202, 159, 56). Gold reads gold in a
+  picture through its own interreflections, and the square is the colour
+  of light after two bounces off the metal: each keeps its measured hue
+  and the order between them, and takes the saturation a picture of it
+  has (the medal's face 0.73, against 0.46 at F0 and the old renderer's
+  0.68). It is a stated departure from measured values, and in a glTF
+  viewer gold (linear 1.0, 0.59, 0.11) is a deep orange-gold.
+
+Reading F0 as the square root of a metal's colour, which would have kept
+the old preset colours, was rejected in the design: it came out pale
+khaki, and beauty.png would lie about the GLB, whose base colour an
+engine reads as F0 itself.
+
+## Environments as light
+
+A sky (environment.ts) is three things at once: the backdrop the camera
+sees, the light a surface takes from all round, and what a metal
+reflects. There are four. Each is the old renderer's gradient (a sky
+colour, an optional horizon band, the ground) with structure added, and
+each is looked at in one of five modes: the light a surface takes
+(DIFFUSE), what a glossy surface reflects (FILTERED, which adds the
+cards), what the camera sees (BACKDROP), and what a mirror sees, without
+the lights (REFLECT) or with each directional light as a softbox
+(MIRROR). A sunset tints a chrome ball's rim the way the sky does
+because they read the same tables.
+
+The studio is rigged to the camera as a photographer rigs one: the white
+sweep behind the model, dark walls on the camera's side above the
+horizon and a black flag on the floor there, a dim ceiling, the model's
+own shadow on the floor away from the key, and three cards that only
+reflections see (a fill card right and low, an overhead strip across the
+frame, a rim strip behind on the left; `STUDIO`). A metal facing the
+camera reflects the dark and the cards, so its form reads; a model's
+shaded side faces the dark, so it is modelled. All of it is out of shot:
+BACKDROP leaves the structure out, since folded in it made the studio's
+sky 35, 78 and 148 levels darker than the old backdrop at 40 and 60
+degrees up and at the zenith. The floor the camera does see carries the
+flag too, for reflections only, from where the bottom of the frame meets
+the floor outwards (pbr.ts, `flagFrom`); started at the camera instead,
+it darkened the bottom half of a plan view's floor from 210 levels to
+48, because a camera looking steeply down sees floor beyond its own
+place. The flag is lifted on the key's side, where the floor is lit and
+a medal's face turned to the camera and the key reflects it; without
+that the medal read khaki.
+
+The rig has two sets of walls, ceiling and flag: one for the light a
+surface takes (DIFFUSE) and a darker one, reaching further round, for
+what it mirrors (`STUDIO.reflect`, read by FILTERED, REFLECT and
+MIRROR). A photographer flags reflections harder than light: the room
+round and behind the camera is black in a metal and still bounces light
+into a shaded side. With one set at the light's darkness every metal
+mirrored a mostly white room and read white, cream or ceramic (rough
+iron facing up returned 0.8 of the sky); with one set at the
+reflections' darkness a white mug's shaded side fell from the old
+renderer's 89 levels to 53, the teapot's to 51, and the rope's grooves
+went black. With two, and the occlusion's power above, the teapot's
+shaded side is 103 levels (the old renderer 90), the mug's 82 (89) and
+the rope's grooves 18 (19). The light's rig reaches its darkness right
+at the horizon, because a shaded side takes 70% of its sky light from
+the ground on its own side and the camera's, and a bright band either
+side of the horizon lit shaded sides and almost no reflection. The
+darker reflections are the studio's alone: under the overcast sky silver
+and steel's upward faces still read near white, and that is the sky a
+mirror metal reads white in.
+
+The other skies: the overcast is a white dome, brighter towards the
+zenith; the sunset a blue sky over a warm band with a sun 3 degrees up
+(`SUN_ELEVATION`) at the key's azimuth, with its glow; the night a dark
+blue sky, a moon at the key's azimuth and its elevation held between 25
+and 60 degrees (`MOON_ELEVATION`), and stars. The sun and the moon stand
+where the key comes from, so every frame of a run shares one sky (but
+for a steep shot's turned key, below). The stars sit on a grid of equal
+angles (rings 0.008 radians high, 4% of the cells holding a star of
+angular radius 0.0018 radians at a hashed place), so they are round dots
+at any elevation (measured 0.8 to 1.25 wide for their height); a grid on
+the lat-long drew ellipses at the horizon and slivers at the zenith. A
+glow ends 90 degrees from its disc without a step, where the prototype's
+cut-off drew a 6-level line across a sunset sky.
+
+A surface takes the sky as two tables. Its diffuse light is DIFFUSE's
+irradiance as nine spherical-harmonic coefficients per channel,
+integrated on a 96 × 48 grid. Its reflection is FILTERED prefiltered by
+a GGX lobe at six roughnesses from 0.15 to 1 (`PREFILTER`), read
+bilinearly within a map and linearly between two. The maps are filtered
+importance sampling (Křivánek and Colbert): the sky is drawn once on a
+512-wide lat-long with a mip chain, and each of 64 or 96 Hammersley
+samples reads the mip whose texels are as large as its share of the
+lobe. Plain samples could not find the studio's bright cards in a lobe
+as wide as a hemisphere: against 4,096 samples the roughest map was 6
+levels off on average and 43 at worst, and filtered it is 2.4 and 11.7.
+In a constant sky the irradiance comes back within 1% and every map
+within 0.5%. Each directional light is a softbox in MIRROR, a disc of
+the light's own angular size whose radiance is π·KEY·p over its solid
+angle, so a mirror shows a light as strongly as it lights (the integral
+comes back within 1% at sizes 1 and 3).
+
+One intensity, E (the palette's ambient times `set ambient`), scales
+everything the sky gives a surface, diffuse and reflected alike; it does
+not scale the lights' softboxes, which are the lights, nor the backdrop.
+The shading prototype lit diffuse surfaces with 0.6 of its studio sky
+(0.9, 0.9 and 0.4 of the others) and reflected all of it. three.js has
+one environment intensity for both, so the viewer could not show that
+split, and a look the export cannot carry is not one to decide a
+material by. The studio keeps E at 1, as the prototype's reflections had
+it, and wins its shaded side's darkness back through its structure; the
+overcast and sunset keep the prototype's 0.9 and the night its 0.4,
+their reflections dimmed with them (the teapot's shaded side within 1.5
+levels of the prototype's in all four).
+
+The tables are built once per run per sky, on the main thread, in 50 to
+100 ms, and kept in the run's cache (kernel.ts, `BeautyCache`) keyed by
+exactly what each sky depends on: the overcast on nothing, the sunset
+and the night on the key, the studio on the camera's azimuth and the key
+(the model's shadow on its floor). beauty.png, each camera's shot and
+the strips share them, the viewer page builds its sky into the same
+cache, and the pool's workers read them on SharedArrayBuffers. A hit and
+a miss give the same bytes, which a test checks for all four skies.
+
+The far floor fades into the sky just above the horizon in its own
+direction (`horizonRadiance`), from one reach beyond the model's box
+(1.5 times the model's diagonal) to four. It is measured from the model,
+not the eye: the old renderer's fade by the distance from the camera
+took a third of a shadow's depth away right beside the model, where the
+floor is a third of the way to the reach of four the fade ran to, and
+the tumbler's shadow vanished. Below the horizon the lighting modes
+blend from the horizon's colour to the ground's over 0.05 of the look's
+downward part, so a reflection has no seam either. From a camera 2
+degrees up, the step across the horizon is 1.60 levels at sunset, 1.11
+at night, 0.61 in the studio and 0.40 overcast.
+
+The default key (`DEFAULT_LIGHT_DIRECTION`, upper left from the front,
+about azimuth −40.2 and elevation 46.6) is fixed in the world for every
+shot but one kind: a camera looking steeply down. People read a picture
+as lit from above, and in a plan view the front-left key lights the
+frame from its bottom, which draws a blind pocket as a dome (round 10's
+hub: its plan shot's pockets read as bumps). So from a camera elevation
+of 55 to 75 degrees (`STEEP`) the default key turns, smoothly with the
+elevation, to the frame's top left: 135 degrees round from the camera's
+azimuth, at the default key's elevation (environment.ts, `defaultKey`);
+a sunset's sun or a night's moon turns with it. It blends the two
+directions rather than their azimuths: turned by azimuth the shortest
+way round, two cameras a twentieth of a degree apart, either side of the
+one whose target lay straight across from the default key, went round
+opposite ways, and their keys were 87 degrees apart. A program that
+places its own lights, or sets `light_azimuth` or `light_elevation`,
+keeps them: the rule only chooses for a program that did not. An unset
+one of those two falls back to −40 or 55 when the other is set, so
+`set light_azimuth -40` alone gives a steeper key than the default.
+Round 10's hub declares its key at −40, which lights its plan shot from
+the bottom left, and its pockets still read as domes; with the key at
+the camera's azimuth less 135 they read as holes. The viewer page keeps
+the world's key, since its camera turns.
+
+## Reflections
+
+What a surface reflects depends on its roughness and on how much it
+reflects (the split sum's weight, F0·A + B), by four cases (pbr.ts):
+
+- **A mirror**, under 0.12 (`MIRROR_ROUGH`): one traced ray, and
+  whatever it meets is shaded in full, the model, the lit and shadowed
+  floor, or the sky a mirror sees with each light's softbox, its sun and
+  its stars. A directional light's highlight is the softbox, so its
+  analytic highlight is left out.
+- **A glossy metal**, from 0.12 to 0.35 (`GLOSSY_ROUGH`), or a surface
+  that glossy whose Fresnel weight passes 0.2, where the camera sees it:
+  four GGX rays about the normal. The ones that meet the model bring its
+  light; the ones that miss share the prefiltered sky.
+- **Other glossy surfaces**, under 0.55 (`TRACED_ROUGH`): one ray along
+  the mirror direction, blended into the prefiltered sky by (1 −
+  rough)².
+- **Everything else**, and any surface whose weight is under 0.015: the
+  prefiltered sky alone, dimmed by specular occlusion.
+
+The four glossy rays are one fixed stratified pattern for every pixel,
+the lobe's quantiles turned by the golden angle, not random directions:
+four random rays left salt and pepper in the mixer's steel bowl, where
+four fixed ones are a slight blur. Past 0.35 four rays are grain again
+(a steel bowl of roughness 0.45 was salt and pepper with them), so one
+ray blended into the smooth prefiltered sky takes over. A glossy ray is
+scaled down whole, its hue kept, to a peak of 3 (`GLOSSY_CLAMP`): a ray
+of four that met a mirror showing a softbox (150 times a lit face) or a
+flame put one pixel in a hundred at white on the lantern's bars and the
+ring's band, a sparkle that read as a bump. A mirror's own ray is not
+clamped, since it is showing the softbox. In full quality a brightness
+jump beside a mirror or glass also makes a pixel an edge, so a sharp
+reflection's outline is antialiased.
+
+Reflections are traced to a depth of two in full quality and one in
+draft (`MAX_DEPTH`), and a surface a reflection meets traces again only
+if it is a mirror (chrome in chrome); a glossy surface met by a
+reflection takes the prefiltered sky. That second glossy bounce was 39%
+of the mixer's time in the shading prototype, for a reflection of a
+reflection that blurs away. Something the glossy rays bring is still not
+explained: wavy streaks on the inner wall of the mixer's bowl in its
+`into_bowl` shot stay with sixteen rays, so they come from what the
+reflections meet, not from the pattern.
+
+## Shadows from lights with a size
+
+A light's size has one meaning: an angular radius of size/18 radians
+(`lightAngle`; 1 is about 3.2 degrees, 3 about 9.5). The one angle sizes
+the disc its shadow rays aim at, widens its highlight (the lobe's α
+becomes min(1, α + 0.5 tan θ), its peak lowered to keep its energy) and
+sizes the softbox a mirror sees. A point light is a sphere of radius
+0.02·range·size (`pointRadius`). The angle's 18 was calibrated against
+the old renderer's look rather than physics: the path-tracing
+prototype's size/20 had been sized to keep the old penumbra's width. No
+disc is wider than 1.5 radians (`MAX_LIGHT_ANGLE`, size 27), because
+past a right angle the disc's tangent turns negative, which turned the
+early out's grown boxes into shrunk ones, and a softbox's edge wrapped
+round the sphere and shrank it to 0.1 radians at size 100.
+
+A surface's visibility of a light is traced (rays.ts, `areaVisibility`).
+The field is marched along the centre ray for the first three cells, the
+old soft march, so a contact shadow hardens where a part meets the
+floor. Beyond them eight rays go to the light's disc against the mesh:
+four on the outer half of its area at one radius, a quarter turn apart,
+and four on the inner half turned an eighth further, each uniform over
+its half, so the mean is the visible share of the disc without bias. A
+pixel's rays are placed by its position, the light and the subsample
+(`diskPattern`): the turn is interleaved gradient noise over the pixel
+grid, transposed so it does not follow the dither's, and the two radii
+an R2 lattice, both shifted by a hash of the light and the subsample.
+Neighbouring pixels so take well-spread rotations, and through the
+filter that is 13 to 40% less noise than a hash per pixel at 384 (the
+medal's floor at 768: 3.0 levels against 3.6). Behind a unit cube the
+filtered penumbra's 10 to 90% width is within 1.2% of the exact disc's
+at size 1 and 1.5% at size 3, and its 50% line 0.018 from the geometric
+edge; the concentric quadrant pattern first specified narrowed it by 7.8
+and 14.9%.
+
+When no triangle can meet the cone the eight rays span beyond the near
+march, all eight are clear, and the answer is taken without them
+(`coneClearRay` in bvh.ts). The test is conservative, so it is exact: on
+all seven benchmark scenes no pixel differs from always tracing eight,
+and it answers 76 to 93% of calls alone. The early out first specified,
+stopping when four quadrant rays agree, put 8.2% of the lantern's pixels
+more than 2 levels from eight rays, because a grille lets light through
+four probes. There is no early out for a point in full shadow; it takes
+its eight rays.
+
+Eight rays a pixel are noisy, so each light's visibility is filtered
+(denoise.ts): a joint bilateral filter guided by what the primary rays
+saw, the depth, the field's normal, the material and whether a pixel is
+the model or the floor, so it never blurs across a silhouette or a
+crease; edge pixels, which have four samples of their own, neither give
+nor take. It filters visibility alone, a ratio between 0 and 1, and the
+light's unshadowed term, with the bump's normal and the texture in it,
+is multiplied in after at full resolution. Filtering the whole diffuse
+term washed the bump out of the door's stone, because the guides see the
+field's normal and not the bump's: the light on the stone faces measured
+a high-pass RMS of 7.78 levels unshadowed, 7.52 with the visibility
+filtered and 1.32 with the whole diffuse filtered. The radius grows with
+the picture, 3 pixels at 384, 4 at 512 and 6 at 768 (`filterRadius`),
+since a fixed one left grain at 768. On one thread it takes 0.12 s at
+384 and 0.95 s at 768. A shadow ray that crosses glass measures the
+glass on the field and dims each channel by Beer's law (see Glass), so
+an amber pane's shadow is amber (its red over blue at least 1.3 times
+the open floor's, a clear pane's within 5% of 1).
+
+The old shadow was Quilez's soft march: one ray towards the light, the
+penumbra taken from how closely it passed the model. That darkens only
+outside the hard shadow, the outer half of a penumbra, so a larger light
+grew a halo outward while the umbra kept its hard edge, and the march's
+steps drew stair-steps (the medal's ribbon, the door's torch wedge) and,
+once, the spatial index's grid on the floor (see A grid over the
+pieces). An agent reads either as geometry. What the disc costs is that
+a physically sized light shrinks or removes the shadows of thin parts
+(the lantern's bars, the torch's bracket, the ring's claws), and a large
+light's umbra shrinks, as a real one's does.
+
+## Glass
+
+A solid that lets light through (pbr-glass.ts) splits the light by
+Schlick's Fresnel at an index of 1.5: a reflection, traced while the
+depth budget lasts and otherwise the sky a mirror sees, and what is seen
+through it. The refracted ray enters the solid, and the inside march
+(rays.ts, `insideMarch`) carries it on the negated field to where it
+leaves; there it refracts out by the field's normal and is traced, so
+the drink, the far wall and the floor behind are what the glass shows.
+
+The inside march has to tell an exit from a zero that is not one. A zero
+the field touches without crossing, where two coincident faces of a
+union meet (and, before round 11, along a revolved outline's axis), is
+still inside a cell further on, so it is no exit; nor is a sliver of
+outside thinner than two cells that the ray runs along, with the solid a
+cell away on both sides across it, which is what a liquid revolved a
+hundredth above its glass's floor makes (the tumbler's). Without the two
+rules the tumbler's drink drew contour bands and dotted lines. A test
+holds the rule on two coincident glass boxes, whose shared face is an
+exact zero: the exit comes out within 2% of the far face.
+
+Where the exit is past the critical angle the ray reflects inside and
+marches again, up to four times (`TIR_EVENTS`), before it gives up on
+the sky behind, tinted. The old renderer gave up at the first such exit,
+and that drew the white triangles in the tumbler's thick base.
+
+Every stretch inside absorbs by Beer's law, σ = 22(1 − c)/reach per
+channel (`BEER` in photometry.ts), with c the glass's colour and the
+reach 1.5 times the model's diagonal. One law serves the refracted rays
+and the shadow rays through glass, which is what tints an amber shadow,
+and it is the law roadmap item 21 would write into the GLB's volume
+extension (an attenuation colour of exp(−(1 − c)) at a distance of
+reach/22). The old renderer dimmed display values by
+exp(−10(1 − c)t/reach); a display value is near linear light to the
+power 1/2.2, so the same drink in linear light takes 2.2 times that: at
+10 the tumbler's whisky came out the colour of milky tea (182, 148, 98
+against the old renderer's 135, 97, 53), at 22 it is the old colour
+again. The absorption is integrated stretch by stretch: `hit()` is asked
+every six cells and just short of the exit, and each boundary between
+materials is found by five bisections, so each material counts for the
+length the ray spends in it. Averaging the samples instead counted a
+stretch by how many samples happened to fall in it, and drew a stripe
+every few rows where the ray crosses the tumbler's base into the drink.
+
+A glass that does not let all its light through (transmit under 1) mixes
+in its surface shaded as a smooth dielectric of its colour. A point
+light's highlight on glass is analytic, with the occlusion ray the
+surface's own shading already traced; a directional light's is the
+softbox in the reflection, traced or not. Adding its analytic highlight
+too lit a glass seen in a mirror twice (the key's share at the
+highlight's peak 15.3 against 10.7).
+
+Glass seen through glass is shaded to a chain of two in full quality and
+one in draft (`GLASS_CHAIN` in pbr.ts); past the chain it is the sky
+behind, tinted by the glass's colour. With the rules above the tumbler's
+drink, inside its glass, shows no contour bands at two (a test holds
+every row-to-row step inside the drink under 6 levels at 256 pixels), so
+the chain was not cut to one to save time. Each depth keeps its own
+absorption: one array shared between depths let the inner glass's shade
+overwrite the outer's, and an amber slab in front of a clear pane came
+out (0.93, 0.87, 0.80) instead of (0.93, 0.26, 0.09), the tumbler's
+drink seen through its upper wall near black.
+
+Two looks in the committed renders were checked and are right. The
+tumbler has a dark band where the drink meets its thick base: a probe of
+the rays at 384 pixels shows the rows above it refract through the side
+wall and the base and see the floor behind the glass (radiance 0.53
+before absorption), the band's rows leave the base low and see the
+floor's contact shadow right behind it (0.21), and the rows below
+reflect totally off the base's underside and see the sky; lifted 0.8 off
+the floor, the band goes. Round 9's bottle has red-black mottling in its
+lower corners: those rays reflect inside the rounded, filled body two to
+four times and leave dimmed by up to exp(−1.46, −3.49, −4.18) per
+channel, and neighbouring rays take different sequences of reflections.
+The optics are right and the signal is chaotic; smoothing it would take
+more samples a pixel there.
+
+Glass is the costliest material. The tumbler took 3.5 times the old
+renderer's time on one thread at 384 (3.1 at 768), the one scene past
+the plan's twice: inside marches are about 45% of it and shadow rays
+through glass about 30%. Sharing the centre ray's transmittance with all
+eight of a pixel's shadow rays that cross glass would save about 0.7 s
+of its 3.5, and was built and not kept: the amber shadow became a
+sharp-edged copy of the glass as the centre ray sees it, and the floor
+beside it took a pale band (up to 36 levels, 4,158 pixels by more than
+8).
+
+## The floor
+
+The floor's albedo is solved per render (pbr.ts) so that the open floor
+near the model shows what the old renderer displayed there, under the
+sky's light from above and every directional light at full strength,
+capped at 0.95. The target is each palette's `open` (environment.ts),
+measured on the committed renders before the rebuild, in red, green and
+blue levels: the studio's 211, 208, 204 (over the medal, the teapot and
+the hardware plate), the overcast's 207, 206, 203, the sunset's 115, 93,
+79 and the night's 13, 13, 17. Solved to the palette's floor colour,
+which the old renderer lit and faded towards its ground but never
+displayed, the studio's open floor came out 13 levels lighter, close
+enough to the white sweep that the horizon all but vanished behind a
+light model, the sunset's 40 lighter and the night's two to three times
+as bright, so a torch lost the dark ground it pools on. Over the 104
+beauty pictures the median shift of the open floor against the old
+renderer went from 12.2 levels to 2.6, and a test holds it within 2.5
+levels of `open` in all four skies.
+
+Every light reaches the whole floor at full strength. The old floor took
+each light's share of the total power, so the candle inside the lantern
+never put its bars' shadows on the floor, though an engine lighting the
+GLB would. Shadows are traced only near the model, within one reach of
+its box and fading out over the last third of it; a point light cut off
+there drew its pool's edge as a line across a low shot (the door's
+torch, a step of 22 levels between rows). The open floor round the
+lantern is now brighter than the old renderer's (206 levels against
+187), because its three lights each light it fully.
+
+Under a part standing on the floor the floor takes the field's occlusion
+and a wider contact term, four taps up from the floor reaching 19% of
+the model's diagonal and darkening by at most three quarters, and the
+lights take it as well as the sky. The area rays see the light's disc
+past the part but not the darkening a base makes where it meets the
+floor: without the contact term on the lights the floor under the
+lantern's base was 45% brighter than the old renderer's; with it the
+base darkens its floor to 0.67 of the open floor round it, where the old
+renderer had 0.68. A tap is not asked where the floor point lies farther
+from the model's box than the tap is high, which skips nothing that
+could reach.
+
+The floor reflects nothing. A sheen on it, in the shading prototype,
+drew a faint ghost of the model under its contact line, which a shot
+from above could take for a part. The floor is not an occluder either: a
+light below the horizon lights the model's side faces through it.
+
+## Threads
+
+The beauty render runs on a pool of workers kept for the life of the
+process (beauty-pool.ts), with the main thread drawing rows beside them.
+The shape is a tree of closures the interpreter built, which cannot
+cross to another thread, so each worker builds its own by evaluating the
+program again: the same source, pose, slice and shown steps, each
+library's source and each picture as the main evaluation read them, and
+each import's samples as the main thread recorded them. A worker never
+samples an import again: it reads the samples from a map keyed by file
+and resolution, which fails on a miss, so a file edited during the run
+cannot change a worker's field. A worker keeps the last program it was
+sent and builds it while the main thread meshes. Everything else crosses
+as data on SharedArrayBuffers: the options, the camera, the mesh's
+arrays (once per mesh), the kernel's tables (the sky's maps, the
+hierarchy) and, per render, the primed depth and the kernel's buffers. A
+material is named by a key from its fields (`materialKey`), not by
+object identity, since a worker's materials are its own objects; two
+identical materials now share an id, which moved four committed renders
+by a few pixels on seams between such materials when it came in.
+
+Each job carries the main thread's field at 64 points, and a worker
+whose own field differs at any of them, to the bit, draws nothing; the
+main thread says once that it drew without it. Rows are claimed one at a
+time from an atomic counter by every thread, so a worker still building
+its shape simply claims none and a slow row holds up no one. A barrier
+comes between the passes: every row's primary samples are done before
+any row's edge pass starts, since the edge test reads a row's
+neighbours.
+
+The pipeline is synchronous, and so is the pool: the main thread posts
+the job, draws rows itself and waits on the counters with
+`Atomics.wait`. It cannot hear a worker's events while it waits, so
+failure is read from shared memory: a worker that throws or exits sets
+the job's error word, and a job that finishes no row for a minute is
+taken as failed. The job is then drawn again on the main thread alone,
+with the same bytes, the pool is off for the rest of the process, and
+the log says so in one line. The workers are unreferenced, so the pool
+never keeps the process alive.
+
+Every pixel is a function of its position and the scene: no
+`Math.random`, no clock, no state one row leaves for the next, the
+filter's rows reading only the unfiltered input. Which thread drew which
+row therefore cannot change a byte, and tests compare beauty.png, the
+camera shots and lights.png at one, two and four threads, and every
+linear float of every light's share at one and three. The command line
+draws on min(4, the available cores) threads (`--threads N`); `run()`
+defaults to one, so a library caller or a test is single-threaded unless
+it asks; the render sets use the command line's count. Measured on the
+old renderer's shading moved onto the pool, on a machine of four shared
+cores: four threads took 0.40 of one thread's time (the geometric mean
+over the seven scenes at 384 and 768), and the render sets, with
+lights.png no longer drawn for them, went from 930 s to 633 s.
+
+## What each light adds
+
+`lights.png` began as each light alone, then all, which shows what a key
+or a rim light does but not a small point light: under one alone it
+changes a few dim pixels of a whole picture, and the ambient sky, which
+every frame keeps, swamps them (round 10: a ring's spark). So the strip
+has a second row, each light's own contribution brightened until the
+99th percentile of what the light reaches shows at 230 levels, the gain
+(between 1 and 32) printed, and closes on the picture under no light,
+which is what every light adds to.
+
+It is one half-size draft render (lightstudy.ts). With `splitLights` the
+kernel keeps the light apart in slots: slot 0 holds what no light brings
+(the sky's light, the glows, the backdrop, the sky in a mirror) and slot
+i + 1 everything light i brings, on the model and the floor, in a mirror
+and through glass. Light i alone is slot 0 plus slot i + 1, all is the
+render's own picture, none is slot 0, and what light i adds is its slot
+times its gain, on black and unbloomed, so it is that light's radiance
+and nothing spread from elsewhere. It replaced a render per light, one
+under no light and one under all, which differed in more than the light:
+the floor's albedo is solved per render from that render's directional
+lights, so each frame showed the palette's own floor and the row
+under-reported a light on it (the door's torch alone lit a floor of
+albedo 0.95, where the shot's is 0.26, 0.20, 0.10), and a glow near
+white in two pictures differs only in the channels not already full, so
+a flame a light barely touched came out green once brightened (round
+11), which needed a grey mask. A glow is in no light's slot, so what a
+light adds on a flame is the light on the flame's colour, and the mask
+is gone.
+
+The frames are exact. The rows keep the slots' sum in double precision
+beside the slots, and the finish composes the picture from it, adding
+each light's direct light in the order an unsplit render does: summed
+from the slots, each rounded to a float, the split picture differed from
+the unsplit one in about one byte in a hundred thousand. With the total,
+52 of 52 split renders drew their unsplit render byte for byte (every
+example and dogfood program with two or more lights, draft and full, at
+96 and 161 pixels). Light alone less none is that light's slot to the
+last bit except where a slot is under 2^−29 of slot 0, where the sum
+rounds it (one value of 28,227 in the test scene, off by 0.37 of a unit
+in the last place). The one difference left is at silhouettes: the slots
+keep an edge pixel's four samples as their linear mean, where the
+render's own picture means them after the tone curve, so an edge against
+something much brighter, a glow's, is up to 61 levels brighter in the
+alone and none frames, and bloom spreads up to 6 levels round it.
+
+On the lantern, the ring and the door, on four threads with 256-pixel
+frames, the study takes about a third of the old one's time: 0.31 to
+0.38 at 862f270 against 230a4d5, two or three interleaved runs each on
+a lightly loaded machine (the lantern 0.80 s against 2.2, the ring 1.05
+against 3.3, the door 1.1 against 3.2). The track that built it measured
+0.17 to 0.31 on a busier machine, where the old study ranged from 1.8 to
+3.5 s on the lantern alone. Each frame's caption is in dark or light ink
+by the brightness under it. The strip is part of the full `--beauty`
+render and not of `--beauty-only`, the loop for trying a finish, unless
+`--lights` asks; the render sets never draw it, since they never commit
+it; and the shot `set camera` names is `beauty.png` and is not drawn
+again as `beauty_<name>.png` (round 11: the material loop's one shot was
+the shot twice and the strip, 28 s against 8).
+
+## What the rebuild costs
+
+The beauty render alone, on the seven benchmark scenes, the old renderer
+(at 1697253) against the new kernel, measured when the kernel was
+reviewed: the inputs captured as a render set makes them (grid 112),
+`renderBeauty` with a fresh cache, so each render pays its own hierarchy
+and sky, the better of two runs back to back, on a machine of four
+shared cores. Seconds:
+
+| Scene | Old, 384 | New, 384 | New, 384, 4 threads | Old, 768 | New, 768 | New, 768, 4 threads |
+| --- | --- | --- | --- | --- | --- | --- |
+| medal | 1.56 | 1.47 | 0.97 | 4.46 | 4.95 | 2.39 |
+| tumbler | 1.01 | 3.51 | 1.36 | 4.30 | 13.27 | 5.52 |
+| lantern | 2.73 | 2.94 | 0.97 | 8.06 | 8.48 | 3.40 |
+| teapot | 0.78 | 1.25 | 0.61 | 2.70 | 4.93 | 2.36 |
+| mixer | 9.68 | 12.13 | 3.94 | 34.07 | 38.63 | 10.83 |
+| door | 6.25 | 5.57 | 1.76 | 19.33 | 18.38 | 5.53 |
+| ring | 5.13 | 4.94 | 1.83 | 11.89 | 14.93 | 4.86 |
+| total | 27.13 | 31.81 | 11.43 | 84.81 | 103.58 | 34.88 |
+
+On one thread the new kernel takes 1.17 times the old one's time at 384
+and 1.22 at 768, inside the plan's 1.4 and 1.5; on four threads 0.42 and
+0.41 of the old renderer on one. The tumbler, at 3.5 and 3.1 times, is
+the one scene past the plan's per-scene limit of twice (see Glass); the
+knob the plan gave for it, two glossy rays instead of four, took the
+mixer from 11.6 s to 9.3 and the ring from 4.6 to 4.0 and did not move
+the tumbler, so it was turned back. The legibility pass that followed
+kept every scene within 5% of the kernel on one thread (at 384, the
+better of two to five interleaved runs a scene over three sessions).
+
+CI on the runner (GitHub's ubuntu-latest, four virtual cores), each
+run's job from start to end and its steps, from the Actions timings of
+pushes to the branch:
+
+| Run | Commit | What it had | Whole check | `npm test` | examples | dogfood | std |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 166 | c5a21bc | the old renderer on one thread, lights.png drawn for the sets | 16 min 6 s | 59 s | 150 s | 728 s | 10 s |
+| 168 | 1697253 | the old shading on the pool, no lights.png in the sets | 11 min 40 s | 72 s | 112 s | 490 s | 7 s |
+| 170 | cdd3a01 | the same, with fewer evaluations (see Fewer evaluations) | 8 min 55 s | 61 s | 77 s | 364 s | 5 s |
+| 172 | 230a4d5 | the new kernel | 9 min 3 s | 67 s | 83 s | 371 s | 7 s |
+| 174 | 862f270 | the legibility pass, lights.png in one pass, the export | 10 min 41 s | 87 s | 93 s | 437 s | 8 s |
+
+The pull-request runs of the last two commits agree (run 173:
+9 min 32 s, dogfood 389 s; run 175: 10 min 32 s, dogfood 428 s). The
+pool, with lights.png dropped from the sets, and the fewer evaluations
+paid for the new look: the dogfood set went from 728 s to 490 s and then to 364 s, as
+the pool's gain measured locally (see Threads), and the kernel then
+added about 15 s to the three sets (6 s to the examples, 7 to dogfood, 2
+to std) and 8 s to the whole check. The last row's dogfood set is 39 to
+66 s slower than the kernel's on both of its runs, which none of the
+stage's own measurements accounts for (the legibility pass's scenes were
+within 5%, and neither the light study nor the export runs in a render
+set); it is recorded here and not yet explained.
+
+The beauty render's share of a render set was measured at 862f270 on the
+same kind of machine (four cores of an Intel Xeon at 2.1 GHz, its load
+average 2.4 to 2.8 over the run, the run's own threads included): every
+program of the three sets run with `tools/render-set.ts`'s options, four
+threads, TMPDIR private, summing each program's `beauty` and
+`beauty:<camera>` timings (the camera's fit, the depth raster, the sky
+and the hierarchy, the rows, the finish and the PNG) against its whole
+run. The 82 programs took 598 s, of which the beauty renders were 142 s,
+24%: 28% of the examples (29 s of 106), 23% of the dogfood set (111 s of
+486) and 28% of std (1.9 s of 6.9). Per program the median is 26%, from
+4% to 64%; the largest shares are scenes of glass, metal and glows,
+round 9's bottle (64%, 7.9 s of 12.4), the lamp (57%) and round 10's
+ring (54%, 14.1 s of 26.1), and the largest beauty times the ring's and
+round 11's mixer's (11.4 s of 41.8). Before the pool, the design had
+measured the old shading on one thread at 33 and 34.5% of a render-set
+run over two samples of its programs, and 44% over the seven benchmark
+scenes.
+
+## Read blind
+
+The new beauty render, as merged at 862f270, was checked blind against
+the old one. A script set the beauty shots of eight models side by side:
+the medal, teapot, lantern and tumbler from the examples, round 10's
+ring, round 11's mixer and door, and the hardware library's plate. Each
+pair set the render at 1697253 against the render at 862f270, and which
+side each took came from a hash of the subject's name, so neither the
+person composing the sheets nor the order of the pairs decided it. A
+reader who saw only the pictures, without the programs or the key,
+answered the same questions about every pair: the lettering, the counts
+of repeated parts, how the model meets the ground, which parts are which
+material, what is glass and what is inside it, and which shapes are
+ambiguous; and said which side they would trust to check the model. The
+answers were then scored against the programs.
+
+| Subject | Old render | New render | Parts and lettering as readable in the new |
+| --- | --- | --- | --- |
+| medal | gold that "could pass for yellow plastic or paint" | gold, star, letters and loop all read as gold metal | yes |
+| ring | gem read as deep magenta or purple (it is a pink-red ruby) | wood, velvet and metal read better; the engraving fainter gold on gold | no: FOREVER, unreadable in both, is less legible |
+| teapot | knob "gold metal or yellow paint", body ceramic or plastic | knob polished gold, glazed ceramic, a contact shadow | yes |
+| lantern | grey iron with rust, right | the frame read as bright polished steel or chrome; the bars' shadows on the floor read right | yes, but its iron read wrongly |
+| tumbler | the drink opaque; the straw's bands miscounted | clear glass, a translucent drink, the bands counted right | yes |
+| mixer | the steel bowl read as painted or plastic, the hub as plastic | polished steel, chrome hub, reflections read as reflections | no: the bowl's reflections crowd the beater |
+| door | the lower half had to be brightened to count | all 35 heads counted without adjustment; the stone's colour left uncertain under the torch | yes |
+| hardware | every part pale blue-grey, read as painted, plastic or dull aluminium | steel and zinc read as such | yes |
+
+Both renders shared some misreadings: the hardware chain's six links
+read as four, the ring's chrome inlay as a reflection and its round cup
+as a box, the teapot's capped handle as an open tube, the door's walnut
+torch handle as black iron, the medal's brass letters as gold, and the
+straw below the drink was not seen at all. One shared misreading is the
+language's, not the renderer's: both show the medal's lower legend
+mirror-reversed, because that is what `text()` builds on a negative arc.
+
+The reader trusted the new render in seven pairs of eight: the metals
+read as metal, the glass as clear and the drink in it as translucent,
+and the door's studs can be counted without brightening the picture. The
+old render was trusted for the lantern, whose iron it showed truthfully.
+The render did not meet the plan's bar, which asked for both halves: the
+lettering and parts read at least as well in six pairs, not seven (the
+ring's inscription and the mixer's beater), and one answer was wrong
+only for the new render, the lantern's frame, the rust preset's dark old
+iron, read as polished steel or chrome. That is the misreading the dark
+iron preset was made to prevent; the first blind check of the kernel,
+before the legibility pass, had read the same frame as white enamel. No
+count or lettering was read wrongly from the new render alone, and the
+one count that differed between the two, the bands on the tumbler's
+straw, the new render got right. The two pairs and the lantern's iron
+are left open; the plan's next step for legibility is a dogfooding round
+that judges the renders.
 
 ## Minecraft geometry
 
@@ -499,39 +1334,51 @@ capped GLB at resolution 64: 25 s, the full one 5 s).
 
 The program's lights are part of the model as shipped: a torch is why a
 scene is at night. The GLB writes each as a `KHR_lights_punctual` light
-on a node of its own, a point light at its position and a directional
-one turned so its -z runs from the light to the model. The beauty render
-works in display values (a white face turned θ from a light of power p
-reads 0.85 p cos θ, a point light's strength is range² / (range² + d²) of
-that) and an engine in linear light with the inverse square, so the two
-cannot agree everywhere. They are made to agree on a face turned 60
-degrees from the light, at `range` from a point light: 2π (0.425 p)^2.2
-lux for a directional light and 2π (0.2125 p)^2.2 range² candela for a
-point light. Over a wall beside a point light at 0.3 to 1 range from it
-that is within 0.04 to 0.10 of the beauty render's display value (rms),
-where agreeing on a face turned to the light was 0.07 to 0.23 off,
-brighter. An engine takes the cosine in linear light, so its light is
-flatter across angles than the beauty render's: on a face turned square
-to the light it is about two thirds as bright as `beauty.png`, at 60
-degrees the same, and at a slant brighter (grey plates under a
-directional light, read in the viewer's scene and in `beauty.png`: 97
-against 159 square on, 70 against 73 at 60 degrees, 42 against 32 at
-80); nearer a point light than its range it is brighter. glTF's range is a cutoff, not a
-half-strength distance, so it is written as three times the program's,
-where the beauty render's strength is a tenth. The apparent size has no
-glTF counterpart. The cameras stay out of the GLB, since an engine
+on a node of its own (glb.ts, `glbLights`): a point light at its
+position, and a directional one turned so its -z runs from the light to
+the model, its node three radii out from the model's centre for an
+engine whose shadow camera needs a place.
+
+Both sides now work in linear light, so the intensities follow from the
+beauty render's units rather than being fitted to them. The beauty
+render gives a white face turned θ from a light of power p the radiance
+KEY·p·cos θ (KEY = 1.05), and a point light's strength at a distance d
+is range² / (range² + d²) of that. A physically lit engine (three.js,
+Blender, Godot, Filament) gives a white Lambert face 1/π of its
+irradiance: lux·cos θ from a directional light, candela·cos θ / d² from
+a point light. So a directional light is π·KEY·p lux, 3.30 for power 1,
+and agrees with beauty.png on every face at every angle: computed
+through the tone curve for powers 0.25 to 2, angles 0 to 80 degrees and
+albedos 1, 0.5 and 0.2, the two are within 2 levels on a white face
+square on and half a level elsewhere, and a matte grey sphere in the
+viewer matches beauty.png to 0.1 levels on average. The display-space
+renderer before it could be made to agree on one face angle only. A
+point light is π·KEY·p·range² candela, and the two laws agree only far
+off: at `range` an engine is twice as bright as beauty.png and at half
+of it five times; with glTF's cutoff the two cross at about 1.8 ranges,
+the engine is 0.8 of beauty.png at two and a third at two and a half,
+and dark at three, where beauty.png keeps a tenth. glTF's `range` is
+that cutoff, written as three times the program's (`GLB_RANGE_CUTOFF`).
+A point light with no range has the beauty render's, half the model's
+longest side, in the GLB too (it was 2 units, which lit a GLB
+differently from its picture). Colours go from sRGB to linear. The
+apparent size (soft shadows, a mirror's softbox) has no glTF counterpart
+and is left out. The cameras stay out of the GLB, since an engine
 imports them as objects in the level; the viewer page has them.
 
-The viewer page has two lightings. Its studio (a grey backdrop, a room
-environment for the metals, a white key) is for judging the maps; its
-scene is the program's: the GLB's own lights, or the beauty render's
-one key when the program declares none (where `set light_azimuth` and
-`set light_elevation` put it), the program's sky drawn
-behind as the beauty render's backdrop and, scaled by the ambient as the
-beauty render scales it, standing in for the light from all round, a
-floor of the sky's floor colour, and each named camera as a button that
-puts the view where the beauty shot's eye is. It opens in the scene when
-the program declares lights or a sky, and from `set camera`'s shot.
+The viewer's Scene mode departs from glTF on purpose, to show what
+beauty.png shows. It replaces three.js's distance attenuation with
+1 / (d² + range²), the range read back from the cutoff, so the GLB's
+candela give exactly beauty.png's KEY·p·range² / (range² + d²): with the
+inverse square the door's wall beside its torch came out 37 levels too
+bright and its non-metal parts 36.8 levels off on average, and with the
+emulation 1.0. And it shows a glow at GLOW times the GLB's emissive
+strength, which is the glow alone, so the door's flame is 247, 201, 52
+against beauty.png's 249, 201, 52 (each glowing material counted once:
+three placed bulbs sharing one material first opened at 1.6³ times). An
+engine importing the GLB uses glTF's inverse square and the emissive as
+written, so the GLB stays standard glTF, and near a point light an
+engine is brighter than the picture.
 
 ## Imported meshes
 
@@ -1012,33 +1859,30 @@ the mug at 1 times); it wants the model's size passed to the format,
 and until then the guide says to draw a part that small in centimetres
 or millimetres.
 
-## Glass, a light with a size, depth of field
-
-A transmitting material is shaded by continuing the ray: refract in at the
-surface, march the inside of the field (the sign flipped) to the far wall,
-refract out, and shade whatever that ray meets next, an opaque surface
-(shaded in full, no further glass), the floor with its shadow, or the
-backdrop; the colour survives in proportion to the thickness crossed. A
-reflection of the same environment is mixed in by Fresnel, and the key
-highlight sits on top. One bounce each way is enough for a tumbler and
-costs about as much as a shadow ray. The light's size is the softness of
-the shadow march; depth of field is a post-process gather blur whose
-radius grows with distance from the focus plane through the model's
-centre, weighted so a sharp foreground does not smear across a blurred
-background.
-
 ## Noise and dither
 
 The procedural patterns and `displace` run on gradient (Perlin) noise:
-value noise, which they used first, has its random values at the
-lattice points, so its blotches sit on a grid and read as patches on a
-skin and bands in a marble's veins, at the coarse atlas above all.
-Gradient noise has nothing to show at the lattice. Every computed colour
-is quantised to 8 bits through a dither (interleaved gradient noise per
-pixel, a triangular distribution one level wide), in the beauty render,
-the sheets and the atlas, so a slow gradient becomes fine grain rather
-than bands a dozen pixels wide; it is a function of the pixel position,
-so renders stay reproducible byte for byte.
+value noise, which they used first, has its random values at the lattice
+points, so its blotches sit on a grid and read as patches on a skin and
+bands in a marble's veins, at the coarse atlas above all. Gradient noise
+has nothing to show at the lattice. Every computed colour is quantised
+to 8 bits through a dither (interleaved gradient noise per pixel, a
+triangular distribution one level wide), in the beauty render, the
+sheets and the atlas, so a slow gradient becomes fine grain rather than
+bands a dozen pixels wide; it is a function of the pixel position, so
+renders stay reproducible byte for byte.
+
+The beauty render's sampling is deterministic too. Its one estimator
+with a pattern in it is the area light: a pixel's eight shadow rays are
+placed by the pixel, the light and the subsample (rays.ts,
+`diskPattern`: interleaved gradient noise over the pixel grid,
+transposed so its residue does not line up with the dither's, an R2
+lattice for the radii and an integer hash of the light and the
+subsample). The glossy rays are one fixed pattern for every pixel. There
+is no `Math.random` and no clock anywhere in the render, so an unchanged
+program draws the same bytes on every run (and on any number of threads,
+see Threads), which is what lets CI compare the committed renders with a
+fresh regeneration.
 
 ## Materials without UVs, and the atlas that bakes them anyway
 
@@ -1145,10 +1989,11 @@ displace ends up wearing is read from the tree: the material at a point
 is the outermost paint above it, so a displace under a paint gives that
 paint, and one with no paint above gives the paints and decals inside it.
 
-`viewer.html` gives three.js a room environment, because a metal is
-mostly what it reflects: without one the lantern's bare iron rendered
-near black in headless Chromium, and a metallic-roughness map had
-nothing to vary.
+`viewer.html`'s Studio mode gives three.js a room environment, because a
+metal is mostly what it reflects: without one the lantern's bare iron
+rendered near black in headless Chromium, and a metallic-roughness map
+had nothing to vary. Its Scene mode reflects the beauty render's own sky
+(see The viewer).
 
 ## The language
 
@@ -1438,69 +2283,6 @@ board (x 1.51) once its hand-set `slice_x` was taken out, and the mixer,
 whose beater meets the model only where its shaft enters the hub, on
 the planes it already had.
 
-## What each light adds
-
-`lights.png` began as each light alone, then all, which shows what a
-key or a rim light does but not a small point light: under one alone it
-changes a few dim pixels of a whole picture, and the ambient sky, which
-every frame keeps, swamps them (round 10: a ring's spark). So the strip
-has a second row, each light's own contribution: the frame under that
-light alone minus the frame under no light (one light of no power: the
-sky's ambient, the glows and the reflections, nothing from any light),
-clamped at zero and brightened
-until the 99th percentile of what the light reaches is near white, the
-gain printed. The lights add up in the shading (each adds its diffuse
-and its highlight, shadowed towards itself), so the difference is that
-light's term, and the brightening makes its reach and colour readable
-whatever its power. It costs one more render than the strip did, and
-the frames went from 0.4 to half the beauty size: 6.1 s to 9.6 s on the
-ring's three lights. The no-light frame closes the row, since it is
-what every light adds to.
-
-The difference is taken from the finished pixels, after the shading has
-clipped each channel at white, so on a glowing part it is not that
-light's term: a flame near white under no light and a little whiter
-under the moon differs only in green and blue, and brightened 7.9 times
-it read as a green flame (round 11). The render marks the pixels whose
-surface glows, and that row draws them flat grey and leaves them out of
-the gain. A light that does reach a glow is still seen on everything
-round it.
-
-The strip is four or more marches beside the shot, so it is part of the
-full `--beauty` render and not of `--beauty-only`, the loop for trying
-a finish, unless `--lights` asks; and the shot `set camera` names is
-`beauty.png` and is not marched again as `beauty_<name>.png` (round 11:
-the material loop's one shot was the shot twice and the strip, 28 s
-against 8).
-
-## Lighting a metal, lighting a lamp
-
-A metal is mostly what it reflects, and a fixed sky is not enough for
-gold to read as gold: the beauty render bounces one ray off a metal
-surface into the scene (the model, the floor, the backdrop), blurred
-towards the plain sky by roughness, and tints it by the metal's colour.
-The key light can be placed (`set light_azimuth`, `set light_elevation`),
-the ambient light scaled, and a material can glow, which is added
-unshadowed so a flame inside a lantern is a flame.
-
-The default key is fixed in the world, upper left from the front, for
-every shot but one kind: a camera looking steeply down. People read a
-picture as lit from above, and in a plan view the front-left key lights
-the frame from its bottom, which draws a blind pocket as a dome (round
-10's hub: its plan shot's pockets read as bumps). So from a camera elevation
-of 55 to 75 the default key turns, smoothly with the elevation, to the
-frame's top left (environment.ts, `defaultKey`). A program that places
-its own lights keeps them: the rule only chooses for a program that did
-not. The viewer page keeps the world's key, since its camera turns.
-
-A metal reflects the room round and behind the camera more than the
-light it takes from it, and the studio flags the two apart: the light a
-surface takes sees walls and a ceiling a white mug's shaded side still
-needs, and what a metal mirrors sees them nearly black, with only the
-sweep behind the model and the cards bright. In one room, light enough
-for the mug, rough iron facing up returned 0.8 of the sky and every
-metal read white, cream or ceramic.
-
 ## The serif face
 
 Serifs are added by rule, not drawn: a slab across every free end of a
@@ -1512,13 +2294,66 @@ glyph was rendered and read to check it.
 ## The viewer
 
 `viewer.html` embeds the GLB as base64 so it opens from disk with no
-server, and loads three.js from a CDN, so it needs a network connection
-once. It exists for people; an agent verifies from the PNGs. With
-animations it grows a bar along the bottom: loop, speed, a scrub bar
-that pauses the clip at a moment, and a button that plays every clip
-once in turn, so a person can check a rig's timing without a second
-tool. The page keeps its own paused and finished flags because
-three.js's action reports a clip that ran to its end as paused.
+server, and loads three.js from a CDN, pinned to 0.187.0
+(`THREE_VERSION` in viewer.ts), so it needs a network connection once.
+That release prefilters each level of an environment with a true GGX
+lobe, as the beauty render's maps are; it also removed the soft PCF
+shadow map and deprecated the Clock the page used, so the page takes the
+plain PCF shadow map and a Timer. It exists for people; an agent
+verifies from the PNGs. With animations it grows a bar along the bottom:
+loop, speed, a scrub bar that pauses the clip at a moment, and a button
+that plays every clip once in turn, so a person can check a rig's timing
+without a second tool. The page keeps its own paused and finished flags
+because three.js's action reports a clip that ran to its end as paused.
+
+Both of its modes end on beauty.png's tone curve (see Light in linear
+units, and one curve), so a base colour lit to unit light shows as
+itself and highlights roll off instead of clipping. The Studio mode is
+the page's own, for judging the maps: a grey backdrop, three.js's room
+environment for the metals to reflect, a hemisphere light and a white
+key, calibrated together (`STUDIO` in viewer.ts: the room at 0.4, the
+hemisphere at 0.1, the key at 1.2 lux) in headless Chromium on a plate
+of the presets, every tile turned square to the key. A white face turned
+to the key comes to 1.1 in linear light, its Fresnel included, one
+turned away to 0.37 and one facing up to 0.94; the 26 solid non-metal
+presets show their base colours to within 1.6 levels on average in every
+channel, and 4.1 levels tile by tile, the darkest channels lowest, since
+a key brings none of the Fresnel lift from all round that Neutral's toe
+expects.
+
+The Scene mode is the program's, what beauty.png shows drawn from the
+export (round 11: a night scene lit by a torch was shown in a daylight
+studio). Its environment is the beauty render's own sky, the
+reflections' map (FILTERED, with the studio's dark side and its cards)
+as a 128 × 64 lat-long of linear half floats, 64 KB of the page, through
+three.js's prefilter at the render's intensity E. Diffuse surfaces are
+lit from the sky's spherical harmonics, as the beauty render lights
+them, and not from that map, whose cards would light them two to three
+times over (a 0.8 grey's shaded side from 128 levels to 178). The lights
+are the GLB's own, with beauty.png's point-light law and glow (see
+Lights in the export), or the beauty render's one key when the program
+declares none; the floor is the albedo the beauty render solves for its
+open floor, reflecting nothing and fading into the horizon from one
+reach to four as in beauty.png; the backdrop is the sky's display
+colours; and each named camera is a button, with one more that frames
+the page exactly as beauty.png. The page opens in the scene when the
+program declares lights or a sky, from `set camera`'s shot. Read in
+headless Chromium against beauty.png at its framing, the non-metal parts
+differ by 2.3 levels on average on the medal, 1.0 on the door and 4.2 on
+round 10's ring at sunset; the lantern's 7.7 is all its candle inside
+the cage (17 to 29 levels brighter), which beauty.png darkens by the
+field's occlusion.
+
+What the page cannot show is what the GLB does not carry or three.js
+does not do: the field's occlusion and cavity term (there is no
+occlusion map, so the medal's lettering barely reads and the candle is
+bright), soft shadows from lights with a size (shadow maps are hard, so
+the door's torch bracket throws a large dark shadow that beauty.png's
+sphere of light dissolves), the model reflected in itself, bloom, glass
+(which stays out of the GLB), and the sun's or moon's disc and the stars
+in the backdrop. Its far floor fades to the one horizon colour
+beauty.png's shot looks towards, so orbiting towards a sunset's sun
+leaves the far edge darker than the picture would.
 
 ## Libraries
 
