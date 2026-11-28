@@ -2066,7 +2066,12 @@ that is zero). `void(region, shape)` is 1 when the region holds no
 solid of the shape: `assert void(cavity, mug)` promises nothing pokes
 into the cup (the mug example's handle once reached inside it), and a
 failure says where the solid is and in which step (`void(cavity, mug),
-solid at (0.44, 1.3, 0) in 'handle'`). The region is a shape of its
+solid at (0.44, 1.3, 0) in 'handle'`): the smallest step that gives the
+shape its solid there, never a cutter whose volume happens to hold the
+point (a rod down a spout bored on its own, before the pot was added,
+meets the pot's wall, and the failure names the body the pot is shelled
+from, not the bore, which only the spout lost), and the same for
+`inside` and `pieces`. The region is a shape of its
 own, never the cutter: a cutter's volume is empty by construction, so
 `void(slot, plate)` holds whether or not the slot went through; "the
 hole goes through" is a thinner rod reaching past both faces,

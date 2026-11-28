@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
-import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, dimsLabel, meshSteps } from "../src/render/views.js";
+import { renderSheet, renderSlices, renderSteps, renderTurntable, renderView, INK, gridStep, defaultLevel, dimsLabel, meshSteps, stepCaptions } from "../src/render/views.js";
 import { createTarget, renderGhost, renderMesh } from "../src/render/raster.js";
 import { attributeVertices, renderCallouts, hiddenFraction } from "../src/render/callouts.js";
 import { decodePng, encodePng, encodeApng } from "../src/render/png.js";
@@ -133,6 +133,43 @@ describe("views", () => {
     expect(steps.width).toBe(2 * 66 + 6);
     const tt = renderTurntable(mesh, info, 40, 4);
     expect(tt.width).toBe(4 * 44 + 4);
+  });
+  it("keeps every steps caption inside its cell, the size whole and the tag on a line under it", () => {
+    // The widest captions the rendered programs make at the committed size (thumbnails 134 px): a region of three
+    // short sizes ran 167 px, and a cut's ("1.59 × 1.94 × 0.24  cut", the teapot's bore) into the next caption.
+    const thumb = 134, gutter = 6, bar = 30;
+    const steps = [
+      { name: "eye_hole", shape: P.box(0.03, 0.068, 0.068), used: false, role: "region" as const, line: 1 },
+      { name: "bore", shape: P.box(1.59, 1.94, 0.24), used: true, role: "cut" as const, line: 2 },
+      { name: "a_part_with_a_long_name", shape: P.box(0.048, 0.048, 0.036), used: true, line: 3 },
+    ];
+    const sheet = renderSteps(steps, thumb, 16);
+    const labelH = sheet.height - bar - gutter - thumb - gutter;
+    const y0 = bar + gutter + thumb;
+    for (let c = 0; c < steps.length; c++) {
+      const x = gutter + c * (thumb + gutter);
+      // Nothing drawn in the gutter right of the cell (or past the last cell's edge) in any caption line.
+      for (let y = y0; y < y0 + labelH; y++)
+        for (let px = x + thumb; px < x + thumb + gutter; px++) expect(sheet.get(px, y), `cell ${c} at (${px}, ${y})`).toBe(INK.page);
+    }
+    // Three caption lines, as two of the steps are tagged.
+    expect(labelH).toBe(34);
+    // The title bar of a sheet three thumbnails wide ends inside it, rather than at its edge mid-word.
+    for (let y = 0; y < bar; y++) for (let px = sheet.width - gutter; px < sheet.width; px++) expect(sheet.get(px, y), `title at (${px}, ${y})`).toBe(INK.bar);
+    const { cell, lines } = stepCaptions(steps, thumb);
+    expect(cell).toBe(thumb);
+    expect(lines[0]).toEqual(["1. eye_hole", "0.03 × 0.068 × 0.068", "region"]);
+    expect(lines[1]).toEqual(["2. bore", "1.59 × 1.94 × 0.24", "cut"]);
+    expect(lines[2]).toEqual(["3. a_part_with_a_long…", "0.048 × 0.048 × 0.036"]);
+    for (const l of lines) for (const s of l) expect(textWidth(s, 1)).toBeLessThanOrEqual(cell);
+    // The tag is drawn: ink on the third line under the region and the cut, none under the part.
+    const inked = (c: number) => { const x = gutter + c * (thumb + gutter); for (let y = y0 + 23; y < y0 + 30; y++) for (let px = x; px < x + thumb; px++) if (sheet.get(px, y) !== INK.page) return true; return false; };
+    expect([inked(0), inked(1), inked(2)]).toEqual([true, true, false]);
+    // A small sheet drops the spaces round the "×" and widens its cells to the widest size rather than cutting it.
+    const small = stepCaptions(steps, 40);
+    expect(small.lines[2][1]).toBe("0.048×0.048×0.036");
+    expect(small.cell).toBe(textWidth("0.048×0.048×0.036", 1));
+    expect(renderSteps(steps, 40, 8).width).toBe(3 * (small.cell + gutter) + gutter);
   });
   it("picks slice planes through the origin when the model straddles it", () => {
     expect(defaultLevel({ min: [-1, 0, -1], max: [3, 2, 1] }, "x")).toBe(0);

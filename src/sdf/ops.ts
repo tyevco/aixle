@@ -236,6 +236,11 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
   return out;
 }
 
+/** Whether a `cut` node keeps the overlap of its two shapes (`a & b`), rather than taking the second from the first. */
+export function isIntersection(s: Shape3): boolean {
+  return INTERSECTIONS.has(s);
+}
+
 // --- transforms --------------------------------------------------------------
 
 export function move(s: Shape3, dx: number, dy: number, dz: number): Shape3 {

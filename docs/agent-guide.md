@@ -134,6 +134,10 @@ mesh; `--no-cache` samples afresh.
   caption names (`grid 0.25`); the darker lines pass through the origin.
 - The perspective view's floor grid is at y = 0 (or under the model if it
   goes lower); the red, green and blue lines are +x, +y, +z at the origin.
+- Each thumbnail on the steps sheet is captioned with its number and name,
+  its size `w × h × d`, and on a third line what it is when it is not a
+  part: `cut` (drawn as the solid it removes), `mask`, `region` (framed
+  grey) or `unused`. A long name ends in "…"; a size never does.
 - A part visible in the steps sheet with a red frame is not in the output:
   you forgot to add it. A thumbnail that says "too fine for this
   thumbnail" is a small part in a large step (bolts along a bench) that

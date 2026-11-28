@@ -331,6 +331,28 @@ describe("interpreter", () => {
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
     expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ cubic units at \(3, 0, 0\) in 'b'$/);
   });
+  it("names for a failed void, inside or pieces a step that gives the shape its solid there, never a cutter (stage 5)", () => {
+    // The teapot's case: a block (the pot) unioned after a bored spout. The rod down the bore runs on into the block,
+    // where the bore's own volume holds the point too: the bore is subtracted from the spout only, so the solid there
+    // is the block's. The attribution named the cutter, the smallest box holding the point.
+    const pot = "pot = box(2, 1, 2)\nspout = cylinder(0.3, 2) | rotate(z=90) | move(1.5, 0.5, 0)\nbore = cylinder(0.15, 2.4) | rotate(z=90) | move(1.5, 0.5, 0)\nrod = cylinder(0.1, 2.6) | rotate(z=90) | move(1.6, 0.5, 0)\n";
+    for (const model of ["pot + (spout - bore)", "(spout - bore) + pot", "(pot + spout - bore) + pot"]) {
+      const ev = run(`${pot}model = ${model}\nassert void(rod, model)\nassert inside(rod, model) == 0\nshow model`);
+      expect(ev.asserts.map((a) => a.passed), model).toEqual([false, false]);
+      expect(ev.asserts[0].where, model).toMatch(/^solid at \(.*\) in 'pot'$/);
+      expect(ev.asserts[1].where, model).toMatch(/inside model at \(.*\) in 'pot'/);
+    }
+    // A loose piece is named for the part it is, not for a smaller cutter whose box holds its inside point.
+    const loose = run("a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nnick = box(0.39, 0.39, 0.39) | move(3, 0, 0)\nassert pieces((a - nick) + b) == 1\nshow (a - nick) + b");
+    expect(loose.asserts[0].where).toMatch(/^the smallest piece is .* in 'b'$/);
+    // A wall's faces are named by the same walk, through shapes whose surface is there: a trimmer whose bottom face lies
+    // on the plate's top, taken from the post alone, does not make the plate's face.
+    const wall = run("plate = box(2, 0.1, 2)\npost = cylinder(0.3, 2) | move(0, 1, 0)\ntrim = box(3, 1, 3) | move(0, 0.55, 0)\nmodel = plate + (post - trim)\nassert wall(model) > 0.2\nshow model");
+    expect(wall.asserts[0].where).toMatch(/^thinnest at \(.*\) in 'plate', through to \(.*\) in 'plate'$/);
+    // The walk passes through a wrapper solid at the point: the rod down a shelled cup meets its floor, the body's.
+    const cup = run("body = cylinder(1, 1)\ncup = shell(body, 0.1)\nrod = cylinder(0.05, 3) | move(0, -1, 0)\nassert void(rod, cup)\nshow cup");
+    expect(cup.asserts[0].where).toMatch(/^solid at \(.*\) in '(cup|body)'$/);
+  });
   it("warns when a part round about the ring's axis is turned just before the ring, which turns nothing (round 10)", () => {
     const ev = run('pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0) | rotate(y=30)\npockets = pocket | ring(6, 0.7)\nslot = box(0.3, 0.1, 0.1) | rotate(y=30)\nslots = slot | ring(6, 0.7)\nright = cylinder(0.1, 0.3) | ring(6, 0.7) | rotate(y=30)\nshow pockets + slots + right');
     expect(ev.warnings.filter((w) => /ring\(\)/.test(w))).toEqual([expect.stringMatching(/^line 2: ring\(\): 'pocket' was turned about y by 30 just before the ring, which leaves it as it was .* rotate after it: \.\.\. \| ring\(\.\.\.\) \| rotate\(y=30\)$/)]);

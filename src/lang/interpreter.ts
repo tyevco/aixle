@@ -8,7 +8,7 @@ import type { Vec3 } from "../core/vec.js";
 import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
-import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
+import { union, scale as scaleShape, allJoints, joint as jointShape, isIntersection, placedUnder } from "../sdf/ops.js";
 import { regionTouches, voidWitness, outsideWitness, insideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
 import { loosePiece, standing, type MeshCache } from "../mesh/pieces.js";
 import { BRIDGE_MM, supportOf, thinnestWall, UNITS } from "../mesh/print.js";
@@ -1460,26 +1460,55 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   /**
-   * The innermost named step of `within` with solid at `p`, as " in 'name'", for a failed void: a step whose value
-   * is in the measured shape's own tree (round 10: a gem's mask cube was named for an engraving's solid, and a
-   * bell for the gnome that poked through it), the shape itself when it is a step; none when no step holds it.
+   * The innermost named step of `within` with solid at `p`, as " in 'name'", for a failed void, inside or pieces: a
+   * step whose value is in the measured shape's own tree (round 10: a gem's mask cube was named for an engraving's
+   * solid, and a bell for the gnome that poked through it) and gives it that solid, reached from it only through
+   * shapes solid at `p` and never through what a difference takes away (stage 5: a pot unioned after its spout was
+   * bored was reported "in 'bore'", the cutter, whose volume held the point where the pot's wall stood); the shape
+   * itself when it is a step; none when no step holds it.
    */
   function stepAt(p: Vec3, exclude: Shape3[], within: Shape3): string {
     const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
-    const tree = shapeTree(within);
+    // Every step in it is solid at the point where the measured shape puts it: a bowl's wall built at the origin and
+    // moved into the bowl is read in the bowl, not at the origin (round 11: it was never found, and the bowl was named).
+    const tree = holdingTree(within, p, (d) => d <= 0, false);
     let best: string | undefined, bv = Infinity;
     for (const st of steps.values()) {
       if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
-      // Where the measured shape puts the step: a bowl's wall built at the origin and moved into the bowl is tested
-      // in the bowl, not at the origin (round 11: it was never found, and the bowl was named instead).
-      const s = placedUnder(roots, st.value);
-      const b = s.bounds;
-      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
-      if (s.dist(p[0], p[1], p[2]) > 0) continue;
+      const b = placedUnder(roots, st.value).bounds;
       const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
       if (v < bv) { bv = v; best = st.name; }
     }
     return best ? ` in '${best}'` : "";
+  }
+
+  /**
+   * The shapes of `within`'s tree that give it what it has at `p`: walked down from it through unions, wrappers,
+   * placed sets and joints with the point carried into each one's own frame, entering only a shape whose value there
+   * passes `keep` (solid, for a void; on the surface, for a wall's face), and a difference's cutter only when
+   * `cutters` (a cut face is the cutter's surface; the solid a cutter's volume holds is never the shape's). A step
+   * that is solid at the point but subtracted there, or inside a shell's hollow, or under a part a later cut took
+   * away, is not reached. `within` is in it when it passes `keep` itself; the walk goes below it either way.
+   */
+  function holdingTree(within: Shape3, p: Vec3, keep: (d: number) => boolean, cutters: boolean): Set<Shape3> {
+    const held = new Set<Shape3>(keep(within.dist(p[0], p[1], p[2])) ? [within] : []);
+    const seen = new Map<Shape3, Vec3[]>();
+    let budget = 100000;
+    const walk = (s: Shape3, q: Vec3, depth: number) => {
+      const at = seen.get(s);
+      if (at?.some((v) => v[0] === q[0] && v[1] === q[1] && v[2] === q[2]) || depth > 200 || budget-- <= 0) return;
+      if (at) at.push(q); else seen.set(s, [q]);
+      const r = s.unwarp ? s.unwarp(q[0], q[1], q[2]) : q;
+      const kids = s.parts ?? s.inner ?? [];
+      const subtracts = s.cut === true && !isIntersection(s);
+      kids.forEach((k, i) => {
+        if ((subtracts && i > 0 && !cutters) || !keep(k.dist(r[0], r[1], r[2]))) return;
+        held.add(k);
+        walk(k, r, depth + 1);
+      });
+    };
+    walk(within, p, 0);
+    return held;
   }
 
   /** Every shape in `within`'s tree, through unions, wrappers, placed sets and joints. */
@@ -1498,18 +1527,17 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   /**
    * The innermost named steps of `within` whose surface passes within `tol` of a surface point, at most two, smallest
-   * box first and none that only holds another one found: the steps a wall's face belongs to, a cut's among them.
+   * box first and none that only holds another one found: the steps a wall's face belongs to, a cut's among them;
+   * reached from `within` through shapes whose surface is there too, so a cutter whose face passes through a part it
+   * never cut, or a part buried in another, is not named for a face it does not make.
    */
   function stepsAtSurface(p: Vec3, within: Shape3, tol: number): string[] {
     const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
-    const tree = shapeTree(within);
+    const tree = holdingTree(within, p, (d) => Math.abs(d) <= tol, true);
     const found: { name: string; value: Shape3; v: number }[] = [];
     for (const st of steps.values()) {
       if (!isShape3(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
-      const s = placedUnder(roots, st.value);
-      const b = s.bounds;
-      if (p[0] < b.min[0] - tol || p[0] > b.max[0] + tol || p[1] < b.min[1] - tol || p[1] > b.max[1] + tol || p[2] < b.min[2] - tol || p[2] > b.max[2] + tol) continue;
-      if (Math.abs(s.dist(p[0], p[1], p[2])) > tol) continue;
+      const b = placedUnder(roots, st.value).bounds;
       found.push({ name: st.name, value: st.value, v: (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]) });
     }
     found.sort((x, y) => x.v - y.v);

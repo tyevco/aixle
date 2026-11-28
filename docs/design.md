@@ -1680,7 +1680,14 @@ a witness: a void the point and the step of the measured shape holding
 solid there (and, for a region made of copies, which copy), an overlap
 the point the two share or, when they share nothing, whether they touch,
 stand apart or overlap more thinly than the lattice resolves, which is
-the clearance between them read at its closest pair. The meshing
+the clearance between them read at its closest pair. The step named for
+a solid point is found by walking down from the measured shape, the
+point carried into each shape's frame, entering only shapes solid there
+and never what a difference takes away, then taking the smallest box
+reached: a cutter's own volume holds points the shape is solid at
+wherever another part fills it (a pot unioned after its bored spout was
+reported in the bore), and only the walk knows the bore was taken from
+the spout alone. The meshing
 queries share their work: one evaluation keeps a mesh and its analysis
 per shape and grid, so `pieces(hub)`, `overhang(hub)` and `wall(hub)`
 mesh the hub once, and a failing `pieces()` names its loose piece from that same
