@@ -1,6 +1,6 @@
 # A worn iron lantern with a candle burning inside: the PBR finish. The iron is the
-# rust preset (patches of rough oxide on the metal) with wear, which rubs the edges
-# back to bright iron and darkens the corners, and a slight bump for a hammered
+# rust preset (patches of rough oxide on the metal) with wear, which rubs scuffs on
+# the edges toward satin iron and darkens the corners, and a slight bump for a hammered
 # skin; the wax has bumps of its own and the flame glows. None of it adds geometry:
 # the beauty render shades it from the field, and the GLB carries it as a normal
 # map, a metallic-roughness map and an emissive flame.

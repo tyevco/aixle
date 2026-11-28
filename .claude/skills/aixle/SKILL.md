@@ -296,8 +296,8 @@ show arm
 | a label or name must go round a cylinder | text is flat | `extrude(text(...), h, "z") \| wrap(r)` |
 | stripes run the wrong way | patterns stack along the material's `axis` (y) in the paint frame | `material(..., axis="x")`, or paint standing, then lay down |
 | gold or silver look dull on the sheet | the sheet has no environment to reflect | judge metals in `beauty.png`, which reads them: gold deep yellow, brass greener, `steel` grey, `iron` dark (`--beauty-only` is the one shot in full quality; `--quick --beauty-only` is a draft in a few seconds that cannot judge glass: its grid is coarse) |
-| the model looks new, like plastic | one smooth colour everywhere | `wear=0.4` (edges bright, creases dark), `bump=` (roughness below the mesh), `"rust"`; judge in `--beauty`, never on the sheet; the GLB carries them as maps (the report's Maps row) |
-| a thin rod or ring is worn bright all over | wear's band is ~1.2% of the model's size; thinner than two bands is all edge | thicken it, or less wear on that part |
+| the model looks new, like plastic | one smooth colour everywhere | `wear=0.4` (edges lighter, a metal's satin and in scuffs; creases dark), `bump=` (roughness below the mesh), `"rust"`; judge in `--beauty`, never on the sheet; the GLB carries them as maps (the report's Maps row) |
+| a thin rod or ring is worn lighter all along, or in patches | wear's band is ~1.2% of the model's size; thinner than two bands is all edge (a non-metal lightened along it, a metal scuffed over ~a third) | thicken it, or less wear on that part |
 | chrome reads as a dark mirror, silver as a bright one | in the `studio` a mirror shows a dark room round the camera, bright cards and each light's softbox | that is metal reading as metal; a `size=3` key gives a larger highlight |
 | chrome, silver or steel reads near white | `overcast` is the white sky for mirror metals | `studio`, `sunset` or `night` for a mirror, or a rougher metal |
 | metal lettering or a metal face turned to the camera reads dark | it mirrors the dark room behind the camera (the patterns plate's iron labels) | paint the letters a non-metal, or turn the face towards the light |

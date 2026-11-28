@@ -38,7 +38,7 @@
  * such texels are written twice and the later triangle wins. It is rare in
  * practice and visible only there.
  */
-import { albedo, bumpSlope, fieldCurvature, surface } from "../sdf/materials.js";
+import { albedo, bumpSlope, fieldCurvature, readsThin, surface } from "../sdf/materials.js";
 import type { DistFn3, HitFn3, Material } from "../sdf/types.js";
 import type { Vec3 } from "../core/vec.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -327,6 +327,8 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
   const fields = opts.fields ?? [];
   const cell = Math.max(opts.cellSize ?? 0, 1e-6);
   const probe = opts.wearProbe ?? cell * 1.5;
+  /** How thin a worn metal is under a texel, which fieldCurvature() writes for surface(). */
+  const THIN = new Float64Array(1);
   // Each vertex's bitangent as a shader builds it from the tangent, cross(normal, tangent) * w, so the bake
   // inverts exactly the frame an engine will use (three.js interpolates it from the vertex, like this).
   const nv = newPos.length / 3;
@@ -550,8 +552,9 @@ export function bakeAtlas(mesh: Mesh, opts: AtlasOptions = {}): AtlasResult {
       onField = fieldNormal(f, qx, qy, qz, mn[0], mn[1], mn[2], fn);
     }
     // Wear reads the curvature at the surface point under the texel (or the mesh point, if the slide failed).
-    const curv = f && (m.wear ?? 0) > 0 ? fieldCurvature(f.dist, onField ? fn[3] : qx, onField ? fn[4] : qy, onField ? fn[5] : qz, probe) : 0;
-    const s = surface(m, lx, ly, lz, curv);
+    const thin = readsThin(m) ? THIN : undefined;
+    const curv = f && (m.wear ?? 0) > 0 ? fieldCurvature(f.dist, onField ? fn[3] : qx, onField ? fn[4] : qy, onField ? fn[5] : qz, probe, thin) : 0;
+    const s = surface(m, lx, ly, lz, curv, probe, f && thin ? thin[0] : 0);
     image.set(px, py, rgbDithered(s.color[0], s.color[1], s.color[2], px, py));
     const r = range[mi];
     r.rMin = Math.min(r.rMin, s.rough); r.rMax = Math.max(r.rMax, s.rough);

@@ -97,6 +97,85 @@ describe("surface and curvature", () => {
     expect(crease.rough).toBeGreaterThan(face.rough);
     expect(face.color).toEqual(albedo(iron, 0, 0, 0));
   });
+  it("rubs a metal's edge to satin, short of bare polished iron, and leaves a non-metal's edge as it was", () => {
+    const iron = { ...preset("iron")!, wear: 0.5 };
+    const lin = (c: number) => Math.pow((c + 0.055) / 1.055, 2.4);
+    const edge = surface(iron, 0, 0, 0, 1);
+    // Brighter and smoother than the dark iron, but well short of bare iron's 0.56 and out of the glossy band.
+    expect(edge.color[0]).toBeGreaterThan(iron.color[0] + 0.1);
+    expect(lin(edge.color[0])).toBeLessThan(0.4);
+    expect(edge.rough).toBeLessThan(iron.rough);
+    expect(edge.rough).toBeGreaterThan(0.42);
+    expect(edge.metal).toBe(1);
+    // A non-metal's worn edge goes 35% of the way to white and loses 55% of its roughness times the edge, as before;
+    // the probe and the thinness are a metal's and change nothing on it.
+    const oak = { ...preset("oak")!, wear: 0.5 }, a = albedo(oak, 0.1, 0.2, 0.3), e = 0.85;
+    const worn = surface(oak, 0.1, 0.2, 0.3, 1, 0.05, 1);
+    expect(worn).toEqual(surface(oak, 0.1, 0.2, 0.3, 1));
+    for (let k = 0; k < 3; k++) expect(worn.color[k]).toBeCloseTo(a[k] + (a[k] + (1 - a[k]) * 0.35 - a[k]) * e, 12);
+    expect(worn.rough).toBeCloseTo(oak.rough * (1 - 0.55 * e), 12);
+  });
+  it("tells a part thinner than two probes from a thick part's sharp edge, at one more call", () => {
+    const h = 0.04, thin = new Float64Array(1);
+    let calls = 0;
+    const counted = (d: (x: number, y: number, z: number) => number) => (x: number, y: number, z: number) => { calls++; return d(x, y, z); };
+    // A bar 1.5 probes thick (the lantern's) reads as convex as an edge all round: only its thinness tells it apart.
+    const bar = P.cylinder(0.03, 2);
+    const c = fieldCurvature(counted(bar.dist), 0.03, 0.2, 0, h, thin);
+    expect(calls).toBe(10);
+    expect(c).toBeGreaterThan(0.6);
+    expect(thin[0]).toBe(1);
+    calls = 0;
+    expect(fieldCurvature(counted(bar.dist), 0.03, 0.2, 0, h)).toBe(c);
+    expect(calls).toBe(9);
+    // A box's edge, a hair in from it, and a post 2.5 probes thick at its corner: thick, however sharp.
+    expect(fieldCurvature(P.box(1, 1, 1).dist, 0.5, 0.49, 0.1, h, thin)).toBeGreaterThan(0.9);
+    expect(thin[0]).toBe(0);
+    expect(fieldCurvature(P.box(0.1, 2, 0.1).dist, 0.05, 0.3, 0.045, h, thin)).toBeGreaterThan(0.9);
+    expect(thin[0]).toBe(0);
+    // The door's ring knocker: a tube 0.016 round at its probe of 0.0294.
+    expect(fieldCurvature(P.torus(0.09, 0.016).dist, 0.106, 0, 0, 0.0294, thin)).toBeGreaterThan(0.6);
+    expect(thin[0]).toBe(1);
+  });
+  it("keeps most of a thin worn bar at the metal's own colour and roughness, where it was rubbed bright all round", () => {
+    // The lantern's bars: radius 0.03 at a probe of 0.04 (1.2% of 3.38), worn 0.45.
+    const iron = { ...preset("iron")!, wear: 0.45 }, plain = { ...iron, wear: 0 };
+    const bar = P.cylinder(0.03, 2), h = 0.04, thin = new Float64Array(1);
+    let own = 0, rubbed = 0, n = 0;
+    for (let i = 0; i < 40; i++) for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * 2 * Math.PI, x = 0.03 * Math.cos(a), y = -0.8 + i * 0.04, z = 0.03 * Math.sin(a);
+      const c = fieldCurvature(bar.dist, x, y, z, h, thin);
+      const s = surface(iron, x, y, z, c, h, thin[0]);
+      n++;
+      if (Math.abs(s.color[0] - iron.color[0]) < 0.02 && Math.abs(s.rough - iron.rough) < 0.02) own++;
+      if (s.color[0] > iron.color[0] + 0.08) rubbed++;
+      // New, the same bar is the metal's own surface everywhere.
+      const p = surface(plain, x, y, z, c, h, thin[0]);
+      expect([p.color, p.rough, p.metal]).toEqual([iron.color, iron.rough, iron.metal]);
+    }
+    expect(own / n).toBeGreaterThan(0.55);
+    // Still worn: rubbed patches along it, not none.
+    expect(rubbed / n).toBeGreaterThan(0.1);
+  });
+  it("breaks a thick part's worn edge into scuffs: most of it rubbed lighter, not all, and the faces untouched", () => {
+    const iron = { ...preset("iron")!, wear: 0.45 };
+    const box = P.box(1, 1, 1), h = 0.04, thin = new Float64Array(1);
+    let lighter = 0, n = 0;
+    for (let i = 0; i < 200; i++) {
+      // Along the box's top front edge, a hair in on the top face.
+      const x = -0.45 + i * 0.0045, y = 0.5, z = 0.49;
+      const c = fieldCurvature(box.dist, x, y, z, h, thin);
+      expect(thin[0]).toBe(0);
+      const s = surface(iron, x, y, z, c, h, thin[0]);
+      n++;
+      if (s.color[0] > iron.color[0] + 0.05) lighter++;
+      // The middle of the face is not worn at all.
+      const f = surface(iron, x, 0.5, 0, fieldCurvature(box.dist, x, 0.5, 0, h, thin), h, thin[0]);
+      expect(f.color).toEqual(iron.color);
+    }
+    expect(lighter / n).toBeGreaterThan(0.4);
+    expect(lighter / n).toBeLessThan(0.9);
+  });
   it("eats rust into a metal: rough and not metal in the patches, and wear rubs them off an edge", () => {
     const rust = preset("rust")!;
     let minMetal = 1, maxMetal = 0, rubbed = 0, n = 0;
@@ -334,6 +413,22 @@ describe("PBR in the GLB", () => {
     expect(pbr.metallicFactor).toBeLessThan(0.05);
     expect(pbr.roughnessFactor).toBeGreaterThan(0.85);
   });
+  it("bakes a thin worn bar's scuffs into the metallic-roughness map as the beauty render shades them: most of it the iron's own", () => {
+    // The lantern's bars again: radius 0.03 at a probe of 0.04, worn 0.45; the baker reads curvature and thinness.
+    const iron = { ...preset("iron")!, wear: 0.45 };
+    const shape = O.paint(P.cylinder(0.03, 1), iron);
+    const mesh = surfaceNets(shape, { resolution: 100 }).mesh;
+    const at = bakeAtlas(mesh, { size: 256, fields: [{ range: [0, mesh.indices.length / 3], dist: shape.dist, offset: [0, 0, 0] }], cellSize: 0.01, wearProbe: 0.04 });
+    const mr = at.metalRough!.data;
+    let own = 0, n = 0;
+    for (let i = 0; i < mr.length; i += 4) {
+      if (mr[i + 2] < 128) continue;   // an iron texel is metal; the unpainted background is rough 1, metal 0
+      n++;
+      if (Math.abs(mr[i + 1] / 255 - iron.rough) < 0.02) own++;
+    }
+    expect(n).toBeGreaterThan(1000);
+    expect(own / n).toBeGreaterThan(0.5);
+  });
   it("gives a plain model the colour atlas and nothing more", () => {
     const h = scene(O.union([O.paint(P.box(1, 1, 1), preset("oak")!), O.paint(O.move(P.sphere(0.4), 0, 0.8, 0), preset("gold")!)]));
     expect(h.normalMap ?? h.metalRoughMap ?? h.emissiveMap ?? h.tangents).toBeUndefined();
@@ -383,5 +478,22 @@ describe("the finish in the beauty render", () => {
     const ball = (m: ReturnType<typeof customMaterial>) => O.paint(P.sphere(0.5), m);
     const bumped = compare(shoot(ball(customMaterial(grey))), shoot(ball(customMaterial({ ...grey, bump: 0.01, bumpScale: 0.08 }))), 12);
     expect(bumped.differ).toBeGreaterThan(500);
+  });
+  it("shades a thin worn iron bar as the iron with scuffs, not rubbed bright all over", () => {
+    // A bar 1.5 probes thick, as the lantern's: before, wear lit the whole of it as bare polished iron.
+    const bar = (m: ReturnType<typeof customMaterial>) => O.paint(P.cylinder(0.03, 0.5), m);
+    const iron = preset("iron")!;
+    const plain = shoot(bar(iron), 0.04), worn = shoot(bar({ ...iron, wear: 0.45 }), 0.04);
+    // The bar's own pixels: where white plastic in its place differs a lot.
+    const white = shoot(bar(preset("plastic")!), 0.04);
+    let pixels = 0, rubbed = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      if (Math.abs(lum(white.get(x, y)) - lum(plain.get(x, y))) < 60) continue;
+      pixels++;
+      if (lum(worn.get(x, y)) - lum(plain.get(x, y)) > 30) rubbed++;
+    }
+    expect(pixels).toBeGreaterThan(100);
+    expect(rubbed / pixels).toBeGreaterThan(0.03);
+    expect(rubbed / pixels).toBeLessThan(0.4);
   });
 });
