@@ -7,14 +7,17 @@ import * as O from "../src/sdf/ops.js";
 import { parse } from "../src/lang/parser.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { buildHierarchy, flatten } from "../src/export/hierarchy.js";
-import { eulerToQuat, glbLights, toGlbScene } from "../src/export/glb.js";
+import { eulerToQuat, GLB_RANGE_CUTOFF, glbLights, toGlbScene } from "../src/export/glb.js";
 import { toObjScene } from "../src/export/obj.js";
 import { easeBlend, interpolatePose, keyAt, renderAnimation, renderPoses, type PoseCache, type PoseView } from "../src/render/views.js";
 import { REST_POSE, type JointPose } from "../src/sdf/types.js";
 import { run } from "../src/pipeline.js";
 import * as pipelineFns from "../src/pipeline.js";
 import { check } from "../src/pipeline.js";
-import { viewerHtml } from "../src/export/viewer.js";
+import { halfBase64, STUDIO, THREE_VERSION, toHalf, viewerHtml, type ViewerScene } from "../src/export/viewer.js";
+import { encode, KEY, TONEMAP_GLSL, toLinear } from "../src/render/photometry.js";
+import { buildSky, DEFAULT_LIGHT_DIRECTION, environmentLatLong, environmentPalette, horizonRadiance, irradiance, lightDirection } from "../src/render/environment.js";
+import { decode } from "../src/render/photometry.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { preset } from "../src/sdf/materials.js";
 
@@ -560,15 +563,15 @@ describe("the program's lights and scene in the exports", () => {
       expect(json.extensionsUsed).toContain("KHR_lights_punctual");
       const lights = json.extensions.KHR_lights_punctual.lights;
       expect(lights.map((l: { name: string; type: string }) => [l.name, l.type])).toEqual([["torch", "point"], ["moon", "directional"]]);
-      // A point light in candela, agreeing with the beauty render at its range on a face turned 60 degrees from it;
-      // glTF's range is the cutoff, three times it.
-      expect(lights[0].intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.2125 * 2, 2.2) * 1.5 * 1.5, 3);
+      // A point light in candela, π·KEY·power·range², the beauty render's strength at range² over d² far off; glTF's
+      // range is the cutoff, three times it.
+      expect(lights[0].intensity).toBeCloseTo(Math.PI * 1.05 * 2 * 1.5 * 1.5, 3);
       expect(lights[0].range).toBeCloseTo(4.5, 6);
       // Colours are linear: #ff8800's green is 0.533 in sRGB, 0.246 linear.
       expect(lights[0].color[0]).toBeCloseTo(1, 4);
       expect(lights[0].color[1]).toBeCloseTo(0.2462, 3);
       expect(lights[0].color[2]).toBeCloseTo(0, 6);
-      expect(lights[1].intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425 * 0.5, 2.2), 3);
+      expect(lights[1].intensity).toBeCloseTo(Math.PI * 1.05 * 0.5, 4);
       expect(lights[1].range).toBeUndefined();
       // Each on a root node of the scene; the point light at its position, the directional one turned so its -z runs
       // from the light towards the model.
@@ -587,12 +590,15 @@ describe("the program's lights and scene in the exports", () => {
       const az = (-50 * Math.PI) / 180, el = (40 * Math.PI) / 180;
       const toward = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
       for (let k = 0; k < 3; k++) expect(travels[k]).toBeCloseTo(-toward[k], 5);
-      // The viewer: a scene mode with the night sky, the ambient as the beauty render takes it, the hero camera, and it
-      // opens in the scene from that camera.
+      // The viewer: a scene mode with the night sky, its light at E as the beauty render takes it (the palette's 0.4
+      // times set ambient 1.3), the hero camera, and it opens in the scene from that camera.
       const html = readFileSync(join(dir, "viewer.html"), "utf8");
       const scene = JSON.parse(/const SCENE = (.*);\n/.exec(html)![1]);
       expect(scene.environment).toBe("night");
-      expect(scene.ambient).toBeCloseTo(0.42 * 1.3 * 0.4, 4);
+      expect(scene.ambient).toBeCloseTo(1.3 * 0.4, 5);
+      expect(scene.light.width * scene.light.height * 3 * 2).toBe(Buffer.from(scene.light.data, "base64").length);
+      // beauty.png's shot is the hero camera's.
+      expect(scene.shot).toEqual({ eye: scene.cameras[0].eye, target: scene.cameras[0].target, fov: 30 });
       expect(scene.key).toBeUndefined();
       expect(scene.start).toBe(true);
       expect(scene.camera).toBe("hero");
@@ -607,7 +613,7 @@ describe("the program's lights and scene in the exports", () => {
       expect(j2.extensions).toBeUndefined();
       const s2 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "plain", "viewer.html"), "utf8"))![1]);
       expect(s2.start).toBe(false);
-      expect(s2.key.intensity).toBeCloseTo(2 * Math.PI * Math.pow(0.425, 2.2), 3);
+      expect(s2.key.intensity).toBeCloseTo(Math.PI * 1.05, 4);
       // That key is where the beauty render puts it: `set light_azimuth` and `set light_elevation` move it there too.
       run('set light_azimuth 90\nset light_elevation 0\nshow box(1, 1, 1) | paint("red")', "box.aix", join(dir, "keyed"), { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
       const s3 = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "keyed", "viewer.html"), "utf8"))![1]);
@@ -620,39 +626,174 @@ describe("the program's lights and scene in the exports", () => {
   });
 });
 
+/** A minimal scene for viewerHtml: the studio sky's map and the rest. */
+function sceneFor(overrides: Partial<ViewerScene> = {}): ViewerScene {
+  const sky = buildSky("studio", 35, DEFAULT_LIGHT_DIRECTION);
+  const map = environmentLatLong(sky);
+  return {
+    environment: "studio", sky: [1, 1, 1], ground: [1, 1, 1], floor: [1, 1, 1], ambient: 1,
+    light: { width: map.width, height: map.height, data: map.data, sh: Array.from(map.diffuseSH) },
+    floorAlbedo: [0.5, 0.5, 0.5], floorFade: { min: [0, 0, 0], max: [1, 1, 1], reach: 2, horizon: [0.8, 0.8, 0.8] },
+    cameras: [], start: true, ...overrides,
+  };
+}
+/** The page's module script, parsed but not run (it imports three.js only dynamically, so it parses as an async body). */
+function pageScript(html: string): string {
+  const body = /<script type="module">([\s\S]*?)<\/script>/.exec(html)![1];
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  new AsyncFunction(body);
+  return body;
+}
+
 describe("the viewer's scene", () => {
   it("keeps a camera named with markup inside its script", () => {
     // A camera's name is any string the program gives; "</script>" in it ended the page's script, and the viewer died.
     const name = 'a</script><b>"x';
-    const html = viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], {
-      environment: "studio", sky: [1, 1, 1], ground: [1, 1, 1], floor: [1, 1, 1], ambient: 0.42, cameras: [{ name, eye: [0, 0, 3], target: [0, 0, 0], fov: 30 }], start: true,
-    });
+    const html = viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], sceneFor({ cameras: [{ name, eye: [0, 0, 3], target: [0, 0, 0], fov: 30 }] }));
     const line = /const SCENE = (.*);\n/.exec(html)![1];
     expect(line).not.toMatch(/<\//);
     expect(JSON.parse(line).cameras[0].name).toBe(name);
     // The page's own script is closed once, at its end.
     expect(html.split("</script>").length - 1).toBe(2);
+    pageScript(html);
+  });
+
+  it("loads one pinned three.js, ends on the beauty render's tone curve and carries the sky's light", () => {
+    const sc = sceneFor();
+    const html = viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], sc);
+    // three.js at an exact version, for the page and its addons alike, and no other.
+    expect(THREE_VERSION).toMatch(/^0\.(1[89]\d|2\d\d)\.\d+$/);
+    const map = JSON.parse(/<script type="importmap">(.*)<\/script>/.exec(html)![1]).imports;
+    expect(map).toEqual({ three: `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`, "three/addons/": `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/examples/jsm/` });
+    expect(html.match(/three@[\d.]+/g)!.every((v) => v === `three@${THREE_VERSION}`)).toBe(true);
+    // The tone curve is photometry.ts's, injected as three.js's CustomToneMapping.
+    const script = pageScript(html);
+    expect(script).toContain("renderer.toneMapping = THREE.CustomToneMapping;");
+    expect(script).toContain(`const TONEMAP = ${JSON.stringify(TONEMAP_GLSL)};`);
+    expect(script).toContain("vec3 CustomToneMapping( vec3 color ) { return color; }");
+    // The sky's radiance, as half floats: every texel back within half precision, and 64 KB of base64, under 100 KB.
+    const scene = JSON.parse(/const SCENE = (.*);\n/.exec(html)![1]);
+    const bytes = Buffer.from(scene.light.data, "base64");
+    expect(scene.light.data.length).toBe(65536);
+    const fromHalf = (h: number) => {
+      const e = (h >> 10) & 31, m = h & 1023, sgn = h & 0x8000 ? -1 : 1;
+      return sgn * (e === 0 ? m * 2 ** -24 : (1 + m / 1024) * 2 ** (e - 15));
+    };
+    let worst = 0;
+    for (let i = 0; i < sc.light.data.length; i++) {
+      const v = sc.light.data[i], back = fromHalf(bytes.readUInt16LE(i * 2));
+      worst = Math.max(worst, Math.abs(back - v) / Math.max(v, 6e-5));
+    }
+    expect(worst).toBeLessThan(1 / 1024);
+    expect(scene.light.sh).toHaveLength(27);
+    // The studio's own lights are the page's calibrated ones.
+    expect(script).toContain(`const STUDIO = ${JSON.stringify(STUDIO)};`);
+    // Glass stays out of the GLB and the page: transmission is its own change (roadmap 21).
+    expect(html).not.toMatch(/transmission|KHR_materials_ior|KHR_materials_volume/);
+  });
+
+  it("writes half floats rounded to nearest, clamped to the largest half", () => {
+    expect(toHalf(1)).toBe(0x3c00);
+    expect(toHalf(0.5)).toBe(0x3800);
+    expect(toHalf(65504)).toBe(0x7bff);
+    expect(toHalf(1e6)).toBe(0x7bff);
+    expect(toHalf(0)).toBe(0);
+    expect(toHalf(2 ** -24)).toBe(1);
+    expect(toHalf(1 + 1 / 2048)).toBe(0x3c00); // a tie, to even
+    expect(toHalf(1 + 3 / 2048)).toBe(0x3c02);
+    expect(halfBase64([1, 0.5])).toBe(Buffer.from([0x00, 0x3c, 0x00, 0x38]).toString("base64"));
+  });
+
+  it("solves the floor, frames beauty.png's shot and takes the sky from the beauty render's tables", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      run('set environment sunset\nset ambient 0.8\nlight("sun", azimuth=30, elevation=35, power=1.2, color="#ffe0b0")\nshow box(1, 1, 1) | move(0, 0.5, 0) | paint("red")', "box.aix", dir, { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 });
+      const scene = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "viewer.html"), "utf8"))![1]);
+      const pal = environmentPalette("sunset");
+      const E = 0.8 * pal.ambient;
+      expect(scene.ambient).toBeCloseTo(E, 5);
+      // The sky is the beauty render's for this shot: lit from where the program's light comes from.
+      const sky = buildSky("sunset", 35, lightDirection(30, 35));
+      const map = environmentLatLong(sky);
+      expect(Array.from(map.diffuseSH, (v) => Number(v.toPrecision(6)))).toEqual(scene.light.sh);
+      expect(halfBase64(map.data)).toBe(scene.light.data);
+      // The floor's albedo shows the palette's open floor under the sky from above and the light at full strength.
+      const up = [0, 0, 0], open = [0, 0, 0];
+      irradiance(sky, 0, 1, 0, up, 0);
+      decode(pal.open[0], pal.open[1], pal.open[2], open, 0);
+      const sunY = lightDirection(30, 35)[1];
+      const col = [1, 0xe0 / 255, 0xb0 / 255];
+      for (let c = 0; c < 3; c++) {
+        const shown = scene.floorAlbedo[c] * (up[c] * E + toLinear(col[c]) * 1.2 * KEY * sunY);
+        expect(shown).toBeCloseTo(open[c], 4);
+      }
+      // The far floor fades into the sky at the horizon the shot looks towards, from 1.5 model diagonals out.
+      const h = [0, 0, 0];
+      horizonRadiance(sky, scene.shot.target[0] - scene.shot.eye[0], scene.shot.target[2] - scene.shot.eye[2], h, 0);
+      for (let c = 0; c < 3; c++) expect(scene.floorFade.horizon[c]).toBeCloseTo(h[c], 4);
+      expect(scene.floorFade.reach).toBeCloseTo(1.5 * Math.hypot(...[0, 1, 2].map((k) => scene.floorFade.max[k] - scene.floorFade.min[k])), 2);
+      // beauty.png's own shot: from azimuth 35 and elevation 25, looking at the model's centre.
+      const v = [0, 1, 2].map((k) => scene.shot.eye[k] - scene.shot.target[k]);
+      const len = Math.hypot(v[0], v[1], v[2]);
+      expect((Math.atan2(v[0], v[2]) * 180) / Math.PI).toBeCloseTo(35, 3);
+      expect((Math.asin(v[1] / len) * 180) / Math.PI).toBeCloseTo(25, 3);
+      expect(scene.shot.target[1]).toBeCloseTo(0.5, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
 describe("the GLB's light intensities against the beauty render", () => {
-  it("agree at 60 degrees, and an engine is darker square on, brighter at a slant and brighter nearer a point light", () => {
-    // What design.md says of them. An engine shows albedo x intensity x cos / pi (over d squared) in linear light,
-    // about the display value to the power 2.2; the beauty render shows 0.85 p cos, times range^2 / (range^2 + d^2).
-    const [sun, lamp] = glbLights([
-      { name: "sun", azimuth: 0, elevation: 90, color: [1, 1, 1], power: 1 },
-      { name: "lamp", azimuth: 0, elevation: 0, color: [1, 1, 1], power: 1, position: [0, 0, 0], range: 2 },
-    ], [0, 0, 0], 1);
-    const display = (linear: number) => Math.pow(linear, 1 / 2.2);
-    const cos = (deg: number) => Math.cos((deg * Math.PI) / 180);
-    const sunRatio = (deg: number) => display((sun.intensity * cos(deg)) / Math.PI) / (0.85 * cos(deg));
-    expect(sunRatio(60)).toBeCloseTo(1, 3);
-    expect(sunRatio(0)).toBeLessThan(0.75);
-    expect(sunRatio(0)).toBeGreaterThan(0.6);
-    expect(sunRatio(80)).toBeGreaterThan(1.2);
-    const lampRatio = (d: number, deg: number) => display((lamp.intensity * cos(deg)) / (Math.PI * d * d)) / ((0.85 * cos(deg) * 4) / (4 + d * d));
-    expect(lampRatio(2, 60)).toBeCloseTo(1, 3);
-    expect(lampRatio(1, 60)).toBeGreaterThan(1.1);
+  // An engine (three.js) shows albedo × E / π in linear light (the Lambert BRDF, with the same (1 − F) the beauty render
+  // takes), E = lux × cos θ, or candela × cos θ / d²; the beauty render KEY × power × cos θ, times range² / (range² +
+  // d²) for a point light. Both then go through the same tone curve.
+  const [sun, lamp] = glbLights([
+    { name: "sun", azimuth: 0, elevation: 90, color: [1, 1, 1], power: 1 },
+    { name: "lamp", azimuth: 0, elevation: 0, color: [1, 1, 1], power: 1, position: [0, 0, 0], range: 2 },
+  ], [0, 0, 0], 1);
+  const display = (linear: number): number => { const o = [0, 0, 0]; encode(linear, linear, linear, o); return o[0] * 255; };
+  const cos = (deg: number) => Math.cos((deg * Math.PI) / 180);
+
+  it("are π·KEY lux for a directional light of power 1 and π·KEY·range² candela for a point light", () => {
+    expect(sun.intensity).toBeCloseTo(3.3, 2);
+    expect(sun.intensity).toBeCloseTo(Math.PI * KEY, 4);
+    expect(lamp.intensity).toBeCloseTo(Math.PI * 1.05 * 4, 4);
+    expect(lamp.range).toBe(2 * GLB_RANGE_CUTOFF);
+    // A point light with no range takes the beauty render's: half the model's longest side, given by the caller.
+    const [bare] = glbLights([{ azimuth: 0, elevation: 0, color: [1, 1, 1], power: 1, position: [0, 1, 0] }], [0, 0, 0], 1, 0.75);
+    expect(bare.intensity).toBeCloseTo(Math.PI * KEY * 0.75 * 0.75, 4);
+    expect(bare.range).toBeCloseTo(0.75 * GLB_RANGE_CUTOFF, 6);
+  });
+
+  it("show a white face square on as beauty.png does, within 2 levels, and at every angle and power alike", () => {
+    for (const power of [0.25, 0.5, 1, 2]) {
+      const [l] = glbLights([{ azimuth: 0, elevation: 90, color: [1, 1, 1], power }], [0, 0, 0], 1);
+      for (const deg of [0, 30, 60, 80]) {
+        for (const albedo of [1, 0.5, 0.2]) {
+          const engine = (albedo * l.intensity * cos(deg)) / Math.PI;
+          const beauty = albedo * KEY * power * cos(deg);
+          expect(Math.abs(display(engine) - display(beauty))).toBeLessThan(deg === 0 && albedo === 1 ? 2 : 0.5);
+        }
+      }
+    }
+  });
+
+  it("agree far from a point light, and an engine is brighter nearer it, as the doc comment says", () => {
+    const R = 2;
+    const cutoff = lamp.range!;
+    const engine = (d: number) => (lamp.intensity / (d * d)) * Math.max(0, 1 - (d / cutoff) ** 4) ** 2 / Math.PI;
+    const beauty = (d: number) => (KEY * R * R) / (R * R + d * d);
+    expect(engine(R) / beauty(R)).toBeCloseTo(2 * (1 - 1 / 81) ** 2, 5);
+    expect(engine(R / 2) / beauty(R / 2)).toBeGreaterThan(4.9);
+    // They cross at about 1.8 ranges; the engine is 0.8 of beauty.png at two, a third at two and a half, dark at three.
+    expect(engine(1.75 * R) / beauty(1.75 * R)).toBeGreaterThan(1);
+    expect(engine(1.85 * R) / beauty(1.85 * R)).toBeLessThan(1);
+    expect(engine(2 * R) / beauty(2 * R)).toBeCloseTo(0.8, 1);
+    expect(engine(2.5 * R) / beauty(2.5 * R)).toBeCloseTo(0.33, 1);
+    expect(engine(3 * R)).toBe(0);
+    // Without the cutoff the two laws converge: the ratio is (range² + d²) / d².
+    expect((lamp.intensity / (10 * R) ** 2 / Math.PI) / beauty(10 * R)).toBeCloseTo(1.01, 3);
   });
 });
 

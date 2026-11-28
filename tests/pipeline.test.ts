@@ -36,7 +36,7 @@ describe("pipeline", () => {
       const html = readFileSync(join(dir, "viewer.html"), "utf8");
       expect(html).toContain("<title>m · aixle viewer</title>");
       expect(html).toMatch(/const GLB = "Z2xURg/); // "glTF" in base64
-      expect(html).toContain("three@0.160.0");
+      expect(html).toContain("three@0.187.0");
       const png = readFileSync(join(dir, "beauty.png"));
       expect(png.readUInt32BE(16)).toBe(64);
       // A declared camera is a shot of its own, framed on its focus; the report lists lights, cameras and the sky.

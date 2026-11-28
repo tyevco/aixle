@@ -6,6 +6,7 @@
 import { albedo } from "../sdf/materials.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "../sdf/types.js";
+import { KEY } from "../render/photometry.js";
 
 export interface GlbTexture {
   /** u, v per vertex, glTF convention. */
@@ -166,36 +167,41 @@ export interface GlbLight {
 
 /**
  * The program's lights as glTF punctual lights (round 11: a torch that lit a door in beauty.png lit nothing in an
- * engine). The beauty render works in display values: a white surface whose normal is at angle θ to a light of power
- * p reads 0.85 p cos θ, and a point light's strength is range² / (range² + d²) of that at distance d. A physically
- * lit engine (three.js, Blender, Godot) shows albedo × intensity × cos θ / π (over d² for a point light) in linear
- * light, and a display value is about the linear one to the power 1 / 2.2. The two laws cannot agree everywhere, so
- * they are made to agree on a surface turned 60 degrees from the light, at `range` from it for a point light: a
- * directional light is 2π (0.425 p)^2.2 lux and a point light 2π (0.2125 p)^2.2 range² candela. Measured over a wall
- * beside a point light at 0.3 to 1 range from it, that is within 0.04 to 0.10 of the beauty render's display value
- * (rms), where agreeing on a face turned to the light is 0.07 to 0.23 off, brighter. The engine takes the cosine in
- * linear light, so its light is flatter across angles: on a face turned square to the light it is about two thirds
- * of the beauty render's display value, at 60 degrees the same, at a slant brighter (measured in the viewer, grey
- * plates under a directional light: 97 against 159 square on, 70 against 73 at 60 degrees, 42 against 32 at 80);
- * and nearer a point light than `range` it is brighter. Its cutoff, which glTF's range is, is three
- * times the program's range, where the beauty render's strength is a tenth. Colours go from sRGB to linear. The
- * apparent size (soft shadows) has no glTF counterpart and is left out. A directional light's node sits three radii
- * out from the model's centre along its direction, for an engine whose shadow camera needs a place.
+ * engine), in the units that make an engine light the model as the beauty render does.
+ *
+ * Both work in linear light. The beauty render gives a white face turned square to a light of power p the radiance
+ * KEY·p (photometry.ts: KEY = 1.05), Lambert in the cosine of the face's angle, and a point light's strength at a
+ * distance d is range² / (range² + d²) of that. A physically lit engine (three.js, Blender, Godot, Filament) gives
+ * a white Lambert face albedo / π times its irradiance: lux × cos θ from a directional light, candela × cos θ / d²
+ * from a point light. So:
+ * - a directional light is π·KEY·p lux, 3.30 for power 1, and agrees with beauty.png on every face at every angle
+ *   (the display-space renderer it replaces could agree at one angle only, 60 degrees);
+ * - a point light is π·KEY·p·range² candela, and the two laws agree only far off. At `range` the engine is twice as
+ *   bright as beauty.png, at half of it five times; with glTF's cutoff (below) they cross at about 1.8 ranges, the
+ *   engine is 0.8 of beauty.png at two and a third at two and a half, and dark at three, where beauty.png keeps a
+ *   tenth. A point light with no range has the beauty render's: half the model's longest side (`defaultRange`).
+ * glTF's `range` is that cutoff, three times the program's range. Colours go from sRGB to linear. The apparent size
+ * (soft shadows, a mirror's softbox) has no glTF counterpart and is left out. A directional light's node sits three
+ * radii out from the model's centre along its direction, for an engine whose shadow camera needs a place.
  */
-export function glbLights(lights: SceneLight[], centre: [number, number, number], radius: number): GlbLight[] {
+/** glTF's range for a point light, where an engine takes it to zero: this many times the program's range. */
+export const GLB_RANGE_CUTOFF = 3;
+
+export function glbLights(lights: SceneLight[], centre: [number, number, number], radius: number, defaultRange = 2): GlbLight[] {
   return lights.map((l, i) => {
     const color = l.color.map((c) => Number(srgbToLinear(c).toFixed(5))) as [number, number, number];
     const name = l.name ?? `light_${i + 1}`;
+    const lux = Math.PI * KEY * Math.max(0, l.power);
     if (l.position) {
-      const range = l.range ?? 2;
-      return { name, type: "point" as const, color, intensity: Number((2 * Math.PI * Math.pow(0.2125 * Math.max(0, l.power), 2.2) * range * range).toPrecision(5)), range: Number((range * 3).toPrecision(6)), translation: [l.position[0], l.position[1], l.position[2]] };
+      const range = l.range ?? defaultRange;
+      return { name, type: "point" as const, color, intensity: Number((lux * range * range).toPrecision(6)), range: Number((range * GLB_RANGE_CUTOFF).toPrecision(6)), translation: [l.position[0], l.position[1], l.position[2]] };
     }
     const az = (l.azimuth * Math.PI) / 180, el = (l.elevation * Math.PI) / 180;
     // Towards the light; the light travels the other way, which is the node's -z.
     const to: [number, number, number] = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
     return {
       name, type: "directional" as const, color,
-      intensity: Number((2 * Math.PI * Math.pow(0.425 * Math.max(0, l.power), 2.2)).toPrecision(5)),
+      intensity: Number(lux.toPrecision(6)),
       translation: [centre[0] + to[0] * radius * 3, centre[1] + to[1] * radius * 3, centre[2] + to[2] * radius * 3],
       rotation: rotationFromZ(to),
     };
