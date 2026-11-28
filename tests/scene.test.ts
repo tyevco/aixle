@@ -863,6 +863,28 @@ describe("the viewer's scene", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("frames each camera's button as its beauty_<name>.png, filling what it leaves out from the program's shot under --camera", () => {
+    // Under --camera close, a camera with no angles of its own takes the program's `set camera` shot (hero), as the
+    // beauty render's camera loop does, not close's azimuth and the default zoom.
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const src = 'camera("hero", azimuth=25, elevation=15, zoom=1.3)\ncamera("close", azimuth=60)\ncamera("bare")\nset camera hero\nshow box(1, 1, 1) | move(0, 0.5, 0) | paint("red")';
+      const o = { grid: 16, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64 };
+      run(src, "cams.aix", join(dir, "a"), { ...o, camera: "close" });
+      const scene = JSON.parse(/const SCENE = (.*);\n/.exec(readFileSync(join(dir, "a", "viewer.html"), "utf8"))![1]);
+      const by = (n: string) => {
+        const { name: _, ...framing } = scene.cameras.find((c: { name: string }) => c.name === n);
+        return framing;
+      };
+      expect(by("bare")).toEqual(by("hero"));
+      // close's own button and beauty.png's shot are close's angle at hero's zoom and elevation.
+      expect(scene.shot).toEqual(by("close"));
+      expect(by("close")).not.toEqual(by("hero"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the GLB's light intensities against the beauty render", () => {

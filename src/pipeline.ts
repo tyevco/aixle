@@ -1799,14 +1799,18 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
       const setAmbient = typeof evaluation.settings.ambient === "number" ? Math.max(0, evaluation.settings.ambient) : 1;
       // E, as the beauty render takes it: the palette's intensity times `set ambient`. three.js's environmentIntensity.
       const E = setAmbient * pal.ambient;
-      const zoom = opts.zoom ?? shot?.zoom ?? (typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined);
+      // The zooms as the beauty block takes them: a camera leaves out what the render's own view gives (the command
+      // line's, then the program's `set camera` shot's, then `set zoom`), so each button frames its beauty_<name>.png.
+      const setZoom = typeof evaluation.settings.zoom === "number" ? evaluation.settings.zoom : undefined;
+      const viewZoom = opts.zoom ?? programShot?.zoom ?? setZoom;
+      const zoom = opts.zoom ?? shot?.zoom ?? (shot ? viewZoom : setZoom);
       const framed = (b: Bounds, focused: boolean, az: number, el: number, zm: number) => {
         const cam = perspective(b, 512, 512, az, el, 30, zm, focused ? pointsWithin(mesh!, b) ?? mesh!.positions : mesh!.positions);
         return { eye: cam.eye.map((v) => Number(v.toFixed(5))) as Vec3, target: boundsCenter(b).map((v) => Number(v.toFixed(5))) as Vec3, fov: 30 };
       };
       const cameras = evaluation.cameras.map((c) => {
         const r = c.focus ? resolveFocus(c.focus) : undefined;
-        return { name: c.name, ...framed(r ? r.frame : focusName ? frame : lit, !!(r || focusName), c.azimuth ?? azimuth, c.elevation ?? elevation, c.zoom ?? zoom ?? 1) };
+        return { name: c.name, ...framed(r ? r.frame : focusName ? frame : lit, !!(r || focusName), c.azimuth ?? viewAzimuth, c.elevation ?? viewElevation, c.zoom ?? viewZoom ?? 1) };
       });
       // beauty.png's own camera: the shot `set camera` names, or the default, framed as the beauty render frames it.
       const shotFocus = shot?.focus ? resolveFocus(shot.focus) : undefined;
