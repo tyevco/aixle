@@ -895,14 +895,14 @@ Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a
 | charcoal | solid |  | #3a3a3e | rough 0.6 |
 | ivory | solid |  | #f4f0e2 | rough 0.6 |
 | coral | solid |  | #e8735a | rough 0.6 |
-| gold | solid |  | #e2b13c | metal, rough 0.3 |
-| silver | solid |  | #d4d6da | metal, rough 0.25 |
-| copper | solid |  | #c67a4a | metal, rough 0.35 |
-| bronze | solid |  | #a5772f | metal, rough 0.4 |
-| steel | solid |  | #8e949c | metal, rough 0.45 |
-| iron | solid |  | #5c5e62 | metal, rough 0.6 |
-| brass | solid |  | #c9a54a | metal, rough 0.35 |
-| chrome | solid |  | #e8eaee | metal, rough 0.1 |
+| gold | solid |  | #ffe39d | metal, rough 0.3 |
+| silver | solid |  | #fcfaf5 | metal, rough 0.25 |
+| copper | solid |  | #fad1c2 | metal, rough 0.35 |
+| bronze | solid |  | #f7dbb8 | metal, rough 0.4 |
+| steel | solid |  | #d6d1cb | metal, rough 0.45 |
+| iron | solid |  | #c6c6c8 | metal, rough 0.6 |
+| brass | solid |  | #f5e4ae | metal, rough 0.35 |
+| chrome | solid |  | #c4c5c4 | metal, rough 0.1 |
 | wood | wood | 0.25 units | #b07d4a / #7a4f2a | rough 0.7 |
 | oak | wood | 0.3 units | #c69a63 / #8f6539 | rough 0.7 |
 | walnut | wood | 0.22 units | #6b4327 / #3e2414 | rough 0.6 |
@@ -931,7 +931,7 @@ Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a
 | porcelain | solid |  | #f6f4ee | rough 0.2 |
 | snow | noise | 0.3 units | #f8f9fb / #dfe6ef | rough 0.9 |
 | lava | marble | 0.8 units | #f06a1a / #3a1a10 | rough 0.6 |
-| rust | rust | 0.3 units | #5c5e62 / #8a4422 | metal, rough 0.55 |
+| rust | rust | 0.3 units | #c6c6c8 / #8a4422 | metal, rough 0.55 |
 
 A pattern's feature size is in model units: a wood ring every 0.25 units suits a table leg, not a 20-unit floor. Use `material(color, pattern, color2, scale=)` with the two colours from this table for the same look at another size.
 

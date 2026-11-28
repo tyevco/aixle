@@ -34,7 +34,7 @@
  * by what each sky depends on, so a hit and a miss give the same bytes. Nothing here allocates per look-up.
  */
 import { normalize, type Vec3 } from "../core/vec.js";
-import { decode, KEY, lightAngle, toLinear } from "./photometry.js";
+import { decode, KEY, lightAngle, MAX_LIGHT_ANGLE, toLinear } from "./photometry.js";
 
 /** The procedural skies the metals reflect and the floor sits in. */
 export type Environment = "studio" | "overcast" | "sunset" | "night";
@@ -45,8 +45,16 @@ interface Palette {
   sky: Vec3;
   horizon?: Vec3;
   ground: Vec3;
-  /** The open floor's display colour near the model: the kernel solves the floor's albedo to show it. */
+  /** The old palette's floor colour, which the backdrop below the horizon (and the viewer's floor) is made from. */
   floor: Vec3;
+  /**
+   * The open floor near the model as the old renderer displayed it (it lit `floor` and faded it towards `ground`),
+   * measured on the committed renders before the rebuild: the studio's at 211, 208, 204 levels (medal, teapot,
+   * hardware), the overcast's 207, 206, 203 (hub, bracket), the sunset's 115, 93, 79 (ring) and the night's 13, 13, 17
+   * (lamp, alley, campsite). The kernel solves the floor's albedo to show it. Solved to `floor` itself, the studio's
+   * open floor came out 13 levels lighter than it always was, the sunset's 40 and the night's three times as bright.
+   */
+  open: Vec3;
   /** The environment's intensity E for `set ambient 1`: it scales the sky's light on diffuse and reflections alike. */
   ambient: number;
 }
@@ -60,16 +68,16 @@ interface Palette {
  * side against the prototype: within 1.5 levels in all four).
  */
 const PALETTES: Record<Environment, Palette> = {
-  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], ambient: 1 },
-  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], ambient: 0.9 },
-  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], ambient: 0.9 },
-  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], ambient: 0.4 },
+  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], open: [0.83, 0.82, 0.8], ambient: 1 },
+  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], open: [0.81, 0.81, 0.8], ambient: 0.9 },
+  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], open: [0.45, 0.365, 0.31], ambient: 0.9 },
+  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], open: [0.052, 0.05, 0.066], ambient: 0.4 },
 };
 
 /** A sky's display colours and its intensity E for `set ambient 1`: what the viewer's scene mode builds its sky from. */
-export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Vec3; ground: Vec3; floor: Vec3; ambient: number } {
+export function environmentPalette(env?: Environment): { sky: Vec3; horizon?: Vec3; ground: Vec3; floor: Vec3; open: Vec3; ambient: number } {
   const p = PALETTES[env ?? "studio"];
-  return { sky: [...p.sky], ...(p.horizon ? { horizon: [...p.horizon] as Vec3 } : {}), ground: [...p.ground], floor: [...p.floor], ambient: p.ambient };
+  return { sky: [...p.sky], ...(p.horizon ? { horizon: [...p.horizon] as Vec3 } : {}), ground: [...p.ground], floor: [...p.floor], open: [...p.open], ambient: p.ambient };
 }
 
 /** The default key light's direction (towards the light): upper left, from the front. */
@@ -125,11 +133,22 @@ export const STUDIO = {
   /** The walls on the camera's side, above the horizon, reaching their darkness `wallsRise` of dy up. */
   walls: 0.92,
   wallsRise: 0.02,
+  /** How far round the walls reach: from none to full darkness as a look's horizontal part along the camera's way runs from the first to the second. */
+  wallsAcross: [-0.3, 0.35],
   /** The ceiling: the gradient at the zenith, as a share of the sky colour (reached from dy = 0.4 up). */
   zenith: 0.2,
   /** The flag on the floor on the camera's side, below the horizon, reaching its darkness `flagRise` of −dy down. */
-  flag: 0.6,
+  flag: 0.8,
   flagRise: 0.02,
+  flagAcross: [-0.15, 0.3],
+  /**
+   * The flag lifted on the key's side, by this share, as a look's horizontal part towards the key runs from 0 to
+   * `flagKeyTo`: the floor the key lights is bright, and a metal turned to the camera and the key (a medal's face, which
+   * reflects the floor at the camera's side towards the key) reflects it; a shaded side faces away from the key and
+   * still sees the flag.
+   */
+  flagKey: 1,
+  flagKeyTo: 0.6,
   /**
    * The model's shadow on the floor: the ground away from the key darkened by `strength`, as the look's horizontal
    * part along the key's way (horizontal, away from it) runs from `from` to `to`, reached `rise` of −dy down (the far
@@ -194,6 +213,8 @@ export interface SkyTables {
   fz: number;
   walls: number;
   wallsRise: number;
+  wallsAcross0: number;
+  wallsAcross1: number;
   /** The ground's darkening opposite the key (the model's shadow), its profile, and the key's horizontal way, away from it. */
   shadow: number;
   shadowFrom: number;
@@ -205,6 +226,10 @@ export interface SkyTables {
   zenith: number;
   flag: number;
   flagRise: number;
+  flagAcross0: number;
+  flagAcross1: number;
+  flagKey: number;
+  flagKeyTo: number;
   /** The backdrop above the horizon by dy, GRAD_N + 1 entries of linear RGB. */
   grad: Float64Array;
   /** The backdrop below the horizon (linear RGB). */
@@ -334,7 +359,7 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   cardArr.set(cards);
   const discArr = f64(disc.length, shared);
   discArr.set(disc);
-  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
+  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
 }
 
 /** Each light's softbox: direction, the squared chord (2 − 2cos) where its edge starts and ends, and its radiance. */
@@ -343,7 +368,8 @@ function softboxes(lights: readonly EnvironmentLight[], shared: boolean): Float6
   lights.forEach((l, i) => {
     if (l.position || !(l.power > 0)) return;
     const o = i * BOX;
-    const t = lightAngle(Math.max(BOX_MIN_SIZE, l.size));
+    // No wider than the shadows' disc: past a right angle the edge's chord wrapped round and shrank the box.
+    const t = Math.min(MAX_LIGHT_ANGLE, lightAngle(Math.max(BOX_MIN_SIZE, l.size)));
     const d = normalize(l.dir);
     const x0 = 2 - 2 * Math.cos(t * (1 - BOX_SOFT)), x1 = 2 - 2 * Math.cos(t * (1 + BOX_SOFT));
     // The disc's solid angle with its soft edge: dΩ = π d(2 − 2cos), and the edge's smoothstep integrates to half.
@@ -608,7 +634,7 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     if (lit) {
       let m = 1;
       if (s.zenith !== 1 && dy > 0.4) m += (s.zenith - 1) * ((dy - 0.4) / 0.6);
-      if (s.walls > 0) m *= 1 - s.walls * smooth(-0.3, 0.35, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
+      if (s.walls > 0) m *= 1 - s.walls * smooth(s.wallsAcross0, s.wallsAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
       r *= m; g *= m; b *= m;
     }
   } else if (!lit) {
@@ -618,7 +644,9 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     const u = smooth(0, HORIZON_BLEND, -dy);
     r = G[0] + (s.below[0] - G[0]) * u; g = G[1] + (s.below[1] - G[1]) * u; b = G[2] + (s.below[2] - G[2]) * u;
     if (s.flag > 0) {
-      const m = 1 - s.flag * smooth(-0.15, 0.3, dx * s.fx + dz * s.fz) * smooth(0, s.flagRise, -dy);
+      let k = s.flag * smooth(s.flagAcross0, s.flagAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.flagRise, -dy);
+      if (s.flagKey > 0) k *= 1 - s.flagKey * smooth(0, s.flagKeyTo, -(dx * s.sx + dz * s.sz));
+      const m = 1 - k;
       r *= m; g *= m; b *= m;
     }
     if (s.shadow > 0) {

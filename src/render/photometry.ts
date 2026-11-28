@@ -22,8 +22,13 @@ export const GLOW = 1.6;
 /** Where the tone curve's shoulder starts (Neutral's 0.8 less its 0.04 toe offset), and its width to 1. */
 export const TONE_START = 0.8 - 0.04;
 const TONE_D = 1 - TONE_START;
-/** Beer's law: a glass of colour c absorbs 10(1 − c) per `reach` of thickness, per channel. */
-export const BEER = 10;
+/**
+ * Beer's law: a glass of colour c absorbs BEER(1 − c) per `reach` of thickness, per channel. The old renderer dimmed
+ * display colours by exp(−10(1 − c)·t/reach); a display value is near linear light to the power 1/2.2, so the same
+ * drink in linear light takes 2.2 times that (at 10 a tumbler's whisky came out the colour of milky tea, 47 levels
+ * lighter than it was).
+ */
+export const BEER = 22;
 
 /** sRGB to linear, one channel. */
 export const toLinear = (v: number): number => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
@@ -76,6 +81,12 @@ export function decode(r: number, g: number, b: number, out: Out, o = 0): void {
 
 /** A light's size as an angular radius in radians: 1 is about 3.2°, 3 about 9.5°. Its shadow's disc, its highlight's widening and its softbox in a mirror all take this one angle. */
 export const lightAngle = (size: number): number => size / 18;
+/**
+ * The widest angular radius a directional light is given, in radians, just short of a right angle (size 27): its
+ * shadow's disc, its highlight's widening and its softbox all stop here, since a size has no upper bound and past a
+ * right angle the disc's tangent turns negative and its softbox wraps round the sphere.
+ */
+export const MAX_LIGHT_ANGLE = 1.5;
 /** A point light's radius, a sphere: 2% of its range per unit of size. */
 export const pointRadius = (size: number, range: number): number => 0.02 * range * size;
 /** The fraction of one channel a glass of that channel's colour c lets through over a length `len`, with `reach` the model's scale (Beer's law, σ = BEER(1 − c)/reach). */

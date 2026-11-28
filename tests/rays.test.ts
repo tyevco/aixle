@@ -7,6 +7,7 @@ import { evaluate } from "../src/lang/interpreter.js";
 import type { Mesh } from "../src/mesh/mesh.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { box, cylinder, sphere, torus } from "../src/sdf/primitives.js";
+import { BEER } from "../src/render/photometry.js";
 import { move, paint, rotate, union } from "../src/sdf/ops.js";
 import { materialFromString } from "../src/sdf/materials.js";
 import { boundsSize, type Bounds, type Material, type Shape3 } from "../src/sdf/types.js";
@@ -630,7 +631,7 @@ show (glass + drink) | ground()`, 96);
       const y0 = near ? 0.85 - nets.cellSize : 0.2;
       rays.occlusion(0, y0, 0, 0, 1, 0, Infinity, 0);
       for (let c = 0; c < 3; c++) {
-        const want = 0.9 * 0.92 * Math.exp((-10 * (1 - m.color[c]) * 0.3) / reach);
+        const want = 0.9 * 0.92 * Math.exp((-BEER * (1 - m.color[c]) * 0.3) / reach);
         expect(Math.abs(rays.vis[c] - want) / want, `${m.color} near ${near} channel ${c}`).toBeLessThan(0.02);
       }
     }

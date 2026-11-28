@@ -148,8 +148,9 @@ describe("photometry: the constants", () => {
     expect((lightAngle(1) * 180) / Math.PI).toBeCloseTo(3.18, 2);
     expect((lightAngle(3) * 180) / Math.PI).toBeCloseTo(9.55, 2);
     expect(pointRadius(2, 5)).toBeCloseTo(0.2, 12);
-    // Today's absorption, exp(−1.5(1 − c)·t / (0.15·reach)), is the same law.
-    for (const [c, t, reach] of [[0.8, 0.3, 2], [0.2, 1.5, 4], [1, 2, 1]]) expect(beer(c, t, reach)).toBeCloseTo(Math.exp((-1.5 * (1 - c) * t) / (0.15 * reach)), 12);
+    // Today's absorption, exp(−1.5(1 − c)·t / (0.15·reach)) on display colours, is the same law in linear light at
+    // 2.2 times the strength (a display value is about linear light to the power 1/2.2).
+    for (const [c, t, reach] of [[0.8, 0.3, 2], [0.2, 1.5, 4], [1, 2, 1]]) expect(beer(c, t, reach)).toBeCloseTo(Math.exp((-2.2 * 1.5 * (1 - c) * t) / (0.15 * reach)), 12);
     expect(KEY).toBe(1.05);
   });
 
@@ -342,7 +343,10 @@ describe("environments: the studio's structure", () => {
     expect(look(s, strip, BACKDROP)[1]).toBeLessThan(1);
     // The walls and the flag reach their darkness at the horizon: no bright band there on the camera's side.
     expect(look(s, dirOf(camAz, 2), DIFFUSE)[1]).toBeLessThan(away[1] * 0.15);
-    expect(look(s, dirOf(camAz, -2), DIFFUSE)[1]).toBeLessThan(look(s, dirOf(camAz + 180, -2), DIFFUSE)[1] * 0.55);
+    // The flag is lifted on the key's side (the floor the key lights, which a medal's face turned to the camera
+    // reflects), so its darkness is measured on the camera's side away from the key.
+    expect(look(s, dirOf(camAz + 40, -2), DIFFUSE)[1]).toBeLessThan(look(s, dirOf(camAz + 180, -2), DIFFUSE)[1] * 0.55);
+    expect(look(s, dirOf(KEY_AZ, -30), DIFFUSE)[1]).toBeGreaterThan(look(s, dirOf(camAz + 40, -30), DIFFUSE)[1] * 2);
     // The model's shadow on the floor: the ground away from the key is darker than the ground towards it, at the
     // same angle from the camera's side.
     const keyAz = KEY_AZ, side = (keyAz - camAz + 360) % 360;
@@ -416,6 +420,23 @@ describe("environments: the studio's structure", () => {
     expect(maxDiff(look(s, at, MIRROR), [look(s, at, REFLECT)[0] + box[0], look(s, at, REFLECT)[1] + box[1], look(s, at, REFLECT)[2] + box[2]])).toBeLessThan(1e-9);
     expect(box[0]).toBeGreaterThan(50);
     expect(look(s, at, FILTERED)[0]).toBeLessThan(5);
+  });
+
+  it("gives a light wider than the widest disc the same softbox as that disc, as its shadows and highlight take it", () => {
+    // A light's size has no upper bound; its angle, size/18, passes a right angle at 28, and the shadows and the
+    // highlight stop at 1.5 rad. A softbox that did not wrapped round the sphere: at size 100 its edge came back to a
+    // tenth of a radian and a mirror lost the light.
+    const look1 = (size: number, off: number) => {
+      const s = buildEnvironment("studio", { cameraAzimuth: 35, lights: [{ dir: [0, 1, 0], size, color: [1, 1, 1], power: 1 }] });
+      const out = [0, 0, 0];
+      softboxAt(s, 0, Math.sin(off), Math.cos(off), 0, out, 0);
+      return out[0];
+    };
+    for (const off of [0, 0.6, 1.2]) {
+      const widest = look1(27, off);
+      expect(widest).toBeGreaterThan(0);
+      for (const size of [30, 60, 100, 1000]) expect(look1(size, off), `size ${size}, ${off} rad off`).toBeCloseTo(widest, 12);
+    }
   });
 
   it("the key is the first directional light, or the default key", () => {
