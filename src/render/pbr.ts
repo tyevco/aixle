@@ -11,12 +11,13 @@
  * What lights a surface:
  * - each light: Lambert and a GGX highlight widened by the light's angular size (one angle, size/18 rad, that also
  *   sizes its shadow and the softbox a mirror sees), shadowed by the share of its disc the point sees (rays.ts: eight
- *   rays a pixel, filtered by denoise.ts on visibility alone);
+ *   rays a pixel, filtered by denoise.ts on visibility alone), the highlight dimmed by the cavity term below on a
+ *   crease or an edge in a hollow;
  * - the environment (environment.ts): its SH irradiance for diffuse; for the reflection, by roughness, one traced ray
  *   (a mirror, under 0.12), four traced GGX rays in a fixed pattern (a glossy metal, under 0.35), one traced ray
  *   blended into the prefiltered sky (other glossy surfaces, under 0.55), or the prefiltered sky alone; the sky dimmed
  *   by specular occlusion, Lagarde's from the field's ambient occlusion, and everything reflected by a cavity term, so
- *   lettering cut into polished metal stays readable;
+ *   lettering cut into polished metal reads as dark marks;
  * - a glow gives off its own colour and lights nothing else.
  *
  * Glass is pbr-glass.ts. The floor is solved so that the open floor near the model shows what the old renderer showed
@@ -108,11 +109,27 @@ const slotCount = (opts: BeautyOptions): number => (opts.splitLights ? lightCoun
 
 /**
  * How far the reflections take the cavity term: K^p, K the first three taps of the field's occlusion (6.4 cells). It
- * dims the prefiltered sky (with Lagarde's specular occlusion) and what the traced rays bring. Tuned on the ring's
- * FOREVER and the medal's FOR MACHINES at 384: at 1 the letters read only at their edges, at 3 as dark letters, as
- * the old renderer drew them; at 5 no better.
+ * dims the prefiltered sky (with Lagarde's specular occlusion), what the traced rays bring, and the lights' highlights
+ * on creases and edges in a hollow (CREASE_BEND). Tuned on the ring's FOREVER and the medal's FOR MACHINES at 384:
+ * at 1 the letters read only at their edges, at 3 darker, at 5 no better; at 6, on the reflections and every highlight,
+ * the medal's raised letters stood in black pools.
  */
 export const CAVITY_POWER = 3;
+/**
+ * How far the field bends across the normal's differences (gradientInto's) at or above which a light's highlight takes
+ * the whole cavity term, rising from none at 0. Central differences half a cell across straddle a crease or an edge
+ * within half a cell of it, and the normal there turns through every angle between the two faces, so some of it meets
+ * each light's half vector while the light's rays find the point lit. Along the lips of the ring's FOREVER (strokes
+ * 1.75 cells wide) the key's highlight was 7 to 12 times what a white matt face square to the key returns, against 0.1
+ * on the groove's walls beside them, and it filled the letters the cavity term had darkened: cut, they were 15 levels
+ * darker than the uncut band (the old renderer's 70), gold-on-gold sparkles. With the lips' cavity term (0.74 to 0.82,
+ * cubed) on the highlight they are 37 darker. Taken on every surface, the cavity term also took the light off flat
+ * floors a few cells from a wall, which the light's rays rightly find lit (round 10's hub's pockets read as domes from
+ * above, its counterbores' steps went black); gated by the gradient's length instead, which a field that is a bound
+ * also shortens, it dimmed the highlight on the Roblox wings' scaled-sphere boss. A smooth surface bends 0.5 at a
+ * radius of about a cell; an open convex edge keeps its glint, its cavity term 1.
+ */
+export const CREASE_BEND = 0.5;
 /**
  * The power the field's occlusion is taken to on the model's own surfaces, for the sky's light and its reflection. The
  * occlusion (five taps along the normal, never under 0.3) was tuned by eye in the old renderer, which multiplied display
@@ -269,10 +286,22 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   let pixX = 0, pixY = 0, pixS = 0;
   let glassChain = 0;
 
-  const gradientInto = (x: number, y: number, z: number, out: Float64Array): void => {
-    const gx = dist(x + eps, y, z) - dist(x - eps, y, z), gy = dist(x, y + eps, z) - dist(x, y - eps, z), gz = dist(x, y, z + eps) - dist(x, y, z - eps);
+  /**
+   * The field's unit normal at a point into out, by central differences half a cell either side. Returns how far the
+   * field bends across them: the second differences on the same six samples, |d(p + e) + d(p − e) − 2 d(p)| over the
+   * three axes, in units of the step. A smooth surface of radius R bends 1.2 to 1.4 e/R (e half a cell), 0.06 on a
+   * sphere twenty cells across, and a field that is a bound rather than a distance (a scaled sphere) bends no more; within
+   * half a cell of a crease or an edge the differences straddle it, and a right angle reads 1.4 at the line itself, 0
+   * half a cell off (the lips of the ring's FOREVER 1.05 to 1.2). There the normal is a blend of the two faces' that no
+   * surface has.
+   */
+  const gradientInto = (x: number, y: number, z: number, out: Float64Array): number => {
+    const xp = dist(x + eps, y, z), xm = dist(x - eps, y, z), yp = dist(x, y + eps, z), ym = dist(x, y - eps, z), zp = dist(x, y, z + eps), zm = dist(x, y, z - eps);
+    const gx = xp - xm, gy = yp - ym, gz = zp - zm;
     const l = Math.sqrt(gx * gx + gy * gy + gz * gz) || 1;
     out[0] = gx / l; out[1] = gy / l; out[2] = gz / l;
+    const d2 = 2 * dist(x, y, z), bx = xp + xm - d2, by = yp + ym - d2, bz = zp + zm - d2;
+    return Math.sqrt(bx * bx + by * by + bz * bz) / eps;
   };
 
   /** The field's occlusion along the normal over five taps (AOK[0]) and its first three, the cavity term (AOK[1]). */
@@ -315,11 +344,12 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const AO_REACH = cell * (1.5 * 25 * 0.4 + 1);
 
   /**
-   * The surface at a hit into SURF at depth: linear base colour, metal, rough, glow and the normal (tilted by a bump).
+   * The surface at a hit into SURF at depth: linear base colour, metal, rough, glow, the normal (tilted by a bump) and
+   * how far the field bends there (`bend`, gradientInto's).
    * A material with a finish (wear, bump, rust) asks surface() with the curvature wear reads and the bump's slope, the
    * same function and slope the atlas baker writes into the GLB's maps. The bump's branch allocates.
    */
-  const finishAt = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, h: Hit): void => {
+  const finishAt = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, h: Hit, bend: number): void => {
     const o = depth * 12, m = h.mat;
     let base: Vec3, metal = m.metal, rough = m.rough, glow = m.glow;
     if (!hasFinish(m)) base = albedo(m, h.lx, h.ly, h.lz);
@@ -347,7 +377,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     }
     SURF[o] = toLinear(base[0]); SURF[o + 1] = toLinear(base[1]); SURF[o + 2] = toLinear(base[2]);
     SURF[o + 3] = Math.max(0, Math.min(1, metal)); SURF[o + 4] = Math.max(0.03, Math.min(1, rough)); SURF[o + 5] = glow;
-    SURF[o + 6] = nx; SURF[o + 7] = ny; SURF[o + 8] = nz;
+    SURF[o + 6] = nx; SURF[o + 7] = ny; SURF[o + 8] = nz; SURF[o + 9] = bend;
   };
 
   /** The sky along a unit direction into out at o (W floats): a mirror's (REFLECT times E in slot 0, each light's softbox in its slot), or the backdrop. */
@@ -423,7 +453,11 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       nv = 1e-3;
     }
     occlusion(px, py, pz, nx, ny, nz);
-    const ao = Math.pow(AOK[0], AO_POWER), cav = AOK[1];
+    const ao = Math.pow(AOK[0], AO_POWER);
+    // The cavity term, which dims what the surface reflects, and on a crease or an edge in a hollow its lights' highlights.
+    const hitK = Math.pow(AOK[1], CAVITY_POWER);
+    const crease = Math.min(1, SURF[s + 9] / CREASE_BEND);
+    const hiK = 1 - crease * (1 - hitK);
     const cdr = br * (1 - metal), cdg = bg * (1 - metal), cdb = bb * (1 - metal);
     const f0r = 0.04 + (br - 0.04) * metal, f0g = 0.04 + (bg - 0.04) * metal, f0b = 0.04 + (bb - 0.04) * metal;
     const alpha = rough * rough, a2 = alpha * alpha;
@@ -466,7 +500,8 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
       const fw = Math.pow(1 - vh, 5);
       const Fr = f0r + (1 - f0r) * fw, Fg = f0g + (1 - f0g) * fw, Fb = f0b + (1 - f0b) * fw;
       // In the units where a white Lambert surface square to the light returns its radiance on a white face: f·π.
-      const spec = mirror && !LP[q + 6] ? 0 : D * vis * Math.PI;
+      // Dimmed by the cavity term where the normal straddles a crease or an edge (CREASE_BEND).
+      const spec = (mirror && !LP[q + 6] ? 0 : D * vis * Math.PI) * hiK;
       const k = nl * att;
       const tr = LP[q + 10] * k * (cdr * (1 - Fr) + Fr * spec * emr);
       const tg = LP[q + 11] * k * (cdg * (1 - Fg) + Fg * spec * emg);
@@ -495,7 +530,6 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     const q1 = (depth + 1) * W;
     // Specular occlusion (Lagarde): the occlusion as the reflection sees it, tighter for a smooth surface; times the
     // cavity term, so a groove in polished metal stays dark enough to read.
-    const hitK = Math.pow(cav, CAVITY_POWER);
     const so = Math.max(0, Math.min(1, Math.pow(nv + ao, Math.pow(2, -16 * rough - 1)) - 1 + ao)) * hitK;
     // What a traced ray brings is dimmed by the cavity term too: from inside a groove the rays meet its walls, which
     // reflect the sky as brightly as the face round it, and an engraving in polished metal read only at its edges.
@@ -594,7 +628,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const shadeOpaque = (depth: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, r: number, g: number, b: number, rough: number, dx: number, dy: number, dz: number): void => {
     const s = depth * 12;
     SURF[s] = r; SURF[s + 1] = g; SURF[s + 2] = b; SURF[s + 3] = 0; SURF[s + 4] = Math.max(0.03, rough); SURF[s + 5] = 0;
-    SURF[s + 6] = nx; SURF[s + 7] = ny; SURF[s + 8] = nz;
+    SURF[s + 6] = nx; SURF[s + 7] = ny; SURF[s + 8] = nz; SURF[s + 9] = 0;
     shade(depth, px, py, pz, dx, dy, dz, false, false);
   };
 
@@ -682,7 +716,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     const t = rays.closest(ox, oy, oz, dx, dy, dz, reach * 4);
     if (t >= 0) {
       const px = ox + dx * t, py = oy + dy * t, pz = oz + dz * t;
-      gradientInto(px, py, pz, N3);
+      const bend = gradientInto(px, py, pz, N3);
       const nx = N3[0], ny = N3[1], nz = N3[2];
       const h = shape.hit(px, py, pz);
       if (h.mat.transmit > 0) {
@@ -700,7 +734,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
         }
         return true;
       }
-      finishAt(depth, px, py, pz, nx, ny, nz, h);
+      finishAt(depth, px, py, pz, nx, ny, nz, h, bend);
       shade(depth, px, py, pz, dx, dy, dz, false, true);
       return true;
     }
@@ -774,7 +808,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     }
     if (hitT >= 0) {
       const p0 = ex + dx * hitT, p1 = ey + dy * hitT, p2 = ez + dz * hitT;
-      gradientInto(p0, p1, p2, N3);
+      const bend = gradientInto(p0, p1, p2, N3);
       const nx = N3[0], ny = N3[1], nz = N3[2];
       const h = shape.hit(p0, p1, p2);
       if (h.mat.transmit > 0) {
@@ -784,7 +818,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
         glassChain = 0;
         sFlags = KIND_MODEL | FLAG_SHINY | (h.mat.glow > 0 ? FLAG_GLOW : 0);
       } else {
-        finishAt(0, p0, p1, p2, nx, ny, nz, h);
+        finishAt(0, p0, p1, p2, nx, ny, nz, h, bend);
         // The contrast pass is for a mirror's sharp reflections, not a pattern's or a bump's contrast.
         sFlags = KIND_MODEL | (SURF[4] < MIRROR_ROUGH ? FLAG_SHINY : 0) | (SURF[5] > 0 ? FLAG_GLOW : 0);
         shade(0, p0, p1, p2, dx, dy, dz, true, true);

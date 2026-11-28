@@ -960,13 +960,16 @@ more of the sky the rougher it is. Above 0.55 a surface reflects only
 the sky, blurred, and no other part of the model. So `chrome` (0.1) is
 a mirror, `silver` (0.25) and `gold` (0.3) glossy, `brass` and `copper`
 (0.35), `bronze` (0.4) and `steel` (0.45) a traced ray softened into the
-sky, and `iron` (0.6) the sky alone. Whatever a reflection brings is
-dimmed in a hollow by a cavity term read from the field, so lettering
-in polished metal stays readable: engraved letters read dark (round
-10's ring's FOREVER), and raised ones stand on a dark margin round
-their feet (the medal's rim). Without it the traced rays from inside a
-groove met its walls, which mirror the sky as brightly as the face
-round it does, and engraved letters read only at their edges. In the
+sky, and `iron` (0.6) the sky alone. Whatever a reflection brings, and
+a light's highlight on a crease or an edge, is dimmed in a hollow by a
+cavity term read from the field, so lettering in polished metal stays
+readable: engraved letters read dark (round 10's ring's FOREVER), and
+raised ones stand on a dark margin round their feet (the medal's rim).
+Without it the traced rays from inside a groove met its walls, which
+mirror the sky as brightly as the face round it does, and engraved
+letters read only at their edges; with it on the reflections alone, the
+key's highlight on the grooves' lips and corners made the ring's letters
+sparkle gold on gold. In the
 studio a mirror metal turned square to the camera mirrors the dark room
 round the camera and reads near black; a rougher one blurs in more of
 the room and keeps a mid-tone. Measured on flat tiles turned square to
