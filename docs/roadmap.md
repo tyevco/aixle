@@ -1265,9 +1265,9 @@ whether it set the viewer beside `beauty.png` and what differed.
   by kind of question, against that check's.
 - The guide's new rows are the hypotheses: paint metal letters a
   non-metal, key a plan shot at the camera's azimuth less 135, read a
-  metal's tops under `overcast` as its sky (28, built), lower a point
-  light's `range`. Count
-  how often an agent met each symptom, and whether the row got it out.
+  metal's tops under `overcast` as its sky or take the studio for darker
+  ones (28, built), lower a point light's `range`. Count how often an
+  agent met each symptom, and whether the row got it out.
 - Renders to done against rounds 9 to 11, and the lighting loop's time
   per render from the logs.
 
@@ -1327,14 +1327,17 @@ side: a dark band from the horizon up to about 20 degrees, gone by 44,
 reaching round past the sides, and a dark ground, lifted on the key's
 side as the studio's flag is. The light a surface takes is the bare
 dome, the same SH bytes at any camera and key; the overcast's tables now
-depend on the camera's azimuth and the key, as the studio's do. Nothing
-changes in a program, and no studio, sunset or night render moved
-(every set regenerated: only round 9's bracket and bottle and round
-10's hub, the overcast programs with renders, did; the hub's probe has
-none). The viewer's Scene mode reflects the same map, built for
-`beauty.png`'s camera, so it carries the flags with no change of its
-own (on the hub's page the ground on the camera's side went from 0.62
-to 0.09, the far side and the zenith as they were).
+depend on the camera's azimuth and the key, as the studio's do, so a
+shot at another azimuth builds its own (50 to 100 ms each: the bottle's
+four shots build four skies where they built one, the bracket's and
+the hub's three shots two each). Nothing changes in a program, and no
+studio, sunset or night render moved (every set regenerated: only round
+9's bracket and bottle and round 10's hub, the overcast programs with
+renders, did; the hub's probe has none). The viewer's Scene mode
+reflects the same map, built for `beauty.png`'s camera, so it carries
+the flags with no change of its own (on the hub's page the ground on
+the camera's side went from 0.62 to 0.09, the far side and the zenith
+as they were).
 
 **Measured**, the studio's figures in brackets. On a plate of the metal
 presets beside clay, a tile and a ball of each from the default camera:
@@ -1362,8 +1365,9 @@ shaded sides under `overcast` move only by the porcelain's gloss: 167.1
 to 166.3 levels, the teapot's lower body 196.0 to 193.3, the mug's
 157.9 to 156.1, at most 5 levels at any porcelain pixel.
 
-Not done here: the blind check of the four programs' pairs, which the
-review composes.
+Not done here: the blind check of the pairs, which the review composed
+for the lead's blind reader: three programs, the bracket, the hub and
+the bottle (the hub's probe has no committed renders).
 
 The proposal, as written before it was built:
 

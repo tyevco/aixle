@@ -1170,9 +1170,13 @@ and what a metal reflects; the lights are the program's own:
   steel ball's face turned to the camera came to 96 levels, its top to
   210), and a hub's rim shades from light on the key's side to dark. A
   metal seen from above, as in a plan shot, mirrors mostly sky and reads
-  near white, as it nearly does in the studio (round 10's steel hub's
-  top at 216 levels in its plan shot, against the studio's 200 to 211);
-  a darker metal reads darker there.
+  near white, and a darker metal reads darker there. The studio mirrors
+  a dark ceiling over a face turned up, so a mirror metal's top is
+  darker there (a silver ball's top came to 189 levels in the studio,
+  236 under the overcast, chrome's to 112 and 199); a steel part seen
+  from straight above is near white in either (round 10's hub's plan
+  shot: 241 levels on the flat outside its bolt circle, 228 in the
+  studio).
 - `sunset` is a blue sky over a warm band at the horizon, with a sun 3
   degrees up on the key light's side and its glow round it. Only a
   camera near the horizon (`elevation` under about 10) sees the band;

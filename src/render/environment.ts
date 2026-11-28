@@ -389,12 +389,15 @@ function card(out: number[], dir: Vec3, ha: number, hb: number, soft: number, L:
 // ---------------------------------------------------------------------------------------------------------------
 // Building a sky.
 
-/** What a sky depends on, normalised: the overcast on the camera's azimuth (its reflections' flag), sunset and night only on the key, the studio on the camera's azimuth and the key (the model's shadow on the floor). */
+/**
+ * What a sky depends on, normalised: sunset and night only on the key (the sun or the moon stands there); the studio
+ * and the overcast on the camera's azimuth and the key (their rigs stand on the camera's side, the flag on the floor
+ * is lifted on the key's side, and the studio's model shadow falls away from it).
+ */
 function skyInputs(env: Environment, cameraAzimuth: number, key: Vec3): { az: number; key: Vec3 } {
   // A unit key; + 0 turns −0 into 0, so a key's bytes do not depend on the sign of a zero.
   const k = normalize(key);
-  if (env === "studio") return { az: cameraAzimuth + 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
-  if (env === "overcast") return { az: cameraAzimuth + 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
+  if (env === "studio" || env === "overcast") return { az: cameraAzimuth + 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
   return { az: 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
 }
 
