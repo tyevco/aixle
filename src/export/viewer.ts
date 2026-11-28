@@ -28,7 +28,7 @@
  */
 import type { Bounds } from "../sdf/types.js";
 import type { Vec3 } from "../core/vec.js";
-import { GLOW, TONEMAP_GLSL } from "../render/photometry.js";
+import { GLOW, glslFloat, TONEMAP_GLSL } from "../render/photometry.js";
 import { GLB_RANGE_CUTOFF } from "./glb.js";
 
 /** The three.js the page loads, pinned: 0.187 prefilters each level of the environment with a true GGX lobe, as the beauty render's maps are. */
@@ -198,7 +198,7 @@ const IBL = THREE.ShaderChunk.envmap_physical_pars_fragment.replace(IBL_HEAD, [
   "  if ( aixleScene > 0.5 ) return max( aixleShIrradiance( transformNormalByInverseViewMatrix( normal, viewMatrix ) ), vec3( 0.0 ) ) * envMapIntensity;",
 ].join("\\n"));
 const FALLOFF_HEAD = "float getDistanceAttenuation( const in float lightDistance, const in float cutoffDistance, const in float decayExponent ) {";
-const FALLOFF = THREE.ShaderChunk.lights_pars_begin.replace(FALLOFF_HEAD, FALLOFF_HEAD + "\\n  if ( aixleScene > 0.5 && cutoffDistance > 0.0 ) { float r = cutoffDistance / ${GLB_RANGE_CUTOFF}.0; return 1.0 / ( lightDistance * lightDistance + r * r ); }");
+const FALLOFF = THREE.ShaderChunk.lights_pars_begin.replace(FALLOFF_HEAD, FALLOFF_HEAD + "\\n  if ( aixleScene > 0.5 && cutoffDistance > 0.0 ) { float r = cutoffDistance / ${glslFloat(GLB_RANGE_CUTOFF)}; return 1.0 / ( lightDistance * lightDistance + r * r ); }");
 if (IBL === THREE.ShaderChunk.envmap_physical_pars_fragment || FALLOFF === THREE.ShaderChunk.lights_pars_begin) console.warn("aixle viewer: this three.js's shaders have changed; the scene is not lit as beauty.png is");
 function patchShader(shader) {
   Object.assign(shader.uniforms, SH);
