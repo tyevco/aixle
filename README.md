@@ -203,9 +203,10 @@ colour is its reflectance, as glTF means it, so a metal has one colour
 in all three. It takes a few seconds at 512 pixels on four threads, and
 its picture is the same bytes on any number of threads. For the
 exports, the procedural materials are baked into a texture atlas with
-UVs, so the GLB looks the same in an engine as it does here; wear, bumps and a displace finer than the mesh
-are baked from the field into normal and metallic-roughness maps beside
-it. Materials are procedural patterns evaluated in the
+UVs, so the GLB looks the same in an engine as it does here; wear,
+bumps and a displace finer than the mesh are baked from the field into
+normal and metallic-roughness maps beside it. Materials are procedural
+patterns evaluated in the
 painted part's own frame, sampled per pixel when rendering and per vertex
 when exporting; there are no UVs. [`docs/design.md`](docs/design.md) has
 the reasoning and the limits.

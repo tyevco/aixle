@@ -912,10 +912,10 @@ tiles, dots, rust. `hsl(h, s, l)` and `rgb(r, g, b)` make colour strings.
 
 A metal (`metal=1`) has no diffuse colour of its own: its colour is its
 reflectance at normal incidence, F0, as glTF's metallic-roughness model
-means it, written in sRGB. The beauty render, `viewer.html` and any
-engine read that one colour from the GLB. So a metal reads by what it
-reflects, and each metal preset is taken from measured reflectances
-rather than chosen as a paint:
+means it, written in sRGB. The beauty render shades with that colour
+and the GLB carries it, so `viewer.html` and any engine show the same
+metal. So a metal reads by what it reflects, and each metal preset is
+taken from measured reflectances rather than chosen as a paint:
 
 - `silver` #fcfaf5 and `chrome` #c4c5c4 (chromium) are the measured F0
   of Real-Time Rendering's fourth edition, table 9.2.
@@ -932,15 +932,15 @@ rather than chosen as a paint:
   #f0bc84 are their measured F0 squared, the colour of light after two
   bounces off the metal (gold from Lagarde's 2011 table, brass and
   copper from table 9.2, bronze, which no table measures, the mean of
-  those two alloys either side of it). A measured F0 is pale, gold's
-  #ffe39d: in a neutral room the trophies' gold read as champagne, the
-  sign's brass letters as cream and a bottle's bronze collar as pink,
-  and a darker room only turned them khaki. Squared, each keeps its
-  measured hue and the order between them and takes the saturation a
-  picture of the metal has: the medal's face has a saturation of 0.73,
-  against 0.46 at F0 and the old renderer's 0.68. A glTF viewer reads the same
-  colour, so the GLB's gold is this deep gold too, a little richer than
-  a measured one.
+  those two, the metals either side of it). A measured F0 is pale,
+  gold's #ffe39d: in a neutral room the trophies' gold read as
+  champagne, the sign's brass letters as cream and a bottle's bronze
+  collar as pink, and a darker room only turned them khaki. Squared,
+  each keeps its measured hue and the order between them and takes the
+  saturation a picture of the metal has: the medal's face has a
+  saturation of 0.73, against 0.46 at F0 and the old renderer's 0.68. A
+  glTF viewer reads the same colour, so the GLB's gold is this deep gold
+  too, a little richer than a measured one.
 
 Gold is deep yellow under `studio` and `overcast`, orange under
 `sunset` and amber under `night`; brass is the greener yellow beside
@@ -962,17 +962,23 @@ a mirror, `silver` (0.25) and `gold` (0.3) glossy, `brass` and `copper`
 (0.35), `bronze` (0.4) and `steel` (0.45) a traced ray softened into the
 sky, and `iron` (0.6) the sky alone. Whatever a reflection brings is
 dimmed in a hollow by a cavity term read from the field, so lettering
-engraved in polished metal reads as dark letters (the medal's, round
-10's ring's FOREVER): without it the traced rays from inside a groove
-met its walls, which mirror the sky as brightly as the face round it
-does, and the letters read only at their edges. In the studio a metal
-face turned square to the camera mirrors the dark room round the camera
-and reads near black, whatever its preset: a convex metal takes its
-contrast from that room, and a flat label facing the camera loses it.
-The patterns plate's labels, iron letters standing on a dark board,
-were lost that way (as they were under the old renderer) and are
-painted porcelain now; lettering that must read face on wants a light
-non-metal.
+in polished metal stays readable: engraved letters read dark (round
+10's ring's FOREVER), and raised ones stand on a dark margin round
+their feet (the medal's rim). Without it the traced rays from inside a
+groove met its walls, which mirror the sky as brightly as the face
+round it does, and engraved letters read only at their edges. In the
+studio a mirror metal turned square to the camera mirrors the dark room
+round the camera and reads near black; a rougher one blurs in more of
+the room and keeps a mid-tone. Measured on flat tiles turned square to
+a camera 25 degrees up, `chrome` came to 5, 13 and 21 levels, `silver`
+to 148, `steel` to 167 and `iron` to 99; the same four standing
+upright, which mirror the floor instead, came to 155, 223, 158 and 77.
+So a convex metal takes its contrast from that room, and a flat metal
+label takes one tone, set by the way it faces, however that tone sits
+against what is behind it. The patterns plate's labels, iron letters
+standing on a dark board, were lost on it that way (as they were under
+the old renderer) and are painted porcelain now; lettering that must
+read face on wants a light non-metal.
 
 A material can also carry a finish, which adds no geometry and shows in
 the beauty render and the GLB, not on the sheet (the sheet draws the
@@ -1058,17 +1064,16 @@ power=0.5, color="#cfe0ff")` are a warm key and a cool rim (azimuth
 about y, 0 from the front and 90 from +x; a `light()` given no angles
 stands at -40 and 55; `power` 1 is the default key's strength, which
 lights a white face turned square to it to near white; the colour is a
-name, a hex or a material). A light's `size` is its angular radius, size/18
-radians: 0.5 (under 2 degrees) is a lamp, 1 (about 3 degrees) the
-default, 3 (about 10) a window, and a directional light stops growing
-at 27, just short of a right angle. That one
-angle softens the light's shadow, widens its highlight, and is the
-bright disc a mirror shows of it, so a bigger key is a bigger window in
-a chrome part. Shadows are traced from the light's disc, eight rays a
-pixel, smoothed across the neighbouring pixels of the same surface on
-the share of the light each sees and nothing else (so a bump's shading
-stays sharp), and a shadow is as soft as its light is large, without
-stair-steps; it
+name, a hex or a material). A light's `size` is its angular radius,
+size/18 radians: 0.5 (under 2 degrees) is a lamp, 1 (about 3 degrees)
+the default, 3 (about 10) a window, and a directional light stops
+growing at 27, just short of a right angle. That one angle softens the
+light's shadow, widens its highlight, and is the bright disc a mirror
+shows of it, so a bigger key is a bigger window in a chrome part.
+Shadows are traced from the light's disc, eight rays a pixel, smoothed
+across the neighbouring pixels of the same surface on the share of the
+light each sees and nothing else (so a bump's shading stays sharp), and
+a shadow is as soft as its light is large, without stair-steps; it
 hardens where a part meets the floor, as a real shadow does, and it is
 tinted where the light passes through coloured glass. Three lights cost
 about a third more than one: from one light to three, the lantern took
@@ -1080,8 +1085,8 @@ threads.
 Without a `light()` the key is the default one: from the upper left
 and the front, at azimuth -40 and about 47 degrees up, fixed in the
 world rather than the camera, so turning the camera turns the shot and
-not the light (`set light_size`, `set light_azimuth` and `set
-light_elevation` move it; see Settings). The one exception is a camera
+not the light (`set light_azimuth` and `set light_elevation` move it,
+`set light_size` sizes it; see Settings). The one exception is a camera
 looking steeply down: from an elevation of 55 to 75 the default key
 turns, smoothly with the elevation, to the frame's top left, because
 people read a picture as lit from above, and a plan view lit from its
@@ -1098,11 +1103,11 @@ radius 2% of `range` for each unit of `size`, so its shadows are soft by
 that sphere and reach the floor (a lantern's bars fan out across it from
 the candle). Its strength at a distance d is range² / (range² + d²) of
 its strength at the light: half at `range`, a fifth at twice it. That
-is in light, as an engine's falloff is, and half the light shows on the
-screen at about three quarters of the brightness, so a pool of light
-looks wider than under the old renderer, which halved the displayed
-colour: a torch lights more of its wall, and lowering `range` narrows
-the pool. Without `range=` it is half the model's longest side, so the
+is in linear light, as an engine's falloff is, and half the light shows
+on the screen at about three quarters of the brightness, so a pool of
+light looks wider than under the old renderer, which halved the
+displayed colour: a torch lights more of its wall, and lowering `range`
+narrows the pool. Without `range=` it is half the model's longest side, so the
 default suits a model of any size. Put a point light in the air just
 outside the glowing part: a solid the light sits inside shadows
 everything, though inside a glass shade is fine (glass lets its light
@@ -1134,8 +1139,11 @@ and what a metal reflects; the lights are the program's own:
 - `overcast` is a white dome, brighter towards the zenith, with soft,
   even light and no rig, so a mirror metal reflects white sky all round:
   silver comes out near white and chrome and steel pale and even there.
-  Give a mirror metal the studio, a sunset or a night, or a rougher
-  finish.
+  A rougher finish does not help, since it blurs the same white: at the
+  centre of a ball, silver at a roughness of 0.6 came to 238 levels,
+  against 216 at its own 0.25. Give a mirror metal the studio, a sunset
+  or a night, or use a darker or a coloured metal (`iron` came to 118
+  there, and `brass` stays yellow).
 - `sunset` is a blue sky over a warm band at the horizon, with a sun 3
   degrees up on the key light's side and its glow round it. Only a
   camera near the horizon (`elevation` under about 10) sees the band;
@@ -1150,14 +1158,14 @@ and what a metal reflects; the lights are the program's own:
 The sun and the moon stand where the key comes from (the program's
 first directional light, or the one key a program without a `light()`
 has), so every shot of a run shares one sky, except a steep shot under
-the default key, whose sun or moon turns with its key. `set ambient 1.5` scales everything the sky
-gives the model: the light a surface takes from it and what a metal or
-a glossy part reflects of it alike, but not the lights, the disc a
-mirror shows of each, or the backdrop. The open floor near the model is
-solved to show the sky's own floor colour under the sky and every
-directional light, so `set ambient` and a key's `power` leave it as it
-is, short of a scene too dim for any floor to show it; a shadow darkens
-it and a point light brightens it.
+the default key, whose sun or moon turns with its key. `set ambient
+1.5` scales everything the sky gives the model: the light a surface
+takes from it and what a metal or a glossy part reflects of it alike,
+but not the lights, the disc a mirror shows of each, or the backdrop.
+The open floor near the model is solved to show the sky's own floor
+colour under the sky and every directional light, so `set ambient` and
+a key's `power` leave it as it is, short of a scene too dim for any
+floor to show it; a shadow darkens it and a point light brightens it.
 
 A named shot, `camera("hero", azimuth=30, elevation=20, zoom=1.4)` or
 `camera("detail", focus="nameplate", zoom=2)`, is written by `render
@@ -1167,9 +1175,8 @@ own view: the command line's `--azimuth`, `--elevation` and `--zoom`,
 then the program's `set camera` shot, then `set azimuth`, `set
 elevation` and `set zoom`, then the defaults (azimuth 35, elevation 25,
 zoom 1), as `check` aims it, and a `dof` it leaves out from `set dof`;
-so `--camera
-NAME`, with or without `--beauty-only`, draws exactly the full run's
-`beauty_NAME.png`. `set camera hero` makes that shot the sheet's
+so `--camera NAME`, with or without `--beauty-only`, draws exactly the
+full run's `beauty_NAME.png`. `set camera hero` makes that shot the sheet's
 perspective view and `beauty.png` as well (the front, right and top
 views are unchanged). That shot is rendered once, as `beauty.png`, its
 caption naming the camera, and not again as `beauty_hero.png`: the two
@@ -1241,10 +1248,10 @@ strength (the sky's own ambient times `set ambient`), diffuse light from
 the sky's spherical harmonics as the beauty render takes it, the GLB's
 lights with `beauty.png`'s point-light falloff in place of an engine's
 inverse square (or the beauty render's one key when the program
-declares no light),
-glows at `beauty.png`'s strength, 1.6 times the GLB's, and the floor at
-the colour the beauty render solves for its open floor, faded into the
-horizon far off. The named cameras are buttons, and `◎ beauty.png`
+declares no light), glows at `beauty.png`'s strength, 1.6 times the
+GLB's, and the floor at the colour the beauty render solves for its
+open floor, faded into the horizon far off. The named cameras are
+buttons, and `◎ beauty.png`
 frames the page as `beauty.png` is framed (a `set camera` shot's own
 button does that when there is one), where Perspective keeps the whole
 model in view. Scene mode cannot show the field's occlusion and the
@@ -1273,8 +1280,11 @@ and since:
   studio,overcast`, renders only those, and beauty.png takes the first
   of them (with `all`, beauty.png keeps the program's own sky). The
   strip's frames are half the beauty render's size, at the full grid,
-  in draft quality, so glass can be judged there, which a quick pass
-  cannot.
+  so a glass wall is meshed there as in `beauty.png`, where a quick
+  pass's may not be; but they are draft quality, glass one deep, so
+  what is seen through two glasses is the backdrop tinted (the
+  tumbler's straw is gone below the drink's surface): judge that in
+  `beauty.png`.
 - A camera's `elevation` is about the model's centre and may be
   negative: at 0 a perspective camera still looks down on the floor
   round a low model, so a low shot is `elevation=-8`. `elevation=90` is
@@ -1311,57 +1321,60 @@ and since:
   blur that grows with a surface's distance from the focus: 0.3 to 0.5
   is a gentle falloff, 1 blurs everything off the focus plane hard.
 - `--azimuth`, `--elevation` and `--zoom` on the command line override
-  the sheet's view and `beauty.png` only; a declared camera keeps its
-  own angles. `--camera NAME` renders one declared shot (the sheet and
+  the sheet's view and `beauty.png`; a declared camera keeps the angles
+  it gives and takes from them only what it leaves out (see the named
+  shots above). `--camera NAME` renders one declared shot (the sheet and
   `beauty.png` take its view, and its `focus=` framing) while a lighting
   loop runs. `--beauty-only` is that loop: the sheet and the one shot
-  (`set camera`'s, `--camera`'s, or the render's own view), written
-  once as `beauty.png`, and nothing else: no other camera's shot, no
+  (`set camera`'s, `--camera`'s, or the render's own view), written once
+  as `beauty.png`, and nothing else: no other camera's shot, no
   `lights.png` (`--lights` adds it), no steps, slices, turntable,
   callouts or exports. It draws in full quality on the run's threads,
   the very picture the full run's `beauty.png` is, so a material chosen
-  in the loop is what the final shot shows. `--environment NAME` tries
-  a sky without editing the program. `--quality draft|full` sets how
-  much `beauty.png` and the camera shots sample. `full`, the default
-  and what the committed renders use, traces reflections two bounces
-  deep, four rays for a glossy metal and glass seen through glass two
-  deep, and samples a pixel four times at the edge of a mirror's sharp
-  reflection. `draft` takes one bounce, one glossy ray and one glass
-  deep, without those extra samples, and the same shadows, eight rays a
-  light, so it saves time only where reflections and glass are the work:
-  draft took 0.68 of full's time for round 11's mixer and its polished
-  bowl, 0.82 for the tumbler and 0.93 to 0.97 for the mug and the medal
-  (512 px, one thread, the best of three). `--quick --beauty` is draft
-  unless `--quality full` says otherwise, and `lights.png` and
+  in the loop is what the final shot shows. `--environment NAME` tries a
+  sky without editing the program. `--quality draft|full` sets how much
+  `beauty.png` and the camera shots sample. `full`, the default and what
+  the committed renders use, traces reflections two bounces deep, four
+  rays for a glossy metal and glass seen through glass two deep, and
+  samples a pixel four times at the edge of a mirror's sharp reflection.
+  `draft` takes one bounce, one glossy ray and one glass deep, without
+  those extra samples, and the same shadows, eight rays a light, so it
+  saves time only where reflections and glass are the work: draft took
+  0.68 of full's time for round 11's mixer and its polished bowl, 0.82
+  for the tumbler and 0.93 to 0.97 for the mug and the medal (512 px,
+  one thread, the best of three). `--quick --beauty` is draft unless
+  `--quality full` says otherwise, and `lights.png` and
   `environments.png` are always draft. No setting in a program chooses
   it: a program describes a model, and how much to sample is the run's
-  choice. `--threads N` draws
-  the beauty renders on N threads (by default the cores, at most four),
-  each worker evaluating the program again; the picture is the same
-  bytes on any number. The caption at the foot of `beauty.png` and of
-  each shot names the shot and its size for whoever checks it; `set
-  caption 0` (or `--no-caption`) leaves it off a presentation copy,
-  where at a low camera it can overprint the model.
+  choice. `--threads N` draws the beauty renders on N threads (by
+  default the cores, at most four), each worker evaluating the program
+  again; the picture is the same bytes on any number. The caption at the
+  foot of `beauty.png` and of each shot names the shot and its size for
+  whoever checks it; `set caption 0` (or `--no-caption`) leaves it off a
+  presentation copy, where at a low camera it can overprint the model.
 - Glass (`transmit`) refracts at an index of 1.5 and reflects the share
-  Fresnel's law gives it. The refracted ray is carried through the solid on the field
-  to where it leaves, and past the critical angle it reflects inside and
-  goes on, up to four times, so thick glass renders: a tumbler's base
-  shows the drink and the floor through it, where falling back to the
-  sky at the first such reflection drew white triangles in it. Every
-  stretch inside absorbs by Beer's law, each channel letting
-  exp(-22 (1 - c) t / reach) through over a length t (c the glass's
-  colour in that channel, reach one and a half times the model's
-  diagonal), so a thick base is deeper in colour than a thin wall, the
-  same at any units, and a shadow cast through the glass takes the same
-  tint. `--quick` meshes at 64 cells, so a glass wall thinner than that
-  cell renders as a frosted solid and a `transmit` material cannot be
-  judged there; judge glass at the full grid. A glowing part inside a
-  glass shell must clear the glass by a cell, or the refraction draws
-  rings and bars where the two surfaces touch. A `loft` or a smooth
-  `union(k=)` is a bound rather than a distance, and glass on one bands
-  the picture behind it (a liquid seen through a lofted flacon drew
-  contour lines; a rounded box rendered clean; `check` warns when a
-  `transmit` material sits on such a field, and a `shell`, a
+  Fresnel's law gives it. The refracted ray is carried through the solid
+  on the field to where it leaves, and past the critical angle it
+  reflects inside and goes on, up to four times, so thick glass renders:
+  a tumbler's base shows the drink and the floor through it, where
+  falling back to the sky at the first such reflection drew white
+  triangles in it. Every stretch inside absorbs by Beer's law, each
+  channel letting exp(-22 (1 - c) t / reach) through over a length t (c
+  the glass's colour in that channel, reach one and a half times the
+  model's diagonal), so a thick base is deeper in colour than a thin
+  wall, the same at any units, and a shadow cast through the glass takes
+  the same tint. `--quick` meshes at 64 cells, and the camera's rays
+  find a surface only near the mesh's, so a glass wall thinner than that
+  cell is drawn where the mesh caught it and missing between: a cup
+  whose wall was a quarter of the quick cell came out as broken upright
+  strips. A `transmit` material cannot be judged there; judge glass at
+  the full grid, with its wall the two cells `check` asks for. A glowing
+  part inside a glass shell must clear the glass by a cell, or the
+  refraction draws rings and bars where the two surfaces touch. A `loft`
+  or a smooth `union(k=)` is a bound rather than a distance, and glass
+  on one bands the picture behind it (a liquid seen through a lofted
+  flacon drew contour lines; a rounded box rendered clean; `check` warns
+  when a `transmit` material sits on such a field, and a `shell`, a
   `clearance` or an `overlap` on one is only as true as the field: a
   loft of two profiles is measured across its slanted wall, like the
   cone it is, but a smooth union's blend or a twist is a bound); two
@@ -1370,8 +1383,8 @@ and since:
   not `== 1`. `glow` on a `transmit` material is not visible, and a
   `glow` above 1 washes out the part's own shading, so a lamp's cap
   reads as a flat disc until a point light beside it lights its
-  surroundings. The first `light()` replaces the default key light, so
-  a program adding a point light declares its key too.
+  surroundings. The first `light()` replaces the default key light, so a
+  program adding a point light declares its key too.
 
 ## Settings
 
@@ -2188,9 +2201,10 @@ the shapes.
   for curved faces; see the contact rule) and bridge it with a hub or a
   post, or they mesh as one part with open edges where they touch.
 - The key light comes from above (about 47 degrees up by default) and
-  does not reach far into an opening: an interior behind a door or a window is
-  dark unless `set light_elevation` brings the light down, `set ambient`
-  lifts the fill, or a `decal` gives the inner walls a lighter colour.
+  does not reach far into an opening: an interior behind a door or a
+  window is dark unless `set light_elevation` brings the light down,
+  `set ambient` lifts the fill, or a `decal` gives the inner walls a
+  lighter colour.
 - A preset with overrides (`material("glass", transmit=0.95)`) is listed
   in the report as the preset's name with a star, `glass*`, unless it is
   assigned to a name, which it then takes (in a loop, `name_2`, `name_3`
