@@ -1,0 +1,84 @@
+# PROBE (deliberate failure): a wall of 0.1, under the 0.152 cell.
+# A glass decanter on a wooden coaster, half full of a dark amber spirit,
+# its glass ball stopper resting in the neck. In centimetres.
+#
+# Plan. The decanter is one smooth outline revolved: a flat foot 5.6 out,
+# a round belly 8.6 out at 5.5 up, a shoulder sweeping in to a straight
+# neck 1.8 out from 19 to 21.5 up, a rolled lip (a torus) on top. The glass
+# is that solid less its inside, the solid shrunk by the wall (0.45) above
+# a thick base (1.0), so the wall is the same everywhere by construction;
+# the outline runs on up past the lip and is trimmed there, so the inside
+# runs out through the top and the mouth is open. The spirit is the inside grown a cell
+# into the glass (the docs' rule for a liquid behind glass) and cut off at
+# the level, about half the inside's volume. The stopper is a tapered plug
+# under a collar and a ball, dropped into the neck with rest() until the
+# plug meets the bore's top edge. The coaster is an oak disc 20 across,
+# the decanter rested on it. Front is +z; nothing faces anywhere.
+
+set grid 180
+set slice_y 5
+
+dec = {wall: 0.1, base: 1.0, neck_r: 1.8, neck_top: 21.5, level: 6.8}
+bore = dec.neck_r - dec.wall
+cell = 0.05                                     # 30.6 tall / grid 180
+
+# the decanter's outside, on x >= 0: corners on the axis, at the foot's
+# edge and where the neck goes straight. The neck runs on past its top
+# (to 24) so the inside, the outside shrunk by the wall, runs out through
+# it; the outside is trimmed at the neck's top, which leaves the mouth
+# open with no cutter's face on the bore's.
+profile = curve2([
+  0,0,  0,0,  5.6,0,  5.6,0,
+  6.3,0.5,  7.9,2.6,  8.6,5.5,  8.2,8.6,  6.6,11.6,  4.2,13.8,  2.4,15.6,
+  1.85,17.2,  1.8,19,  1.8,19,
+  1.8,24,  1.8,24,  0,24,  0,24
+])
+long_outer = revolve(profile)
+below_lip = box(30, 30, 30) | move(0, dec.neck_top - 15, 0)
+above_base = box(30, 30, 30) | move(0, dec.base + 15, 0)
+outer = long_outer & below_lip
+cavity = (long_outer | offset(-dec.wall)) & above_base
+bead = torus(1.75, 0.32) | move(0, dec.neck_top - 0.1, 0)
+glass = (outer - cavity + bead) | paint("glass")
+
+# the spirit: the inside grown a cell into the wall and the base, up to the level
+spirit_colour = material("#d4862a", transmit=0.85, rough=0.05)
+spirit = ((outer | offset(-dec.wall + cell)) & (box(30, dec.level - dec.base + cell, 30) | move(0, (dec.level + dec.base - cell) / 2, 0)))
+  | paint(spirit_colour)
+
+# the stopper: a plug tapering 1.45 to 0.95 over 3.5, a collar, a ball
+plug = cone(0.95, 1.45, 3.5) | move(0, 1.75, 0)
+collar = cylinder(1.9, 0.5, round=0.2) | move(0, 3.6, 0)
+finial = sphere(1.9) | move(0, 5.5, 0)
+stopper = (plug + collar + finial) | paint("glass") | move(0, 22, 0) | rest(glass)
+
+coaster = cylinder(10, 1.2, round=0.35) | move(0, 0.6, 0) | paint(material("oak", scale=1.0, axis="x"))
+decanter = (glass + spirit + stopper) | rest(coaster)
+model = coaster + decanter
+
+light("key", azimuth=-35, elevation=50, size=2.5)
+light("rim", azimuth=160, elevation=25, power=0.6)
+camera("hero", azimuth=25, elevation=12, zoom=1.2)
+camera("neck", focus="stopper", elevation=15, zoom=1.0)
+set camera hero
+set environment studio      # tried against overcast in one run (environments.png): the white sweep keeps the glass's edges dark and its highlights crisp
+
+# the promises
+assert inside(spirit, outer) == 1, "the spirit is inside the decanter's outside"
+assert void(box(40, 40, 40) - outer, spirit), "no spirit outside the glass"
+assert inside(spirit, cavity) > 0.9, "the spirit fills the inside, grown a cell into the wall"
+assert abs(height(spirit, 3, 0) - dec.level) < 0.01, "the spirit's surface is at the level"
+body_inside = cavity & below_lip
+inside_volume = overlap(body_inside, body_inside)
+spirit_volume = overlap(spirit, body_inside)
+assert overlap(spirit, body_inside) > 0.45 * overlap(body_inside, body_inside), "at least half full, near enough"
+assert overlap(spirit, body_inside) < 0.55 * overlap(body_inside, body_inside), "no more than half full, near enough"
+assert clearance(stopper, glass) > -0.001, "the stopper does not pass into the glass"
+assert abs(clearance(stopper, glass)) < 0.01, "the stopper rests on the neck"
+assert bottom(stopper) < dec.neck_top - 1.5, "the plug is down in the neck"
+assert bottom(stopper) > 17, "the plug stays in the neck, above the shoulder"
+assert abs(clearance(decanter, coaster)) < 0.001, "the decanter stands on the coaster"
+assert overlap(decanter, coaster) < 0.001, "not sunk into it"
+assert stands(model) > 3, "the whole stands, its centre of mass well inside the coaster's footprint"
+assert wall(glass) > 0.4, "a real wall, two and a half cells"
+show model

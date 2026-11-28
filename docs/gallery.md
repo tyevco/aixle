@@ -420,6 +420,38 @@ round 11: A desk stand for a phone, printed in PLA standing on its base.
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/stand.aix) · <a href="/aixle/viewers/round-11_stand.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/stand.report.md)
 
+### round-12_decanter
+
+round 12: A glass decanter on a wooden coaster, half full of a dark amber spirit,
+
+![round-12_decanter, beauty render](../dogfood/renders/round-12_decanter_beauty.png) ![round-12_decanter, contact sheet](../dogfood/renders/round-12_decanter.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/decanter.aix) · <a href="/aixle/viewers/round-12_decanter.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/decanter.report.md)
+
+### round-12_desk
+
+round 12: A writing desk at night, drawn in centimetres: a small walnut desk with one
+
+![round-12_desk, beauty render](../dogfood/renders/round-12_desk_beauty.png) ![round-12_desk, contact sheet](../dogfood/renders/round-12_desk.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/desk.aix) · <a href="/aixle/viewers/round-12_desk.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/desk.report.md)
+
+### round-12_plaque
+
+round 12: A cast brass plaque to be screwed to a park bench, 200 x 80 mm.
+
+![round-12_plaque, beauty render](../dogfood/renders/round-12_plaque_beauty.png) ![round-12_plaque, contact sheet](../dogfood/renders/round-12_plaque.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/plaque.aix) · <a href="/aixle/viewers/round-12_plaque.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/plaque.report.md)
+
+### round-12_plate
+
+round 12: A machined aluminium mounting plate for a NEMA 17 stepper motor, in millimetres.
+
+![round-12_plate, beauty render](../dogfood/renders/round-12_plate_beauty.png) ![round-12_plate, contact sheet](../dogfood/renders/round-12_plate.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/plate.aix) · <a href="/aixle/viewers/round-12_plate.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/plate.report.md)
+
 ### round-2_excavator
 
 round 2: A hydraulic excavator: tracked base, a slewing upper structure, a bent

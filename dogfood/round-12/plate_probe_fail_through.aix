@@ -1,0 +1,117 @@
+# Probe: a deliberate failure. The corner holes stop 2 short of the bottom face.
+# A machined aluminium mounting plate for a NEMA 17 stepper motor, in millimetres.
+# The plate lies flat on y = 0: 120 along x, 80 along z, 12 thick; its front is +z.
+# Left of centre, the motor: a 22.5 bore straight through for the motor's 22 shaft
+# boss, and four M3 tapped-size holes (2.5 drill) on a 31 square, BLIND: 8 deep to
+# the full diameter, then a 118-degree drill point, so they stop 3.25 short of the
+# far face. At the corners, four M5 counterbored through holes for the plate's own
+# screws (5.5 through, a 10 counterbore 5.5 deep). On the right, a pocket 34 x 46,
+# corners R4 (an 8 end mill), milled 5 deep into the top. A part number is engraved
+# 0.6 deep along the front.
+
+set units mm
+set grid 256
+
+p = {w: 120, d: 80, t: 12, corner: 5}
+
+# The blank: a rounded rectangle in plan (its y runs along -z), extruded 12 up from y = 0.
+# Machined aluminium: no preset, so its reflectance (about 0.91, near neutral) as a metal of my own, satin.
+aluminium = material("#d9dcdf", metal=1, rough=0.5)
+blank = extrude(rect(p.w, p.d, round=p.corner), p.t) | move(0, p.t / 2, 0) | paint(aluminium)
+
+# Corner holes: M5 clearance 5.5 straight through, counterbore 10 across and 5.5 deep.
+cb = {r_hole: 2.75, r_bore: 5, depth: 5.5, x: 50, z: 30}
+cb_through = cylinder(cb.r_hole, 10) | move(0, 2 + 5, 0)
+cb_counter = cylinder(cb.r_bore, 2 * cb.depth) | move(0, p.t, 0)
+cb_hole = cb_through + cb_counter
+corner_holes = cb_hole | move(cb.x, 0, cb.z) | mirror("x") | mirror("z")
+
+# The motor: centre of the bore and the tapped holes' square.
+motor = {x: -20, z: 0, r_bore: 11.25, pitch: 31}
+bore = cylinder(motor.r_bore, 30) | move(motor.x, p.t / 2, motor.z)
+
+# A tapped-size hole: 2.5 drill, 8 deep to the full diameter, then the 118-degree point.
+tap = {r: 1.25, depth: 8}
+tap_tip_h = tap.r / tan(59)
+tap_floor_y = p.t - tap.depth
+tap_body = cylinder(tap.r, tap.depth + 6) | move(0, tap_floor_y + (tap.depth + 6) / 2 - 0.1, 0)
+tap_point = cone(0, tap.r, tap_tip_h) | move(0, tap_floor_y - tap_tip_h / 2, 0)
+tap_hole = tap_body + tap_point
+tapped_holes = tap_hole | move(motor.x + motor.pitch / 2, 0, motor.z + motor.pitch / 2) | mirror("z")
+tapped = tapped_holes + (tapped_holes | move(-motor.pitch, 0, 0))
+
+# The pocket: 34 x 46 in plan with R4 corners, 5 deep, its floor at y = 7.
+pocket_size = {w: 34, d: 46, r: 4, depth: 5, x: 25, z: -3}
+pocket = extrude(rect(pocket_size.w, pocket_size.d, round=pocket_size.r), 10) | move(pocket_size.x, p.t - pocket_size.depth + 5, pocket_size.z)
+
+# The part number, engraved 0.6 deep, reading from the front with its baseline 7 in from the front edge.
+# spacing=1 leaves 0.9 of metal between letters (a fifth of the size, plus the spacing, less the weight).
+engrave = {depth: 0.6, size: 5, weight: 1.1, spacing: 1}
+part_number = extrude(text("MP17-001", engrave.size, weight=engrave.weight, spacing=engrave.spacing, align="center"), 2 * engrave.depth) | move(0, p.t, 33)
+
+plate = blank - corner_holes - bore - tapped - pocket - part_number
+
+# --- presentation ------------------------------------------------------------
+camera("plan", azimuth=0, elevation=90, zoom=1.1)
+camera("three_quarter", azimuth=-35, elevation=45, zoom=1.2)
+set camera plan
+# The plan's key from the frame's top left (the camera's azimuth less 135), a fill from the front right.
+light("key", azimuth=-135, elevation=55, size=2)
+light("fill", azimuth=40, elevation=30, power=0.35)
+
+# A backlight: a glowing panel under the plate, which rests on it, so a hole that goes
+# through shows light and a blind one does not. No light() can do this: the floor stops
+# a light from below, and a steep light lights the blind holes' drill points as much as
+# the floor under the through holes. Inset 4 from the plate's edge, hidden under it.
+# Blue, since a metal top seen from above mirrors the studio and reads as white as a white glow.
+backlight = box(p.w - 8, 1, p.d - 8) | move(0, -0.5, 0) | paint(material("#8cc4ff", glow=1.6))
+scene plate, backlight
+
+# Slicing slabs (regions): through the row of tapped holes at z = 15.5, and the corner holes at z = 30.
+section_tapped = box(40, 12, 1) | move(-20, 6, 15.5)
+section_corner = box(120, 12, 1) | move(0, 6, 30)
+set slice section_tapped
+
+# --- promises -------------------------------------------------------------
+assert pieces(plate) == 1, "one piece"
+
+# The four corners and the four tapped holes, as signs on x and z.
+quadrants = [[1, 1], [1, -1], [-1, 1], [-1, -1]]
+
+# Through: a rod thinner than each hole, reaching past both faces, finds no metal.
+# One rod per hole: a single region of four thin rods far apart passed with the holes blind.
+for q in quadrants {
+  assert void(cylinder(2, 20) | move(q[0] * cb.x, p.t / 2, q[1] * cb.z), plate), "each corner hole goes through"
+}
+bore_rod = cylinder(10, 20) | move(motor.x, p.t / 2, motor.z)
+assert void(bore_rod, plate), "the motor bore goes through"
+
+# Counterbored: in each corner, the shoulder 5.5 down between the hole and the counterbore's
+# wall, and the counterbore open all the way round above it.
+for q in quadrants {
+  cx = q[0] * cb.x
+  cz = q[1] * cb.z
+  shoulder = height(plate, cx - q[0] * 3.9, cz)
+  assert abs(p.t - shoulder - cb.depth) < 0.05, "each counterbore's floor is 5.5 down"
+  assert void(cylinder(4.6, cb.depth - 0.3) | move(cx, p.t - (cb.depth - 0.3) / 2 + 0.2, cz), plate), "each counterbore is open 10 across"
+}
+
+# Blind: each tapped hole is open 8 deep, its drill point stops 3.25 above the far face,
+# and there is metal under it.
+for q in quadrants {
+  tx = motor.x + q[0] * motor.pitch / 2
+  tz = motor.z + q[1] * motor.pitch / 2
+  floor_y = height(plate, tx, tz)
+  assert floor_y > 3, "each tapped hole stops 3 short of the far face"
+  assert floor_y < 3.5, "each tapped hole's drill point reaches 8.75 down"
+  assert void(cylinder(0.9, tap.depth - 0.3) | move(tx, p.t - (tap.depth - 0.3) / 2 + 0.2, tz), plate), "each tapped hole is open 8 deep"
+  assert inside(cylinder(0.9, 2.6) | move(tx, 1.5, tz), plate) == 1, "solid metal under each tapped hole"
+}
+
+# The pocket: its floor is 5 below the top, 7 above the bottom, and flat right up to its
+# walls (one wall 5 tall, no step in it).
+pocket_floor = height(plate, pocket_size.x, pocket_size.z)
+assert abs(p.t - pocket_floor - pocket_size.depth) < 0.05, "the pocket is 5 deep"
+pocket_back = pocket_size.z - pocket_size.d / 2
+assert abs(height(plate, pocket_size.x, pocket_back + 0.3) - pocket_floor) < 0.05, "the floor is flat to the back wall"
+assert abs(height(plate, pocket_size.x, pocket_back - 0.3) - p.t) < 0.05, "and the top is whole just behind it"

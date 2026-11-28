@@ -60,6 +60,10 @@ changes: a dogfood program that stops rendering is a regression.
 | 11 | Dungeon door with a torch | [`round-11/door.aix`](round-11/door.aix) | [report](round-11/door.report.md) | oak, worn iron, a swinging knocker and a glowing flame shipped as a GLB in twelve renders; the export dropped the torch's light and frayed the iron at its seams once decimated, both fixed |
 | 11 | Stand mixer | [`round-11/mixer.aix`](round-11/mixer.aix) | [report](round-11/mixer.report.md) | a tilting head, a locked bowl and a beater under two skies in sixteen renders; one `wall()` turned a 2 s quick pass into 20 s and a scene object's open edges had no place, both fixed |
 | 11 | Parametric bookcase | [`round-11/shelf.aix`](round-11/shelf.aix), [`round-11/shelf_lib.aix`](round-11/shelf_lib.aix) | [report](round-11/shelf.report.md) | a library of defs taking records and 33 books, some leaning, in eleven renders; `overlap()` never returned on a book resting on its shelf and a decal warning fired 32 times for nothing, both fixed |
+| 12 | Brass bench plaque | [`round-12/plaque.aix`](round-12/plaque.aix) | [report](round-12/plaque.report.md) | raised and engraved lettering that reads at 384 and 768, eleven promises, in fifteen renders; a "goes through" promise on mirrored probe rods held of a hole closed by a skin, and brass lit for its colour rolled to lemon |
+| 12 | Machined motor plate | [`round-12/plate.aix`](round-12/plate.aix) | [report](round-12/plate.report.md) | through, blind and counterbored holes and a pocket with 33 promises in fifteen renders; four probe rods in one region held of four blind holes, and no light could tell a through hole from a blind one from straight above |
+| 12 | Glass decanter | [`round-12/decanter.aix`](round-12/decanter.aix) | [report](round-12/decanter.report.md) | clear glass, a spirit half full by volume and a seated stopper with fifteen promises in six renders; the sheet cannot show a liquid inside glass, and a wall made by subtracting an offset is not warned when it is under a cell |
+| 12 | Writing desk at night | [`round-12/desk.aix`](round-12/desk.aix) | [report](round-12/desk.report.md) | a lamp whose bulb is a point light, a book and a mug under the moon, shipped to the viewer, in fourteen renders; a light sealed in its shade drew no warning, and the night sky showed no stars and no horizon |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -259,6 +263,31 @@ against an engine's, which the renderer redesign takes on; `curve()`,
 are sized in model units, so a millimetre model passes `scale=`; and
 there is still no `if` (the docs show the indexing that stands in for
 one).
+
+Round 12 was four models chosen to need what the ray-traced renderer
+changed (a brass plaque with raised and engraved lettering, a machined
+plate shot in plan with blind and through holes, a glass decanter of
+spirit with a stopper, a desk at night lit by its lamp), each briefed to
+count the renders its lighting and its finish took and to say what it
+read off `beauty.png` that a number showed wrong. A fresh reader then
+saw only each agent's final `beauty.png` and answered six or seven
+questions with known answers, scored against the program: 17 of 25
+right, 7 partly, 1 wrong. The plaque was read entirely (every line of
+lettering, raised from engraved, brass, countersunk holes through). The
+plate's holes were read entirely (through from blind by a glowing panel
+the agent put under it, since no light can come from under the floor),
+but its bead-blasted aluminium, seen from straight above, read as white
+plastic. The decanter's glass, spirit, level and materials were read;
+its solid glass foot took the spirit's colour by refraction and read as
+hollow. The desk's lights, objects and support were read; its night
+sky, with no stars and no horizon in frame, read as a room's wall, and
+the moon as a window. The lighting took 4, 6, 1 and 5 renders, the
+finish 5, 3, 2 and 1. The round's real bug was under the promises: two
+agents, independently, made the "goes through" probe one region of rods
+far apart (mirrored, as the docs' own pattern does), and `void()` held
+of holes closed by a skin, because the region's lattice was coarser
+than each rod. Neither would have known had they not broken their
+models on purpose.
 
 ## What each round changed
 
