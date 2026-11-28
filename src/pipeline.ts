@@ -1473,11 +1473,13 @@ function runWith(source: string, sourceName: string, outDir: string, opts: RunOp
     });
   // `set camera hero` makes a declared shot the sheet's and the beauty render's view; the CLI still overrides. --camera
   // naming no camera of the program is warned about and otherwise left out, so the run is the one without it: the
-  // program's shot (beauty.png took the plain settings' view, though the render's own view, below, is that shot).
+  // program's shot (beauty.png took the plain settings' view, and a full run wrote the shot again as beauty_<name>.png).
   const cliCamera = opts.camera && evaluation.cameras.some((c) => c.name === opts.camera) ? opts.camera : undefined;
   const shotName = cliCamera ?? (typeof evaluation.settings.camera === "string" ? evaluation.settings.camera : undefined);
   const shot = shotName ? evaluation.cameras.find((c) => c.name === shotName) : undefined;
-  if (opts.camera && !cliCamera) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? "beauty.png takes the render's own view" : "every shot is rendered"}`);
+  // The warning says what beauty.png is instead: the set camera's shot where there is one (not "the render's own view",
+  // which the docs name as the view with no camera), else that view; a full run renders every shot besides.
+  if (opts.camera && !cliCamera) warnings.push(`--camera ${opts.camera}: no such camera${evaluation.cameras.length ? `; cameras: ${evaluation.cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; ${opts.shots === false || !evaluation.cameras.length ? (shot ? `beauty.png is camera ${shot.name} (set camera)` : "beauty.png takes the render's own view") : "every shot is rendered"}`);
   // What a camera leaves out it takes from the render's own view: the command line's angles, then the program's own
   // `set camera` shot, then `set azimuth` and the rest (as check's aim takes them). --camera naming another camera
   // changes the shot, not that view, so --beauty-only --camera close draws the very beauty_close.png of the full run
