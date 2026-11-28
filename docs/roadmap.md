@@ -1580,12 +1580,23 @@ occlusion (design.md, "A grid over the pieces").
   carries its bench's size in one and renders byte for byte as before.
   Not built: string keys, and iterating a record's fields.
 - Found while answering the blind check, not fixed:
-  - A field that is a bound (a scaled shape) reads as a hollow to the
-    cavity term, so its reflections are dimmed in open air: K is 0.53 to
-    0.64 on the Roblox wings' scaled-sphere boss, about 15 to 26% off
-    since the kernel, and the cafe set's scaled rug is the same. The bend
-    gate keeps it off the highlights (12% at the boss's peak). A fix
-    would measure the occlusion against the gradient's length.
+  - Done in stage 6: a field that is a bound (a scaled shape) read as a
+    hollow to the occlusion and the cavity term, so its sky light and
+    reflections were dimmed in open air. Each occlusion tap that reads
+    short of its height is now divided by the field's slope there, the
+    steeper one-sided difference on each axis (design.md, "The BRDF is
+    the viewer's"). Where the mesh's distance finds nothing near, the
+    Roblox wings' boss's cavity term went from a median of 0.87 (a
+    twentieth under 0.68) to 0.965 (0.93), and the cafe set's rug's sky
+    light from 0.16 to 1 and its reflections from 0.21 to 1; over the 82
+    programs the occlusion to the power 1.5 is off the mesh's by 0.023
+    on average, against 0.036 (the slope at the surface point alone,
+    which costs nothing, 0.029). The ring's FOREVER, the hub, the rope's
+    grooves and the teapot's and mug's sides read as they did. 98 of the
+    104 beauty renders moved, 21 by more than 8 levels on more than 200
+    pixels, all lighter. It costs 5.3 to 13.6 more field evaluations a
+    pixel on the four programs counted (11.8 to 15.5 in their whole
+    render before), and 25 to 58% more time on their beauty renders.
   - The steps sheet truncates a step's name but not its size-and-tag
     line, so a cut with three two-decimal sizes runs into the next
     caption (the teapot's `bore` reads "CUT2.26"). Scanned over all 126

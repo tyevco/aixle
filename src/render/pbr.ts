@@ -38,7 +38,7 @@
  */
 import { normalize, type Vec3 } from "../core/vec.js";
 import { albedo, bumpScaleOf, bumpSlope, fieldCurvature, hasFinish, readsThin, surface, wearProbe } from "../sdf/materials.js";
-import { boundsCenter, boundsDistance, boundsSize, type Bounds, type Hit, type Shape3 } from "../sdf/types.js";
+import { boundsCenter, boundsDistance, boundsSize, type Bounds, type DistFn3, type Hit, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { toView, type Camera } from "./camera.js";
 import { Canvas, rgbDithered } from "./canvas.js";
@@ -148,6 +148,100 @@ export const GLOSSY_ROUGH = 0.35, TRACED_ROUGH = 0.55;
  * at white, a sparkle that read as a bump; a mirror's own single ray is not clamped, since it shows the softbox.
  */
 export const GLOSSY_CLAMP = 3;
+/** The least slope boundDistance() reads a bound's field to have: a tap's value is taken for at most five times itself. */
+export const BOUND_SLOPE_FLOOR = 0.2;
+/**
+ * The slopes boundDistance() reads as a distance's (BOUND_SLOPE_ONE and over) and as a bound's in full (under
+ * BOUND_SLOPE_FULL), with a ramp between so a picture has no contour where a field's slope crosses one. Half a cell
+ * either side of a point a cell or two from a small curved part, the steps toward the surface fall a few percent short
+ * of a distance's slope: with every slope under 0.999 read as a bound, the stairs' rail of spheres two cells across
+ * moved 400 pixels by up to 4 levels, and 46% of the stairs' occluded taps took the second pass of samples (16% at
+ * 0.98). The Roblox wings' feathers are ellipsoids, whose far field is a bound: against the occlusion read from the
+ * distance to the mesh, the wings' pixels' occlusion (to the power 1.5) was off by 0.18 on average before, 0.14 with
+ * the lines at 0.95 and 0.9, 0.11 at 0.98 and 0.95 and 0.08 at 0.999 and 0.99, the last for 1.3 to 1.9 more samples a
+ * pixel than 0.98 (the stairs, the rope, the cafe set, round 4's frog).
+ */
+export const BOUND_SLOPE_ONE = 0.98, BOUND_SLOPE_FULL = 0.95;
+/**
+ * A one-sided difference steeper than this, in units of the step, is a jump in the field, not its slope: a union skips
+ * a part whose box is farther than the nearest value so far (its bounding-box cull), which is no lower bound on a
+ * scaled part's smaller value, so the field steps where the cull starts (above the cafe set's scaled rug, by ten times
+ * the step at once). A distance's differences are never steeper than 1.
+ */
+export const BOUND_JUMP = 1.2;
+
+/** The field one step `s` along axis k (0, 1, 2) from (x, y, z). */
+const stepped = (dist: DistFn3, x: number, y: number, z: number, k: number, s: number): number => (k === 0 ? dist(x + s, y, z) : k === 1 ? dist(x, y + s, z) : dist(x, y, z + s));
+/** The steeper of an axis's two one-sided differences, unless it is a jump (over j), when the other. */
+const steeper = (a: number, b: number, j: number): number => (a > b ? (a > j ? b : a) : b > j ? a : b);
+
+/**
+ * The field at the tap (x, y, z), h out along the unit normal n from a surface, read as the distance it bounds where
+ * the occlusion asks whether anything is nearer than h.
+ *
+ * A field that is a bound, not a distance (a non-uniform scale, a smooth union, a loft, a warp, an ellipsoid's far
+ * field, a difference's above the mouth of a cut), reads less than its distance in open air, so a tap read h - d of
+ * occlusion where nothing is near: the Roblox wings' scaled-sphere boss had a cavity term of 0.53 to 0.64 in the open,
+ * and the cafe set's scaled rug its sky light dimmed to a sixth. Where a tap reads less than h, the field's slope there
+ * is measured half a cell (`e`) to each side on each axis, and the value divided by it: a bound's slope is its ratio to
+ * the distance (0.7 on the rug's top, exactly), a distance's is 1. On each axis the steeper of the two one-sided
+ * differences is taken, so the kink where two surfaces are equally near (a groove's middle, a corner's diagonal, a gap
+ * between parts: the min of two distances) still reads a slope of 1 and a hollow keeps its occlusion, where the central
+ * difference across it is short. A difference steeper than BOUND_JUMP is a jump in the field, and the other side is
+ * taken.
+ *
+ * The steps toward the surface are taken first, the normal's largest axis first, and as soon as they alone make a slope
+ * of BOUND_SLOPE_ONE the tap is a distance's and reads as it is, after one to three more samples; otherwise the other
+ * three sides are asked too. A tap that reads h or more takes none.
+ */
+export function boundDistance(dist: DistFn3, e: number, x: number, y: number, z: number, h: number, nx: number, ny: number, nz: number): number {
+  const d = dist(x, y, z);
+  if (d >= h) return d;
+  const j = e * BOUND_JUMP, one = e * BOUND_SLOPE_ONE * (e * BOUND_SLOPE_ONE);
+  const sx = nx > 0 ? -e : e, sy = ny > 0 ? -e : e, sz = nz > 0 ? -e : e;
+  const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+  const k0 = ax >= ay && ax >= az ? 0 : ay >= az ? 1 : 2;
+  const k1 = k0 === 0 ? (ay >= az ? 1 : 2) : k0 === 1 ? (ax >= az ? 0 : 2) : ax >= ay ? 0 : 1;
+  let fx = 0, fy = 0, fz = 0, s2 = 0;
+  for (let i = 0; i < 3; i++) {
+    const k = i === 0 ? k0 : i === 1 ? k1 : 3 - k0 - k1;
+    const f = stepped(dist, x, y, z, k, k === 0 ? sx : k === 1 ? sy : sz);
+    if (k === 0) fx = f;
+    else if (k === 1) fy = f;
+    else fz = f;
+    const a = Math.abs(f - d);
+    if (a <= j) {
+      s2 += a * a;
+      if (s2 >= one) return d;
+    }
+  }
+  const gx = steeper(Math.abs(fx - d), Math.abs(dist(x - sx, y, z) - d), j);
+  const gy = steeper(Math.abs(fy - d), Math.abs(dist(x, y - sy, z) - d), j);
+  const gz = steeper(Math.abs(fz - d), Math.abs(dist(x, y, z - sz) - d), j);
+  const g = Math.sqrt(gx * gx + gy * gy + gz * gz) / e;
+  if (g >= BOUND_SLOPE_ONE) return d;
+  const s = g < BOUND_SLOPE_FULL ? g : g + ((1 - g) * (g - BOUND_SLOPE_FULL)) / (BOUND_SLOPE_ONE - BOUND_SLOPE_FULL);
+  return d / Math.max(BOUND_SLOPE_FLOOR, s);
+}
+
+/**
+ * The field's occlusion along the unit normal n at a surface point p, in a field meshed at `cell`: five taps from 1.6
+ * to 16 cells out, each counting how much nearer than its height the field reads (boundDistance), weighted down by 0.7
+ * a tap, never under 0.3 (a concave join still gets bounce light). out[0] is the occlusion over all five, out[1] the
+ * cavity term over the first three (6.4 cells).
+ */
+export function occlusionAt(dist: DistFn3, cell: number, px: number, py: number, pz: number, nx: number, ny: number, nz: number, out: Float64Array): void {
+  const e = cell * 0.5;
+  let occ = 0, w = 1;
+  for (let i = 1; i <= 5; i++) {
+    const h = cell * 1.5 * i * i * 0.4 + cell;
+    const d = boundDistance(dist, e, px + nx * h, py + ny * h, pz + nz * h, h, nx, ny, nz);
+    occ += w * Math.max(0, h - d);
+    w *= 0.7;
+    if (i === 3) out[1] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
+  }
+  out[0] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
+}
 
 export const pbr: Kernel<PbrTables> = {
   name: "pbr",
@@ -307,23 +401,14 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   };
 
   /** The field's occlusion along the normal over five taps (AOK[0]) and its first three, the cavity term (AOK[1]). */
-  const occlusion = (px: number, py: number, pz: number, nx: number, ny: number, nz: number): void => {
-    let occ = 0, w = 1;
-    for (let i = 1; i <= 5; i++) {
-      const h = cell * 1.5 * i * i * 0.4 + cell;
-      const d = dist(px + nx * h, py + ny * h, pz + nz * h);
-      occ += w * Math.max(0, h - d);
-      w *= 0.7;
-      if (i === 3) AOK[1] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
-    }
-    // Never fully black: a concave join still gets bounce light.
-    AOK[0] = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
-  };
+  const occlusion = (px: number, py: number, pz: number, nx: number, ny: number, nz: number): void => occlusionAt(dist, cell, px, py, pz, nx, ny, nz, AOK);
 
   /**
    * The darkening under a part standing on the floor: occlusion over a larger reach than the surface's, up to 19% of
    * the model's diagonal. `hd` is the floor point's distance from the model's box across the floor: a tap no higher
-   * than that is clear of the model, so it is not asked.
+   * than that is clear of the model, so it is not asked. A tap reads the field as the distance it bounds, as the
+   * surface's occlusion does (boundDistance), so a part whose field is a bound darkens the floor round it no more than
+   * its distance says.
    */
   const CONTACT_WSUM = 1 + 1 / 2 + 1 / 3 + 1 / 4;
   const contact = (px: number, pz: number, hd: number): number => {
@@ -331,7 +416,7 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     for (let i = 1; i <= 4; i++) {
       const h = modelSize * 0.012 * i * i;
       if (h <= hd) continue;
-      const d = dist(px, floorY + h, pz);
+      const d = boundDistance(dist, eps, px, floorY + h, pz, h, 0, 1, 0);
       occ += Math.max(0, h - d) / h / i;
     }
     return 1 - 0.75 * Math.min(1, occ / CONTACT_WSUM);

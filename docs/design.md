@@ -467,7 +467,8 @@ more the lower the F0 (copper's red, green and blue at 0.99, 0.90 and
 
 Two terms darken what a surface reflects where it is enclosed, both read
 from the field's ambient occlusion (five taps along the normal, never
-under 0.3, the old renderer's). Specular occlusion is Lagarde's, the
+under 0.3, the old renderer's, each reading the field as the distance it
+bounds: see below). Specular occlusion is Lagarde's, the
 occlusion as the reflection sees it, tighter for a smooth surface; it
 dims the prefiltered sky. The cavity term is the first three taps (6.4
 cells) to the power 3 (`CAVITY_POWER`), and it multiplies everything a
@@ -529,7 +530,8 @@ its counterbores' steps went black; on creases only, they read as they
 did. Gated by the gradient's length instead (1 on a smooth distance,
 0.80 on those lips), it also dimmed the highlight on the Roblox wings'
 boss, a scaled sphere, whose field is a bound with a gradient under 1
-everywhere and whose cavity term is under 1 in the open. An open convex
+everywhere and whose cavity term was then under 1 in the open too (no
+longer: below). An open convex
 edge keeps its glint, its cavity term 1. The same change takes out the
 dotted line of highlights where two parts meet in a crease (the ring's
 cushion on its plinth, the hub's boss on its flange). Diffuse light is
@@ -559,6 +561,102 @@ against the old renderer's 19). At 1.5 they are 18; at 2 they were 11,
 black between the strands. The lights' diffuse light needs no
 occlusion: their area rays already shadow it into the grooves. Their
 highlights take the cavity term on creases and edges, as above.
+
+The taps read the field as the distance it bounds. A field that is a
+bound and not a distance (a non-uniform scale, a smooth union, a loft, a
+warp, a sweep, an ellipsoid's far field, a difference above the mouth of
+its cut) reads less than its distance in open air, so a tap h out from
+such a surface read h − d of occlusion where nothing was near, and the
+surface read as a hollow. The Roblox wings' boss is a sphere scaled 1 by
+1.2 by 0.7: over its pixels where nothing is near (where the distance to
+the extracted mesh finds nothing within the taps), its cavity term had a
+median of 0.87 and a twentieth of it under 0.68, its reflections dimmed
+to that cubed since the kernel. The cafe set's rug is a cylinder scaled
+0.7 across: there its sky light was dimmed to 0.16 (the median) and its
+reflections to 0.21. Where a tap reads less than its height,
+`boundDistance` (pbr.ts) measures the field's slope there and divides
+the value by it: a bound's slope is its ratio to the distance (0.7 on
+the rug's top, exactly), a distance's is 1. Three things make the
+measure:
+
+- On each axis the slope is the steeper of the two one-sided
+  differences half a cell either side. Where two surfaces are equally
+  near (a groove's middle, a corner's diagonal, the gap between two
+  parts) the distance is the smaller of two and has a kink, and a
+  difference across it is short: measured by forward differences, the
+  stairs, all exact, moved 1,698 pixels and read further from the
+  mesh's distance (off by 0.016, against 0.011). The steeper side is
+  never short at such a kink.
+- A one-sided difference steeper than 1.2 steps (`BOUND_JUMP`) is a jump
+  in the field, and the other side is taken. A union skips a part whose
+  box is farther than the nearest value so far (its bounding-box cull),
+  which is no lower bound on a scaled part's smaller value, so the field
+  steps where the cull starts, ten steps at once above the rug; without
+  the rule the measure drew the rug under the table as a flat grey
+  patch, with contours round the legs.
+- Slopes of 0.98 and over are a distance's and the value is read as it
+  is; under 0.95 a bound's in full; a ramp between draws no contour where
+  a slope crosses a line (`BOUND_SLOPE_ONE`, `BOUND_SLOPE_FULL`). Half a
+  cell either side of a point a cell or two from a small curved part,
+  the steps fall a few percent short of 1: with every slope under 0.999
+  read as a bound, the stairs' rail of spheres two cells across moved
+  400 pixels by up to 4 levels. Lines at 0.95 and 0.9 left more of the
+  wings reading as a hollow (their feathers are ellipsoids, whose far
+  field is a bound): the wings' occlusion was off by 0.14 against the
+  mesh's distance (below), against 0.11 here and 0.08 at 0.999 and
+  0.99, which cost 1.3 to 1.9 more samples a pixel.
+
+The steps toward the surface are asked first, the normal's largest axis
+first, and stop as soon as they make a slope of 0.98; the other three
+sides are asked only when they do not. A tap that reads its height or
+more is asked nothing, so a field that is a distance at every tap draws
+the same bytes. The floor's occlusion and its contact term read their
+taps the same way; under a bound they drew a grey ring on the floor
+round the cafe set's rug, a wide grey band round the lighthouse's
+island and a grey patch past the garden's tray.
+
+Measured against the occlusion read from the distance to the mesh (a
+closest-point query on the extracted triangles, the sign the field's;
+right to a fraction of a cell where the mesh is) at every other pixel
+of the model in each direction, over the 82 programs of the three sets,
+the occlusion to the power 1.5 was off by 0.036 on average and is off by
+0.023, the cavity term cubed by 0.036 and 0.021. Dividing every tap by
+the slope at the surface point instead (gradientInto's, gated off where
+the field bends, since across a crease the central differences are short
+too: the ring's lips read 0.80) costs nothing and reaches 0.029 and
+0.026. It is right for the rug's top, but it divides a tap that reaches
+another part's distance too (round the table's legs on the rug the
+occlusion to the power 1.5 read 0.43, against the mesh's 0.25 and the
+measure's 0.24), and it misses an exact surface whose taps read a bound
+(the feathers' far field, the mouth of a cut). Where the field is a
+distance nothing moves: on the ring, the mug and the stairs no pixel's
+occlusion or cavity term moves by 0.05 (on the hub 4, on the tower 6),
+the ring's FOREVER is 37.4 levels darker than the same pixels uncut, as
+it was, and the rope's darkest tenth moved by 0.3 of a level.
+
+The measure costs samples where a tap reads short: 5.3 more field
+evaluations a pixel on the stairs (against 11.8 for the whole render),
+6.8 on the rope (15.5), 12.2 on round 4's frog (13.2) and 13.6 on the
+cafe set (15.4), counted over the beauty render's pixels at 384. The
+beauty render took, at two threads, the best of three runs interleaved
+with the base's on a loaded machine, 2.5 s for the stairs against 2.0,
+3.2 against 2.4 for the rope, 3.8 against 2.4 for the frog and 1.9
+against 1.4 for the cafe set. Carrying a tap's slope to the next where
+the field grows at that slope between them took a quarter of the
+samples off the cafe set and a fourteenth off the frog, and was left
+out.
+
+In the three sets 98 of the 104 beauty renders changed and 21 moved by
+more than 8 levels on more than 200 pixels, every one of them lighter
+(one pixel in all is darker by more than 8, by 11, on the wings): the
+cafe set's rug and the floor round it, round 4's, 2's and 3's frogs,
+the lighthouse's island and its floor, the wings' boss and feathers and
+the floor under them, the gold lids of round 3's and 4's trophies (their
+domes had read as a dark band), round 5's treehouse's canopy and the
+tree's, the lantern's roof, the sailboat's hull, the floor under the
+anglepoise's shade and under the teapot's handle (its body did not
+move). Of the other 77, none moved by more than 8 levels on more than
+159 pixels, 57 by no more than 8 anywhere and 39 by no more than 2.
 
 A metal preset's colour is its F0, written in sRGB, as glTF means a
 metal's base colour, so beauty.png, the viewer and an engine read the
