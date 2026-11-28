@@ -577,13 +577,27 @@ picture does not always read as that metal:
   saturation of 0.02.
 - **Iron** is the iron things are made of, wrought, cast or blackened,
   under its skin of black oxide: magnetite, most of mill scale and of a
-  blacking, which reflects about 20% across the visible spectrum (ore
-  microscopy's reflectance tables give 20 to 21% from 470 to 650 nm),
-  neutral, linear 0.20 (#7c7c7c). Bare polished iron's 0.56 drew the
+  blacking, neutral, linear 0.10 (#595959). A polished section of
+  magnetite reflects about 20.7% (ore microscopy's tables, Criddle and
+  Stanley 1993: 20.9, 20.7 and 20.7% at 470, 546 and 650 nm), and the
+  preset was that, 0.20 (#7c7c7c), until the lantern's roof read as
+  light silver-grey (see "Read blind"). A skin of oxide is not a
+  polished section: it is grains and pores at every scale, which trap
+  light that a single GGX lobe of the same F0 sends back. Granular
+  magnetite returns 30 to 40% of its Fresnel reflectance (Roush,
+  Teodoro, Blewett and Cahill, Icarus 361, 2021), and a cast-iron
+  surface measures L* 19, a linear 0.027, off the specular angle (the
+  Physically Based database's 45/0 spectrophotometer reading), where
+  the preset at 0.20 and roughness 0.6 returns 0.13 there (0.07 at
+  0.10). Half the
+  polished value is between the granular powder's and the polished
+  section's, and it is what the old renderer's iron (#5c5e62, about
+  0.11) drew and was read right with. Bare polished iron's 0.56 drew the
   bench's arms and the door's hinges as chrome tubing and the lantern as
-  white enamel. A worn edge rubs it to satin, halfway to bare iron and in
-  scuffs (see "The finish, and the maps that carry it"), and the rust
-  preset is the same iron, rusting.
+  white enamel. A worn edge rubs the skin to satin, twice its
+  reflectance and in scuffs (see "The finish, and the maps that carry
+  it"), and the rust preset is the same iron, rusting, with a thin film
+  of oxide over the iron between its patches (`RUST_FILM`).
 - **Gold, brass, copper and bronze** are their measured F0 squared: gold
   Lagarde's (2011: 1.000, 0.766, 0.336), brass (C260 cartridge brass)
   and copper from table 9.2, and bronze, which no table measures, the
@@ -1276,8 +1290,8 @@ at 67ba88d against the answer's:
   metal is "still bright and silvery", hedged as rusted steel or
   galvanised. That is the flat faces, which wear never touches: the roof,
   the largest iron in the picture, is the rust preset's dark iron
-  (F0 0.20, rough 0.55) taking the studio's overhead strip, and is as
-  light at wear 0. The lantern's iron is still open.
+  (F0 0.20, rough 0.55), and is as light at wear 0. The lantern's iron
+  was left open, and answered after (below).
 - **The faint engraving** (the ring, with the medal and the nameplate as
   controls). A light's highlight now takes the cavity term where the
   field bends ("The BRDF is the viewer's"), so a groove's lips stop
@@ -1296,6 +1310,60 @@ at 67ba88d against the answer's:
 
 The mixer's beater among its bowl's reflections is not a renderer fault:
 a bowl at `rough` 0.2 mirrors what it holds. The guide has a row for it.
+
+The lantern's iron was measured before anything was changed. With the
+kernel's terms switched off one at a time at the committed shot, and the
+picture's linear light (before bloom and the tone curve) compared, the
+bare iron of the roof (where the rust leaves the metal whole, 4,086
+pixels, 150 levels) took 55% of its light from the key's highlight, 26%
+from the rim light's, 7% from the studio's overhead strip, 3% from the
+rim strip, 2% from the fill card, 6% from the rest of the sky above the
+horizon and 2% from the floor, and nothing from a traced ray; the bars'
+bare iron (32 levels, with streaks to 92 at the 90th percentile) took
+62% from the floor below the horizon and 14% each from the key and the
+candle. Neither the lights nor the rig were found carrying more than
+they should. The key's highlight, the lobe widened by the light's size
+(α + 0.5 tan θ), is 2 to 32% under a numerical integral of GGX over
+the light's disc on the roof's lit face (rough 0.3 to 0.6, sizes 1.5
+and 3), and over it only in a dim tail; the prefiltered studio at the
+roof's reflection and four other directions is within 5% of a
+200,000-sample GGX integral of the sky at roughness 0.45 to 0.6, cards
+included (29% over only straight up at 0.3, where the overhead strip is
+narrower than the map's texels). So the roof is GGX's own highlight of
+a rough metal of F0 0.20 under a big key, and the bars are what such a
+metal mirrors of a white floor; the old renderer drew the same roof at
+109 levels and the bars at 78, flat grey.
+
+Five answers were prototyped and judged on the lantern, the door's two
+shots, the chest, the hardware plate and a plate of every metal preset
+beside clay under the lantern's lights: the iron's F0 lowered (0.12,
+0.10, 0.08), its roughness raised (0.8, the rust 0.75) or lowered (0.35),
+the reflections' floor darkened to 0.4 (a rig change, so every metal),
+and a thin film of oxide over the iron between the rust's patches (0.15,
+0.3, 0.5 of the way to the oxide). Rougher iron spread the same light
+into a flat grey (the roof 107 levels) that read as zinc; smoother iron
+gathered it into a wet, polished sheen (191); the darker floor darkened
+every metal's bars and bases and left the roof as it was. A lower F0 is
+the measured answer (the iron preset above): at 0.10 the roof's bare
+iron is 100 levels, 0.12 gave 112 and 0.08 87, and the bars are dark
+(19, against 33). It still took the rim light and the sky as a cool
+blue-grey (97, 100, 106), the galvanised look; rust grows through a
+film, and over the iron between the patches a film 0.15 of the way to
+the oxide at their edges, fading out, makes it the dark brown-grey of
+old iron (92, 88, 90; at 0.3 and 0.5 the lantern read rusted through).
+That is the change: the iron and rust presets at 0.10, and the film
+(`RUST_FILM`), which leaves about a twentieth of the metal bare. The
+lantern's roof is 75 levels against 117, its bare iron 89 against 150,
+and the frame reads as old, dark, rusting iron; the door's straps,
+studs and knocker are darker and still stand out on its wood; the chest's
+bands are black iron, not grey; steel, zinc, chrome, silver, gold, brass
+and copper are byte for byte as they were (the hardware plate) or
+changed only where they mirror an iron part beside them. The lantern's
+beauty render takes the same time: at 384 pixels on two threads, six
+interleaved runs each on a shared machine, a median of 1.62 s before
+(1.46 to 1.86) and 1.59 s after (1.53 to 1.70); the film is a
+smoothstep and a few multiplications on what the patches already
+computed. It has not yet been read blind.
 
 ## Minecraft geometry
 
@@ -2090,7 +2158,9 @@ the dark skin off the high points and leaves it in the scratches, so at
 a pixel's scale rubbed iron is a mix, halfway to bare (0.37 linear,
 where bare iron is 0.56) with at most a quarter of its roughness gone
 (the lantern's 0.55 to 0.44, a blurred sheen); polish is what a file
-leaves, not use. Alone it left the ring and the bars an even grey with
+leaves, not use. (The same lift, in the colour's sRGB, takes the darker
+skin the iron preset has since, 0.10, to 0.20: twice the skin, about
+the contrast it had.) Alone it left the ring and the bars an even grey with
 their rust rubbed off: satin steel. Scuffs: what a texturing tool's edge
 wear does (Substance's Metal Edge Wear: curvature broken by a grunge
 noise), a fractal noise two probes across in the paint frame,

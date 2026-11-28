@@ -4,14 +4,16 @@ import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
 import * as W from "../src/sdf/sweeps.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
-import { albedo, bumpSlope, customMaterial, fieldCurvature, preset, surface } from "../src/sdf/materials.js";
+import { albedo, bumpSlope, customMaterial, fieldCurvature, preset, RUST_FILM, surface } from "../src/sdf/materials.js";
 import { bakeAtlas, chartTangent, type AtlasResult } from "../src/export/atlas.js";
 import { buildHierarchy } from "../src/export/hierarchy.js";
 import { toGlbScene } from "../src/export/glb.js";
-import { renderBeauty } from "../src/render/beauty.js";
+import { renderBeauty, renderBeautyResult } from "../src/render/beauty.js";
+import { FLAG_EDGE, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
 import { evaluate } from "../src/lang/interpreter.js";
 import { parse } from "../src/lang/parser.js";
-import type { Shape3 } from "../src/sdf/types.js";
+import type { Material, Shape3 } from "../src/sdf/types.js";
+import type { Vec3 } from "../src/core/vec.js";
 
 const deg = (c: number) => (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
 const glbJson = (glb: Buffer) => JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
@@ -189,6 +191,30 @@ describe("surface and curvature", () => {
     expect(maxMetal).toBe(1);
     expect(n).toBeGreaterThan(20);
     expect(rubbed).toBe(n);
+  });
+  it("lays a thin film of oxide over the metal between the rust's patches, leaving about a twentieth of it bare", () => {
+    // Rust grows through a film: with clean metal between the patches, the lantern's iron there read as a cool
+    // blue-grey, galvanised steel (36% of the surface was bare iron then).
+    const rust = preset("rust")!;
+    let bare = 0, filmed = 0, n = 0;
+    for (let i = 0; i < 4000; i++) {
+      const x = (i % 80) * 0.0137, y = Math.floor(i / 80) * 0.0151, z = 0.2 + (i % 7) * 0.05;
+      const s = surface(rust, x, y, z);
+      n++;
+      if (s.metal === 1) bare++;
+      // A film, not a patch: most of the metal kept, and the colour no further from the iron's than the film goes
+      // towards the oxide (mottled between its colour and a darker scale, 0.62 of it).
+      else if (s.metal >= 1 - RUST_FILM - 1e-12) {
+        filmed++;
+        for (let k = 0; k < 3; k++) {
+          const far = Math.max(Math.abs(rust.color2[k] - rust.color[k]), Math.abs(rust.color2[k] * 0.62 - rust.color[k]));
+          expect(Math.abs(s.color[k] - rust.color[k])).toBeLessThanOrEqual(RUST_FILM * far + 1e-9);
+        }
+      }
+    }
+    expect(bare / n).toBeGreaterThan(0.01);
+    expect(bare / n).toBeLessThan(0.12);
+    expect(filmed / n).toBeGreaterThan(0.25);
   });
   it("keeps a bump's slope when the part is scaled after painting: its height and its size scale together", () => {
     // A world unit moves the paint frame's point 1/s for a part scaled by s; the bumps are the same bumps, scaled.
@@ -480,6 +506,34 @@ describe("the finish in the beauty render", () => {
     const ball = (m: ReturnType<typeof customMaterial>) => O.paint(P.sphere(0.5), m);
     const bumped = compare(shoot(ball(customMaterial(grey))), shoot(ball(customMaterial({ ...grey, bump: 0.01, bumpScale: 0.08 }))), 12);
     expect(bumped.differ).toBeGreaterThan(500);
+  });
+  it("draws dark iron's flat face in a key's broad highlight as dark metal: the lantern's roof, under its lights", () => {
+    // The lantern's roof, its key and rim and its camera. Iron at polished magnetite's reflectance (0.20) took the key's
+    // highlight at roughness 0.6 as light silver-grey, 144 levels on this roof, against 166 for clay; the skin's 0.10
+    // reads dark, under two thirds of the clay.
+    const roof = (m: Material) => O.paint(O.move(W.loft(S.rect(1.5, 1.5), S.rect(0.34, 0.34), 0.6), 0, 0.3, 0), m);
+    const lights = [
+      { azimuth: -35, elevation: 40, size: 1.5, color: [1, 1, 1] as Vec3, power: 1 },
+      { azimuth: 150, elevation: 25, size: 1, color: [0.81, 0.88, 1] as Vec3, power: 0.45 },
+    ];
+    const level = (m: Material): number => {
+      const shape = roof(m), nets = surfaceNets(shape, { resolution: 40 });
+      const r = renderBeautyResult(shape, nets.mesh, shape.bounds, { size: 64, cellSize: nets.cellSize, lights, azimuth: 35, elevation: 25 });
+      let sum = 0, n = 0;
+      for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+        const f = r.flags![y * 64 + x];
+        if ((f & KIND_MASK) !== KIND_MODEL || f & FLAG_EDGE) continue;
+        const p = r.canvas.get(x, y);
+        sum += 0.2126 * ((p >> 16) & 255) + 0.7152 * ((p >> 8) & 255) + 0.0722 * (p & 255);
+        n++;
+      }
+      expect(n).toBeGreaterThan(500);
+      return sum / n;
+    };
+    const iron = preset("iron")!, clay = level(preset("clay")!);
+    expect(level(iron)).toBeLessThan(clay * 0.65);
+    // The rust preset is the same iron under its rust.
+    expect(preset("rust")!.color).toEqual(iron.color);
   });
   it("shades a thin worn iron bar as the iron with scuffs, not rubbed bright all over", () => {
     // A bar 1.5 probes thick, as the lantern's: before, wear lit the whole of it as bare polished iron.

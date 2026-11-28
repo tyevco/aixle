@@ -86,10 +86,17 @@ const PRESET_LIST: Material[] = [
   // and a steel hub, gear and bracket read ivory and ceramic under a warm key.
   //
   // Iron is the iron things are made of, wrought, cast or blackened, under its skin of black oxide: magnetite (Fe3O4,
-  // most of mill scale and of a blacking), which reflects about 20% across the visible spectrum (ore microscopy's
-  // reflectance tables: 20 to 21% at 470 to 650 nm), neutral, linear 0.20. Bare polished iron (0.56) rendered a bench's
-  // arms and a door's hinges as chrome tubing and a lantern as white enamel; a worn edge (`wear`) rubs it to satin,
-  // halfway to that bare iron, in scuffs. The rust preset is the same iron, rusting.
+  // most of mill scale and of a blacking), neutral, linear 0.10. A polished section of magnetite reflects about 20.7%
+  // (ore microscopy's tables, Criddle and Stanley 1993: 20.9, 20.7 and 20.7% at 470, 546 and 650 nm), but a skin of
+  // oxide is not polished: it is grains and pores at every scale, which trap light a single GGX lobe has no term for
+  // (granular magnetite returns 30 to 40% of its Fresnel reflectance, Roush and others, Icarus 2021; cast iron measures
+  // L* 19 off the specular angle, the Physically Based database's 45/0 reading). At the polished 0.20 the lantern's
+  // flat roof took the key's broad highlight at roughness 0.55 (81% of its light: the highlight is GGX's own, and the
+  // studio's prefiltered sky holds what its rig does) as light silver-grey, 150 levels where the old renderer drew 109,
+  // and its bars mirrored the white floor; at half that, as a skin returns, the roof's iron is 100 (89 under the rust's
+  // film) and the bars dark. Bare polished iron (0.56) rendered a bench's arms and a door's hinges as chrome tubing and
+  // a lantern as white enamel; a worn edge (`wear`) rubs the skin to satin, twice its reflectance, in scuffs. The rust
+  // preset is the same iron, rusting.
   //
   // Gold, brass, copper and bronze are their measured F0 squared, the colour of the light after two bounces off the
   // metal: gold is Lagarde's (2011: 1.000, 0.766, 0.336), brass (C260 cartridge brass) and copper are RTR4's table 9.2,
@@ -104,7 +111,7 @@ const PRESET_LIST: Material[] = [
   make("copper", { color: hex("#f5ab92"), metal: 1, rough: 0.35 }),
   make("bronze", { color: hex("#f0bc84"), metal: 1, rough: 0.4 }),
   make("steel", { color: hex("#c6c6c8"), metal: 1, rough: 0.45 }),
-  make("iron", { color: hex("#7c7c7c"), metal: 1, rough: 0.6 }),
+  make("iron", { color: hex("#595959"), metal: 1, rough: 0.6 }),
   make("brass", { color: hex("#ebcc75"), metal: 1, rough: 0.35 }),
   make("chrome", { color: hex("#c4c5c4"), metal: 1, rough: 0.1 }),
   make("wood", { color: hex("#b07d4a"), color2: hex("#7a4f2a"), pattern: "wood", scale: 0.25, rough: 0.7 }),
@@ -137,7 +144,7 @@ const PRESET_LIST: Material[] = [
   make("lava", { color: hex("#f06a1a"), color2: hex("#3a1a10"), pattern: "marble", scale: 0.8, rough: 0.6 }),
   // Iron with patches of rust: the iron preset's own dark iron (a rusty lantern is old iron, not polished), and patches
   // that are rough and not metal, so it bakes a metallic-roughness map.
-  make("rust", { color: hex("#7c7c7c"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
+  make("rust", { color: hex("#595959"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
 ];
 
 export const PRESETS: ReadonlyMap<string, Material> = new Map(PRESET_LIST.map((m) => [m.name, m]));
@@ -278,13 +285,23 @@ export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
   }
 }
 
+/**
+ * How far a `rust` pattern's thin film of oxide goes towards the patches' oxide at their edge, over the metal between
+ * them. Rust grows through a film, not in patches on clean metal: without one the iron between the lantern's patches
+ * was its plain dark iron, which the rim light and the sky turn a cool blue-grey that read as galvanised steel (its
+ * roof's bare iron 97, 100, 106 levels; with the film 92, 88, 90).
+ */
+export const RUST_FILM = 0.15;
+
 /** Where a `rust` pattern has eaten the base (0..1) and the oxide's colour there, mottled finer than the patches. */
 function rustAt(m: Material, x: number, y: number, z: number): { mask: number; shade: Vec3 } {
   const s = m.scale > 0 ? m.scale : 1;
-  // Patches about a scale across covering a little under half the surface, with soft edges; a finer noise
-  // mottles the oxide between its own colour and a darker scale.
+  // Patches about a scale across covering a little under half the surface, with soft edges, and between them a thin
+  // film, thickest at their edges, that leaves about a twentieth of the metal bare; a finer noise mottles the oxide
+  // between its own colour and a darker scale.
   const v = fbm3(x / s, y / s, z / s, m.seed + 5, 4);
-  const mask = smoothstep(0.47, 0.6, v);
+  const patch = smoothstep(0.47, 0.6, v);
+  const mask = patch + (1 - patch) * RUST_FILM * smoothstep(0.35, 0.47, v);
   const fine = noise3((x / s) * 6, (y / s) * 6, (z / s) * 6, m.seed + 11);
   return { mask, shade: lerp3(m.color2, darken(m.color2, 0.62), fine) };
 }
@@ -349,8 +366,8 @@ export function surface(m: Material, x: number, y: number, z: number, curvature 
   } else color = albedo(m, x, y, z);
   if (edge > 0) {
     const under = m.pattern === "rust" && !m.image ? m.color : color;
-    // A metal rubbed by hands and cloth is satin: about half its dark skin rubbed through at a pixel's scale (iron's
-    // 0.20 linear reflectance to 0.37, where bare iron is 0.56) and a quarter of its roughness taken off (iron's 0.6
+    // A metal rubbed by hands and cloth is satin: its dark skin rubbed through in places at a pixel's scale (iron's
+    // 0.10 linear reflectance to 0.20, where bare iron is 0.56) and a quarter of its roughness taken off (iron's 0.6
     // to 0.45, a blurred sheen). Bare and polished (under * 1.3 + 0.16, roughness less 55%) drew every bar of a rusty
     // lantern as polished steel. A non-metal's edge goes lighter and smoother.
     const bare: Vec3 = metallic

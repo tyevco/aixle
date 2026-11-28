@@ -1104,7 +1104,8 @@ regenerated and read at each:
   found one answer wrong only for the new: the lantern's iron read as
   white enamel, since a measured metal colour reads pale in a bright
   room. So the studio has two rigs, one for the light a surface takes and
-  a darker one for what it mirrors; `iron` is magnetite (#7c7c7c),
+  a darker one for what it mirrors; `iron` was polished magnetite
+  (#7c7c7c, an oxide skin's #595959 since: design.md, "Read blind"),
   `steel` is iron's measured reflectance (#c6c6c8), and gold, brass,
   copper and bronze are their measured F0 squared; the occlusion is taken to the power
   1.5; and a steep shot's default key turns to the frame's top left. In a
@@ -1234,9 +1235,12 @@ lettering under an arc, is fixed. The worn metal and the faint engraving
 were answered before this round and read blind again (design.md, the end
 of "Read blind"): worn studs, rings and bars now read as old rusty iron,
 and a polished engraving's lips no longer glint. Two things stayed open:
-the lantern's flat iron faces still read as light, silvery metal under
-the studio's overhead strip, and the ring's FOREVER, 50 by 5 pixels at
-384, is darker marks but still no letters. The round tests the fixes.
+the lantern's flat iron faces still read as light, silvery metal, and
+the ring's FOREVER, 50 by 5 pixels at 384, is darker marks but still no
+letters. The first was measured after as the key's broad highlight on
+iron at a polished section's reflectance, and the iron preset is now an
+oxide skin's, half that, with a film of oxide between the rust's
+patches (design.md, the end of "Read blind"). The round tests the fixes.
 
 **What.** A round of four fresh agents, briefed as `dogfood/README.md`
 describes, each brief chosen to need what the redesign changed:
