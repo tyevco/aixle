@@ -56,6 +56,14 @@ changes: a dogfood program that stops rendering is a regression.
 | 10 | Glass terrarium | [`round-10/terrarium.aix`](round-10/terrarium.aix) | [report](round-10/terrarium.report.md) | a bell jar, plants and eight promises in seven renders; a lofted dome's shell curled and its clearance read 4e-17, and a rim sunk 0.02 overlapped by 0, both fixed |
 | 10 | Street corner at night | [`round-10/alley.aix`](round-10/alley.aix) | [report](round-10/alley.report.md) | a lamp post, a shop front, three point-lit shots in sixteen renders; a point light inside its glass lantern lit nothing and every pool wore rings, both fixed |
 | 10 | Jewelled ring | [`round-10/ring.aix`](round-10/ring.aix) | [report](round-10/ring.report.md) | a faceted stone in claws, an inscription and four skies in twelve renders; a void promise held with its boxes never meeting and named a mask cube for the culprit, both fixed |
+| 11 | Printed phone stand | [`round-11/stand.aix`](round-11/stand.aix) | [report](round-11/stand.report.md) | a curved side profile, a cable slot and an engraved word with ten promises in ten renders; `void()` passed a cable sunk 0.3 mm into both walls of its slot and the support could not be promised, both fixed |
+| 11 | Dungeon door with a torch | [`round-11/door.aix`](round-11/door.aix) | [report](round-11/door.report.md) | oak, worn iron, a swinging knocker and a glowing flame shipped as a GLB in twelve renders; the export dropped the torch's light and frayed the iron at its seams once decimated, both fixed |
+| 11 | Stand mixer | [`round-11/mixer.aix`](round-11/mixer.aix) | [report](round-11/mixer.report.md) | a tilting head, a locked bowl and a beater under two skies in sixteen renders; one `wall()` turned a 2 s quick pass into 20 s and a scene object's open edges had no place, both fixed |
+| 11 | Parametric bookcase | [`round-11/shelf.aix`](round-11/shelf.aix), [`round-11/shelf_lib.aix`](round-11/shelf_lib.aix) | [report](round-11/shelf.report.md) | a library of defs taking records and 33 books, some leaning, in eleven renders; `overlap()` never returned on a book resting on its shelf and a decal warning fired 32 times for nothing, both fixed |
+| 12 | Brass bench plaque | [`round-12/plaque.aix`](round-12/plaque.aix) | [report](round-12/plaque.report.md) | raised and engraved lettering that reads at 384 and 768, eleven promises, in fifteen renders; a "goes through" promise on mirrored probe rods held of a hole closed by a skin, and brass lit for its colour rolled to lemon |
+| 12 | Machined motor plate | [`round-12/plate.aix`](round-12/plate.aix) | [report](round-12/plate.report.md) | through, blind and counterbored holes and a pocket with 33 promises in fifteen renders; four probe rods in one region held of four blind holes, and no light could tell a through hole from a blind one from straight above |
+| 12 | Glass decanter | [`round-12/decanter.aix`](round-12/decanter.aix) | [report](round-12/decanter.report.md) | clear glass, a spirit half full by volume and a seated stopper with fifteen promises in six renders; the sheet cannot show a liquid inside glass, and a wall made by subtracting an offset is not warned when it is under a cell |
+| 12 | Writing desk at night | [`round-12/desk.aix`](round-12/desk.aix) | [report](round-12/desk.report.md) | a lamp whose bulb is a point light, a book and a mug under the moon, shipped to the viewer, in fourteen renders; a light sealed in its shade drew no warning, and the night sky showed no stars and no horizon |
 
 Probes the agents wrote to measure what the docs did not say:
 [`round-2/market_stripes_probe.aix`](round-2/market_stripes_probe.aix)
@@ -211,7 +219,75 @@ without naming the piece; and `beauty.png` under a focus camera was not
 framed. Their reports' three changes each are answered below. Not
 done: a warning when `attach` leaves two faces touching (documented
 instead), a per-step slice, a `--environment a,b` pair (`all` exists),
-a bigger lights strip, and `text(arc=)` printing its radial span.
+a bigger lights strip, and `text(arc=)` printing its radial span (all
+four since built: `set slice name`, `--environment a,b`, a row of what
+each light adds on its own, and an `on the arc` line in `check`; with
+them `check` meshes a shape once for `pieces()` and `overhang()`, an
+`overlap` of zero says why, a `void` on a ring of probes names the
+copy, and `attach(sink=)` answers the touching faces).
+
+Round 11 was four models against round 10's leftovers and the
+roadmap's new features (a phone stand printed in PLA, a dungeon door
+shipped to a game engine, a stand mixer with a tilting head, and a
+bookcase built from a library of its own). Smooth profiles, records,
+`aixle fmt`, the print section, the 3MF, decimation and the posed
+promises all did what the docs said, and each agent found the case
+underneath. `overlap()` never returned on a face meeting a face to
+within floating point, or on a turned corner resting on a face (a
+30-book program sat silent for twelve minutes and took forty checks to
+bisect). `void()` passed a cable sunk 0.3 mm into both walls of its
+slot. A negative `clearance()` was not a depth, and a corner sunk into
+a board read 0. A decal on a union of bands warned that it painted
+nothing, 32 times. One `wall()` meshed a bowl finer than the whole
+model and took 18 of a quick pass's 20 seconds. A loop's promises
+printed 271 lines, and `check` named neither a slow assert nor a hung
+one. A comment pasted mid-line swallowed a step with every promise
+holding. A loop's own names became steps, thumbnails and warnings, and
+a material in a loop took its step's name only once. `curve2` looped
+on unevenly spaced points into a 0.019 mm sliver. A door for an engine
+was told it printed 2.6 mm tall. The export dropped the program's
+lights, frayed the iron at its seams once decimated, shared the
+triangle cap equally between a flat wall and a ring, and gave a scene
+object's open edges no place. `set camera` rendered its shot twice,
+`--beauty-only` wrote three shots, `lights.png` greyed a flame, a run
+left the last run's files beside its own, and a posed sheet was meshed
+a third coarser than at rest. Their reports' three changes each are
+answered below. Not done: `overhang()` and the Overhangs row still
+read the mesh's faces alone (`support()` reads the field); `inside()`
+does not walk the outside of its first shape; `ground()` is as exact as
+its 48 rays, which `clearance()` now reports; `check`'s camera test
+and the render's can differ by about fifteen points; a picture of what
+the export ships beside `beauty.png`; the beauty render's light falloff
+against an engine's, which the renderer redesign takes on; `curve()`,
+`spline()` and smooth sweeps keep uniform tangents; preset patterns
+are sized in model units, so a millimetre model passes `scale=`; and
+there is still no `if` (the docs show the indexing that stands in for
+one).
+
+Round 12 was four models chosen to need what the ray-traced renderer
+changed (a brass plaque with raised and engraved lettering, a machined
+plate shot in plan with blind and through holes, a glass decanter of
+spirit with a stopper, a desk at night lit by its lamp), each briefed to
+count the renders its lighting and its finish took and to say what it
+read off `beauty.png` that a number showed wrong. A fresh reader then
+saw only each agent's final `beauty.png` and answered six or seven
+questions with known answers, scored against the program: 17 of 25
+right, 7 partly, 1 wrong. The plaque was read entirely (every line of
+lettering, raised from engraved, brass, countersunk holes through). The
+plate's holes were read entirely (through from blind by a glowing panel
+the agent put under it, since no light can come from under the floor),
+but its bead-blasted aluminium, seen from straight above, read as white
+plastic. The decanter's glass, spirit, level and materials were read;
+its solid glass foot took the spirit's colour by refraction and read as
+hollow. The desk's lights, objects and support were read; its night
+sky, with no stars and no horizon in frame, read as a room's wall, and
+the moon as a window. The lighting took 4, 6, 1 and 5 renders, the
+finish 5, 3, 2 and 1. The round's real bug was under the promises: two
+agents, independently, made the "goes through" probe one region of rods
+far apart (mirrored, as the docs' own pattern does), and `void()` held
+of holes closed by a skin, because the region's lattice was coarser
+than each rod. Neither would have known had they not broken their
+models on purpose.
 
 ## What each round changed
 
@@ -442,6 +518,41 @@ scene gets no ground() note; `beauty.png` is framed on a `set camera`'s
 focus; `--beauty-only` and `--environment all` (an `environments.png`
 strip); docs on gold and gems under each sky, `attach` face on face,
 and text wrapped inside a band.
+
+**Round 11** (against round 10's changes: stand, door, mixer, shelf):
+`overlap()` terminates on near contacts and reads a touch as 0;
+`clearance()` below zero is the depth of the deepest point either part
+reaches into the other, so a corner sunk into a board reads its depth;
+`void()` catches a thin skin of intrusion along a long probe; a decal on
+a union region is tested on the region's own surface; new `support()`
+and `stands()` queries make the Supports and Stands rows promises; the
+meshed queries mesh at the model's own cell by default; failing
+`pieces()`, `wall()` and `void()` name their step where the output puts
+it; a promise inside a loop is one line (how many times it held, the
+judgement nearest to failing) with the failures last, a slow assert is
+named as it runs, `check --brief` folds a library's names, a promise at
+rest is judged once and not again in every pose, and `check` says how
+much of each camera's focus is hidden; defs take a block body with
+`return`, a loop's own names stay off the steps (`named()` names one
+per pass), a library keeps names starting with `_` to itself, a name
+read before its line says where it is assigned, a comment that holds a
+step is warned about, every fresh material takes its step's name,
+asserts print with their parentheses and values with four figures;
+`fmt --check` prints the lines it would change and keeps a column of
+trailing comments; a model is judged as a print only with `set units`,
+`set bed` or `--3mf`, decimetres and feet are units, `curve2` takes
+centripetal tangents and its thin warning gives the place, and a thin
+part made in a def or a library is named by the call that made it; the
+GLB carries the program's lights as `KHR_lights_punctual` and the
+viewer page its scene, the triangle cap is shared by error across a
+scene's meshes, the atlas finds each texel's material on the surface
+so seams stay clean after decimation, and each object's open edges and
+loose pieces are placed; `set camera` renders its shot once,
+`--beauty-only` is one shot without `lights.png`, `lights.png` draws a
+glowing surface flat, a run removes what its last run wrote and this
+one did not, a shown pose is meshed at the rest pose's cell,
+`render --show` draws a probe with the output, and the slice planes go
+through the contact a named step rests on.
 
 ## Running a round
 

@@ -1,0 +1,11 @@
+# Probe: is the leaning book's 0.003 gap over its shelf from ground() or from clearance()?
+floor = box(4, 0.2, 3) | move(0, -0.1, 0)
+sharp = box(0.34, 2.5, 1.9) | move(0.17, 1.25, 0) | rotate(z=18)
+sharp_g = sharp | ground() | move(1, 0, 0)
+round_g = box(0.34, 2.5, 1.9, round=0.02) | move(0.17, 1.25, 0) | rotate(z=18) | ground() | move(2, 0, 0)
+round_x = box(0.34, 2.5, 1.9, round=0.02) | move(0.17, 1.25, 0) | rotate(z=18) | move(-1, -0.02 * (sin(18) + cos(18) - 1), 0)
+show floor + sharp + sharp_g + round_g + round_x
+assert clearance(sharp, floor) < 0.0001, "sharp corner placed by the numbers: the clearance it reads"
+assert clearance(sharp_g, floor) < 0.0001, "sharp corner after ground()"
+assert clearance(round_g, floor) < 0.0001, "rounded edge after ground()"
+assert clearance(round_x, floor) < 0.0001, "rounded edge placed by the numbers"

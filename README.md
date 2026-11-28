@@ -28,10 +28,12 @@ npx aixle render examples/mug.aix        # writes out/mug/
 
 ![the mug's contact sheet](examples/renders/mug.png)
 
-`--beauty` adds a ray-marched render of the field with soft shadows and
-ambient occlusion, for the picture that shows the model as meant:
+`--beauty` adds `beauty.png`, the picture that shows the model as meant:
+the field itself, ray traced, with glTF's PBR shading as the viewer and
+engines shade the GLB, traced reflections, soft shadows from lights with
+a size, real refraction, and one tone curve at the end:
 
-![the mug, ray-marched](examples/renders/mug_beauty.png)
+![the mug, ray traced](examples/renders/mug_beauty.png)
 
 The cross-sections come straight from the distance field, so a hollow you
 cannot see from outside is still checkable:
@@ -62,14 +64,24 @@ npx aixle explain model.aix          # the program as a tree from the output dow
 npx aixle render model.aix           # everything, into out/model/
 npx aixle render model.aix --quick   # the sheet only, in a second or two; add --watch to re-render on save
 npx aixle diff before.aix after.aix  # two versions side by side
-npx aixle render model.aix --beauty         # plus beauty.png (a second or a few)
+npx aixle fmt model.aix --write      # the one layout, comments kept, meaning unchanged (--check: "formatted", or each line that differs and fail)
+npx aixle render model.aix --beauty         # plus beauty.png (a few seconds), in full quality on the cores (at most 4)
+npx aixle render model.aix --beauty --quality draft   # one reflection bounce, one glossy ray, glass one deep; --quick --beauty is draft
+npx aixle render model.aix --beauty --threads 1       # the beauty renders on one thread; the same picture, byte for byte, on any number
 npx aixle render model.aix --azimuth 60 --elevation 10   # turn the camera
 npx aixle render model.aix --focus lid --pose reach      # frame one part; show a rig in one pose
+npx aixle render model.aix --slice stem         # slices.png through one step, framed on it, the rest faint
+npx aixle render model.aix --show probe         # the output with a probe step drawn in place, the program unchanged
+npx aixle render model.aix --beauty-only        # the sheet and one beauty render (set camera's shot), full quality, for a lighting loop
 npx aixle render model.aix --grid 200 --size 768 --out somewhere
 npx aixle render model.aix --crease 0           # one smooth normal per vertex; the default splits edges at 35 degrees
 npx aixle render model.aix --minecraft 16       # also Minecraft Bedrock geometry (model.geo.json, model.geo.png; --minecraft-entity to face north)
 npx aixle render model.aix --roblox             # also model.roblox.glb for Roblox Studio (facing -Z, _Att attachment nodes)
+npx aixle render model.aix --3mf                # also model.3mf for a slicer, and the report judges it as a print (both anyway when the program sets units or a bed)
+npx aixle render model.aix --triangles 50000    # cap the GLB, OBJ and viewer (decimated; default 200000, 0 for all)
+npx aixle check model.aix --no-cache            # sample imports afresh; they are otherwise cached on disk by content
 npx aixle doc                        # the reference, to stdout
+npx aixle doc sweep tube             # those entries of it (a misspelt name gets the nearest names)
 ```
 
 `render` writes:
@@ -77,33 +89,39 @@ npx aixle doc                        # the reference, to stdout
 | File | What |
 | --- | --- |
 | `sheet.png` | perspective, front, right and top views on unit grids, with the model's size in the bar |
-| `slices.png` | cross-sections on x, y and z, inside filled with the material, outline where the surface is |
+| `slices.png` | cross-sections on x, y and z, inside filled with the material, outline where the surface is; through one step's solid with `--slice name` |
 | `steps.png` | one thumbnail per named shape in program order; red = not part of the output |
 | `callouts.png` | the perspective view with the largest visible steps named, a leader line from each label to its part |
 | `turntable.png` | eight views around the model |
 | `persp.png`, `front.png`, `right.png`, `top.png` | the views on their own |
 | `model.obj`, `model.mtl` | the mesh with UVs, one group per material, mapped to the atlas |
-| `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set |
+| `model.stl` | binary STL for a slicer: the model as shown, posed if a pose is set, in millimetres with z up |
+| `model.3mf` | with `set units`, `set bed` or `--3mf`: the same mesh for a slicer in the program's unit (millimetres for `dm`, which 3MF lacks), a colour per triangle from the materials |
 | `model.png` | the texture atlas: the procedural materials baked per chart |
-| `model.glb` | binary glTF with the atlas embedded (`--no-texture` for vertex colours instead) |
-| `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn): self-contained, loads three.js from a CDN |
-| `beauty.png` | with `--beauty`: the field ray-marched with soft shadows and ambient occlusion |
+| `model_normal.png`, `model_mr.png`, `model_emissive.png` | when the program has them: the normal map (bumps, and `displace` relief finer than the mesh), the metallic-roughness map (wear, rust) and the emissive map (a patterned glow), on the atlas's UVs |
+| `model.glb` | binary glTF with the atlas and those maps embedded, tangents for the normal map (`--no-texture` for vertex colours instead), and the program's lights in linear light (a directional light agrees with `beauty.png` at every angle); this, the OBJ and the viewer are decimated past 200 thousand triangles (`--triangles`), the cap shared by error over every mesh |
+| `viewer.html` | orbit the GLB in a browser and play its animations (loop, speed, scrub bar, all in turn), under its own studio or the program's scene (`beauty.png`'s sky, the program's lights and cameras), both on `beauty.png`'s tone curve: self-contained, loads three.js 0.187.0 from a CDN |
+| `beauty.png` | with `--beauty`: the field itself, ray traced, with glTF's PBR shading as in the viewer and engines, traced reflections, soft shadows from lights with a size, real refraction, tone-mapped; from the camera `set camera` names, in full quality (`--quality draft`, or `--quick`, for a quicker one); each other declared camera's shot is `beauty_<name>.png`, and with two lights or more `lights.png` shows each alone and exactly what each adds |
 | `poses.png`, `anim_<name>.png` | with joints: every pose, and frames through each animation |
 | `model.roblox.glb` | with `--roblox`: the GLB for Roblox Studio's 3D Importer, a Handle node facing -Z with `_Att` attachment nodes from the anchors |
 | `model.geo.json`, `model.geo.png` | with `--minecraft`: Bedrock geometry, the model voxelised at 16 pixels to the block and merged into cuboids, a bone per object and per joint, with its texture |
 | `model.animation.json` | with `--minecraft` and joints: the animations as Bedrock keyframes on the joint bones |
-| `report.md`, `report.json` | size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings |
+| `report.md`, `report.json` | the files the run wrote (a run removes what the last one wrote into the folder and it did not), size, bounds, triangle count, mass, centre of mass, whether it stands, pieces, every step's size and whether it is used, warnings; and for a print (`set units`, `set bed` or `--3mf`) the size in millimetres, whether it fits the bed, the thinnest wall and where, the support under the overhangs with the bridges and the islands apart |
 
 ## The language in one screen
 
 ```
 name = expr                      # every assignment is a step
 def part(a, b=1) = expr          # a parametric part
+def part(a) { ... return x }     # one with names and loops of its own: a statement per line, return last
 for i in range(6) { ... }        # loops; also range(a, b), range(a, b, step), or a list [1, 2.5]
+all = all + named("leg_" + i, leg) # a step per copy a loop makes; a name first assigned in a loop is the loop's own
+seat = {w: 0.9, h: 0.45}         # a record: seat.h, legs[0].x, {...seat, h: 0.6} for a changed copy
 show name                        # what to output (default: the last shape)
 
 box(w, h, d)  sphere(r)  cylinder(r, h)  cone(r1, r2, h)  capsule(r, h)  torus(R, r)  prism(sides, r, h)
 circle(r)  rect(w, h)  ngon(n, r)  star(n, r1, r2)  polygon(x1,y1, ...)  text("Hi", size, arc=r)   # 2D
+curve2([x,y, ...])  bezier2([x,y, ...])  curve2(points, wall=0.1)                        # smooth 2D outlines, exact
 extrude(profile, h)  revolve(profile, angle=180)  loft(a, b, h)                          # to solids
 tube(r, points, smooth=6, taper=1)  sweep(profile, points, smooth=6, twist=0, taper=1)   # along a path
 helix(r, h, turns)  arc(r, from, to)  spline(points)                                     # point lists
@@ -114,7 +132,9 @@ anchor(part, "tip", x, y, z)   at(part, "tip")   lamp | attach("bottom", arm, "t
 scene a, b, c   place(shape, [x,y,z,yaw, ...])   joint(part, "elbow", x, y, z)          # assemblies
 pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   animation("wave", ["rest", "reach", "rest"], seconds=2, ease=1)
 set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render
+set units mm   set bed 220 220 250   assert wall(model) > 0.8                           # a print: the report's Print section
 decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stripes", axis="x")  # surface paint
+material("rust", wear=0.4, bump=0.003)   # a finish: edges rubbed, creases dark, rust, bumps (beauty and GLB)
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
@@ -123,7 +143,7 @@ a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")
   | ground() | center() | paint("wood")
 ```
 
-Units are whatever you say they are; y is up; angles are degrees. Every
+Units are whatever you say they are (`set units mm` for a print); y is up; angles are degrees. Every
 primitive is centred on the origin and stands along y. `a | f(x)` is
 `f(a, x)`. Paint parts before combining them if they should keep different
 materials.
@@ -133,11 +153,12 @@ The docs, the gallery and the dogfooding record are published at
 
 ## Examples
 
-[`examples/`](examples/) has eighteen models exercising the language, each
+[`examples/`](examples/) has twenty-five models exercising the language, each
 with its sheet, slices, steps and beauty render under
 [`examples/renders/`](examples/renders/): a mug, a fluted vase from a
-revolved profile, a teapot with a tube spout and a swept handle, a desk
-lamp with a lofted shade, a reel of three-strand rope swept along a helix
+revolved smooth profile, a teapot with a tube spout and a swept handle, a desk
+lamp with a lofted shade, an acoustic guitar whose body is one smooth
+outline extruded, a reel of three-strand rope swept along a helix
 with a twist, a hanging sign with raised and engraved text, a rock garden
 from an imported mesh, a robot arm with three joints and a waving
 animation, a fenced plot with placed panels and trees, a table with
@@ -146,7 +167,13 @@ spiral staircase from a loop, a robot with per-part materials, a tree
 with smooth blends and displacement, a glass tumbler for refraction and
 depth of field, a medal with text on an arc and a partial revolve, and a
 desk nameplate with serif lettering engraved in brass and scrolls swept
-along exact Bezier curves.
+along exact Bezier curves, and a worn iron lantern whose rust, rubbed
+edges, hammered skin and glowing flame are baked into the GLB's normal,
+metallic-roughness and emissive maps; besides those, a treasure chest at
+Minecraft block scale, a plate of the material patterns, a biscuit tin
+whose label is a picture, a windmill placed with anchors and a workshop
+corner built from the shipped libraries. [`examples/roblox/`](examples/roblox/)
+has nine more made for Roblox Studio.
 
 | | | |
 | --- | --- | --- |
@@ -155,7 +182,7 @@ along exact Bezier curves.
 | ![gears](examples/renders/gear_beauty.png) | ![robot](examples/renders/robot_beauty.png) | ![table](examples/renders/table_beauty.png) |
 | ![stairs](examples/renders/stairs_beauty.png) | ![tree](examples/renders/tree_beauty.png) | ![garden](examples/renders/garden_beauty.png) |
 | ![medal](examples/renders/medal_beauty.png) | ![nameplate](examples/renders/nameplate_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
-| ![arm](examples/renders/arm_beauty.png) | ![fence](examples/renders/fence_beauty.png) | ![tumbler](examples/renders/tumbler_beauty.png) |
+| ![arm](examples/renders/arm_beauty.png) | ![fence](examples/renders/fence_beauty.png) | ![guitar](examples/renders/guitar_beauty.png) |
 
 ## How it works
 
@@ -166,10 +193,20 @@ is free. The surface is extracted once at the end by surface nets with
 dual contouring on a grid (`--grid`, default 128 cells on the longest
 side), so corners stay sharp, and that one mesh is what the software
 rasteriser draws and what the exporters write, so the pictures show the
-file you get. The beauty render marches the field itself, primed by that
-mesh so it costs about a second. For the exports, the procedural materials
-are baked into a texture atlas with UVs, so the GLB looks the same in an
-engine as it does here. Materials are procedural patterns evaluated in the
+file you get. The beauty render traces the field itself: the camera's
+rays march it, primed by that mesh, and reflections, shadows and
+refraction march it near a surface and then let a bounding volume
+hierarchy over the mesh skip empty space, every hit confirmed on the
+field. It shades in linear light with glTF's metallic-roughness model,
+as the viewer and an engine shade the GLB, and tone-maps once; a metal's
+colour is its reflectance, as glTF means it, so a metal has one colour
+in all three. It takes a few seconds at 512 pixels on four threads, and
+its picture is the same bytes on any number of threads. For the
+exports, the procedural materials are baked into a texture atlas with
+UVs, so the GLB looks the same in an engine as it does here; wear,
+bumps and a displace finer than the mesh are baked from the field into
+normal and metallic-roughness maps beside it. Materials are procedural
+patterns evaluated in the
 painted part's own frame, sampled per pixel when rendering and per vertex
 when exporting; there are no UVs. [`docs/design.md`](docs/design.md) has
 the reasoning and the limits.

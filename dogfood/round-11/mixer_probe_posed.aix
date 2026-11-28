@@ -1,0 +1,152 @@
+# Probe: is a reassigned step (head_shell, painted then decalled) measured where the pose puts it?
+# A tilt-head kitchen stand mixer. One unit is a decimetre (10 cm).
+# Front is +z: the bowl and the head's nose face the viewer. The base is a
+# long rounded foot along z; the column rises at its back; the head hinges
+# on a pin across the top of the column (along x) and tilts back, front up.
+# The bowl is locked on a clamp plate on the base by two tabs under two
+# hooks, and a flat beater hangs from the head's drive hub into the bowl.
+
+# ---- named sizes ----
+base_dims = {back: -1.78, front: 1.8, h: 0.45, r: 0.1}
+plate_dims = {r: 0.74, h: 0.08, sink: 0.02}
+column_dims = {r: 0.06}
+hinge_dims = {y: 2.47, z: -1.45, r: 0.11, pin_r: 0.05, mid: 0.5, outer: 0.8, gap: 0.04}
+head_dims = {len: 2.95, axis_y: 3.0, back_z: -1.62, flat_y: 2.45, fillet: 0.08}
+hub_dims = {r: 0.24, h: 0.4, y: 2.45}
+bowl_dims = {z: 0.45, t: 0.05, rim_r: 1.09, rim_h: 1.65, curl: 0.055}
+lock_dims = {tab_r0: 0.53, tab_r1: 0.64, tab_w: 0.18, tab_h: 0.045, hook_gap: 0.025, hook_t: 0.05, lip_r0: 0.585}
+beater_dims = {gap: 0.07, frame: 0.08, thick: 0.06, top: 1.95, shaft_r: 0.05}
+tilt_deg = -55
+
+enamel = material("#b3141f", rough=0.25)
+bowl_steel = material("steel", rough=0.2)
+beater_coat = material("#f2f2ee", rough=0.4)
+trim = "chrome"
+
+# ---- base: a smooth plan outline, extruded and rounded ----
+# The plan is drawn in (x, z) and flipped so its second coordinate runs to +z.
+base_plan = curve2([0,-1.78, 0.8,-1.74, 1.03,-1.45, 1.05,-0.7, 1.0,0.3, 0.92,1.05,
+  0.68,1.6, 0,1.8, -0.68,1.6, -0.92,1.05, -1.0,0.3, -1.05,-0.7, -1.03,-1.45, -0.8,-1.74])
+base = extrude(base_plan | offset(-base_dims.r), base_dims.h - 2 * base_dims.r)
+  | round(base_dims.r) | flip("z") | move(0, base_dims.h / 2, 0) | paint(enamel)
+
+# The clamp plate the bowl twists onto, sunk a cell into the base.
+plate_top = base_dims.h + plate_dims.h - plate_dims.sink
+plate = cylinder(plate_dims.r, plate_dims.h, round=0.02)
+  | move(0, plate_top - plate_dims.h / 2, bowl_dims.z) | paint(trim)
+
+# Two hooks on the plate's rim, at +x and -x, each a post and a lip that
+# reaches in over the bowl's tab with a small gap above it.
+hook_post = box(lock_dims.hook_t, lock_dims.tab_h + lock_dims.hook_gap + lock_dims.hook_t + 0.02, lock_dims.tab_w + 0.04, round=0.01)
+  | move(plate_dims.r - lock_dims.hook_t / 2, plate_top + (lock_dims.tab_h + lock_dims.hook_gap + lock_dims.hook_t) / 2 - 0.01, 0)
+hook_lip = box(plate_dims.r - lock_dims.lip_r0, lock_dims.hook_t, lock_dims.tab_w + 0.04, round=0.01)
+  | move((plate_dims.r + lock_dims.lip_r0) / 2, plate_top + lock_dims.tab_h + lock_dims.hook_gap + lock_dims.hook_t / 2, 0)
+hooks = (hook_post + hook_lip) | mirror("x") | move(0, 0, bowl_dims.z) | paint(trim)
+
+# ---- column: a side outline and a front outline, intersected, rounded ----
+# The side outline is drawn in (z, y), front on the right.
+column_side = curve2([-1.72,0.3, -1.72,0.3, -0.35,0.3, -0.35,0.3,
+  -0.52,0.65, -0.72,1.1, -0.8,1.7, -0.86,2.15, -0.95,2.3, -1.1,2.33, -1.3,2.31, -1.5,2.31,
+  -1.64,2.22, -1.71,1.6, -1.73,0.9])
+column_front = curve2([-0.8,0.3, -0.8,0.3, 0.8,0.3, 0.8,0.3, 0.72,1.4, 0.68,2.1, 0.62,2.4,
+  0,2.5, -0.62,2.4, -0.68,2.1, -0.72,1.4])
+column = (extrude(column_side, 2, "x") | flip("z")) & extrude(column_front, 4, "z")
+column = column | offset(-column_dims.r) | round(column_dims.r) | paint(enamel)
+
+# ---- hinge: two knuckles on the column, one on the head, a pin through ----
+def knuckle(x0, x1) = cylinder(hinge_dims.r, x1 - x0) | rotate(z=90)
+  | move((x0 + x1) / 2, hinge_dims.y, hinge_dims.z)
+column_knuckles = (knuckle(hinge_dims.mid + hinge_dims.gap, hinge_dims.outer)
+  + box(hinge_dims.outer - hinge_dims.mid - hinge_dims.gap, 0.2, 0.22) | move((hinge_dims.outer + hinge_dims.mid + hinge_dims.gap) / 2, hinge_dims.y - 0.1, hinge_dims.z))
+  | mirror("x") | paint(enamel)
+pin = cylinder(hinge_dims.pin_r, 2 * hinge_dims.outer + 0.06) | rotate(z=90)
+  | move(0, hinge_dims.y, hinge_dims.z) | paint(trim)
+
+# ---- head: a smooth profile revolved about its long axis, underside flattened ----
+# The profile is radius (x) against length from the back (y), laid along +z.
+head_profile = curve2([0,0, 0,0, 0.48,0.0, 0.62,0.25, 0.66,0.9, 0.63,1.8, 0.52,2.45,
+  0.33,2.82, 0,2.95, 0,2.95])
+head_round = revolve(head_profile) | rotate(x=90) | move(0, head_dims.axis_y, head_dims.back_z)
+below_head = box(3, 1, 4) | move(0, head_dims.flat_y - 0.5, 0)
+head_shell = difference(head_round, below_head, k=head_dims.fillet) | paint(enamel)
+head_shell = decal(head_shell, box(2, 2, 0.07) | move(0, 3, -0.95), trim)
+head_knuckle = knuckle(-hinge_dims.mid, hinge_dims.mid) | paint(enamel)
+# The knuckle's top grazes the head's side at a shallow angle: a small blend seals it.
+head_hinged = union(head_shell, head_knuckle, k=0.03)
+nose = cylinder(0.22, 0.2, round=0.03) | rotate(x=90)
+  | move(0, head_dims.axis_y, head_dims.back_z + head_dims.len - 0.03) | paint(trim)
+hub = cylinder(hub_dims.r, hub_dims.h, round=0.04) | move(0, hub_dims.y, bowl_dims.z) | paint(trim)
+lever = (tube(0.025, [-0.5, 3.0, -1.15, -0.74, 3.02, -1.1]) + sphere(0.05) | move(-0.76, 3.02, -1.1))
+  | paint(trim)
+
+# ---- bowl: one smooth line revolved, a thin wall, a rolled rim ----
+# The wall's centre line runs from the axis out along the floor, up the side
+# and curls outward over the rim; a short skirt below is the foot.
+bowl_line = [0,0.14, 0.3,0.14, 0.5,0.17, 0.7,0.28, 0.88,0.5, 1.0,0.85, 1.06,1.25, 1.08,1.5, bowl_dims.rim_r,bowl_dims.rim_h]
+# Three quarters of a turn round a circle beside the rim: a rolled bead,
+# open underneath, its hole wide enough (3 cells) to mesh clean.
+def curl_pt(deg) = [bowl_dims.rim_r + bowl_dims.curl - bowl_dims.curl * cos(deg), bowl_dims.rim_h + bowl_dims.curl * sin(deg)]
+bowl_curl = curl_pt(45) + curl_pt(90) + curl_pt(135) + curl_pt(180) + curl_pt(225)
+bowl_y0 = plate_top + bowl_dims.t / 2
+bowl_wall = revolve(curve2(bowl_line + bowl_curl, wall=bowl_dims.t))
+bowl_foot = revolve(curve2([0.5,0.16, 0.53,0.0], wall=bowl_dims.t))
+# Two tabs on the foot, resting on the plate under the hooks.
+bowl_tabs = box(lock_dims.tab_r1 - lock_dims.tab_r0, lock_dims.tab_h, lock_dims.tab_w, round=0.01)
+  | move((lock_dims.tab_r0 + lock_dims.tab_r1) / 2, lock_dims.tab_h / 2 - bowl_dims.t / 2, 0) | mirror("x")
+# The handle's ends sit a tube's radius and a cell outside the wall's centre
+# line, so their round caps stop well short of the inside.
+bowl_handle = tube(0.04, curve([1.135, 1.42, 0, 1.3, 1.36, 0, 1.42, 1.1, 0, 1.3, 0.82, 0, 1.04, 0.78, 0]))
+bowl = (bowl_wall + bowl_foot + bowl_tabs + bowl_handle) | move(0, bowl_y0, bowl_dims.z) | paint(bowl_steel)
+
+# The space the wall's centre line encloses: the beater is cut from it.
+cavity_line = [0,0.14] + bowl_line + [bowl_dims.rim_r,bowl_dims.rim_h, 0,bowl_dims.rim_h, 0,bowl_dims.rim_h]
+cavity = revolve(curve2(cavity_line)) | move(0, bowl_y0, bowl_dims.z)
+
+# ---- beater: a flat paddle that follows the bowl's inside at a gap ----
+inset = bowl_dims.t / 2 + beater_dims.gap
+slab = box(3, beater_dims.top, beater_dims.thick) | move(0, beater_dims.top / 2, bowl_dims.z)
+paddle_outer = (cavity | offset(-inset)) & slab
+window_slab = box(3, beater_dims.top - beater_dims.frame, 1) | move(0, (beater_dims.top - beater_dims.frame) / 2, bowl_dims.z)
+windows = ((cavity | offset(-inset - beater_dims.frame)) & window_slab)
+  - box(beater_dims.frame, 4, 1) | move(0, 1, bowl_dims.z)
+paddle = paddle_outer - windows
+shaft = cylinder(beater_dims.shaft_r, hub_dims.y - beater_dims.top + 0.1)
+  | move(0, (hub_dims.y + beater_dims.top) / 2 - 0.05, bowl_dims.z)
+beater = (paddle + shaft) | paint(beater_coat)
+
+# ---- the tilting head: everything that turns with it ----
+head = joint(head_hinged + nose + hub + lever + beater, "tilt", 0, hinge_dims.y, hinge_dims.z, axis=[1, 0, 0])
+pose("tilted", tilt=tilt_deg)
+animation("tilt", ["rest", "tilted", "tilted", "rest"], times=[0, 1.2, 1.8, 3], ease=1)
+
+body = base + plate + hooks + column + column_knuckles + pin + head
+scene body, bowl
+set grid 200
+set slice beater
+set slice_y 1.3
+
+# ---- presentation ----
+light("key", azimuth=-40, elevation=50, size=1.5, color="#fff4e8")
+light("rim", azimuth=150, elevation=25, power=0.5, color="#dfe8ff")
+camera("hero", azimuth=35, elevation=18, zoom=1.15)
+camera("into_bowl", focus="paddle", azimuth=60, elevation=45, zoom=1)
+set camera hero
+
+# ---- promises ----
+assert clearance(beater, bowl) > 0.05, "the beater clears the inside of the bowl at rest"
+assert inside(paddle, cavity) > 0.99, "the paddle hangs inside the bowl"
+assert void(cavity | offset(-bowl_dims.t / 2 - 0.01), bowl), "nothing of the bowl pokes into its own inside"
+assert clearance(head, bowl) > 0.1, "the tilted head, beater and all, clears the bowl", pose=tilted
+assert overlap(bowl, base + plate + hooks) < 0.0002, "the bowl sits on the plate, not sunk into it"
+assert clearance(bowl, plate) < 0.01, "the bowl rests on the plate, not floating above it"
+assert clearance(head_shell, column) > 0.02, "the head's back swings clear of the column", pose=tilted
+assert clearance(head_shell, column_knuckles) > 0.02, "the head's body clears the column's knuckles at rest"
+assert clearance(head_shell, column_knuckles) > 0.02, "and tilted", pose=tilted
+assert clearance(head_hinged, column + column_knuckles) > 0.015, "the head's knuckle turns free between the column's"
+assert clearance(bowl, hooks) > 0.015, "the hooks hold the tabs without touching them"
+assert wall(bowl, 96) > 0.04, "the bowl's wall is at least 4 mm"
+assert clearance(head_shell, column) > 0, "rest"
+assert clearance(head_shell, column) > 0, "tilted", pose=tilted
+assert top(head_shell) > 0, "rest top"
+assert top(head_shell) > 0, "tilted top", pose=tilted
+assert top(head_hinged) > 0, "tilted top hinged", pose=tilted

@@ -34,7 +34,7 @@ export function referenceMarkdown(): string {
     "",
     "### import",
     "",
-    "An existing mesh as a shape: `import(\"part.obj\")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so.",
+    "An existing mesh as a shape: `import(\"part.obj\")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so. The samples are cached on disk by the file's content, so `check` and `render` sample a file once at each resolution (`--no-cache` samples afresh).",
     "",
     "    import(path, size=?, resolution=96) -> shape",
     "",
@@ -74,24 +74,28 @@ export function referenceMarkdown(): string {
   out.push(
     "## Lights, cameras and environments",
     "",
-    "The beauty render's lighting and shots, declared in the program. Without a `light()` the render has one key light, placed by `set light_azimuth`, `set light_elevation` and `set light_size`.",
+    "The beauty render's lighting and shots, declared in the program. Without a `light()` the render has one key light: the default from the upper left and the front, at azimuth -40 and about 47 degrees up, turned towards the frame's top left in a shot looking steeply down (turning as the camera's elevation goes from 55 to 75, and turned all the way above that), or where `set light_azimuth`, `set light_elevation` and `set light_size` put it (one angle set alone takes -40 or 55 for the other).",
     "",
     "### light",
     "",
-    "A light in the beauty render: `light(\"key\", azimuth=-40, elevation=55, size=1.5, color=\"#fff2e0\")` and `light(\"rim\", azimuth=150, elevation=20, power=0.5, color=\"#cfe0ff\")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's apparent size (0.5 a lamp with crisp shadows, 3 a window); `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's. Each light casts its own soft shadow, so three lights cost about half again the time of one (measured on the market scene: 4.1 s to 5.9 s at 512 px). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them. A point light is at a place instead of a direction: `light(\"fire\", position=[0, 0.4, 0], range=2, color=\"#ff9a3c\")` lights what is round it, its strength halving `range` away, shadowed by what stands between; put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through dimmed), since inside a solid every shadow ray hits that solid.",
+    "A light in the beauty render: `light(\"key\", azimuth=-40, elevation=55, size=1.5, color=\"#fff2e0\")` and `light(\"rim\", azimuth=150, elevation=20, power=0.5, color=\"#cfe0ff\")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's angular radius, size/18 radians (0.5 a lamp with crisp shadows, 1 about 3 degrees, 3 about 10, a window), which softens its shadow, widens its highlight and is the bright disc a mirror shows of it; `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's, which lights a white face turned square to it to near white. Each light's shadow is traced from its disc, eight rays a pixel: soft by the light's size, hardening where a part meets the floor, tinted where the light passes through coloured glass. Three lights cost about a third more than one (one light to three at 384 px, full quality, one thread, best of five: the lantern 2.29 s to 3.03 s, round 4's market 2.70 s to 3.46 s). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them, `model.glb` carries them as glTF lights, and with two or more `render --beauty` draws `lights.png`. A point light is at a place instead of a direction: `light(\"fire\", position=[0, 0.4, 0], range=2, color=\"#ff9a3c\")` is a small sphere (its radius 2% of `range` per unit of `size`) that lights what is round it, shadowed by what stands between, its shadows reaching the floor. Its strength at a distance d is range² / (range² + d²) of its strength at the light, in linear light as an engine's is: half at `range` (half the model's longest side when not given, so the default suits a model of any size), a fifth at twice it. Half the light shows at about three quarters of the brightness, so its pool looks wider than half suggests; lower `range` to narrow it. Put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through tinted), since inside a solid every shadow ray hits that solid.",
     "",
     "    light(name, azimuth=-40, elevation=55, size=1, color=\"white\", power=1) -> string",
-    "    light(name, position=[x, y, z], range=2, size=1, color=\"white\", power=1) -> string",
+    "    light(name, position=[x, y, z], range=?, size=1, color=\"white\", power=1) -> string",
     "",
     "### camera",
     "",
-    "A named shot: `camera(\"hero\", azimuth=30, elevation=20, zoom=1.4)` and `camera(\"detail\", focus=\"nameplate\", zoom=2)`. `render --beauty` writes `beauty_<name>.png` for each, framed on `focus=` (a step or object, as `--focus` frames it) when given, with the render's own azimuth, elevation, zoom and dof for whatever a shot leaves out. `set camera hero` makes that shot the sheet's and `beauty.png`'s view too (the command line's `--azimuth`, `--elevation` and `--zoom` still override).",
+    "A named shot: `camera(\"hero\", azimuth=30, elevation=20, zoom=1.4)` and `camera(\"detail\", focus=\"nameplate\", zoom=2)`. `render --beauty` writes `beauty_<name>.png` for each, framed on `focus=` (a step or object, as `--focus` frames it) when given. What a shot leaves out it takes from the render's own view: the command line's `--azimuth`, `--elevation` and `--zoom`, then the `set camera` shot's, then `set azimuth`, `set elevation` and `set zoom`, then the defaults; and `set dof`. So `--camera NAME`, with or without `--beauty-only`, draws exactly the full run's `beauty_NAME.png`, unless an angle is given on the command line too: that overrides the camera's own in `beauty.png`, as it does a `set camera` shot's, where `beauty_NAME.png` keeps the camera's. `set camera hero` makes that shot the sheet's and `beauty.png`'s view too (the command line's `--azimuth`, `--elevation` and `--zoom` still override).",
     "",
     "    camera(name, azimuth=35, elevation=25, zoom=1, focus=\"step\", dof=0) -> string",
     "",
     "### set environment",
     "",
-    "The sky the beauty render sits in and the metals reflect: `set environment sunset`. `studio` (the default) is the grey-white backdrop; `overcast` a white sky with soft, even light; `sunset` a warm band at the horizon under a blue sky on warm ground; `night` a dark blue sky and a dark floor, where a `glow` material carries the picture. An environment sets the sky, ground and floor colours and scales the ambient light; the lights are yours.",
+    "The sky the beauty render sits in, takes its ambient light from and the metals reflect: `set environment sunset`. `studio` (the default) is a white sweep with the room round the camera dark and out of shot, in two rigs: the light a surface takes, whose walls still light a shaded side, and a darker room a surface mirrors, with three cards (a fill low on the right, a strip overhead, a rim strip behind) that only reflections see, so chrome reads as a dark mirror with bright cards in it. `overcast` is a white dome with soft, even light, brighter towards the zenith; what a surface mirrors is flagged on the camera's side, as a photographer flags a shot outdoors, a dark band over the horizon and a dark ground, so a metal's faces turned to the camera have form while its faces turned to the sky mirror the white dome (a chrome or silver ball shows a white sky over a dark horizon and ground). `sunset` is a warm band at the horizon under a blue sky on warm ground, with a sun 3 degrees up on the key light's side. `night` is a dark blue sky with stars and a moon on the key's side, over a dark floor, its ambient light 0.4 of the studio's, where a `glow` material carries the picture. An environment sets the backdrop, the sky's light and what the metals reflect, and the floor's colour; the lights are yours.",
+    "",
+    "### set ambient",
+    "",
+    "Scales the sky's light in the beauty render: `set ambient 1.5`. It scales the light a surface takes from the sky and what a metal or a glossy part reflects of it alike, not the lights, the disc a mirror shows of each, or the backdrop: 0.5 is a dark room, 2 a shaded interior lifted, and under `night` (0.4 of the studio's sky) 1.6 is a start. The open floor near the model keeps its colour, short of a scene too dim for any floor to show it: it is solved to show the sky's own floor under the sky and every directional light.",
     "",
   );
   out.push("## Roblox attachments", "", "An `anchor` with one of these names becomes the accessory's attachment in `model.roblox.glb` (`set roblox 1`), and the report checks the model against the size limit for it at the Normal body scale, in studs (width × height × depth).", "", "| Attachment | Kind | Limit |", "| --- | --- | --- |");
@@ -110,4 +114,75 @@ export function referenceMarkdown(): string {
   out.push("", "A pattern's feature size is in model units: a wood ring every 0.25 units suits a table leg, not a 20-unit floor. Use `material(color, pattern, color2, scale=)` with the two colours from this table for the same look at another size.");
   out.push("", "## Patterns", "", `For \`material(color, pattern, ...)\`: ${PATTERNS.join(", ")}.`, "");
   return out.join("\n");
+}
+
+/** The reference's entries by name: each `### name` section with the `## group` it sits in, as the reference prints it. */
+function referenceEntries(): Map<string, { group: string; lines: string[] }> {
+  const entries = new Map<string, { group: string; lines: string[] }>();
+  let group = "";
+  let current: string[] | undefined;
+  for (const line of referenceMarkdown().split("\n")) {
+    if (line.startsWith("## ")) { group = line.slice(3); current = undefined; continue; }
+    if (line.startsWith("### ")) { current = [line]; entries.set(line.slice(4), { group, lines: current }); continue; }
+    current?.push(line);
+  }
+  return entries;
+}
+
+/** The material presets' table, its two header lines and a row per preset, from the reference. */
+function presetRows(): { head: string[]; rows: Map<string, string> } {
+  const lines = referenceMarkdown().split("\n");
+  const at = lines.indexOf("| Name | Pattern | Feature size | Colours | Notes |");
+  const rows = new Map<string, string>();
+  for (let i = at + 2; i < lines.length && lines[i].startsWith("| "); i++) rows.set(lines[i].slice(2, lines[i].indexOf(" |", 2)), lines[i]);
+  return { head: lines.slice(at, at + 2), rows };
+}
+
+/**
+ * One entry of the reference, as `aixle doc NAME` prints it: a builtin's description, its signatures (the usage a
+ * failed call prints) and its parameters under the group it is in; a section the reference writes by hand (import,
+ * use, joint, pose, animation, light, camera, set environment, set ambient); or a material preset's row of the presets table.
+ * Undefined for a name the reference does not have.
+ */
+export function referenceEntry(name: string): string | undefined {
+  const entries = referenceEntries();
+  const key = entries.has(name) ? name : [...entries.keys()].find((k) => k.toLowerCase() === name.toLowerCase() || k === `set ${name}`);
+  if (key !== undefined) {
+    const { group, lines } = entries.get(key)!;
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    return [`## ${group}`, "", ...lines, ""].join("\n");
+  }
+  const { head, rows } = presetRows();
+  const row = rows.get(name) ?? rows.get(name.toLowerCase());
+  if (row) return ["## Material presets", "", `### ${row.slice(2, row.indexOf(" |", 2))}`, "", "A material preset: use it by name in `paint()`.", "", ...head, row, ""].join("\n");
+  return undefined;
+}
+
+/** Edit distance with a swap of neighbours counted as one edit, so `cylnider` is one from `cylinder`. */
+function editDistance(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  return d[a.length][b.length];
+}
+
+/**
+ * The names the reference has entries for that are nearest a name it has none for: those that hold it or that it
+ * holds (`round` for `rounded`, `extrude` for `extru`), then those a few edits away, the fewest first.
+ */
+export function nearestNames(name: string, count = 5): string[] {
+  const q = name.toLowerCase();
+  const names = [...referenceEntries().keys(), ...presetRows().rows.keys()];
+  const scored = names
+    .map((n) => {
+      const l = n.toLowerCase();
+      const holds = q.length >= 3 && (l.includes(q) || q.includes(l));
+      return { n, holds, d: editDistance(q, l) };
+    })
+    .filter((s) => s.holds || s.d <= Math.max(2, Math.ceil(q.length / 3)));
+  scored.sort((a, b) => (a.holds === b.holds ? a.d - b.d || (a.n < b.n ? -1 : 1) : a.holds ? -1 : 1));
+  return scored.slice(0, count).map((s) => s.n);
 }

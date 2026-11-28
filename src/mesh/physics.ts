@@ -23,6 +23,13 @@ export interface Piece {
   size: number;
   /** True for an inward-facing shell: an enclosed void, not a loose part. */
   cavity: boolean;
+  /** A vertex of the piece, on its surface: where to look for the step it belongs to (a ring's centre is in its hole). */
+  at: [number, number, number];
+  /**
+   * A few of the piece's own vertices, spread over its triangles: points on its surface, so the steps it is made of
+   * can be named there rather than at its centre, which for a ring is in the air (round 11).
+   */
+  points: [number, number, number][];
 }
 
 export interface Physics {
@@ -101,6 +108,9 @@ export function isSpeck(pc: Piece, physics: Physics, cellSize: number): boolean 
   return Math.abs(pc.volume) < Math.abs(main.volume) * 0.001 && pc.size < cellSize * 4;
 }
 
+/** How many surface points a piece keeps for naming it. */
+const PIECE_POINTS = 12;
+
 export function analyse(mesh: Mesh, cellSize: number): Physics {
   const { volume, centre } = centroidAndVolume(mesh);
   const p = mesh.positions;
@@ -143,7 +153,13 @@ export function analyse(mesh: Mesh, cellSize: number): Physics {
       }
     bottom = lo[1];
     // The main body's winding gives a positive volume; a shell wound the other way is a void inside something.
-    pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre, size: Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), cavity: false });
+    const points: [number, number, number][] = [];
+    const every = Math.max(1, Math.floor(tris.length / PIECE_POINTS));
+    for (let i = 0; i < tris.length && points.length < PIECE_POINTS; i += every) {
+      const o = ix[tris[i] * 3] * 3;
+      points.push([p[o], p[o + 1], p[o + 2]]);
+    }
+    pieces.push({ triangles: tris.length, volume: cv.volume, bottom, centre: cv.centre, size: Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), cavity: false, at: points[0], points });
   }
   // A piece with no volume is a stray triangle or a flat sliver, not a part; naming it as a loose piece sent an agent
   // looking for something that is not there (round 4). It is dropped unless it is all there is.

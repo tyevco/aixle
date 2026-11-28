@@ -1,0 +1,13 @@
+# Probe: does decal()'s "touches none of the shape's surface" warning depend on the region's thickness?
+set grid 44
+b = {w: 0.35, h: 2.2, d: 1.7}
+base = box(b.w, b.h, b.d, round=0.02) | paint("navy")
+thin = decal(base, box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2), "gold")
+thick = decal(base, box(b.w + 0.1, 0.12, 0.2) | move(0, 0.8, b.d / 2), "gold")
+nested = decal(decal(base, box(b.w - 0.06, b.h + 0.2, b.d + 0.06) | move(0, 0, -0.07), "cream"), box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2), "gold")
+two = decal(base, (box(b.w + 0.1, 0.06, 0.2) | move(0, 0.8, b.d / 2)) + (box(b.w + 0.1, 0.06, 0.2) | move(0, -0.8, b.d / 2)), "gold")
+def bands(r) = (box(r.w + 0.1, 0.06, 0.2) | move(0, r.h * 0.36, r.d / 2)) + (box(r.w + 0.1, 0.06, 0.2) | move(0, -r.h * 0.36, r.d / 2))
+viadef = decal(base, bands(b), "gold")
+show (thin + (two | move(1, 0, 0)) + (viadef | move(2, 0, 0))) | ground()
+assert 1, "thick and nested are kept for check"
+kept = thick + nested

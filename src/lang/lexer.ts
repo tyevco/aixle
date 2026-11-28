@@ -1,6 +1,8 @@
 /**
  * Tokens for .aix. Newlines end statements except inside parentheses or
  * brackets, so a long call can wrap. Comments start with `#` or `//`.
+ * Each token keeps where it was in the source, so `aixle fmt` can print
+ * it exactly as written and find the comments between tokens.
  */
 
 export type TokenType = "num" | "str" | "ident" | "op" | "newline" | "eof";
@@ -9,7 +11,19 @@ export interface Token {
   type: TokenType;
   value: string;
   line: number;
+  /** Offsets of the token's text in the source: `source.slice(start, end)` is it as written (a string with its quotes). */
+  start: number;
+  end: number;
+  /** What the parser took the token to be, where its spelling does not say: for the formatter. */
+  role?: TokenRole;
 }
+
+/**
+ * `unary` a minus that negates; `named` the `=` of a named argument, a parameter's default or assert's pose=;
+ * `index` the `[` of `list[i]`; `record` the braces of a record literal; `keyword` a word that is a keyword only
+ * where it stands (`as` in a use).
+ */
+export type TokenRole = "unary" | "named" | "index" | "record" | "keyword";
 
 export class SyntaxError extends Error {
   constructor(message: string, readonly line: number) {
@@ -18,7 +32,7 @@ export class SyntaxError extends Error {
   }
 }
 
-const OPS = ["==", "!=", "<=", ">=", "..", "(", ")", "{", "}", "[", "]", ",", "=", "+", "-", "*", "/", "%", "^", "|", "&", "<", ">", ":", "."];
+const OPS = ["==", "!=", "<=", ">=", "...", "..", "(", ")", "{", "}", "[", "]", ",", "=", "+", "-", "*", "/", "%", "^", "|", "&", "<", ">", ":", "."];
 
 /** Operators that carry a statement over a line break when a line ends with one of them. */
 const TRAILING = new Set(["=", "+", "-", "*", "/", "%", "^", "|", "&", ","]);
@@ -51,10 +65,17 @@ function continues(tokens: Token[], source: string, at: number): boolean {
   return LEADING.has(source[j]) && source.slice(j, j + 2) !== "//";
 }
 
-export function tokenize(source: string): Token[] {
+/** A comment after code on its line, as written from its `#` or `//`: what `check` reads for code pasted into one. */
+export interface TrailingComment {
+  line: number;
+  text: string;
+}
+
+/** The tokens; `trailing`, when given, gets every comment that follows code on its line. */
+export function tokenize(source: string, trailing?: TrailingComment[]): Token[] {
   const tokens: Token[] = [];
   let i = 0, line = 1, depth = 0;
-  const push = (type: TokenType, value: string) => tokens.push({ type, value, line });
+  const push = (type: TokenType, value: string, start = i, end = i + value.length) => tokens.push({ type, value, line, start, end });
   while (i < source.length) {
     const ch = source[i];
     if (ch === "\n") {
@@ -65,7 +86,10 @@ export function tokenize(source: string): Token[] {
     }
     if (ch === " " || ch === "\t" || ch === "\r") { i++; continue; }
     if (ch === "#" || (ch === "/" && source[i + 1] === "/")) {
+      const from = i;
       while (i < source.length && source[i] !== "\n") i++;
+      const last = tokens[tokens.length - 1];
+      if (trailing && last && last.line === line && last.type !== "newline") trailing.push({ line, text: source.slice(from, i).trimEnd() });
       continue;
     }
     if (ch === '"' || ch === "'") {
@@ -75,7 +99,7 @@ export function tokenize(source: string): Token[] {
         text += source[j++];
       }
       if (j >= source.length) throw new SyntaxError("unterminated string", line);
-      push("str", text);
+      push("str", text, i, j + 1);
       i = j + 1;
       continue;
     }
@@ -102,7 +126,7 @@ export function tokenize(source: string): Token[] {
     }
     throw new SyntaxError(`unexpected character '${ch}'`, line);
   }
-  push("newline", "\n");
-  push("eof", "");
+  push("newline", "\n", i, i);
+  push("eof", "", i, i);
   return tokens;
 }

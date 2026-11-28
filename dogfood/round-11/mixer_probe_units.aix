@@ -1,0 +1,3 @@
+# Probe: does set units take a decimetre, the unit the mixer is drawn in?
+set units dm
+show box(1)

@@ -6,6 +6,7 @@
 import { albedo } from "../sdf/materials.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "../sdf/types.js";
+import { KEY } from "../render/photometry.js";
 
 export interface GlbTexture {
   /** u, v per vertex, glTF convention. */
@@ -137,6 +138,89 @@ export interface GlbAnimation {
   scales?: Record<string, [number, number, number][]>;
 }
 
+/** A light the program declares, as the beauty render takes it. */
+export interface SceneLight {
+  name?: string;
+  azimuth: number;
+  elevation: number;
+  /** 0..1, sRGB as written. */
+  color: [number, number, number];
+  power: number;
+  position?: [number, number, number];
+  range?: number;
+}
+
+/** A KHR_lights_punctual light and the node that places it. */
+export interface GlbLight {
+  name: string;
+  type: "point" | "directional";
+  /** Linear RGB. */
+  color: [number, number, number];
+  /** Candela for a point light, lux for a directional one. */
+  intensity: number;
+  /** A point light's cutoff, where an engine takes it to zero. */
+  range?: number;
+  translation: [number, number, number];
+  /** A directional light's node turned so its -z points the way the light travels. */
+  rotation?: [number, number, number, number];
+}
+
+/** glTF's range for a point light, where an engine takes it to zero: this many times the program's range. */
+export const GLB_RANGE_CUTOFF = 3;
+
+/**
+ * The program's lights as glTF punctual lights (round 11: a torch that lit a door in beauty.png lit nothing in an
+ * engine), in the units that make an engine light the model as the beauty render does.
+ *
+ * Both work in linear light. The beauty render gives a white face turned square to a light of power p the radiance
+ * KEY·p (photometry.ts: KEY = 1.05), Lambert in the cosine of the face's angle, and a point light's strength at a
+ * distance d is range² / (range² + d²) of that. A physically lit engine (three.js, Blender, Godot, Filament) gives
+ * a white Lambert face albedo / π times its irradiance: lux × cos θ from a directional light, candela × cos θ / d²
+ * from a point light. So:
+ * - a directional light is π·KEY·p lux, 3.30 for power 1, and agrees with beauty.png on every face at every angle
+ *   (the display-space renderer it replaces could agree at one angle only, 60 degrees);
+ * - a point light is π·KEY·p·range² candela, and the two laws agree only far off. At `range` the engine is twice as
+ *   bright as beauty.png, at half of it five times; with glTF's cutoff (below) they cross at about 1.8 ranges, the
+ *   engine is 0.8 of beauty.png at two and a third at two and a half, and dark at three, where beauty.png keeps a
+ *   tenth. A point light with no range has the beauty render's: half the model's longest side (`defaultRange`).
+ * glTF's `range` is that cutoff, three times the program's range. Colours go from sRGB to linear. The apparent size
+ * (soft shadows, a mirror's softbox) has no glTF counterpart and is left out. A directional light's node sits three
+ * radii out from the model's centre along its direction, for an engine whose shadow camera needs a place.
+ */
+export function glbLights(lights: SceneLight[], centre: [number, number, number], radius: number, defaultRange = 2): GlbLight[] {
+  return lights.map((l, i) => {
+    const color = l.color.map((c) => Number(srgbToLinear(c).toFixed(5))) as [number, number, number];
+    const name = l.name ?? `light_${i + 1}`;
+    const lux = Math.PI * KEY * Math.max(0, l.power);
+    if (l.position) {
+      const range = l.range ?? defaultRange;
+      return { name, type: "point" as const, color, intensity: Number((lux * range * range).toPrecision(6)), range: Number((range * GLB_RANGE_CUTOFF).toPrecision(6)), translation: [l.position[0], l.position[1], l.position[2]] };
+    }
+    const az = (l.azimuth * Math.PI) / 180, el = (l.elevation * Math.PI) / 180;
+    // Towards the light; the light travels the other way, which is the node's -z.
+    const to: [number, number, number] = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    return {
+      name, type: "directional" as const, color,
+      intensity: Number(lux.toPrecision(6)),
+      translation: [centre[0] + to[0] * radius * 3, centre[1] + to[1] * radius * 3, centre[2] + to[2] * radius * 3],
+      rotation: rotationFromZ(to),
+    };
+  });
+}
+
+/** The quaternion that turns +z onto `d` (a unit vector), the shorter way round. */
+export function rotationFromZ(d: [number, number, number]): [number, number, number, number] {
+  // q = (z × d, 1 + z · d), normalised; opposite vectors turn half a turn about x.
+  const w = 1 + d[2];
+  if (w < 1e-9) return [1, 0, 0, 0];
+  const x = -d[1], y = d[0], z = 0;
+  const l = Math.hypot(x, y, z, w);
+  return [x / l, y / l, z / l, w / l];
+}
+
+/** sRGB-encoded 0..1 to linear, for a factor where the texture it stands in for would have been sRGB. */
+export const srgbToLinear = (v: number): number => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+
 /** Quaternion for rotations about x, then y, then z, in degrees (the joint convention). */
 /** A quaternion for `deg` degrees about an axis, for a joint declared with one: the animation then turns about it. */
 export function axisAngleToQuat(axis: [number, number, number], deg: number): [number, number, number, number] {
@@ -161,7 +245,7 @@ export function eulerToQuat(x: number, y: number, z: number): [number, number, n
   return mul(qz, mul(qy, qx));
 }
 
-export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnimation[] = []): Buffer {
+export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnimation[] = [], lights: GlbLight[] = []): Buffer {
   const chunks: Buffer[] = [];
   const bufferViews: object[] = [];
   const accessors: object[] = [];
@@ -186,22 +270,49 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     return accessors.length - 1;
   };
 
+  // Textures: the colour atlas first, then whichever of the normal, metallic-roughness and emissive maps the bake
+  // found worth writing, all on the atlas's UVs.
+  const textured = !!h.atlas;
+  const images: object[] = [];
+  const addImage = (png: Buffer, what: string): number => {
+    images.push({ bufferView: pushView(png, 0), mimeType: "image/png", name: `${name} ${what}` });
+    return images.length - 1;
+  };
+  const baseTex = h.atlas ? addImage(h.atlas.toPng(), "atlas") : -1;
+  const normalTex = textured && h.normalMap && h.tangents ? addImage(h.normalMap.toPng(), "normal") : -1;
+  const mrTex = textured && h.metalRoughMap ? addImage(h.metalRoughMap.toPng(), "metallic-roughness") : -1;
+  const emTex = textured && h.emissiveMap ? addImage(h.emissiveMap.toPng(), "emissive") : -1;
+  const extensionsUsed = new Set<string>();
+
   // Materials, shared across meshes.
   const materials: object[] = [];
   const matIds = new Map<Material, number>();
-  const textured = !!h.atlas;
   const materialId = (m: Material): number => {
     let id = matIds.get(m);
     if (id !== undefined) return id;
-    const pbr: Record<string, unknown> = { baseColorFactor: [1, 1, 1, 1], metallicFactor: m.metal, roughnessFactor: m.rough };
-    if (textured) pbr.baseColorTexture = { index: 0 };
-    materials.push({ name: m.name, pbrMetallicRoughness: pbr });
+    const maps = h.materialMaps?.get(m);
+    const pbr: Record<string, unknown> = { baseColorFactor: [1, 1, 1, 1], metallicFactor: maps?.metal ?? m.metal, roughnessFactor: maps?.rough ?? m.rough };
+    if (textured) pbr.baseColorTexture = { index: baseTex };
+    const def: Record<string, unknown> = { name: m.name, pbrMetallicRoughness: pbr };
+    // A map multiplies its factor, so a material that reads one has factors of 1.
+    if (mrTex >= 0 && maps?.metalRough) { pbr.metallicRoughnessTexture = { index: mrTex }; pbr.metallicFactor = 1; pbr.roughnessFactor = 1; }
+    if (normalTex >= 0 && maps?.normal) def.normalTexture = { index: normalTex };
+    if (m.glow > 0 && h.pbr !== false) {
+      // glTF's emissive factor is at most 1; a glow above that is the emissive strength extension's.
+      const k = Math.min(1, m.glow);
+      if (emTex >= 0 && maps?.emissive) { def.emissiveTexture = { index: emTex }; def.emissiveFactor = [k, k, k]; }
+      else {
+        // One colour: a factor, linear where the atlas is sRGB.
+        const c = maps?.emissiveColor ?? m.color;
+        def.emissiveFactor = c.map((v) => Number((srgbToLinear(v) * k).toFixed(4)));
+      }
+      if (m.glow > 1) { def.extensions = { KHR_materials_emissive_strength: { emissiveStrength: m.glow } }; extensionsUsed.add("KHR_materials_emissive_strength"); }
+    }
+    materials.push(def);
     id = materials.length - 1;
     matIds.set(m, id);
     return id;
   };
-  let imageView = -1;
-  if (h.atlas) imageView = pushView(h.atlas.toPng(), 0);
 
   // Meshes.
   const meshes: object[] = [];
@@ -209,7 +320,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     const n = mesh.positions.length / 3;
     const posAcc = floatAccessor(mesh.positions, "VEC3", true);
     const nrmAcc = floatAccessor(mesh.normals, "VEC3", false);
-    let uvAcc = -1, colAcc = -1;
+    let uvAcc = -1, colAcc = -1, tanAcc = -1;
     if (textured && h.uvs) uvAcc = floatAccessor(h.uvs[mi], "VEC2", false);
     else {
       const colors = new Float32Array(n * 3);
@@ -219,6 +330,9 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
       }
       colAcc = floatAccessor(colors, "VEC3", false);
     }
+    // Tangents only for a mesh with a normal-mapped material: sixteen bytes a vertex, and the bulk of the growth.
+    const mapped = normalTex >= 0 && h.tangents && [...new Set(mesh.materialIndex)].some((i) => h.materialMaps?.get(mesh.materials[i])?.normal);
+    if (mapped) tanAcc = floatAccessor(h.tangents![mi], "VEC4", false);
     const perMaterial = new Map<number, number[]>();
     const ix = mesh.indices;
     for (let t = 0; t < ix.length; t += 3) {
@@ -233,6 +347,7 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
       const view = pushView(Buffer.from(arr.buffer), 34963);
       accessors.push({ bufferView: view, componentType: 5125, count: arr.length, type: "SCALAR" });
       const attributes: Record<string, number> = { POSITION: posAcc, NORMAL: nrmAcc };
+      if (tanAcc >= 0) attributes.TANGENT = tanAcc;
       if (uvAcc >= 0) attributes.TEXCOORD_0 = uvAcc; else attributes.COLOR_0 = colAcc;
       primitives.push({ attributes, indices: accessors.length - 1, material: materialId(mesh.materials[m]) });
     }
@@ -257,6 +372,13 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     return index;
   };
   const rootIndices = h.roots.map(addNode);
+  // The program's lights, each on a node of its own at the scene's root.
+  for (const [i, l] of lights.entries()) {
+    const node: Record<string, unknown> = { name: l.name, translation: l.translation, extensions: { KHR_lights_punctual: { light: i } } };
+    if (l.rotation) node.rotation = l.rotation;
+    rootIndices.push(nodes.length);
+    nodes.push(node);
+  }
 
   // Animations.
   const anims: object[] = [];
@@ -309,10 +431,15 @@ export function toGlbScene(h: SceneHierarchy, name: string, animations: GlbAnima
     buffers: [{ byteLength: offset }],
   };
   if (textured) {
-    json.images = [{ bufferView: imageView, mimeType: "image/png", name: `${name} atlas` }];
+    json.images = images;
     json.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 }];
-    json.textures = [{ sampler: 0, source: 0 }];
+    json.textures = images.map((_, i) => ({ sampler: 0, source: i }));
   }
+  if (lights.length) {
+    json.extensions = { KHR_lights_punctual: { lights: lights.map((l) => ({ name: l.name, type: l.type, color: l.color, intensity: l.intensity, ...(l.range !== undefined ? { range: l.range } : {}) })) } };
+    extensionsUsed.add("KHR_lights_punctual");
+  }
+  if (extensionsUsed.size) json.extensionsUsed = [...extensionsUsed];
   if (anims.length) json.animations = anims;
   let jsonBuf = Buffer.from(JSON.stringify(json), "utf8");
   jsonBuf = Buffer.concat([jsonBuf, Buffer.alloc((4 - (jsonBuf.length % 4)) % 4, 0x20)]);

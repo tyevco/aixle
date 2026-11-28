@@ -1,0 +1,23 @@
+# Probe: the mixer's bowl alone at the scene's cell (0.0189), to find where its
+# 17 open edges are, which the scene report counts but does not place.
+bowl_dims = {z: 0.45, t: 0.05, rim_r: 1.09, rim_h: 1.65, curl: 0.055}
+lock_dims = {tab_r0: 0.53, tab_r1: 0.64, tab_w: 0.18, tab_h: 0.045, hook_gap: 0.025, hook_t: 0.05, lip_r0: 0.585}
+bowl_steel = material("steel", rough=0.2)
+plate_top = 0.51
+bowl_line = [0,0.14, 0.3,0.14, 0.5,0.17, 0.7,0.28, 0.88,0.5, 1.0,0.85, 1.06,1.25, 1.08,1.5, bowl_dims.rim_r,bowl_dims.rim_h]
+# Three quarters of a turn round a circle beside the rim: a rolled bead,
+# open underneath, its hole wide enough (3 cells) to mesh clean.
+def curl_pt(deg) = [bowl_dims.rim_r + bowl_dims.curl - bowl_dims.curl * cos(deg), bowl_dims.rim_h + bowl_dims.curl * sin(deg)]
+bowl_curl = curl_pt(45) + curl_pt(90) + curl_pt(135) + curl_pt(180) + curl_pt(225)
+bowl_y0 = plate_top + bowl_dims.t / 2
+bowl_wall = revolve(curve2(bowl_line + bowl_curl, wall=bowl_dims.t))
+bowl_foot = revolve(curve2([0.5,0.16, 0.53,0.0], wall=bowl_dims.t))
+# Two tabs on the foot, resting on the plate under the hooks.
+bowl_tabs = box(lock_dims.tab_r1 - lock_dims.tab_r0, lock_dims.tab_h, lock_dims.tab_w, round=0.01)
+  | move((lock_dims.tab_r0 + lock_dims.tab_r1) / 2, lock_dims.tab_h / 2 - bowl_dims.t / 2, 0) | mirror("x")
+# The handle's ends sit a tube's radius outside the wall's centre line, so
+# their round caps stop on the centre line, a cell short of the inside.
+bowl_handle = tube(0.04, curve([1.115, 1.42, 0, 1.3, 1.36, 0, 1.42, 1.1, 0, 1.3, 0.82, 0, 1.02, 0.78, 0]))
+bowl = (bowl_wall + bowl_foot + bowl_tabs + bowl_handle) | move(0, bowl_y0, bowl_dims.z) | paint(bowl_steel)
+show bowl
+set grid 142

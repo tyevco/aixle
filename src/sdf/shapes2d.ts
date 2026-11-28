@@ -25,16 +25,28 @@ export function shape2(dist: DistFn2, bounds: Bounds2, cost = 1): Shape2 {
 
 const sym2 = (hx: number, hy: number): Bounds2 => ({ min: [-hx, -hy], max: [hx, hy] });
 
+/** A profile whose field is a distance, so reads at least its box distance outside its box (Shape2.boxFloor). */
+const floored = (s: Shape2): Shape2 => {
+  s.boxFloor = true;
+  return s;
+};
+/** A profile that keeps the floor when what it was made from has one. */
+const floorIf = (s: Shape2, on: boolean | undefined): Shape2 => {
+  if (on) s.boxFloor = true;
+  return s;
+};
+
 export function circle(r: number): Shape2 {
-  return shape2((x, y) => length2(x, y) - r, sym2(r, r));
+  return floored(shape2((x, y) => length2(x, y) - r, sym2(r, r)));
 }
 
 export function rect(w: number, h: number, round = 0): Shape2 {
   const hx = Math.max(w / 2 - round, 0), hy = Math.max(h / 2 - round, 0);
-  return shape2((x, y) => {
+  // A distance, so floored, while the rounding fits inside the box (a larger one bulges out of it).
+  return floorIf(shape2((x, y) => {
     const qx = Math.abs(x) - hx, qy = Math.abs(y) - hy;
     return length2(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - round;
-  }, sym2(w / 2, h / 2));
+  }, sym2(w / 2, h / 2)), round >= 0 && round <= Math.min(w, h) / 2);
 }
 
 export function ellipse(rx: number, ry: number): Shape2 {
@@ -57,7 +69,7 @@ export function polygon(points: readonly number[]): Shape2 {
     minx = Math.min(minx, vx[i]); maxx = Math.max(maxx, vx[i]);
     miny = Math.min(miny, vy[i]); maxy = Math.max(maxy, vy[i]);
   }
-  return shape2((px, py) => {
+  const out = shape2((px, py) => {
     let d = (px - vx[0]) * (px - vx[0]) + (py - vy[0]) * (py - vy[0]);
     let s = 1;
     for (let i = 0, j = n - 1; i < n; j = i, i++) {
@@ -71,6 +83,36 @@ export function polygon(points: readonly number[]): Shape2 {
     }
     return s * Math.sqrt(d);
   }, { min: [minx, miny], max: [maxx, maxy] }, n);
+  // The distance to the nearest edge, so at least the box's distance (outside the box no crossing count can flip it).
+  out.boxFloor = true;
+  // A lathe profile's edges on x = 0 are inside the solid once it is spun, so a full revolve measures the outline
+  // without them (see Shape2.revolveDist), as curve2 does. With the plain distance the revolved field is zero all up
+  // the axis, and `shell()` of it left a hollow rod up the middle of the teapot (measured: every slice showed it).
+  // Only for an outline on x >= 0, where those edges are the axis and not a boundary facing open space.
+  const tol = 1e-9 * (1 + Math.max(Math.abs(minx), Math.abs(maxx), Math.abs(miny), Math.abs(maxy)));
+  const axisEdge = new Uint8Array(n);
+  let onAxis = 0;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) if (Math.abs(vx[i]) <= tol && Math.abs(vx[j]) <= tol) { axisEdge[i] = 1; onAxis++; }
+  if (onAxis > 0 && onAxis < n && minx >= -tol) {
+    out.revolveDist = (px, py) => {
+      let d = Infinity;
+      let s = 1;
+      for (let i = 0, j = n - 1; i < n; j = i, i++) {
+        const ex = vx[j] - vx[i], ey = vy[j] - vy[i];
+        const wx = px - vx[i], wy = py - vy[i];
+        if (!axisEdge[i]) {
+          const t = Math.max(0, Math.min(1, (wx * ex + wy * ey) / (ex * ex + ey * ey)));
+          const bx = wx - ex * t, by = wy - ey * t;
+          d = Math.min(d, bx * bx + by * by);
+        }
+        // The sign still counts every edge: the axis runs close the outline.
+        const c1 = py >= vy[i], c2 = py < vy[j], c3 = ex * wy > ey * wx;
+        if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
+      }
+      return s * Math.sqrt(d);
+    };
+  }
+  return out;
 }
 
 /** A regular polygon with `sides` sides and circumradius `r`, a vertex on +y. */
@@ -140,14 +182,18 @@ export function union2(shapes: Shape2[], k = 0): Shape2 {
     return d;
   }, bounds, live.reduce((c, s) => c + s.cost, 0));
   if (k <= 0) out.parts = live;
-  for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) out.feature = s.feature;
+  // The least of fields that keep their boxes' floor keeps the union box's. A blend does not: chained over the parts
+  // it reads up to k under the least of them (ten bars blended at 0.5 read 0.36 under), past the k/2 the box grows.
+  if (k <= 0 && live.every((s) => s.boxFloor)) out.boxFloor = true;
+  for (const s of live) if (s.feature !== undefined && (out.feature === undefined || s.feature < out.feature)) { out.feature = s.feature; out.featureAt = s.featureAt; }
   for (const s of live) if (s.gap !== undefined && (out.gap === undefined || s.gap < out.gap)) { out.gap = s.gap; out.gapWhat = s.gapWhat; }
   return out;
 }
 
 export function difference2(a: Shape2, b: Shape2, k = 0): Shape2 {
   const da = a.dist, db = b.dist;
-  return keep(shape2((x, y) => smax(da(x, y), -db(x, y), k), a.bounds, a.cost + b.cost), a);
+  // At least a's value, in a's box: a's floor.
+  return floorIf(keep(shape2((x, y) => smax(da(x, y), -db(x, y), k), a.bounds, a.cost + b.cost), a), a.boxFloor);
 }
 
 export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
@@ -155,9 +201,10 @@ export function intersect2(a: Shape2, b: Shape2, k = 0): Shape2 {
   return keep(shape2((x, y) => smax(da(x, y), db(x, y), k), bounds2Intersect(a.bounds, b.bounds), a.cost + b.cost), a);
 }
 
-/** The result carries the feature size of the shape it was built from (scaled by `by`). */
-function keep(out: Shape2, from: Shape2, by = 1): Shape2 {
+/** The result carries the feature size of the shape it was built from (scaled by `by`), and where it is (moved by `at`). */
+function keep(out: Shape2, from: Shape2, by = 1, at: (p: [number, number]) => [number, number] = (p) => p): Shape2 {
   if (from.feature !== undefined) out.feature = from.feature * by;
+  if (from.featureAt) out.featureAt = at(from.featureAt);
   if (from.gap !== undefined) { out.gap = from.gap * by; out.gapWhat = from.gapWhat; }
   return out;
 }
@@ -167,7 +214,7 @@ function keep(out: Shape2, from: Shape2, by = 1): Shape2 {
 export function move2(s: Shape2, dx: number, dy: number): Shape2 {
   const d = s.dist;
   const b = s.bounds;
-  return keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s);
+  return floorIf(keep(shape2((x, y) => d(x - dx, y - dy), isEmpty2(b) ? b : { min: [b.min[0] + dx, b.min[1] + dy], max: [b.max[0] + dx, b.max[1] + dy] }, s.cost), s, 1, (p) => [p[0] + dx, p[1] + dy]), s.boxFloor);
 }
 
 export function rotate2(s: Shape2, deg: number): Shape2 {
@@ -182,8 +229,8 @@ export function rotate2(s: Shape2, deg: number): Shape2 {
       bounds = bounds2Union(bounds, { min: [rx, ry], max: [rx, ry] });
     }
   }
-  // Inverse rotation of the point.
-  return keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s);
+  // Inverse rotation of the point. The box of the turned box holds the turned one, so the floor is kept.
+  return floorIf(keep(shape2((x, y) => d(c * x + sn * y, -sn * x + c * y), bounds, s.cost), s, 1, (p) => [c * p[0] - sn * p[1], sn * p[0] + c * p[1]]), s.boxFloor);
 }
 
 export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
@@ -196,7 +243,8 @@ export function scale2(s: Shape2, sx: number, sy: number): Shape2 {
         min: [Math.min(b.min[0] * sx, b.max[0] * sx), Math.min(b.min[1] * sy, b.max[1] * sy)],
         max: [Math.max(b.min[0] * sx, b.max[0] * sx), Math.max(b.min[1] * sy, b.max[1] * sy)],
       };
-  return keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m);
+  // A uniform scale (a flip included) keeps the floor; a stretched one reads its smallest factor's share along the other.
+  return floorIf(keep(shape2((x, y) => d(x / sx, y / sy) * m, bounds, s.cost), s, m, (p) => [p[0] * sx, p[1] * sy]), s.boxFloor && Math.abs(sx) === Math.abs(sy));
 }
 
 export function flip2(s: Shape2, axis: "x" | "y"): Shape2 {
@@ -210,14 +258,15 @@ export function mirror2(s: Shape2, axis: "x" | "y"): Shape2 {
 /** Grow (r > 0) or shrink (r < 0) the profile by `r`, rounding convex corners. */
 export function offset2(s: Shape2, r: number): Shape2 {
   const d = s.dist;
-  return keep(shape2((x, y) => d(x, y) - r, bounds2Grow(s.bounds, Math.max(r, 0)), s.cost), s);
+  return floorIf(keep(shape2((x, y) => d(x, y) - r, bounds2Grow(s.bounds, Math.max(r, 0)), s.cost), s), s.boxFloor);
 }
 
 /** Keep only a band of width `t` inside the profile's outline. */
 export function shell2(s: Shape2, t: number): Shape2 {
   const d = s.dist;
-  const out = shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost);
+  const out = floorIf(shape2((x, y) => { const v = d(x, y); return Math.max(v, -v - t); }, s.bounds, s.cost), s.boxFloor);
   out.feature = s.feature === undefined ? t : Math.min(s.feature, t);
+  if (s.featureAt && s.feature !== undefined && s.feature <= t) out.featureAt = s.featureAt;
   return out;
 }
 
@@ -252,7 +301,16 @@ export function extrude(profile: Shape2, h: number, axis: ExtrudeAxis = "y"): Sh
         ? (x: number, y: number, z: number) => inner(d(x, y), z)
         : (x: number, y: number, z: number) => inner(d(-z, y), x);
   const out = primitive(dist, bounds, profile.cost);
+  // Outside the slab or the profile's box the value is hypot of the two parts, each at least its box distance when
+  // the profile reads at least its own (Shape3.boxFloor).
+  if (profile.boxFloor) out.boxFloor = true;
   out.feature = profile.feature;
+  if (profile.featureAt) {
+    // The profile's point at mid-thickness, laid as the extrusion lays the profile.
+    const [u, v] = profile.featureAt;
+    out.featureAt = axis === "y" ? [u, 0, -v] : axis === "z" ? [u, v, 0] : [0, v, -u];
+    out.featureProfile = { profile, at: profile.featureAt };
+  }
   out.gap = profile.gap;
   out.gapWhat = profile.gapWhat;
   return out;
@@ -270,8 +328,15 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     ? { min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
     : { min: [-R, b.min[1], -R] as [number, number, number], max: [R, b.max[1], R] as [number, number, number] };
   if (angle >= 360) {
-    const full = primitive((x, y, z) => d(length2(x, z) - offset, y), bounds, profile.cost);
+    // An outline's runs on the axis are inside the solid once it is spun, so they are no surface (see Shape2.revolveDist).
+    const da = offset === 0 && profile.revolveDist ? profile.revolveDist : d;
+    const full = primitive((x, y, z) => da(length2(x, z) - offset, y), bounds, profile.cost);
+    // The radius past the profile's reach is at least the distance to the square round the circle it spins in; an
+    // outline's run on the axis left out of revolveDist only makes the distance larger.
+    if (profile.boxFloor) full.boxFloor = true;
     full.feature = profile.feature;
+    // The profile's point, on the side the profile is drawn on (+x); a full revolve has it all the way round.
+    if (profile.featureAt) { full.featureAt = [profile.featureAt[0] + offset, profile.featureAt[1], 0]; full.featureProfile = { profile, at: profile.featureAt }; }
     full.gap = profile.gap;
     full.gapWhat = profile.gapWhat;
     return full;
@@ -293,7 +358,11 @@ export function revolve(profile: Shape2, offset = 0, angle = 360): Shape3 {
     const d2 = d(inPlane - offset, y);
     return d2 > 0 ? length2(d2, off) : off > 0 ? off : d2;
   }, bounds, profile.cost);
+  // Past an end face the value is the distance to the profile's box laid on that face, which lies in the box.
+  if (profile.boxFloor) out.boxFloor = true;
   out.feature = profile.feature;
+  // A wedge starts at +z: the profile's point at its first face.
+  if (profile.featureAt) { out.featureAt = [0, profile.featureAt[1], profile.featureAt[0] + offset]; out.featureProfile = { profile, at: profile.featureAt }; }
   out.gap = profile.gap;
   out.gapWhat = profile.gapWhat;
   return out;

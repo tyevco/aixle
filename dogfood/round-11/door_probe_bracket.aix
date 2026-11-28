@@ -1,0 +1,145 @@
+# PROBE (bracket): door.aix with one deliberate fault, to see what check says.
+# An arched oak door of six vertical planks, set in a stone wall, held by three
+# iron strap hinges and studded with iron clavos; a ring knocker that swings out
+# on a hinge joint and drops back; and to the right of the door a torch in an
+# iron wall bracket, its flame glowing and lighting the door as a point light.
+# One unit is a metre (glTF's unit). Front is +z. The floor is y = 0.
+
+set grid 160
+set triangles 55000
+set texture 2048                                              # the bumps want several texels each
+
+# ---- materials: the finishes are what the GLB's maps must carry
+# weathered oak: darker than the "oak" preset, which read as new pine in the viewer
+oak = {color: "#8e6438", color2: "#4c2f17", grain: 0.08, bump: 0.0015, bump_scale: 0.025}
+iron = material("rust", scale=0.1, wear=0.5, bump=0.0012, bump_scale=0.012)
+stone = material("#77716a", "brick", color2="#34302b", scale=0.25, rough=0.95, bump=0.004, bump_scale=0.04, wear=0.2)
+handle_wood = material("walnut", scale=0.05, bump=0.0015, bump_scale=0.015, wear=0.3)
+pitch = material("#2a1c12", "noise", color2="#4b3322", scale=0.02, rough=0.95, bump=0.003, bump_scale=0.012)
+flame_mat = material("#ffc04a", "noise", color2="#ff5a14", scale=0.03, glow=1.4)
+
+# ---- sizes
+door = {w: 1.08, rise: 1.5, t: 0.07, z: 0.035, foot: 0.01}   # rise: where the arch springs; z: the leaf's centre
+arch_r = door.w / 2
+gap = 0.022                                                   # all round the leaf, so it could swing: over a cell
+wall = {w: 2.2, h: 2.45, t: 0.24}                             # trimmed to the shot (not fewer triangles: the grid follows the longest side)
+plank_w = door.w / 6
+front = door.z + door.t / 2                                   # the leaf's front face, z = 0.07
+
+# ---- the wall with an arched opening
+opening = (rect(door.w + 2 * gap, door.rise + 0.4) | move(0, door.rise / 2 - 0.2)) + (circle(arch_r + gap) | move(0, door.rise))
+wall_block = box(wall.w, wall.h, wall.t) | move(0, wall.h / 2, 0)
+doorway = extrude(opening, wall.t + 0.2, "z")
+stonework = (wall_block - doorway) | paint(stone)
+
+# ---- the leaf: six planks, each painted in its own frame with its own grain
+leaf_outline = (rect(door.w, door.rise - door.foot) | move(0, (door.rise + door.foot) / 2)) + (circle(arch_r) | move(0, door.rise))
+leaf_slab = extrude(leaf_outline, door.t, "z")
+planks = empty()
+for i in range(6) {
+  x0 = -door.w / 2 + i * plank_w
+  strip = box(plank_w, 3, door.t + 0.02) | move(plank_w / 2, 1.5, 0)
+  plank = (strip & (leaf_slab | move(-x0, 0, 0))) | paint(material(oak.color, "wood", color2=oak.color2, scale=oak.grain, seed=i, rough=0.75, wear=0.3, bump=oak.bump, bump_scale=oak.bump_scale)) | move(x0, 0, door.z)
+  planks = planks + plank
+}
+groove = box(0.028, 2.4, 0.028) | rotate(y=45)
+grooves = empty()
+for i in range(1, 6) {
+  grooves = grooves + (groove | move(-door.w / 2 + i * plank_w, 1.2, front))
+}
+leaf = planks - grooves
+
+# ---- iron: three strap hinges with spear ends, knuckles at the hinge side, studs
+strap = {h: 0.075, t: 0.03, x0: -0.55, x1: 0.44}
+strap_ys = [0.3, 0.88, 1.42]
+spear = polygon(strap.x1 - 0.1, 0, strap.x1 - 0.03, 0.055, strap.x1 + 0.055, 0, strap.x1 - 0.03, -0.055) | round(0.008)
+strap_profile = (rect(strap.x1 - 0.06 - strap.x0, strap.h) | move((strap.x0 + strap.x1 - 0.06) / 2, 0)) + spear
+stud = sphere(0.024) | scale(1, 1, 0.75)
+stud_xs = [-0.45, -0.27, -0.09, 0.09, 0.27, 0.41]
+straps = empty()
+knuckles = empty()
+strap_studs = empty()
+for y in strap_ys {
+  straps = straps + (extrude(strap_profile, strap.t, "z") | move(0, y, front + 0.003))
+  knuckles = knuckles + (cylinder(0.03, strap.h + 0.012, round=0.004) | move(-door.w / 2 - gap / 2, y, front + 0.01))   # a cell into the leaf and into the jamb
+  for x in stud_xs {
+    strap_studs = strap_studs + (stud | move(x, y, front + 0.018 - 0.004))
+  }
+}
+clavos = empty()
+for x in [-0.45, -0.27, -0.09, 0.09, 0.27, 0.45] {
+  clavos = clavos + (stud | move(x, 0.6, front - 0.003))
+}
+for x in [-0.45, -0.27, -0.09, 0.09, 0.45] {              # none behind the knocker's ring
+  clavos = clavos + (stud | move(x, 1.15, front - 0.003))
+}
+for x in [-0.45, -0.27, -0.09, 0.09, 0.27, 0.45] {     # an arc under the arch, one on each plank
+  clavos = clavos + (stud | move(x, door.rise + 0.8 * sqrt(arch_r ^ 2 - x ^ 2), front - 0.003))
+}
+ironwork = (straps + knuckles + strap_studs + clavos) | paint(iron)
+
+# ---- the knocker: a rosette and an eye on the door, the ring hanging in the eye
+pivot = [0.28, 1.27, front + 0.018 + 0.016 + 0.02]      # the ring's back a cell off the rosette
+rosette = cylinder(0.065, 0.03, round=0.006) | rotate(x=90) | move(pivot[0], pivot[1], front + 0.003)
+eye = torus(0.05, 0.015) | rotate(z=90) | move(pivot[0], pivot[1], pivot[2])   # its hole clears the ring's tube by 0.019, a cell
+mount = (rosette + eye) | paint(iron)
+ring_r = 0.09
+ring = torus(ring_r, 0.016) | rotate(x=90) | move(pivot[0], pivot[1] - ring_r, pivot[2]) | paint(iron)
+knocker = joint(ring, "knocker", pivot[0], pivot[1], pivot[2], axis=[1, 0, 0])
+eye_hole = cylinder(0.034, 0.03) | rotate(z=90) | move(pivot[0], pivot[1], pivot[2])   # a probe: the air the ring hangs through
+eye_disc = cylinder(0.068, 0.034) | rotate(z=90) | move(pivot[0], pivot[1], pivot[2])  # a probe: where the eye must be, round the pivot
+
+door_leaf = leaf + ironwork + mount
+door_set = door_leaf + knocker
+
+pose("lifted", knocker=-75)
+pose("bounce", knocker=-14)
+animation("knock", ["rest", "lifted", "rest", "bounce", "rest"], times=[0, 0.55, 0.7, 0.8, 0.95])
+
+# ---- the torch: a walnut handle leaning out 20 degrees, a pitch-soaked head, a flame
+tilt = 20
+base = [0.88, 1.2, 0.21]
+def along(s) = [base[0], base[1] + s * cos(tilt), base[2] + s * sin(tilt)]
+handle = cone(0.02, 0.026, 0.5) | move(0, 0.25, 0) | paint(handle_wood)
+head = cylinder(0.046, 0.13, round=0.015) | move(0, 0.52, 0) | paint(pitch)   # its flat foot (r 0.031) takes the handle (r 0.026) a cell deep
+torch_body = (handle + head) | rotate(x=tilt) | move(base[0], base[1], base[2])
+tip = along(0.585)
+flame = union(sphere(0.05) | scale(1, 1.1, 1), cone(0.046, 0, 0.2) | move(0, 0.1, 0), k=0.03) | twist(70) | move(tip[0], tip[1] + 0.025, tip[2]) | paint(flame_mat)
+
+# the bracket: a plate on the wall, two arms out to a collar and a cup
+plate = box(0.09, 0.32, 0.03, round=0.006) | move(base[0], 1.33, wall.t / 2 + 0.03)   # PROBE: the plate 3 cm off the wall
+collar_at = along(0.3)
+collar = cylinder(0.04, 0.04, round=0.01) | rotate(x=tilt) | move(collar_at[0], collar_at[1], collar_at[2])
+cup_at = along(0.02)
+cup = cone(0.026, 0.038, 0.05) | rotate(x=tilt) | move(cup_at[0], cup_at[1], cup_at[2])
+arm_hi = tube(0.014, [base[0], 1.45, wall.t / 2, collar_at[0], collar_at[1], collar_at[2]])
+arm_lo = tube(0.014, [base[0], 1.22, wall.t / 2, cup_at[0], cup_at[1], cup_at[2]])
+bolts = (stud | move(base[0], 1.21, wall.t / 2 + 0.014)) + (stud | move(base[0], 1.45 + 0.0, wall.t / 2 + 0.014))
+bracket = (plate + collar + cup + arm_hi + arm_lo + bolts) | paint(iron)
+torch = torch_body + flame + bracket
+
+# ---- light and shots: a night, a faint moon, the torch lighting the door
+set environment night
+set ambient 1.3
+light("moon", azimuth=-50, elevation=40, power=0.35, color="#9fb4ff", size=2)
+light("torch", position=[0.85, 2.03, 0.44], range=1.8, color="#ff9a3c", power=2.2)   # just above the flame's tip, so the torch throws its shadow down
+camera("hero", azimuth=20, elevation=3, zoom=1.2)
+camera("iron", focus="knocker", zoom=0.4, azimuth=-25, elevation=8)
+camera("torch", focus="torch", zoom=0.7, azimuth=50, elevation=5)
+set camera hero
+
+scene stonework, door_set, torch
+
+# ---- promises
+assert abs(tall(leaf) - 2.03) < 0.005, "the leaf is 2.03 m tall, its foot 1 cm off the floor"
+assert clearance(leaf, stonework) > 0.018, "the leaf stands clear of its opening, free to swing"
+assert pieces(door_leaf) == 1, "planks, straps, studs, knuckles and the knocker's mount are one piece"
+assert clearance(ring, door_leaf) > 0.016, "the ring hangs in its eye a cell clear of it and of the door"
+assert clearance(ring, door_leaf) > 0.016, "lifted, the ring still clears the eye and the door", pose=lifted
+assert inside(eye, eye_disc) > 0.95, "the eye stands round the pivot (the probe above is the pivot's, so this says the eye is there)"
+assert overlap(ring, eye_hole) > 0.00001, "the ring passes through the eye"
+assert overlap(ring, eye_hole) > 0.00001, "lifted, it still turns in the eye", pose=lifted
+assert pieces(torch) == 1, "handle, head, flame and bracket are one piece"
+assert overlap(plate, stonework) > 0.0002, "the bracket's plate is set into the wall"
+assert clearance(flame, stonework) > 0.2, "the flame stands well off the wall"
+assert clearance(torch, door_set) > 0.2, "the torch is beside the door, not on it"

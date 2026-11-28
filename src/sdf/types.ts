@@ -36,7 +36,8 @@ export type PatternKind =
   | "speckle"
   | "brick"
   | "tiles"
-  | "dots";
+  | "dots"
+  | "rust";
 
 /** A picture painted on a surface: decoded pixels and how the surface's local point maps into them. */
 export interface ImageTexture {
@@ -80,6 +81,20 @@ export interface Material {
   glow: number;
   /** A picture instead of a pattern: sampled at the local point; its alpha is what a decal falls through. */
   image?: ImageTexture;
+  /**
+   * Bumps finer than the mesh, in model units: the height of a noise the
+   * beauty render shades and the atlas bakes into a normal map, adding no
+   * geometry. 0 (or absent) for none.
+   */
+  bump?: number;
+  /** The bumps' feature size in model units; absent, ten times `bump`. */
+  bumpScale?: number;
+  /**
+   * 0..1: how used the surface looks, read from the field's curvature.
+   * Convex edges go lighter and smoother (a metal's rubbed to satin, in
+   * scuffs), cavities darker and rougher. 0 (or absent) for new.
+   */
+  wear?: number;
 }
 
 export interface Hit {
@@ -110,6 +125,14 @@ export interface Shape3 {
    * these, so the thin-part warning reads this instead.
    */
   feature?: number;
+  /**
+   * Where that thinnest feature is, in the shape's own frame, when its constructor knows: a curve2 outline's
+   * thinnest wall, extruded or revolved. Set where the feature is found; the pipeline carries it to the model
+   * through the transforms above, so the thin-part warning can say where (round 11: a sliver on a 46-point outline).
+   */
+  featureAt?: Vec3;
+  /** For an extrude or a revolve whose profile knows where its thinnest wall is: that profile and the point in its plane. */
+  featureProfile?: { profile: Shape2; at: [number, number] };
   /** The narrowest gap the shape is known to contain (a letter's counters, a slot), in model units: closes up under a cell. */
   gap?: number;
   /** What the narrowest gap is, for the warning: "the counter of 'A'", "the space between F and A". */
@@ -132,6 +155,33 @@ export interface Shape3 {
   loose?: boolean;
   /** Set by a loft, a smooth boolean, a warp or a non-uniform scale: the field is a bound on the distance, not the distance, so a march through it (glass) bands. */
   bound?: boolean;
+  /**
+   * Set on a leaf (a shape with no inner or parts) whose field is known to read at least its distance from its box
+   * everywhere outside the box, as a distance does: the exact primitives, a tube, and an extrusion or a revolve of a
+   * profile with Shape2.boxFloor. A difference skips such a cutter outside its box (boxFloored in ops.ts). Not an
+   * ellipsoid, whose field is an approximation that reads 0.155 by a flat one's rim where its box is 0.224 away; a
+   * halfspace's planes; a sweep, whose pieces read the distance to a tilted mitre plane past it; nor an import,
+   * whose open mesh reads inside above its box. A leaf without it is never trusted to.
+   */
+  boxFloor?: boolean;
+  /**
+   * How far this step's own field can stretch its child's, for the mesher's narrow band (fieldBound in ops.ts):
+   * |f(p) - f(q)| <= lipschitz x the child's factor x |p - q|. Set where a warp is not an isometry (a twist, a
+   * twisted or tapered sweep) and by an import's trilinear samples; Infinity where no bound is worked out (bend,
+   * wrap), which has the mesher sample every lattice point. Undefined is 1: a distance, or a bound on one.
+   */
+  lipschitz?: number;
+  /** How much more than lipschitz x the distance this step's own field can read, in its units: displace's noise, which stops short of the far field and so jumps there. */
+  slack?: number;
+  /** Set by scale: the factor its values are its child's times, which scales a slack below it. */
+  valueScale?: number;
+  /** Set by a smooth union, difference or intersection: its blend radius k, so a report can say an edge lies in its fillet. */
+  blend?: number;
+  /** Set by displace: the noise's feature size. Relief like this is finer than the mesh can follow, so the atlas baker writes it into a normal map. */
+  relief?: number;
+  /** Set by paint: the material it gives everything inside it; by decal, `decal` is the one it gives inside its region. */
+  material?: Material;
+  decal?: Material;
   /** Set by difference and intersection: only the first inner shape contributes its surface's material. */
   cut?: boolean;
   /** For a joint: its name, pivot (world), the shape it turns, and its live state. */
@@ -183,10 +233,28 @@ export interface Shape2 {
   parts?: Shape2[];
   /** The thinnest feature the profile is known to carry (a stroke's weight, a 2D shell's wall); see Shape3.feature. */
   feature?: number;
+  /** Where that feature is in the profile's plane, when known (a curve2 outline's thinnest wall); see Shape3.featureAt. */
+  featureAt?: [number, number];
   /** The narrowest gap the profile is known to contain; see Shape3.gap. */
   gap?: number;
   /** What that gap is; see Shape3.gapWhat. */
   gapWhat?: string;
+  /**
+   * For an outline with straight runs on x = 0 (a lathe profile's axis): the distance a full revolve should
+   * use, those runs left out, since a revolve puts them inside the solid and the plain distance would leave a
+   * zero on the axis (a line in the slices, a surface the glass march meets). Set by curve2 and bezier2; any
+   * transform or boolean drops it.
+   */
+  revolveDist?: DistFn2;
+  /** Lettering bent onto an arc: the nearest and farthest the ink comes to the arc's centre, the origin. */
+  arcSpan?: [number, number];
+  /**
+   * Set where the field is known to read at least its distance from the box outside the box, as a distance does: a
+   * circle, a rectangle, a polygon, and the unions, differences, moves, turns, uniform scales, offsets and shells of
+   * such profiles. Not an ellipse, whose field reads as little as 0.88 of that a few sizes off on a diagonal, nor an
+   * intersection or an outline's scan. A sweep bounds its pieces across the path by it (sweeps.ts).
+   */
+  boxFloor?: boolean;
 }
 
 export const EMPTY_BOUNDS: Bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

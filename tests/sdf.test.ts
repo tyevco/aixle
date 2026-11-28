@@ -4,9 +4,14 @@ import * as O from "../src/sdf/ops.js";
 import * as S from "../src/sdf/shapes2d.js";
 import * as W from "../src/sdf/sweeps.js";
 import * as C from "../src/sdf/curves.js";
+import * as C2 from "../src/sdf/curves2d.js";
+import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { isWatertight, meshBounds } from "../src/mesh/mesh.js";
 import * as C_ from "../src/sdf/measure.js";
 import { textProfile, textWidth, FONT_GLYPHS } from "../src/sdf/font.js";
-import { boundsCorners, boundsSize, isEmpty } from "../src/sdf/types.js";
+import { boundsCorners, boundsSize, isEmpty, type Shape3 } from "../src/sdf/types.js";
+import { buildSpatialIndex, cellsFor } from "../src/sdf/spatial.js";
+import { meshField } from "../src/mesh/meshSdf.js";
 import { albedo, customMaterial, materialFromString, preset } from "../src/sdf/materials.js";
 
 describe("primitives", () => {
@@ -384,6 +389,184 @@ describe("spatial index", () => {
   });
 });
 
+describe("fewer evaluations, the same bits", () => {
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  it("visits an index's pieces nearest first and gives min()'s value to the bit, inside and outside the grid", () => {
+    const n = 60;
+    const cx = new Float64Array(n), cy = new Float64Array(n), cz = new Float64Array(n), r = new Float64Array(n);
+    const bmin = new Float64Array(n * 3), bmax = new Float64Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      cx[i] = rnd() * 6 - 3; cy[i] = rnd() * 6 - 3; cz[i] = rnd() * 6 - 3; r[i] = 0.1 + rnd() * 0.6;
+      bmin.set([cx[i] - r[i], cy[i] - r[i], cz[i] - r[i]], i * 3);
+      bmax.set([cx[i] + r[i], cy[i] + r[i], cz[i] + r[i]], i * 3);
+    }
+    const index = buildSpatialIndex(n, bmin, bmax, { min: [-4, -4, -4], max: [4, 4, 4] }, cellsFor(n));
+    const piece = (i: number, x: number, y: number, z: number) => Math.hypot(x - cx[i], y - cy[i], z - cz[i]) - r[i];
+    // A bound under the piece by a varying amount, and one that is no bound at all where it is not positive.
+    const bound = (i: number, x: number, y: number, z: number) => { const d = piece(i, x, y, z); return d > 0 ? d * 0.9 : -5; };
+    const boxDist = (i: number, x: number, y: number, z: number) => {
+      const ex = Math.max(bmin[i * 3] - x, 0, x - bmax[i * 3]), ey = Math.max(bmin[i * 3 + 1] - y, 0, y - bmax[i * 3 + 1]), ez = Math.max(bmin[i * 3 + 2] - z, 0, z - bmax[i * 3 + 2]);
+      return Math.sqrt(ex * ex + ey * ey + ez * ez);
+    };
+    let skipped = 0, calls = 0;
+    const counted = (i: number, x: number, y: number, z: number) => { calls++; return piece(i, x, y, z); };
+    for (let k = 0; k < 3000; k++) {
+      const x = rnd() * 12 - 6, y = rnd() * 12 - 6, z = rnd() * 12 - 6;
+      const before = calls;
+      const got = index.minNearest(x, y, z, counted, bound, boxDist, Infinity);
+      skipped += n - (calls - before);
+      expect(Object.is(got, index.min(x, y, z, piece, boxDist, Infinity))).toBe(true);
+    }
+    expect(skipped).toBeGreaterThan(3000 * n * 0.8);
+  });
+  const sweeps: [string, () => W.SweepPieces][] = [
+    ["a square swept round sharp turns, its corner on the bound", () => W.sweepPieces(S.rect(0.4, 0.4), [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0.5, 2.6, 0.4], [0, 1, 1.5], [1, 0.5, 2.5], [2.5, 0.3, 2], [3, 1.5, 1], [3.5, 0, 0], [4, 1, -1]])!],
+    ["three strands twisted along a helix", () => W.sweepPieces(S.union2([0, 120, 240].map((a) => S.rotate2(S.move2(S.circle(0.11), 0.12, 0), a))), W.toPoints(W.helixPath(1, 1.4, 2, 24), "p"), 720)!],
+    ["a tapered polygon", () => W.sweepPieces(S.polygon([-0.3, 0, 0.3, 0, 0.3, 0.22, -0.3, 0.22]), W.toPoints(W.helixPath(1.5, 2, 1.5, 10), "p"), 90, 2.5)!],
+    ["an ellipse, bounded by its ends alone", () => W.sweepPieces(S.ellipse(0.11, 0.2), W.smoothPath([[-1.85, 0.9, 0], [-2.75, 1.3, 0], [-2.85, 2.2, 0], [-1.75, 2.45, 0]], 6))!],
+  ];
+  for (const [what, make] of sweeps)
+    it(`bounds each piece of ${what} from below, out to five times its size`, () => {
+      const sp = make();
+      const b = sp.bounds;
+      const size = Math.max(...boundsSize(b));
+      let positive = 0;
+      for (let k = 0; k < 6000; k++) {
+        const x = b.min[0] - 2 * size + rnd() * 5 * size, y = b.min[1] - 2 * size + rnd() * 5 * size, z = b.min[2] - 2 * size + rnd() * 5 * size;
+        for (let i = 0; i < sp.n; i++) {
+          const lb = sp.bound(i, x, y, z);
+          if (!(lb > 0)) continue;
+          positive++;
+          expect(lb).toBeLessThanOrEqual(sp.piece(i, x, y, z));
+        }
+      }
+      expect(positive).toBeGreaterThan(6000);
+    });
+  it("bounds a square's piece to within a hair of it on the diagonal, where the two agree", () => {
+    const sp = W.sweepPieces(S.rect(0.4, 0.4), [[0, 0, 0], [3, 0, 0]])!;
+    // Beside the middle of the bar, out along the square's diagonal: the profile reads |q| - reach exactly there.
+    for (const t of [0.5, 1, 3]) {
+      const q = 0.2 + t / Math.SQRT2;
+      const v = sp.piece(0, 1.5, q, -q), lb = sp.bound(0, 1.5, q, -q);
+      expect(lb).toBeLessThan(v);
+      expect(v - lb).toBeLessThan(1e-9);
+    }
+  });
+  it("keeps the floor only through what keeps it", () => {
+    const c = S.circle(0.3), e = S.ellipse(0.1, 0.3);
+    expect([c, S.rect(1, 0.5), S.rect(1, 0.5, 0.2), S.polygon([0, 0, 1, 0, 0, 1]), S.ngon(6, 1), S.star(5, 1, 0.4)].every((p) => p.boxFloor)).toBe(true);
+    expect([S.union2([c, S.move2(c, 1, 0)]), S.difference2(S.rect(1, 1), e), S.rotate2(S.rect(1, 0.2), 30), S.scale2(c, 2, 2), S.flip2(S.move2(c, 1, 0), "x"), S.offset2(S.rect(1, 0.2), 0.1), S.shell2(c, 0.05)].every((p) => p.boxFloor)).toBe(true);
+    expect([e, S.rect(0.2, 1, 0.3), S.intersect2(S.rect(1, 1), c), S.scale2(c, 2, 1), S.union2([c, e]), S.difference2(e, c), S.move2(e, 1, 0), S.union2([c, S.move2(c, 1, 0)], 0.2)].some((p) => p.boxFloor)).toBe(false);
+    // Each floored profile reads at least its box distance outside its box.
+    for (const p of [c, S.rect(1, 0.5, 0.2), S.star(5, 1, 0.4), S.union2([c, S.move2(c, 1, 0)]), S.rotate2(S.rect(1, 0.2), 30), S.offset2(S.rect(1, 0.2), 0.1), textProfile("Ag", 0.5, 0.1, 0, 2)])
+      for (let k = 0; k < 2000; k++) {
+        const x = rnd() * 8 - 4, y = rnd() * 8 - 4;
+        const dx = Math.max(p.bounds.min[0] - x, 0, x - p.bounds.max[0]), dy = Math.max(p.bounds.min[1] - y, 0, y - p.bounds.max[1]);
+        if (dx > 0 || dy > 0) expect(p.dist(x, y)).toBeGreaterThanOrEqual(Math.hypot(dx, dy) - 1e-12);
+      }
+    // And the ellipse does not: far off on a diagonal it reads under its box distance.
+    expect(e.dist(2, 2)).toBeLessThan(Math.hypot(2 - 0.1, 2 - 0.3));
+  });
+  it("skips a dear cutter outside its box and reads max(base, -cutter) to the bit everywhere", () => {
+    const board = P.box(4, 1, 0.4);
+    const letters = O.move(S.extrude(textProfile("AIXLE", 0.5), 0.3, "z"), -1.2, -0.2, 0.2);
+    const wrapped = O.move(O.wrap(S.extrude(textProfile("RING", 0.2), 0.05, "z"), 0.9), 0, 0, -0.7);
+    for (const cutter of [letters, wrapped, O.scale(P.sphere(0.4), 3, 1, 1), O.intersect(P.box(3, 0.2, 3), P.box(0.2, 3, 3))]) {
+      const cut = O.difference(board, cutter);
+      for (let k = 0; k < 20000; k++) {
+        const x = rnd() * 6 - 3, y = rnd() * 2 - 1, z = rnd() * 1.2 - 0.6;
+        expect(Object.is(cut.dist(x, y, z), -Math.min(-board.dist(x, y, z), cutter.dist(x, y, z)))).toBe(true);
+      }
+    }
+  });
+});
+
+describe("fewer evaluations: where a box is no floor", () => {
+  /** How many points of an n-cubed lattice over lo..hi read other than max(base, -cutter), the difference before the cull. */
+  const differing = (base: Shape3, cutter: Shape3, lo: number[], hi: number[], n = 40): number => {
+    const cut = O.difference(base, cutter);
+    let differ = 0;
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++)
+        for (let k = 0; k <= n; k++) {
+          const x = lo[0] + ((hi[0] - lo[0]) * i) / n, y = lo[1] + ((hi[1] - lo[1]) * j) / n, z = lo[2] + ((hi[2] - lo[2]) * k) / n;
+          if (!Object.is(cut.dist(x, y, z), -Math.min(-base.dist(x, y, z), cutter.dist(x, y, z)))) differ++;
+        }
+    return differ;
+  };
+  it("reads max(base, -cutter) to the bit for every cutter whose field can read under its box distance", () => {
+    // An open sheet, imported: past its last crossing a line is counted inside, so it reads negative above its box.
+    const sheet = meshField({ positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]), indices: new Uint32Array([0, 1, 2, 0, 2, 3]) }, 16);
+    const cases: [string, Shape3, Shape3, number[], number[]][] = [
+      // Quilez's ellipsoid is not a distance: by a flat one's rim it reads 0.155 where its box is 0.224 away.
+      ["two flat ellipsoid dimples", P.box(10, 1, 10), O.union([O.move(P.ellipsoid(1, 0.1, 1), -2, 0.5, 0), O.move(P.ellipsoid(1, 0.1, 1), 2, 0.5, 0)]), [-5, -0.5, -2], [5, 0.5, 2]],
+      // Past a mitre plane a piece reads hypot(profile, cap), and the cap is the distance to a tilted plane.
+      ["a groove round a right angle", P.box(40, 40, 4), W.sweep(S.circle(0.5), [[0, 0, 0], [1, 0, 0], [1, 1, 0]]), [-20, -20, -2], [20, 20, 2]],
+      ["an extruded ellipse", P.box(20, 1, 20), S.extrude(S.union2([S.ellipse(2, 0.3), S.circle(0.2)]), 2), [-10, -0.5, -10], [10, 0.5, 10]],
+      ["a halfspace's planes", P.box(20, 20, 20), O.union([P.halfspace(2), O.move(P.sphere(1), 5, 5, 5)]), [-10, -10, -10], [10, 10, 10]],
+      // A pose's non-uniform scale is inside the joint, where the tree's walk does not see it.
+      ["a joint scaled 3:1:1", P.box(20, 20, 20), O.joint(O.union([P.sphere(1), O.move(P.sphere(0.5), 0, 1, 0)]), "j", 0, 0, 0, [0, 0, 0], undefined, [0, 0, 0], [3, 1, 1]), [-10, -10, -10], [10, 10, 10]],
+      ["an open imported mesh", O.move(P.box(4, 4, 1.15), 0.5, 0.5, -0.425), P.primitive(sheet.dist, sheet.bounds, 8), [-0.5, -0.5, -0.2], [1.5, 1.5, 0.2]],
+    ];
+    for (const [what, base, cutter, lo, hi] of cases) expect(differing(base, cutter, lo, hi), what).toBe(0);
+  });
+  it("still skips a cutter that keeps the floor: lettering, tubes, rounded boxes, a revolved polygon", () => {
+    const board = P.box(4, 1, 0.4);
+    const cutters = [
+      O.move(S.extrude(textProfile("AIXLE", 0.5), 0.3, "z"), -1.2, -0.2, 0.2),
+      W.tube([[-1, 0, 0], [0, 0.3, 0], [1, 0, 0]], 0.05, 0.5),
+      O.union([P.box(0.5, 0.2, 0.3, 0.1), O.move(P.cylinder(0.2, 0.5, 0.1), 1, 0, 0)]),
+      O.union([S.revolve(S.polygon([0, 0, 0.3, 0, 0.2, 0.4, 0, 0.4])), O.move(P.torus(0.3, 0.05), 1, 0, 0)]),
+      C.tubeCurve(C.curveThrough([[-1.5, 0, 0], [-0.5, 0.4, 0.1], [0.5, -0.4, 0], [1.5, 0, -0.1]]), 0.06, 0.5, "flat"),
+    ];
+    for (const cutter of cutters) {
+      let calls = 0;
+      const counted: Shape3 = { ...cutter, dist: (x, y, z) => { calls++; return cutter.dist(x, y, z); } };
+      const cut = O.difference(board, counted);
+      // Outside the board and well outside the cutter's box: the board's value, and the cutter is not asked.
+      expect(cut.dist(5, 3, 2)).toBe(board.dist(5, 3, 2));
+      expect(calls).toBe(0);
+      expect(differing(board, cutter, [-3, -1, -0.5], [3, 1, 0.5], 30)).toBe(0);
+    }
+    // And one that is not trusted is asked.
+    let calls = 0;
+    const e = O.union([P.ellipsoid(0.3, 0.1, 0.3), P.sphere(0.1)]);
+    O.difference(board, { ...e, dist: (x, y, z) => { calls++; return e.dist(x, y, z); } }).dist(5, 3, 2);
+    expect(calls).toBe(1);
+  });
+  it("does not take a smooth union of profiles to keep the floor: blended in a chain it reads up to k under the least", () => {
+    const bars = S.union2([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => S.move2(S.rect(2, 0.02), 0, i * 0.001)), 0.5);
+    expect(bars.boxFloor).toBeFalsy();
+    // Its sweep is the plain minimum of its pieces, as before the bound.
+    for (const path of [[[0, 0, 0], [0, 0, 1], [0.3, 0, 2]], [[0, 0, 0], [0, 0, 1], [0, 0.3, 2]], [[0, 0, 0], [0, 0, 1], [1, 0, 1.4]]] as [number, number, number][][]) {
+      const sp = W.sweepPieces(bars, path)!;
+      const now = W.sweep(bars, path).dist;
+      const lo = sp.bounds.min, hi = sp.bounds.max;
+      let differ = 0;
+      for (let i = 0; i <= 50; i++)
+        for (let j = 0; j <= 50; j++)
+          for (let k = 0; k <= 50; k++) {
+            const x = lo[0] + (hi[0] - lo[0]) * ((i / 50) * 3 - 1), y = lo[1] + (hi[1] - lo[1]) * ((j / 50) * 3 - 1), z = lo[2] + (hi[2] - lo[2]) * ((k / 50) * 3 - 1);
+            let best = 1e6;
+            for (let p = 0; p < sp.n; p++) { const bd = sp.boxDist(p, x, y, z); if (bd > 0 && bd >= best) continue; const d = sp.piece(p, x, y, z); if (d < best) best = d; }
+            if (!Object.is(now(x, y, z), best)) differ++;
+          }
+      expect(differ).toBe(0);
+    }
+  });
+  it("breaks a tie of 0 and -0 as min() does, by the order of the cell's list", () => {
+    const n = 16;
+    const bmin = new Float64Array(n * 3).fill(-1), bmax = new Float64Array(n * 3).fill(1);
+    const index = buildSpatialIndex(n, bmin, bmax, { min: [-2, -2, -2], max: [2, 2, 2] }, cellsFor(n));
+    // Every piece reads zero at the point, the last one -0, and the last one has the least bound.
+    const piece = (i: number) => (i === n - 1 ? -0 : 0);
+    const bound = (i: number) => -1 - i;
+    const boxDist = () => 0;
+    for (const p of [[0, 0, 0], [0.5, -0.5, 0.25], [-0.9, 0.9, -0.9]]) expect(Object.is(index.minNearest(p[0], p[1], p[2], piece, bound, boxDist, 1e6), index.min(p[0], p[1], p[2], piece, boxDist, 1e6))).toBe(true);
+  });
+});
+
 describe("loft", () => {
   it("measures a slanted wall across it, like the cone it is, and never farther than the truth", () => {
     const l = W.loft(S.circle(1), S.circle(0.5), 2);
@@ -438,6 +621,39 @@ describe("partial revolve, spline, lowercase, arc text", () => {
     expect(Math.abs(b.min[0] + b.max[0])).toBeLessThan(0.5);
     const under = textProfile("ABC", 1, 0.2, 0, -4);
     expect(under.bounds.min[1]).toBeLessThan(-4);
+  });
+  it("arc text reads left to right with its letters upright, at the top and at the bottom", () => {
+    // The ink's mean angle along the baseline, left of centre negative, in two bands of radius: next to the
+    // baseline's circle, and far from it towards the cap height. Only an L's stem reaches the cap height, and in "I."
+    // only the I does, so in both the far band's ink sits left of the near band's when the glyph is upright and the
+    // text runs left to right. On the bottom arc the letters stand inward, so there the far band is the smaller
+    // radius. (An angle, not x: on the bottom the far band's smaller circle draws x in towards the centre.)
+    const r = 2;
+    const meanAngle = (p: ReturnType<typeof textProfile>, near: boolean, arc: number): number => {
+      let sum = 0, n = 0;
+      for (let x = -1.5; x <= 1.5; x += 0.01) for (let y = -3.2; y <= 3.2; y += 0.01) {
+        if (p.dist(x, y) >= 0) continue;
+        const out = (Math.hypot(x, y) - r) * Math.sign(arc); // height above the baseline, along the letter's up
+        if (near ? Math.abs(out) < 0.1 : out > 0.6) { sum += Math.atan2(x, y * Math.sign(arc)); n++; }
+      }
+      expect(n).toBeGreaterThan(10);
+      return sum / n;
+    };
+    for (const arc of [r, -r]) for (const text of ["L", "I."]) {
+      const p = textProfile(text, 1, 0.12, 0, arc);
+      expect(meanAngle(p, false, arc), `${text} on arc ${arc}`).toBeLessThan(meanAngle(p, true, arc) - 0.02);
+    }
+  });
+  it("arc text knows the radii its ink spans, which check prints (round 10: an engraving broke out over a rim)", () => {
+    // The hub's label: size 0.1 and weight 0.03 on an arc of 0.27 spans 0.255 to 0.385 from the origin.
+    const label = textProfile("HB-7", 0.1, 0.03, 0, 0.27);
+    expect(label.arcSpan![0]).toBeCloseTo(0.255, 3);
+    expect(label.arcSpan![1]).toBeCloseTo(0.385, 3);
+    // Under the bottom the letters stand inward from the baseline's circle.
+    const under = textProfile("HB-7", 0.1, 0.03, 0, -0.27).arcSpan!;
+    expect(under[0]).toBeCloseTo(0.155, 3);
+    expect(under[1]).toBeCloseTo(0.285, 3);
+    expect(textProfile("HB-7", 0.1, 0.03).arcSpan).toBeUndefined();
   });
 });
 
@@ -498,6 +714,31 @@ describe("clearance", () => {
   });
 });
 
+describe("slice levels", () => {
+  it("put the planes through a part's solid, not its box's centre, and through its widest section when the centroid misses", () => {
+    // A lamp: a thin post at x = 0 and a heavy globe out at x = 1.2 on top. The box's centre (x 0.78) is in the air
+    // between them; the centroid is in the globe.
+    const lamp = O.union([P.cylinder(0.05, 2), O.move(P.sphere(0.4), 1.2, 1, 0)]);
+    const cuts = (level: number) => { for (let y = -1; y <= 1.4; y += 0.02) for (let z = -0.4; z <= 0.4; z += 0.02) if (lamp.dist(level, y, z) < 0) return true; return false; };
+    const box = lamp.bounds;
+    expect(cuts((box.min[0] + box.max[0]) / 2)).toBe(false);
+    const lv = C_.sliceLevels(lamp)!;
+    expect(cuts(lv.at[0])).toBe(true);
+    expect(lv.at[0]).toBeGreaterThan(0.9);
+    // A ring lying flat: the centroid is in its hole on every axis; y keeps it (the tube's middle), x and z move
+    // to a section through the tube only if the centre's cut is under half the widest.
+    const ring = P.torus(1, 0.1);
+    const rl = C_.sliceLevels(ring)!;
+    expect(Math.abs(rl.at[1])).toBeLessThan(0.05);
+    // Through the centroid (the hole) a vertical plane cuts the tube twice across, far less than half of a cut along
+    // it near x = ±1, so x and z go there.
+    expect(Math.abs(rl.centroid[0])).toBeLessThan(0.05);
+    expect(Math.abs(rl.at[0])).toBeGreaterThan(0.85);
+    expect(Math.abs(rl.at[2])).toBeGreaterThan(0.85);
+    expect(C_.sliceLevels(P.empty())).toBeUndefined();
+  });
+});
+
 describe("void, overlap and inside", () => {
   it("find solid in a region, the shared volume of two parts, and how much of one lies in another", () => {
     const cup = O.difference(P.cylinder(1, 2), O.move(P.cylinder(0.85, 2), 0, 0.2, 0));
@@ -514,6 +755,12 @@ describe("void, overlap and inside", () => {
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 1, 0, 0))).toBe(0);
     expect(C_.overlapVolume(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 3, 0, 0))).toBe(0);
+    // The language guide's worked number for a curved part: a ring's band (a torus of radius 0.42, tube 0.065)
+    // standing on a flat cushion and sunk 0.03 into it shares about 0.00047; a band half that size shares less.
+    const band = (r: number) => O.move(O.rotate(P.torus(r, 0.065), -90, 0, 0), 0, 0.41 - 0.03 + r + 0.065, 0);
+    const cushion = O.move(P.box(1.3, 0.34, 0.8), 0, 0.24, 0);
+    expect(C_.overlapVolume(band(0.42), cushion)).toBeCloseTo(0.00047, 5);
+    expect(C_.overlapVolume(band(0.2), cushion)).toBeLessThan(0.0004);
     // A small box wholly inside a big one is all inside; half out is half.
     expect(C_.insideFraction(P.box(0.5, 0.5, 0.5), P.box(2, 2, 2))).toBe(1);
     expect(C_.insideFraction(P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.5, 0, 0))).toBeCloseTo(0.5, 2);
@@ -568,6 +815,247 @@ describe("curves", () => {
     const b = ct.bounds;
     for (const p of C.curvePoints(c, 8)) for (let k = 0; k < 3; k++) { expect(p[k]).toBeGreaterThanOrEqual(b.min[k]); expect(p[k]).toBeLessThanOrEqual(b.max[k]); }
     expect(() => C.bezierCurve([[0, 0, 0], [1, 0, 0]])).toThrow(/4, 7, 10/);
+  });
+});
+
+describe("smooth profiles", () => {
+  const k = 0.5523;
+  /** A circle of radius r from four Bezier quarters with the standard handle length, closed on its first anchor. */
+  const bezierCircle = (r: number) => C2.bezier2([r, 0, r, k * r, k * r, r, 0, r, -k * r, r, -r, k * r, -r, 0, -r, -k * r, -k * r, -r, 0, -r, k * r, -r, r, -k * r, r, 0]);
+  const ringOf = (n: number, r = 1) => Array.from({ length: n }, (_, i) => [r * Math.cos((i / n) * 2 * Math.PI), r * Math.sin((i / n) * 2 * Math.PI)]).flat();
+  // A vase's wall as one closed outline: the axis and the foot's edge given twice (corners), the rest smooth.
+  const vasePts = [0, 0, 0, 0, 1, 0, 1, 0, 1.3, 0.5, 1.45, 1.3, 1.25, 2.3, 0.85, 3, 0.8, 3.5, 1.05, 4, 0.98, 4.06, 0.92, 4, 0.68, 3.5, 0.74, 3, 1.12, 2.3, 1.3, 1.3, 1.12, 0.5, 0.85, 0.2, 0, 0.2, 0, 0.2];
+
+  it("a bezier2 circle with handles 0.5523 r is within 0.03% of the radius, negative inside, positive outside", () => {
+    const c = bezierCircle(2);
+    for (let i = 0; i < 360; i++) {
+      const a = (i / 360) * 2 * Math.PI;
+      expect(Math.abs(c.dist(2 * Math.cos(a), 2 * Math.sin(a)))).toBeLessThan(2 * 3e-4);
+      expect(Math.abs(c.dist(1.5 * Math.cos(a), 1.5 * Math.sin(a)) + 0.5)).toBeLessThan(2 * 3e-4);
+      expect(Math.abs(c.dist(3 * Math.cos(a), 3 * Math.sin(a)) - 1)).toBeLessThan(2 * 3e-4);
+    }
+    expect(c.dist(0, 0)).toBeCloseTo(-2, 3);
+    // Tight bounds: the curve's own extent, not its handles'.
+    expect(c.bounds.min[0]).toBeCloseTo(-2, 9);
+    expect(c.bounds.max[1]).toBeCloseTo(2, 9);
+    expect(c.feature).toBeCloseTo(4, 3);
+  });
+  it("a curve2 through points of a circle is within its spline error, which is far under the polygon's", () => {
+    for (const n of [8, 16]) {
+      const pts = ringOf(n);
+      const c = C2.curve2(pts);
+      let dev = 0;
+      for (const [x, y] of C2.chainPoints(C2.chainThrough(pts, true), 200)) dev = Math.max(dev, Math.abs(Math.hypot(x, y) - 1));
+      // Measured: 8.5e-3 through 8 points and 5.5e-4 through 16, against 7.6e-2 and 1.9e-2 for the polygons' sagitta.
+      expect(dev).toBeLessThan(n === 8 ? 9e-3 : 6e-4);
+      for (let i = 0; i < 720; i++) {
+        const a = (i / 720) * 2 * Math.PI;
+        expect(Math.abs(c.dist(Math.cos(a), Math.sin(a)))).toBeLessThanOrEqual(dev + 1e-9);
+      }
+      for (let i = 0; i < n; i++) expect(Math.abs(c.dist(pts[i * 2], pts[i * 2 + 1]))).toBeLessThan(1e-9);
+    }
+  });
+  it("takes centripetal tangents, so a short piece beside a long one cannot loop, and evenly spaced points are the uniform spline", () => {
+    // Round 11's stand: a straight run 85 long ends in a point 2 before the end, then a round end of radius 3 as
+    // evenly spaced points. The uniform tangent at (83, 0), half the chord between its neighbours, handed the 2-long
+    // piece a 14-long handle: it overshot past 85 and looped into a sliver (the thin-part warning read 0.0012).
+    const end: number[] = [];
+    for (let i = 1; i < 8; i++) { const a = (i * 22.5 * Math.PI) / 180; end.push(85 + 3 * Math.sin(a), 3 - 3 * Math.cos(a)); }
+    const run = [0, 0, 0, 0, 83, 0, 85, 0, ...end, 85, 6, 83, 6, 0, 6, 0, 6];
+    const c = C2.curve2(run);
+    // The round end reaches x = 88 and no further; the run stays on y = 0 to within a hair, and the bar is 6 thick.
+    expect(c.bounds.max[0]).toBeLessThan(88.01);
+    expect(c.bounds.min[1]).toBeGreaterThan(-0.15);
+    expect(c.feature!).toBeGreaterThan(5.9);
+    let back = 0;
+    const pts = C2.chainPoints(C2.chainThrough(run, true), 64);
+    for (let i = 1; i < pts.length; i++) if (pts[i][1] < 1 && pts[i - 1][1] < 1 && pts[i][0] < pts[i - 1][0] - 1e-9 && pts[i][0] > 1) back++;
+    expect(back).toBe(0); // along the bottom run the curve only moves forward: no loop
+    // Evenly spaced points: each handle is a third of half the chord between the neighbours, as the uniform spline's.
+    const ring = ringOf(12);
+    const ch = C2.chainThrough(ring, true);
+    for (let i = 0; i < 12; i++) {
+      const prev = (i + 11) % 12, next = (i + 1) % 12;
+      expect(ch.ctrl[i * 8 + 2]).toBeCloseTo(ring[i * 2] + (ring[next * 2] - ring[prev * 2]) / 6, 12);
+      expect(ch.ctrl[i * 8 + 3]).toBeCloseTo(ring[i * 2 + 1] + (ring[next * 2 + 1] - ring[prev * 2 + 1]) / 6, 12);
+    }
+  });
+  it("is the exact distance to the curve, signed by which side, with a gradient of length 1 near it", () => {
+    const chain = C2.chainThrough(vasePts, true);
+    const vase = C2.curve2(vasePts);
+    const dense = C2.chainPoints(chain, 2000);
+    const poly = S.polygon(dense.slice(0, -1).flat());
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 300; i++) {
+      const x = -0.5 + rnd() * 2.5, y = -0.5 + rnd() * 5;
+      const d = vase.dist(x, y), p = poly.dist(x, y);
+      // The dense polygon is within its sagitta (well under 1e-6 here) of the curve.
+      expect(Math.abs(d - p)).toBeLessThan(1e-6);
+    }
+    for (let i = 0; i < 400; i++) {
+      const x = -0.2 + rnd() * 1.9, y = -0.2 + rnd() * 4.5;
+      const d = vase.dist(x, y);
+      if (Math.abs(d) > 0.05 || Math.abs(d) < 1e-3) continue;
+      const h = 1e-5;
+      const g = Math.hypot(vase.dist(x + h, y) - vase.dist(x - h, y), vase.dist(x, y + h) - vase.dist(x, y - h)) / (2 * h);
+      expect(g).toBeCloseTo(1, 3);
+    }
+    // A long outline searches through a grid and counts crossings by height bands: the same exact field.
+    const wavy: number[] = [];
+    for (let i = 0; i < 90; i++) { const a = (i / 90) * 2 * Math.PI, r = 1 + 0.1 * Math.sin(9 * a); wavy.push(r * Math.cos(a), r * Math.sin(a)); }
+    const long = C2.curve2(wavy), longPoly = S.polygon(C2.chainPoints(C2.chainThrough(wavy, true), 200).slice(0, -1).flat());
+    for (let i = 0; i < 300; i++) {
+      const x = -1.6 + rnd() * 3.2, y = -1.6 + rnd() * 3.2;
+      expect(Math.abs(long.dist(x, y) - longPoly.dist(x, y))).toBeLessThan(1e-6);
+    }
+    // The underside runs straight between its two corners.
+    expect(vase.dist(0.5, 0.02)).toBeCloseTo(-0.02, 9);
+    expect(vase.dist(0.5, -0.1)).toBeCloseTo(0.1, 9);
+    expect(vase.dist(0.5, 1)).toBeGreaterThan(0);
+  });
+  it("finds the nearest point in every basin of a piece, not only round its nearest sample", () => {
+    // A teardrop drawn as one piece from its point and back: beside the point the scan's nearest sample is the start,
+    // and the nearest point is near the end. Searching round the nearest sample alone read 0.28 there, against 0.015.
+    const b = [0, 0, 1.5, 1.5, -1.5, 1.5, 0, 0];
+    const drop = C2.bezier2(b);
+    const dropPoly = S.polygon(C2.chainPoints(C2.chainFromBezier(b, true), 4000).slice(0, -1).flat());
+    expect(drop.dist(-0.2, 0.2)).toBeCloseTo(dropPoly.dist(-0.2, 0.2), 6);
+    for (let i = 0; i < 30; i++)
+      for (let j = 0; j < 30; j++) {
+        const x = -0.6 + (1.2 * (i + 0.5)) / 30, y = -0.2 + (1.4 * (j + 0.5)) / 30;
+        expect(Math.abs(drop.dist(x, y) - dropPoly.dist(x, y))).toBeLessThan(1e-6);
+      }
+    // Inside the example vase's mouth, a sample whose nearest point is in a shallow basin away from the lowest sample
+    // (5.6e-5 too far before).
+    const ex = [0, 0, 0, 0, 1.0, 0, 1.0, 0, 1.18, 0.3, 1.45, 1.2, 1.3, 2.2, 0.9, 2.9, 0.8, 3.4, 1.0, 3.8, 1.06, 4.0, 0.985, 4.06, 0.91, 4.0, 0.85, 3.8, 0.68, 3.4, 0.78, 2.9, 1.15, 2.2, 1.3, 1.2, 1.05, 0.38, 0.8, 0.22, 0, 0.22, 0, 0.22];
+    const exPoly = S.polygon(C2.chainPoints(C2.chainThrough(ex, true), 2000).slice(0, -1).flat());
+    expect(Math.abs(C2.curve2(ex).dist(0.4823, 3.9417) - exPoly.dist(0.4823, 3.9417))).toBeLessThan(1e-6);
+  });
+  it("carries bounds that contain the curve and touch it, and a feature for a wall drawn as an outline", () => {
+    const chain = C2.chainThrough(vasePts, true);
+    const vase = C2.curve2(vasePts);
+    const b = vase.bounds;
+    const pts = C2.chainPoints(chain, 64);
+    for (const [x, y] of pts) {
+      expect(x).toBeGreaterThanOrEqual(b.min[0] - 1e-12);
+      expect(x).toBeLessThanOrEqual(b.max[0] + 1e-12);
+      expect(y).toBeGreaterThanOrEqual(b.min[1] - 1e-12);
+      expect(y).toBeLessThanOrEqual(b.max[1] + 1e-12);
+    }
+    expect(Math.max(...pts.map((p) => p[0]))).toBeCloseTo(b.max[0], 4);
+    expect(b.min[0]).toBe(0);
+    // A band 0.05 thick drawn out along an arc and back along a smaller one: its wall, not its box.
+    const band = [...ringOf(16).slice(0, 18), ...ringOf(16, 0.95).slice(0, 18).reverse().flatMap((_, i, r) => (i % 2 === 0 ? [r[i + 1], r[i]] : []))];
+    expect(C2.curve2(band).feature).toBeCloseTo(0.05, 2);
+    // Sharp tips are corners, not walls: a leaf 0.4 wide reads near its width.
+    expect(C2.curve2([0, 0, 0, 0, 0.5, 0.15, 1, 0.2, 1.5, 0.15, 2, 0, 2, 0, 1.5, -0.15, 1, -0.2, 0.5, -0.15]).feature).toBeGreaterThan(0.3);
+    // A wall carries itself; a profile closed along the axis carries nothing from the axis.
+    expect(C2.curve2([0, 0, 1, 0, 2, 1], 0.08).feature).toBe(0.08);
+    expect(C2.bezier2([0, -1, k, -1, 1, -k, 1, 0, 1, k, k, 1, 0, 1]).feature).toBeUndefined();
+    expect(S.revolve(C2.curve2(vasePts)).feature).toBeCloseTo(vase.feature!, 9);
+  });
+  it("a point given twice is a corner, the run between two corners is straight, and a closing point is only that", () => {
+    const sq = C2.curve2([0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1]);
+    expect(sq.dist(0.5, 0.5)).toBeCloseTo(-0.5, 9);
+    expect(sq.dist(1.5, 0.5)).toBeCloseTo(0.5, 9);
+    expect(sq.dist(1.5, 1.5)).toBeCloseTo(Math.SQRT2 / 2, 9);
+    expect(sq.bounds).toEqual({ min: [0, 0], max: [1, 1] });
+    const open = C2.curve2([1, 0, 0, 1, -1, 0, 0, -1]), closed = C2.curve2([1, 0, 0, 1, -1, 0, 0, -1, 1, 0]);
+    expect(closed.dist(1.1, 0.1)).toBe(open.dist(1.1, 0.1));
+    expect(C2.curve2([1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 1, 0]).dist(1.1, 0.1)).not.toBeCloseTo(open.dist(1.1, 0.1), 3);
+    expect(C2.curve2([1, 0, 1, 0, 0, 1, -1, 0, 0, -1]).dist(1.1, 0.1)).toBeCloseTo(C2.curve2([1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 1, 0]).dist(1.1, 0.1), 12);
+  });
+  it("bezier2 closes with a straight edge back to the first anchor, and says what a malformed list is", () => {
+    // A half disc drawn from the axis round to the axis: the straight edge closes it along x = 0.
+    const d = C2.bezier2([0, -1, k, -1, 1, -k, 1, 0, 1, k, k, 1, 0, 1]);
+    expect(d.dist(0.5, 0)).toBeCloseTo(-0.5, 3);
+    expect(d.dist(-0.1, 0)).toBeCloseTo(0.1, 9);
+    expect(d.bounds.min[0]).toBe(0);
+    // Revolved, it is a sphere of radius 1 to the Bezier circle's error.
+    const ball = S.revolve(d);
+    expect(Math.abs(ball.dist(0, 0, 1))).toBeLessThan(3e-4);
+    expect(Math.abs(ball.dist(0.6, 0.8, 0))).toBeLessThan(3e-4);
+    expect(() => C2.bezier2([0, 0, 1, 0, 1])).toThrow(/x, y pairs, got 5 numbers/);
+    expect(() => C2.bezier2([0, 0, 1, 0, 1, 1, 0, 1, 0, 0])).toThrow(/4, 7, 10, \.\.\. x, y pairs .* got 5 pairs/);
+    expect(() => C2.curve2([0, 0, 1, 0, 1, 0, 0, 0])).toThrow(/at least 3 different points/);
+    expect(() => C2.bezier2([0, 0, 0, 0, 0, 0, 0, 0])).toThrow(/piece 1 has all four points/);
+  });
+  it("a self-crossing outline is filled even-odd, as polygon is", () => {
+    const eight = C2.curve2([0, 0, 1, 0.8, 2, 0, 1, -0.8, 0, 0, -1, 0.8, -2, 0, -1, -0.8]);
+    expect(eight.dist(1, 0)).toBeLessThan(0);
+    expect(eight.dist(-1, 0)).toBeLessThan(0);
+    expect(eight.dist(0, 0.5)).toBeGreaterThan(0);
+    const star: number[] = [];
+    for (let i = 0; i < 5; i++) { const a = ((i * 2) / 5) * 2 * Math.PI + Math.PI / 2; star.push(Math.cos(a), Math.sin(a)); }
+    expect(C2.curve2(star).dist(0, 0)).toBeGreaterThan(0);
+    expect(C2.curve2(star).dist(0, 0.8)).toBeLessThan(0);
+  });
+  it("a wall makes the open curve a band with round ends", () => {
+    const w = C2.curve2([0, 0, 1, 0, 2, 1], 0.2);
+    expect(w.dist(-0.1, 0)).toBeCloseTo(0, 9);
+    expect(w.dist(-0.3, 0)).toBeCloseTo(0.2, 9);
+    expect(w.dist(2, 1)).toBeCloseTo(-0.1, 9);
+    const b = C2.bezier2([0, 0, 1, 0, 2, 0, 3, 0], 0.1);
+    expect(b.dist(1.5, 0.05)).toBeCloseTo(0, 9);
+    expect(b.dist(1.5, 0)).toBeCloseTo(-0.05, 9);
+    expect(b.bounds).toEqual({ min: [-0.05, -0.05], max: [3.05, 0.05] });
+    // language.md's cup: the heel is a corner of the line, so the band is sharp inside it and round outside it, by
+    // half the wall (a point 0.07 out from the corner along the outer bisector is 0.02 outside).
+    const cup = C2.curve2([0, 0.05, 0.9, 0.05, 0.9, 0.05, 1.2, 1, 0.8, 2.4], 0.1);
+    const ox = 0.953, oy = -1.301, ol = Math.hypot(ox, oy);
+    expect(cup.dist(0.9 + (0.07 * ox) / ol, 0.05 + (0.07 * oy) / ol)).toBeCloseTo(0.02, 3);
+  });
+  it("a polygon's edge on the axis is left out of a full revolve too, so a shelled lathe has no rod up its middle", () => {
+    // The teapot's body: shell() of a revolved polygon closed along x = 0 left a hollow rod of the wall's thickness up
+    // the axis, in every slice, since the plain distance is zero all along it.
+    const body = S.polygon([0, 0, 1.6, 0, 2.1, 0.7, 2.05, 1.5, 1.4, 2.3, 1.15, 2.5, 0, 2.5]);
+    expect(body.dist(0, 1)).toBeCloseTo(0, 9);
+    const solid = S.revolve(body);
+    expect(solid.dist(0, 1, 0)).toBeCloseTo(-1, 6);
+    expect(solid.dist(0.01, 1.2, 0)).toBeCloseTo(-1.2, 6);
+    const pot = O.shell(solid, 0.08);
+    expect(pot.dist(0, 1.25, 0)).toBeGreaterThan(0.5);
+    // Outside the solid it is the same distance as before; a partial revolve keeps the axis as its wedge's edge.
+    expect(solid.dist(3, 1, 0)).toBeCloseTo(S.revolve(S.move2(body, 0, 0), 0, 360).dist(3, 1, 0), 9);
+    expect(solid.dist(3, 1, 0)).toBeCloseTo(body.dist(3, 1), 9);
+    expect(S.revolve(body, 0, 180).dist(0, 1, 0.001)).toBeCloseTo(body.dist(0.001, 1), 9);
+    // An outline reaching past the axis is not a lathe profile: its edge on x = 0 is kept.
+    expect(S.polygon([-1, 0, 0, 0, 0, 1, -1, 1]).revolveDist).toBeUndefined();
+    expect(S.polygon([0, 0, 1, 0, 0, 1]).revolveDist).toBeDefined();
+    // A wall a few cells thick meshes as two closed surfaces and nothing up the middle.
+    expect(isWatertight(surfaceNets(O.shell(solid, 0.3), { resolution: 64 }).mesh)).toBe(true);
+  });
+  it("works wherever a profile does, and a revolve of one is exact and meshes watertight", () => {
+    const vase = C2.curve2(vasePts);
+    const solid = S.revolve(vase);
+    expect(solid.bound).toBeUndefined();
+    expect(solid.dist(0, 0.02, 0.5)).toBeCloseTo(-0.02, 9);
+    // The run up the axis is inside the solid once spun: no zero along the axis (a line in the slices, a surface to
+    // the glass march), where the plain profile is zero on it. A moved profile has no axis, and keeps its distance.
+    expect(vase.dist(0, 0.1)).toBeCloseTo(0, 9);
+    expect(solid.dist(0, 0.1, 0)).toBeCloseTo(-0.1, 9);
+    expect(solid.dist(0.001, 0.12, 0)).toBeCloseTo(-0.08, 6);
+    expect(S.move2(vase, 0.5, 0).revolveDist).toBeUndefined();
+    // So does a boolean (language.md: cut a groove after the revolve): its axis run is a zero again.
+    expect(S.difference2(vase, S.move2(S.circle(0.1), 1.3, 1)).revolveDist).toBeUndefined();
+    expect(S.revolve(S.difference2(vase, S.move2(S.circle(0.1), 1.3, 1))).dist(0, 0.1, 0)).toBeCloseTo(0, 9);
+    expect(S.revolve(vase, 0, 180).dist(0, 0.1, 0.001)).toBeCloseTo(vase.dist(0.001, 0.1), 9);
+    // At 80 cells the 0.096 lip is 1.9 cells. At 64 it is 1.5, in the band that meshes but not always watertight: it
+    // was watertight there by luck, and with the centripetal tangents its crest falls 6 open edges short.
+    const r = surfaceNets(solid, { resolution: 80 });
+    expect(isWatertight(r.mesh)).toBe(true);
+    const mb = meshBounds(r.mesh);
+    expect(mb.max[1]).toBeCloseTo(vase.bounds.max[1], 1);
+    expect(mb.max[0]).toBeCloseTo(vase.bounds.max[0], 1);
+    // Extrude, booleans, offset and loft take it like any profile.
+    const c = C2.curve2(ringOf(12));
+    expect(S.extrude(c, 0.5, "z").dist(0, 0, 0)).toBeCloseTo(-0.25, 6);
+    expect(S.difference2(c, S.circle(0.5)).dist(0, 0)).toBeCloseTo(0.5, 6);
+    expect(S.offset2(c, 0.1).dist(1.1, 0)).toBeCloseTo(0, 6);
+    expect(W.loft(c, S.circle(0.5), 1).dist(0, 0, 0)).toBeLessThan(0);
+    const sw = C.sweepCurve(C2.bezier2([0.1, 0, 0.1, 0.05, 0.05, 0.1, 0, 0.1, -0.05, 0.1, -0.1, 0.05, -0.1, 0, -0.1, -0.05, -0.05, -0.1, 0, -0.1, 0.05, -0.1, 0.1, -0.05, 0.1, 0]), C.bezierCurve([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]));
+    expect(sw.dist(1.5, 0, 0)).toBeCloseTo(-0.1, 2);
   });
 });
 
@@ -733,5 +1221,63 @@ describe("letter spacing as a gap", () => {
     // A single letter has no neighbour: its gap is its counters alone; so is a bold title whose letters overlap.
     expect(textProfile("A", 0.15, 0.04, 0.025, 0, "serif").gap!).toBeCloseTo(2.8 * 0.025 - 0.04, 6);
     expect(textProfile("AIXLE", 1.3, 0.22).gap!).toBeCloseTo(2.8 * (1.3 / 6) - 0.22, 6);
+  });
+});
+
+describe("round-11 findings", () => {
+  // A head laid along z, 3 long, with a plate 0.03 thick across it hanging below: the plate's z lies between two of
+  // the 48 rays a side, so the rays from below and from the sides slip past it.
+  const head = () => O.rotate(P.cylinder(0.5, 3), 90, 0, 0);
+  const plate = () => O.move(P.box(3, 2.5, 0.03), 0, -1.25, 0);
+  it("the surface's extent keeps a thin plate the rays slip between, measured on the plate's own box", () => {
+    const rig = O.joint(O.union([head(), plate()]), "tilt", 0, 0, 0);
+    const rays = O.surfaceExtent(rig, 48);
+    // What the rays alone see: the head without its plate (round 11: a joint's surface line left out the beater).
+    expect(rays.min[1]).toBeGreaterThan(-0.6);
+    const deep = O.surfaceExtentDeep(rig);
+    expect(deep.min[1]).toBeCloseTo(-2.5, 2);
+    expect(deep.min[0]).toBeCloseTo(-1.5, 2);
+    expect(deep.max[0]).toBeCloseTo(1.5, 2);
+    // Never past the box, and the head's own extent stands.
+    expect(deep.max[1]).toBeCloseTo(0.5, 2);
+    expect(deep.min[2]).toBeCloseTo(-1.5, 2);
+  });
+  it("places a hard union folded into a larger one where its parts are, so it has a posed extent", () => {
+    // `hinged = head + knuckle` read by `joint(hinged + nose, ...)`: the union of unions is one flat list, so hinged is
+    // no node of the joint's tree, only its parts are.
+    const knuckle = O.move(P.sphere(0.2), 0, 0, -1.5);
+    const hinged = O.union([head(), knuckle]);
+    const nose = O.move(P.sphere(0.3), 0, 0, 1.6);
+    const turned = O.joint(O.union([hinged, nose]), "tilt", 0, 0, -1.5, [-90, 0, 0]);
+    const placed = O.placedShape(turned, hinged)!;
+    expect(placed).toBeDefined();
+    // Turned -90 degrees about x at the back, the head stands up: its far end is 3 above the pivot.
+    expect(O.surfaceExtent(placed, 48).max[1]).toBeCloseTo(3, 1);
+  });
+});
+
+describe("where a step rests", () => {
+  it("finds the edge a leaning box rests on, not its centroid, and nothing for a box in the air", () => {
+    // Round 11: a book leaning 18 degrees had its centroid's vertical plane in the air between two shelves.
+    const board = O.move(P.box(4, 0.2, 2), 0, -0.1, 0);
+    const book = O.rotate(O.move(P.box(0.3, 2.5, 1.5), 0.15, 1.25, 0), 0, 0, 18);
+    const model = O.union([board, book]);
+    const cell = 0.03;
+    const c = C_.restingContact(book, model, cell * 2)!;
+    expect(c).toBeDefined();
+    // The book stands on its edge at x = 0; its centroid is at x -0.24, up in the air.
+    expect(Math.abs(c.at[0])).toBeLessThan(0.1);
+    expect(c.at[1]).toBeLessThan(0.15);
+    expect(c.normal[1]).toBeLessThan(-0.5);
+    expect(C_.sliceLevels(book)!.at[0]).toBeLessThan(-0.2);
+    // Lifted half a unit off the board it touches nothing.
+    const lifted = O.move(book, 0, 0.5, 0);
+    expect(C_.restingContact(lifted, O.union([board, lifted]), cell * 2)).toBeUndefined();
+    // A stem in its soil meets it all round: no one direction, so no plane is said to lie along it.
+    const soil = O.move(P.box(1, 0.4, 1), 0, 0.2, 0);
+    const stem = O.move(P.cylinder(0.05, 1), 0, 0.6, 0);
+    const s = C_.restingContact(stem, O.union([soil, stem]), cell * 2)!;
+    expect(Math.abs(s.at[0]) + Math.abs(s.at[2])).toBeLessThan(0.03);
+    expect(s.at[1]).toBeLessThan(0.45);
   });
 });

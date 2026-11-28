@@ -110,6 +110,7 @@ export function union(shapes: Shape3[], k = 0): Shape3 {
     cost,
     inner: live,
     bound: true,
+    blend: k,
     feature: minFeature(live),
     gap: minGap(live),
     gapWhat: minGapWhat(live),
@@ -136,12 +137,62 @@ function minFeature(shapes: Shape3[]): number | undefined {
   return f;
 }
 
+/**
+ * A cutter of at least this cost (primitives a call can evaluate) is skipped where its box shows it cannot win. A
+ * single primitive costs about what the box test does: over a lattice on each difference's base, the test took a
+ * sample's time to 0.75 to 1.95 of what it was with one primitive (the mug's two cylinders 1.05 and 0.83), and to 0.20
+ * to 1.11 with two or more, slower only on a lighthouse's three (1.11) and a hub's 58 (1.02).
+ */
+const CUT_CULL_COST = 2;
+
+/**
+ * Whether a field is known to read at least its box distance everywhere outside its box: the floor union()'s cull
+ * rests on, and difference()'s. A leaf is trusted only when it says so (Shape3.boxFloor: the exact primitives, tubes,
+ * extrusions and revolves of profiles that keep the floor), since an ellipsoid, a halfspace, a sweep past a mitre and
+ * an open import all read under their boxes (measured: an import's open sheet flipped the sign at 3173 of 68921
+ * lattice points under the cull). Above the leaves the hard unions and differences, moves, turns, uniform scales,
+ * offsets, shells, paints and anchors of trusted fields keep it. A field marked as only a bound on the distance
+ * (`bound`: a twist, a bend or a wrap, a non-uniform scale, a displacement, a loft, a blend) is not trusted (a wrapped
+ * inscription read under its box distance at 6 lattice points of round 10's ring), nor an intersection, whose box is
+ * the overlap of its operands' boxes while its field is only the larger of their fields, nor a joint a pose scales
+ * unevenly, whose scale sits inside it where `inner` does not lead. Memoised per shape.
+ */
+const FLOORED = new WeakMap<Shape3, boolean>();
+const INTERSECTIONS = new WeakSet<Shape3>();
+function boxFloored(s: Shape3): boolean {
+  const known = FLOORED.get(s);
+  if (known !== undefined) return known;
+  const kids = s.inner ?? s.parts ?? [];
+  let ok = !s.bound && !INTERSECTIONS.has(s) && (kids.length > 0 || s.joint !== undefined || s.instanced !== undefined || s.boxFloor === true);
+  if (ok) for (const c of kids) if (!boxFloored(c)) { ok = false; break; }
+  if (ok && s.joint) ok = s.joint.scale[0] === s.joint.scale[1] && s.joint.scale[1] === s.joint.scale[2] && boxFloored(s.joint.child);
+  if (ok && s.instanced) ok = boxFloored(s.instanced.base);
+  FLOORED.set(s, ok);
+  return ok;
+}
+
 export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
   if (isEmpty(b.bounds)) return a;
   const da = a.dist, db = b.dist, ha = a.hit, hb = b.hit;
+  let dist = (x: number, y: number, z: number): number => smax(da(x, y, z), -db(x, y, z), k);
+  if (k <= 0 && b.cost >= CUT_CULL_COST && boxFloored(b)) {
+    // Outside the cutter's box by bd the cutter reads at least bd, so where the base reads -bd or more, max(base,
+    // -cutter) is the base's value to the bit and the cutter need not be asked. The floor is taken a hair under the
+    // box distance (a millionth of a millionth, and as much of the box's own coordinates) so rounding in the box test
+    // cannot skip a cutter that would have decided the value.
+    const bx0 = b.bounds.min[0], by0 = b.bounds.min[1], bz0 = b.bounds.min[2], bx1 = b.bounds.max[0], by1 = b.bounds.max[1], bz1 = b.bounds.max[2];
+    const tiny = 1e-12 * (1 + Math.max(Math.abs(bx0), Math.abs(by0), Math.abs(bz0), Math.abs(bx1), Math.abs(by1), Math.abs(bz1)));
+    dist = (x, y, z) => {
+      const va = da(x, y, z);
+      const ex = Math.max(bx0 - x, 0, x - bx1), ey = Math.max(by0 - y, 0, y - by1), ez = Math.max(bz0 - z, 0, z - bz1);
+      const floor = Math.sqrt(ex * ex + ey * ey + ez * ez) * (1 - 1e-12) - tiny;
+      if (floor > 0 && va >= -floor) return va;
+      return -Math.min(-va, db(x, y, z));
+    };
+  }
   return {
     kind: "shape3",
-    dist: (x, y, z) => smax(da(x, y, z), -db(x, y, z), k),
+    dist,
     hit: (x, y, z) => {
       const h = ha(x, y, z);
       const d = smax(h.d, -hb(x, y, z).d, k);
@@ -152,6 +203,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
     inner: [a, b],
     cut: true,
     bound: k > 0 || undefined,
+    blend: k > 0 ? k : undefined,
     feature: a.feature,
     gap: a.gap,
     gapWhat: a.gapWhat,
@@ -160,7 +212,7 @@ export function difference(a: Shape3, b: Shape3, k = 0): Shape3 {
 
 export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
   const da = a.dist, db = b.dist, ha = a.hit, hb = b.hit;
-  return {
+  const out: Shape3 = {
     kind: "shape3",
     dist: (x, y, z) => smax(da(x, y, z), db(x, y, z), k),
     hit: (x, y, z) => {
@@ -175,10 +227,18 @@ export function intersect(a: Shape3, b: Shape3, k = 0): Shape3 {
     inner: [a, b],
     cut: true,
     bound: k > 0 || undefined,
+    blend: k > 0 ? k : undefined,
     feature: a.feature,
     gap: a.gap,
     gapWhat: a.gapWhat,
   };
+  INTERSECTIONS.add(out);
+  return out;
+}
+
+/** Whether a `cut` node keeps the overlap of its two shapes (`a & b`), rather than taking the second from the first. */
+export function isIntersection(s: Shape3): boolean {
+  return INTERSECTIONS.has(s);
 }
 
 // --- transforms --------------------------------------------------------------
@@ -250,6 +310,7 @@ export function scale(s: Shape3, sx: number, sy: number, sz: number): Shape3 {
     cost: s.cost,
     inner: [s],
     bound: sx !== sy || sy !== sz || undefined,
+    valueScale: m,
     transform: true,
     unwarp: (x, y, z) => [x / sx, y / sy, z / sz],
     warp: (x, y, z) => [x * sx, y * sy, z * sz],
@@ -323,10 +384,17 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
   const d = s.dist, h = s.hit;
   const b = s.bounds;
   let bounds = b;
+  let reach = 0;
   if (!isEmpty(b)) {
     const r = Math.max(...boundsCorners(b).map((c) => length2(c[0], c[2])));
     bounds = { min: [-r, b.min[1], -r], max: [r, b.max[1], r] };
+    reach = r;
   }
+  // The turn shears a point's distance to the child's surface: from a point to a surface point at radius at most
+  // `reach`, a rise of h turns the surface point k h round, so the child's frame sees the matrix [[1, m], [0, 1]]
+  // with m = k reach, whose largest stretch is (m + sqrt(m^2 + 4)) / 2.
+  const m = Math.abs(k) * reach;
+  const lipschitz = (m + Math.sqrt(m * m + 4)) / 2;
   const warp = (x: number, y: number, z: number): Vec3 => {
     const a = -k * y, c = Math.cos(a), sn = Math.sin(a);
     return [c * x - sn * z, y, sn * x + c * z];
@@ -342,6 +410,7 @@ export function twist(s: Shape3, degPerUnit: number): Shape3 {
     warp: (x, y, z) => { const a = k * y, c = Math.cos(a), sn = Math.sin(a); return [c * x - sn * z, y, sn * x + c * z]; },
     loose: true,
     bound: true,
+    lipschitz,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -406,6 +475,8 @@ export function bend(s: Shape3, degPerUnit: number): Shape3 {
     warp,
     loose: true,
     bound: true,
+    // Near the circle's centre the unbending stretches without limit, and across the angle's cut it jumps.
+    lipschitz: Infinity,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -454,6 +525,8 @@ export function wrap(s: Shape3, r: number): Shape3 {
     warp,
     loose: true,
     bound: true,
+    // As bend: unbounded near the axis, and a jump across the angle's cut behind the shape.
+    lipschitz: Infinity,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -481,6 +554,10 @@ export function displace(s: Shape3, amp: number, size = 1, seed = 0): Shape3 {
     cost: s.cost + 8,
     inner: [s],
     bound: true,
+    // The noise is up to `amp` and is dropped past 3 amp, a jump: the surface moves by up to amp, and the field reads
+    // at most (1 + the child's factor) amp more than its factor times the distance (fieldBound scales it).
+    slack: 2 * a,
+    relief: size,
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
@@ -515,6 +592,43 @@ export function ring(s: Shape3, count: number, radius = 0, axis: Axis = "y"): Sh
   return union(copies);
 }
 
+// --- the field's bound ---------------------------------------------------------
+
+/** How far a field can read more than the distance to its surface: |f(p)| <= lipschitz x distance + slack. */
+export interface FieldBound {
+  lipschitz: number;
+  slack: number;
+}
+
+const FIELD_BOUNDS = new WeakMap<Shape3, FieldBound>();
+
+/**
+ * The field's bound for the whole tree, for the mesher's narrow band: the largest stretch of any path through
+ * the tree (each step's own `lipschitz` times the largest of its children's: a union, a difference or a smooth
+ * blend of fields takes the largest; a rigid move, a turn or a uniform scale keeps it), and the slack a displace
+ * adds, scaled by the scales above it. Booleans and blends of fields that bound the distance still bound it, so
+ * only the steps that set a factor raise it. Memoised per shape; nothing here evaluates the field.
+ */
+export function fieldBound(s: Shape3): FieldBound {
+  const known = FIELD_BOUNDS.get(s);
+  if (known) return known;
+  let lipschitz = 1, slack = 0;
+  const kids: Shape3[] = [...(s.inner ?? s.parts ?? [])];
+  if (s.joint) kids.push(s.joint.child);
+  if (s.instanced) kids.push(s.instanced.base);
+  for (const c of kids) {
+    const b = fieldBound(c);
+    if (b.lipschitz > lipschitz) lipschitz = b.lipschitz;
+    if (b.slack > slack) slack = b.slack;
+  }
+  const out: FieldBound = {
+    lipschitz: lipschitz * (s.lipschitz ?? 1),
+    slack: slack * (s.valueScale ?? 1) + (s.slack ? s.slack * lipschitz : 0),
+  };
+  FIELD_BOUNDS.set(s, out);
+  return out;
+}
+
 // --- placement helpers -------------------------------------------------------
 
 /**
@@ -528,9 +642,9 @@ export function ring(s: Shape3, count: number, radius = 0, axis: Axis = "y"): Sh
  * extraction pass, which this replaced, missed a plate thinner than its
  * cell that no sample plane fell inside (measured: a lily pad 0.12 thick
  * under a 4.4-unit frog came back 1.8 wide instead of 2.2). A face no ray
- * hits keeps the bounds' value.
+ * hits keeps the bounds' value (or, with `keepBounds` false, is left open: Infinity).
  */
-export function surfaceExtent(s: Shape3, rays = 48): Bounds {
+export function surfaceExtent(s: Shape3, rays = 48, keepBounds = true): Bounds {
   const b = s.bounds;
   if (isEmpty(b)) return b;
   const size = boundsSize(b);
@@ -565,7 +679,11 @@ export function surfaceExtent(s: Shape3, rays = 48): Bounds {
           const t = march(p, a, dir, limit);
           if (t < best) { best = t; bi = i; bj = j; }
         }
-      if (best === Infinity) continue;
+      if (best === Infinity) {
+        // keepBounds false: a face no ray hits is left open (Infinity), for a caller that only adds what was seen.
+        if (!keepBounds) { if (dir === 1) out.min[a] = Infinity; else out.max[a] = -Infinity; }
+        continue;
+      }
       // Refine within one ray spacing of the best ray.
       const su = size[u] / rays, sv = size[v] / rays;
       const cu = b.min[u] + (bi + 0.5) * su, cv = b.min[v] + (bj + 0.5) * sv;
@@ -581,6 +699,49 @@ export function surfaceExtent(s: Shape3, rays = 48): Bounds {
       const hit = startA + dir * best;
       if (dir === 1) out.min[a] = Math.max(b.min[a], Math.min(b.max[a], hit));
       else out.max[a] = Math.min(b.max[a], Math.max(b.min[a], hit));
+    }
+  }
+  return out;
+}
+
+/**
+ * surfaceExtent with the thin parts put back that its rays can slip between. The rays are a 48th of the box apart,
+ * so a plate thinner than that (a beater's 0.06 paddle in a head 3 units long) can lie between them and drop out of
+ * the extent (round 11: a joint's surface line was the head without its beater). Every part of a hard union under
+ * `s`, through the moves, turns, joints, paint and decals above it (which keep its surface on s's), that is thinner
+ * than twice the rays' spacing on some axis, or carries a feature that thin, is measured again on its own box,
+ * where the rays are dense, and its extent added: a hard union's extent is its parts' together, so nothing is added
+ * that is not on the surface. A thin plate inside a cut part (a difference's left side) is still only seen by the
+ * rays. Measured where `root` puts s, through the joints and transforms above it (a posed line), or as s is. A
+ * thin part's face that none of its own rays hits adds nothing, rather than its box.
+ */
+export function surfaceExtentDeep(s: Shape3, root: Shape3 = s, rays = 48): Bounds {
+  const top = root === s ? s : (placedShape(root, s) ?? s);
+  const out = surfaceExtent(top, rays);
+  if (isEmpty(out)) return out;
+  const size = boundsSize(top.bounds);
+  const longest = Math.max(size[0], size[1], size[2]);
+  // The parts whose surface is on s's: down through hard unions and the wrappers that only move or paint a part.
+  const units: Shape3[] = [];
+  const seen = new Set<Shape3>();
+  const walk = (n: Shape3, depth: number) => {
+    if (seen.has(n) || depth > 64 || units.length > 256) return;
+    seen.add(n);
+    if (n.parts && !n.instanced) { for (const p of n.parts) walk(p, depth + 1); return; }
+    if (n.inner?.length === 1 && !n.cut && (n.transform || n.joint || n.material !== undefined || n.decal !== undefined)) { walk(n.inner[0], depth + 1); return; }
+    if (n !== s) units.push(n);
+  };
+  walk(s, 0);
+  for (const u of units) {
+    if (isEmpty(u.bounds)) continue;
+    const placed = placedShape(root, u) ?? u;
+    const us = boundsSize(placed.bounds);
+    const thin = [0, 1, 2].some((k) => us[k] < (2 * size[k]) / rays) || (u.feature ?? Infinity) < (2 * longest) / rays;
+    if (!thin) continue;
+    const e = surfaceExtent(placed, 24, false);
+    for (let k = 0; k < 3; k++) {
+      out.min[k] = Math.max(top.bounds.min[k], Math.min(out.min[k], e.min[k]));
+      out.max[k] = Math.min(top.bounds.max[k], Math.max(out.max[k], e.max[k]));
     }
   }
   return out;
@@ -620,6 +781,7 @@ export function paint(s: Shape3, m: Material): Shape3 {
     gap: s.gap,
     gapWhat: s.gapWhat,
     painted: true,
+    material: m,
   };
 }
 
@@ -650,6 +812,7 @@ export function decal(s: Shape3, region: Shape3, m: Material): Shape3 {
     feature: s.feature,
     gap: s.gap,
     gapWhat: s.gapWhat,
+    decal: m,
   };
 }
 
@@ -816,6 +979,44 @@ export function anchorAt(s: Shape3, name: string): Vec3 | undefined {
 /** The free anchor names every shape answers to, for messages. */
 export const FREE_ANCHORS = ["centre", "top", "bottom", "front", "back", "left", "right"];
 
+/**
+ * The materials that end up on a displaced surface: relief finer than a mesh follows, which the atlas baker writes
+ * into the normal map for those materials' texels and no others. The material at a point is the outermost paint
+ * above it (a paint answers for everything inside it), so a displace under a paint gives that paint's material;
+ * one with no paint above gives the paints inside it, the decals above or inside it, and the default material
+ * wherever a part is unpainted.
+ */
+export function reliefMaterials(s: Shape3): Set<Material> {
+  const out = new Set<Material>();
+  const seen = new Map<Shape3, Set<string>>();
+  const ids = new Map<Material, number>();
+  const id = (m: Material | undefined) => (m ? (ids.get(m) ?? ids.set(m, ids.size).get(m)!) : -1);
+  const walk = (n: Shape3, outer: Material | undefined, decals: Material[], under: boolean): void => {
+    const key = `${id(outer)}:${under ? 1 : 0}:${decals.map(id).join(",")}`;
+    const done = seen.get(n) ?? seen.set(n, new Set()).get(n)!;
+    if (done.has(key)) return;
+    done.add(key);
+    if (n.relief !== undefined && !under) {
+      under = true;
+      if (outer) { out.add(outer); return; }
+      for (const d of decals) out.add(d);
+    }
+    if (n.material && !outer) {
+      outer = n.material;
+      if (under) { out.add(outer); return; }
+    }
+    if (n.decal && !outer) {
+      if (under) out.add(n.decal);
+      else decals = [...decals, n.decal];
+    }
+    const kids = [...(n.parts ?? n.inner ?? []), ...(n.joint ? [n.joint.child] : []), ...(n.instanced ? [n.instanced.base] : [])];
+    if (!kids.length && under && !outer) out.add(DEFAULT_MATERIAL);
+    for (const k of kids) walk(k, outer, decals, under);
+  };
+  walk(s, undefined, [], false);
+  return out;
+}
+
 /** Whether a rotation, a warp or a posed joint sits anywhere in the tree, so the box is the box of a turned box. */
 export function hasLooseBounds(s: Shape3): boolean {
   const seen = new Set<Shape3>();
@@ -859,7 +1060,16 @@ function placementChain(root: Shape3, target: Shape3): Shape3[] | undefined {
     chain.pop();
     return false;
   };
-  if (!find(root)) return undefined;
+  if (!find(root)) {
+    // A hard union folded into a larger one (`head = shell + knuckle`, then `joint(head + nose, ...)`) is no node of
+    // the tree any more, only its parts are: it is placed where they are, when they all sit under the same maps
+    // (round 11: a posed line went missing for such a step while the asserts measured it posed).
+    if (!target.parts || target.instanced || !target.parts.length) return undefined;
+    const each = target.parts.map((p) => placementChain(root, p));
+    const first = each[0];
+    if (!first || each.some((c) => !c || c.length !== first.length || c.some((m, i) => m !== first[i]))) return undefined;
+    return first;
+  }
   const maps = chain.filter((n) => n.unwarp || n.warp);
   return maps.some((n) => !n.warp || !n.unwarp) ? undefined : maps;
 }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/lang/lexer.js";
 import { parse } from "../src/lang/parser.js";
-import { assertLine, evaluate } from "../src/lang/interpreter.js";
-import { isShape2, isShape3 } from "../src/lang/values.js";
+import { assertLine, assertReport, evaluate } from "../src/lang/interpreter.js";
+import { AssertClock } from "../src/pipeline.js";
+import { isShape2, isShape3, type RecordValue } from "../src/lang/values.js";
 import type { Shape3 } from "../src/sdf/types.js";
 
 const run = (src: string) => evaluate(parse(src));
@@ -271,12 +272,13 @@ describe("interpreter", () => {
     expect(w).toContainEqual('camera "x" (line 2): focus="nope" names no step or object; the shot frames the whole model');
     // A point light: at a place, with a range; the parts it does not take are errors or a warning.
     const point = run('light("fire", position=[0, 0.4, 0], range=1.5, color="#ff9a3c")\nlight("odd", position=[1, 1, 1], azimuth=30)');
-    expect(point.lights.map((l) => [l.name, l.position, l.range])).toEqual([["fire", [0, 0.4, 0], 1.5], ["odd", [1, 1, 1], 2]]);
+    // Without range= the render takes half the model's longest side, so the default suits a model of any size.
+    expect(point.lights.map((l) => [l.name, l.position, l.range])).toEqual([["fire", [0, 0.4, 0], 1.5], ["odd", [1, 1, 1], undefined]]);
     expect(point.warnings).toContainEqual('light("odd") (line 2): a point light is at its position; azimuth and elevation are ignored');
     expect(() => run('light("k", position=[1, 2])')).toThrow(/position is \[x, y, z\]/);
     expect(() => run('light("k", range=2)')).toThrow(/range goes with position/);
     expect(() => run('light("k", position=[0, 1, 0], range=0)')).toThrow(/range is the distance/);
-    expect(() => run('light("k", size=0)')).toThrow(/size is the light's apparent size, above 0/);
+    expect(() => run('light("k", size=0)')).toThrow(/size is the light's angular size \(its radius is size\/18 radians\), above 0/);
     expect(() => run('light("k", colour="red")')).toThrow(/no parameter named 'colour'/);
     expect(() => run('light("k", color="nope")')).toThrow(/light\("k"\): color: "nope" is not a material preset or a colour/);
     expect(() => run('camera("c", zoom=0)')).toThrow(/zoom is above 0/);
@@ -292,7 +294,7 @@ describe("interpreter", () => {
     expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
     // inside and overlap failures say where too; a passing query leaves no witness.
     const f = run('a = sphere(1)\nb = sphere(1) | move(1.5, 0, 0)\nassert inside(a, b) == 1\nassert overlap(a, b) < 0.001\nassert overlap(a, b) > 0\nshow a + b');
-    expect(f.asserts.map((x) => [x.passed, x.where])).toEqual([[false, expect.stringMatching(/^a is outside b at \(-0\.\d+, -?[\d.]+, -?[\d.]+\)$/)], [false, expect.stringMatching(/^they overlap at \(0\.7\d, -?[\d.]+, -?[\d.]+\)$/)], [true, undefined]]);
+    expect(f.asserts.map((x) => [x.passed, x.where])).toEqual([[false, expect.stringMatching(/^a is inside b at \(0\.7\d, -?[\d.]+, -?[\d.]+\) in 'b', and outside it at \(-0\.\d+, -?[\d.]+, -?[\d.]+\)$/)], [false, expect.stringMatching(/^they overlap at \(0\.7\d, -?[\d.]+, -?[\d.]+\)$/)], [true, undefined]]);
   });
   it("gives each step a role: a part, a cut, a region, or none, and the unused warning only to the last", () => {
     const ev = run('base = box(2, 0.2, 2)\nhole = cylinder(0.1, 1)\nrod = cylinder(0.05, 2)\nplate = base - hole\npeg = cylinder(0.05, 0.5) | move(0.5, 0.2, 0)\nspare = sphere(0.1)\neye = sphere(0.2) | move(0.5, 0.1, 0)\nmodel = decal(plate + peg, eye, "black")\ncamera("c", focus="rod")\nassert void(rod, model)\nshow model');
@@ -316,6 +318,9 @@ describe("interpreter", () => {
     const ev = run('stone = prism(8, 0.3, 0.4)\nabove = box(2, 2, 2) | move(0, 1, 0)\ngem = stone & above\nprobe = box(0.1, 0.1, 0.1) | move(0, 0.1, 0)\nassert void(probe, gem)\nshow gem');
     expect(ev.roles.get("above")).toBe("mask");
     expect(ev.roles.get("stone")).toBe("part");
+    // A half-space turned and moved on its way into the cut, facet by facet in a loop, is still the mask.
+    const facets = run('stone = prism(8, 0.3, 0.6)\nbelow = box(2, 2, 2) | move(0, -1, 0)\nfor i in range(4) {\n  stone = stone & (below | rotate(x=25) | move(0, 0.2, 0) | rotate(y=i * 90))\n}\nshow stone');
+    expect(facets.roles.get("below")).toBe("mask");
     expect(ev.asserts[0].where).toMatch(/^solid at \(.*\) in 'gem'$/);
     // Boxes that never meet make a void trivial, and it is said.
     const far = run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(5, 0, 0)\nassert void(b, a)\nshow a');
@@ -324,7 +329,53 @@ describe("interpreter", () => {
     expect(run('a = box(1, 1, 1)\nb = box(1, 1, 1) | move(1.1, 0, 0)\nassert void(b, a)\nshow a').warnings.filter((w) => /trivially/.test(w))).toEqual([]);
     // A failing pieces() names the loose piece.
     const two = run('a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nassert pieces(a + b) == 1\nshow a + b');
-    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ at \(3, 0, 0\)$/);
+    expect(two.asserts[0].where).toMatch(/^the smallest piece is 0\.0\d+ cubic units at \(3, 0, 0\) in 'b'$/);
+  });
+  it("names for a failed void, inside or pieces a step that gives the shape its solid there, never a cutter (stage 5)", () => {
+    // The teapot's case: a block (the pot) unioned after a bored spout. The rod down the bore runs on into the block,
+    // where the bore's own volume holds the point too: the bore is subtracted from the spout only, so the solid there
+    // is the block's. The attribution named the cutter, the smallest box holding the point.
+    const pot = "pot = box(2, 1, 2)\nspout = cylinder(0.3, 2) | rotate(z=90) | move(1.5, 0.5, 0)\nbore = cylinder(0.15, 2.4) | rotate(z=90) | move(1.5, 0.5, 0)\nrod = cylinder(0.1, 2.6) | rotate(z=90) | move(1.6, 0.5, 0)\n";
+    for (const model of ["pot + (spout - bore)", "(spout - bore) + pot", "(pot + spout - bore) + pot"]) {
+      const ev = run(`${pot}model = ${model}\nassert void(rod, model)\nassert inside(rod, model) == 0\nshow model`);
+      expect(ev.asserts.map((a) => a.passed), model).toEqual([false, false]);
+      expect(ev.asserts[0].where, model).toMatch(/^solid at \(.*\) in 'pot'$/);
+      expect(ev.asserts[1].where, model).toMatch(/inside model at \(.*\) in 'pot'/);
+    }
+    // A loose piece is named for the part it is, not for a smaller cutter whose box holds its inside point.
+    const loose = run("a = sphere(0.5)\nb = sphere(0.2) | move(3, 0, 0)\nnick = box(0.39, 0.39, 0.39) | move(3, 0, 0)\nassert pieces((a - nick) + b) == 1\nshow (a - nick) + b");
+    expect(loose.asserts[0].where).toMatch(/^the smallest piece is .* in 'b'$/);
+    // A wall's faces are named by the same walk, through shapes whose surface is there: a trimmer whose bottom face lies
+    // on the plate's top, taken from the post alone, does not make the plate's face.
+    const wall = run("plate = box(2, 0.1, 2)\npost = cylinder(0.3, 2) | move(0, 1, 0)\ntrim = box(3, 1, 3) | move(0, 0.55, 0)\nmodel = plate + (post - trim)\nassert wall(model) > 0.2\nshow model");
+    expect(wall.asserts[0].where).toMatch(/^thinnest at \(.*\) in 'plate', through to \(.*\) in 'plate'$/);
+    // The walk passes through a wrapper solid at the point: the rod down a shelled cup meets its floor, the body's.
+    const cup = run("body = cylinder(1, 1)\ncup = shell(body, 0.1)\nrod = cylinder(0.05, 3) | move(0, -1, 0)\nassert void(rod, cup)\nshow cup");
+    expect(cup.asserts[0].where).toMatch(/^solid at \(.*\) in '(cup|body)'$/);
+  });
+  it("warns when a part round about the ring's axis is turned just before the ring, which turns nothing (round 10)", () => {
+    const ev = run('pocket = cylinder(0.1, 0.3) | move(0, 0.28, 0) | rotate(y=30)\npockets = pocket | ring(6, 0.7)\nslot = box(0.3, 0.1, 0.1) | rotate(y=30)\nslots = slot | ring(6, 0.7)\nright = cylinder(0.1, 0.3) | ring(6, 0.7) | rotate(y=30)\nshow pockets + slots + right');
+    expect(ev.warnings.filter((w) => /ring\(\)/.test(w))).toEqual([expect.stringMatching(/^line 2: ring\(\): 'pocket' was turned about y by 30 just before the ring, which leaves it as it was .* rotate after it: \.\.\. \| ring\(\.\.\.\) \| rotate\(y=30\)$/)]);
+    // Inline, and about the ring's own axis only.
+    expect(run('a = cylinder(0.1, 0.3) | rotate(y=45) | ring(4, 1)\nshow a').warnings.join()).toMatch(/line 1: ring\(\): the part was turned about y by 45/);
+    expect(run('a = cylinder(0.1, 0.3) | rotate(x=45) | ring(4, 1)\nshow a').warnings.join()).not.toMatch(/ring\(\)/);
+    // A def's parameter that shares a turned step's name is not that step: the sphere handed in was never turned.
+    expect(run('p = box(0.2, 0.1, 0.1) | rotate(y=30)\ndef around(p) = p | ring(4, 1)\nq = around(sphere(0.1))\nm = q + p\nshow m').warnings.join()).not.toMatch(/ring\(\)/);
+    // ...but the step itself handed in is.
+    expect(run('p = cylinder(0.1, 0.3) | rotate(y=30)\ndef around(p) = p | ring(4, 1)\nq = around(p)\nshow q').warnings.join()).toMatch(/ring\(\): 'p' was turned about y by 30/);
+    // A ring about x pushes its copies out along +y, and the warning says so.
+    expect(run('a = sphere(0.1) | rotate(x=45) | ring(4, 1, "x")\nshow a').warnings.join()).toMatch(/turned about x by 45 .* ring pushes each copy out along \+y before turning it/);
+  });
+  it("says why an overlap is nothing, and which copy of a ring of probes a void failure is in (round 10)", () => {
+    // A board whose back face lies exactly on the wall's front only touches; one held off stands apart.
+    const ev = run('wall = box(2, 1, 0.2)\nboard = box(0.6, 0.3, 0.05) | move(0, 0, 0.125)\nfar = box(0.6, 0.3, 0.05) | move(0, 0, 0.2)\nassert overlap(board, wall) > 0.002\nassert overlap(far, wall) > 0.002\nshow wall + board + far');
+    expect(ev.asserts.map((a) => a.where)).toEqual([expect.stringMatching(/^they only touch, at \(.*\): sink one into the other by a cell or more$/), expect.stringMatching(/^they do not meet: 0\.075 apart, closest at \(.*\)$/)]);
+    // A ring of six probe rods, the third copy (120 degrees) blocked: the failure names that copy.
+    const hub = run('disc = cylinder(1, 0.25) | move(0, 0.125, 0)\nholes = cylinder(0.07, 1.2) | ring(6, 0.7)\nplug = cylinder(0.07, 0.25) | move(0.7, 0.125, 0) | rotate(y=120)\nhub = disc - holes + plug\nrods = cylinder(0.03, 0.6) | move(0, 0.125, 0) | ring(6, 0.7)\nassert void(rods, hub)\nshow hub');
+    expect(hub.asserts[0].where).toMatch(/, in copy 3 of the 6 in rods$/);
+    // A region that is a union of named probes names the probe.
+    const named = run('slab = box(2, 0.2, 2)\na = box(0.1, 0.1, 0.1) | move(-0.5, 0.5, 0)\nb = box(0.1, 0.1, 0.1) | move(0.5, 0, 0)\nprobes = a + b\nassert void(probes, slab)\nshow slab');
+    expect(named.asserts[0].where).toMatch(/, in probes's part 'b'$/);
   });
   it("attach sinks a part into its target along its anchor's line to its centre", () => {
     const ev = run('post = cylinder(0.1, 1) | move(0, 0.5, 0)\nlamp = sphere(0.2) | attach("bottom", post, "top")\nsunk = sphere(0.2) | attach("bottom", post, "top", sink=0.05)\nshow post + lamp + sunk');
@@ -332,9 +383,9 @@ describe("interpreter", () => {
     expect(lamp.bounds.min[1]).toBeCloseTo(1, 9);
     expect(sunk.bounds.min[1]).toBeCloseTo(0.95, 9);
   });
-  it("marks a step assigned inside a loop", () => {
+  it("marks a step updated inside a loop, and keeps a name first assigned there off the steps (round 11)", () => {
     const ev = run('b = 1\nall = sphere(0.1)\nfor i in range(3) {\n  a = i * 2\n  all = all + (sphere(0.1) | move(i, 0, 0))\n}\nshow all');
-    expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true], ["a", true]]);
+    expect(ev.steps.map((s) => [s.name, s.inLoop])).toEqual([["b", undefined], ["all", true]]);
   });
   it("measures overhangs like the report's row", () => {
     // A table: the underside of its top faces down and is not on the floor.
@@ -348,9 +399,10 @@ describe("interpreter", () => {
     expect(rest.asserts.map((a) => [a.line, a.passed, a.pose, a.pending])).toEqual([[3, true, "open", true], [4, true, undefined, undefined], [5, true, "rest", undefined]]);
     expect(rest.warnings.filter((w) => /assert/.test(w))).toEqual([]);
     const open = evaluate(parse(src), { jointPoses: rest.poses[0].joints, poseName: "open" });
-    // Opened, the lid stands up: its own assert fails with the numbers it saw; the unposed one is evaluated here too
-    // (the pipeline takes its verdict from the rest evaluation) and the pose=rest one is pending.
-    expect(open.asserts.map((a) => [a.line, a.passed, a.pending])).toEqual([[3, false, undefined], [4, false, undefined], [5, true, true]]);
+    // Opened, the lid stands up: its own assert fails with the numbers it saw; the unposed one is not judged again
+    // here (its verdict is the rest evaluation's, and round 11's wall() at rest cost seconds in every pose) and the
+    // pose=rest one is pending.
+    expect(open.asserts.map((a) => [a.line, a.passed, a.pending])).toEqual([[3, false, undefined], [5, true, true]]);
     expect(open.asserts[0].detail).toMatch(/^1 < 0\.5$/);
     expect(assertLine(open.asserts[0])).toBe("assert (line 3) in pose open fails: tall(lid) < 0.5 is 1 < 0.5: lies flat");
     // An assert for a pose that does not exist is never tested, and says so.
@@ -389,6 +441,16 @@ describe("curves and faces in the language", () => {
     expect(isShape3(ev.steps.find((s) => s.name === "band")!.value)).toBe(true);
     expect(() => run("t = tube(0.2, bezier([0,0,0, 1,0,0]))")).toThrow(/4, 7, 10/);
     expect(() => run('t = sweep(rect(1, 1), "nope")')).toThrow(/sweep/);
+  });
+  it("curve2 and bezier2 are profiles for revolve, extrude and the 2D booleans, wall= by name", () => {
+    const ev = run('wall = curve2([0,0, 0,0, 1,0, 1,0, 1.3,1, 0.9,2, 0,2, 0,2])\nvase = revolve(wall)\nleaf = bezier2([0,0, 0.5,0.4, 1.5,0.4, 2,0, 1.5,-0.4, 0.5,-0.4, 0,0]) - circle(0.1)\nplate = extrude(leaf, 0.05)\nline = revolve(curve2([0,0.05, 0.9,0.05, 1,1], wall=0.1))');
+    expect(isShape2(ev.steps.find((s) => s.name === "wall")!.value)).toBe(true);
+    expect(isShape3(ev.steps.find((s) => s.name === "vase")!.value)).toBe(true);
+    expect(isShape3(ev.steps.find((s) => s.name === "plate")!.value)).toBe(true);
+    expect((ev.steps.find((s) => s.name === "line")!.value as Shape3).feature).toBeCloseTo(0.1);
+    expect(() => run("p = bezier2([0,0, 1,0, 1,1, 0,1, 0,0])")).toThrow(/line 1.*bezier2 needs an anchor, then two handles and an anchor for each piece: 4, 7, 10/);
+    expect(() => run("p = curve2([0,0, 1,1])")).toThrow(/at least 3 different points/);
+    expect(() => run("p = curve2([0,0, 1,1, 2])")).toThrow(/x, y pairs, got 5 numbers/);
   });
   it("text takes face=\"serif\"", () => {
     const ev = run('a = extrude(text("Ab", 1, face="serif"), 0.2)\nb = extrude(text("Ab", 1), 0.2)');
@@ -537,5 +599,169 @@ describe("use: libraries", () => {
     expect(() => ev('m = hardware.bolt()')).toThrow(/'hardware' is not a used library/);
     expect(() => ev('use "parts/missing.aix"')).toThrow(/cannot read parts\/missing.aix/);
     expect(() => ev('use "parts/hardware.aix"\nuse "parts/nested.aix" as hardware')).toThrow(/already a used library/);
+  });
+  it("reads a dotted name as the library's before a record's, and warns when a record takes a library's name", () => {
+    const e = ev('use "parts/hardware.aix"\nhardware = {head_h: 5}\nh = hardware.head_h\nsize = {r: 0.2}\nb = hardware.bolt(size.r)');
+    expect(e.steps.find((s) => s.name === "h")!.value).toBe(0.07);
+    expect(e.warnings).toEqual(["line 2: 'hardware' is a used library, so hardware.head_h reads the library, not this record; give the record another name"]);
+    expect((e.steps.find((s) => s.name === "b")!.value as Shape3).bounds.max[0]).toBeCloseTo(0.23, 6);
+  });
+});
+
+describe("records", () => {
+  const value = (src: string, name: string) => run(src).steps.find((s) => s.name === name)!.value;
+  it("holds named values of any kind and reads them back by field, nested, from a list, a call or a parameter", () => {
+    const src = [
+      'seat = {w: 0.9, h: 0.45, name: "seat", pts: [1, 2], wood: material("oak"), top: box(1, 0.1, 1)}',
+      "cfg = {seat: seat, leg: {r: 0.04, h: seat.h}}",
+      "legs = [{x: 1, z: 2}, {x: -1, z: 2}]",
+      "def leg(p, c=cfg) = cylinder(c.leg.r, c.leg.h) | move(p.x, 0, p.z)",
+      "def dims() = {w: 3}",
+      "a = cfg.seat.w + cfg.leg.h",
+      "b = legs[1].x",
+      "c = dims().w + ({k: 5}).k",
+      "frame = empty()",
+      "for p in legs { frame = frame + leg(p) }",
+      "n = cfg.seat.name + seat.pts[1]",
+    ].join("\n");
+    const ev = run(src);
+    const get = (name: string) => ev.steps.find((s) => s.name === name)!.value;
+    expect(get("a")).toBeCloseTo(1.35, 9);
+    expect(get("b")).toBe(-1);
+    expect(get("c")).toBe(8);
+    expect(get("n")).toBe("seat2");
+    expect((get("frame") as Shape3).bounds.max[0]).toBeCloseTo(1.04, 9);
+    expect(isShape3(get("frame"))).toBe(true);
+    // A record is not a shape, however many shapes it holds, and a field named like a shape's own does not make it one.
+    expect(isShape3(get("seat"))).toBe(false);
+    expect(isShape3(value("r = {kind: \"shape3\", pattern: \"stripes\"}", "r"))).toBe(false);
+  });
+  it("makes a changed copy with ...: the original keeps its fields and its order, and a later entry wins", () => {
+    const ev = run("p = {x: 1, y: 2, z: 3}\nq = {...p, y: 5, w: 4}\nr = {y: 0, ...p}");
+    const fields = (name: string) => [...((ev.steps.find((s) => s.name === name)!.value as RecordValue).fields)];
+    expect(fields("p")).toEqual([["x", 1], ["y", 2], ["z", 3]]);
+    expect(fields("q")).toEqual([["x", 1], ["y", 5], ["z", 3], ["w", 4]]);
+    expect(fields("r")).toEqual([["y", 2], ["x", 1], ["z", 3]]);
+    expect(() => run("p = 1\nq = {...p}")).toThrow(/'\.\.\.p' takes the fields of a record, and p is a number/);
+    // Nothing changes a record in place; the error says how to make the new one.
+    expect(() => parse("p = {x: 1}\np.x = 2")).toThrow(/line 2: p\.x = \.\.\.: a record's fields cannot be changed; make a new record with the change, p = \{\.\.\.p, x: value\}/);
+    expect(() => parse("p = {a: {b: 1}}\np.a.b = 2")).toThrow(/p = \{\.\.\.p, a: \{\.\.\.p\.a, b: value\}\}/);
+  });
+  it("names the fields there are when one is missing, and refuses a key given twice", () => {
+    expect(() => run("p = {x: 1, y: 2}\na = p.z")).toThrow(/line 2: 'p' has no field 'z'; it has x, y/);
+    expect(() => run("p = {a: {b: 1}}\na = p.a.c")).toThrow(/'p\.a' has no field 'c'; it has b/);
+    expect(() => run("p = [1, 2]\na = p.x")).toThrow(/'p' is a list, not a record, so it has no field 'x'; a list's items are read by index, p\[0\]/);
+    expect(() => run("a = q.x")).toThrow(/'q' is not a used library or a defined record/);
+    expect(() => parse("p = {x: 1, x: 2}")).toThrow(/line 1: the record has 'x' twice/);
+    expect(() => parse("p = {x: 1 y: 2}")).toThrow(/expected ',' or '\}' in the record/);
+    expect(() => parse("p = {x: 1\n")).toThrow(/the record opened on line 1 is never closed/);
+    expect(() => parse("p = {1: 2}")).toThrow(/a record's entries are name: value/);
+    expect(() => parse("p = {in: 2}")).toThrow(/'in' is a keyword and cannot be a field name$/);
+  });
+  it("keeps the dot apart from numbers: p.x is a field, .5 and 1.5 numbers, p.0 an error that says to index", () => {
+    const ev = run("p = {x: 2}\na = p.x*.5\nb = 1.5+p.x");
+    expect(ev.steps.map((s) => s.value).slice(1)).toEqual([1, 3.5]);
+    expect(() => parse("legs = [1]\na = legs.0")).toThrow(/'legs\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]/);
+    expect(() => parse("legs = [[1]]\na = legs[0].0 + dims().1")).toThrow(/'legs\[0\]\.0': a field is read by name \(p\.x\); an item of a list by its index, legs\[0\]\[0\]/);
+    expect(() => parse("a = dims().1")).toThrow(/'dims\(\)\.1': .* dims\(\)\[1\]/);
+    expect(tokenize("{...p}").map((t) => t.value).slice(0, 3)).toEqual(["{", "...", "p"]);
+  });
+  it("spans lines between entries, and a loop's braces are still a block", () => {
+    const ev = run("p = {\n  x: 1,\n\n  y: 2 +\n    3,\n}\nfor i in [p] {\n  q = i.y\n}\nr = q");
+    expect(ev.steps.find((s) => s.name === "r")!.value).toBe(5);
+  });
+  it("is never taken for a shape: show, scene, union and for say what a record is and how to use one", () => {
+    expect(() => run("parts = {lid: box(1)}\nshow parts")).toThrow(/show needs a 3D shape, got a record \(fields lid\); show its shapes by name, show parts\.lid/);
+    expect(() => run("parts = {lid: box(1)}\nscene parts")).toThrow(/scene needs a 3D shape, got a record/);
+    expect(() => run("parts = {lid: box(1)}\nm = union(parts, box(1))")).toThrow(/expected a 3D shape, got a record/);
+    expect(() => run("parts = {lid: box(1)}\nm = box(1) + parts")).toThrow(/'\+' does not apply to a shape and a record/);
+    expect(() => run("p = {x: 1}\nfor i in p { a = i }")).toThrow(/'for' needs a list \(use range\(n\)\), got a record; to run over several records, put them in a list/);
+    expect(() => run("p = {x: 1, y: 2, z: 3}\nt = tube(0.1, [p, p])")).toThrow(/a record in a list of numbers; write out its fields, \[p\.x, p\.y, p\.z\]/);
+  });
+  it("reads the step a shown field holds, so a record's other parts are still unused, and names the output after it", () => {
+    const ev = run("lid = box(1)\nspare = sphere(1)\nparts = {lid: lid, spare: spare}\nshow parts.lid");
+    expect(ev.outputName).toBe("lid");
+    expect(ev.roles.get("lid")).toBe("part");
+    expect(ev.warnings).toContainEqual("'spare' (line 2) is not part of the output; add it to the model or remove it");
+    // A field that holds no step of its own is named as written.
+    expect(run("parts = {lid: box(1)}\nshow parts.lid").outputName).toBe("parts.lid");
+    // A part used through a record is a part, and its line in the steps says so.
+    const used = run("lid = box(1)\ncup = cylinder(1, 1)\nparts = {lid: lid, cup: cup}\nm = parts.lid + parts.cup");
+    expect([...used.used].sort()).toEqual(["cup", "lid", "m"]);
+    expect(used.warnings).toEqual([]);
+  });
+  it("calls a def a record holds, takes records as parameters and defaults, and prints in an assert's text", () => {
+    const ev = run("def two(x) = x * 2\nr = {f: two, n: 3}\na = r.f(r.n)\ndef area(s={w: 2, d: 3}) = s.w * s.d\nb = area()\nc = area({w: 1, d: 1})\nassert {w: 1}.w == 1");
+    expect(ev.steps.filter((s) => ["a", "b", "c"].includes(s.name)).map((s) => s.value)).toEqual([6, 6, 1]);
+    expect(ev.asserts[0].text).toBe("{w: 1}.w == 1");
+    // Only a name calls: a def reached through an index or a call is named first, and the error says so.
+    expect(() => parse("legs = [r]\na = legs[0].f(1)")).toThrow(/line 2: 'legs\[0\]\.f\(\.\.\.\)': only a name is called, as r\.f\(1\) is; name it first, f = legs\[0\]\.f, then f\(\.\.\.\)/);
+    expect(run("def two(x) = x * 2\nlegs = [{f: two}]\nf = legs[0].f\na = f(4)").steps.find((s) => s.name === "a")!.value).toBe(8);
+    expect(() => parse("a = (r).f(1)")).toThrow(/'\(r\)\.f\(\.\.\.\)': only a name is called; write r\.f\(\.\.\.\), without the parentheses/);
+    expect(ev.defs.map((d) => d.name)).toEqual(["two", "area"]);
+  });
+});
+
+describe("round 11: what check says about its asserts", () => {
+  it("prints an assert judged many times in a loop as one line, with the judgement nearest to failing, and every failure in full last", () => {
+    const src = 'm = box(1)\nfor i in [0, 1, 2, 3] {\n  assert i * 0.1 < 0.25, "book " + i + " fits"\n  assert width(m) == 1, "same each time"\n}\nassert tall(m) > 0.5, "once"';
+    const lines = assertReport(run(src).asserts);
+    expect(lines).toEqual([
+      // The margin of a < b is b - a: 0.2 < 0.25 passes by 0.05, the least of the passes, and its message is book 2's.
+      'assert (line 3) holds 3 of 4 times: i * 0.1 < 0.25, nearest to failing 0.2 < 0.25: book 2 fits',
+      "assert (line 4) holds 4 times: width(m) == 1 is 1 == 1 each time: same each time",
+      "assert (line 6) holds: tall(m) > 0.5 is 1 > 0.5: once",
+      "assert (line 3) fails: i * 0.1 < 0.25 is 0.3 < 0.25: book 3 fits",
+    ]);
+    // The margin as recorded: a - b for >, b - a for <, -|a - b| for ==.
+    const ev = run("assert 3 > 1\nassert 1 < 4\nassert 2 == 2.5\nassert 2 != 5");
+    expect(ev.asserts.map((a) => a.margin)).toEqual([2, 3, -0.5, 3]);
+  });
+  it("keeps a probe only asserts read a region when the asserts are skipped, or are another pose's", () => {
+    const src = 'm = box(1)\nprobe = sphere(0.1) | move(0, 2, 0)\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\nlid_probe = box(0.2) | move(0, 1.2, 0)\nassert clearance(probe, m) > 0.5\nassert clearance(lid, lid_probe) > 0.1, pose=open\npose("open", lid=[-60, 0, 0])\nshow m + lid';
+    for (const ev of [evaluate(parse(src), { skipAsserts: true }), run(src)]) {
+      expect(ev.roles.get("probe")).toBe("region");
+      expect(ev.roles.get("lid_probe")).toBe("region");
+      expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    }
+    // In the pose's evaluation the promise at rest is not judged again, and its probe is a region all the same.
+    const open = evaluate(parse(src), { jointPoses: run(src).poses[0].joints, poseName: "open" });
+    expect(open.asserts.map((a) => [a.line, a.pending ?? false])).toEqual([[6, false]]);
+    expect(open.roles.get("probe")).toBe("region");
+  });
+  it("keeps a probe a region when the assert reads it through a def, judged or not", () => {
+    // One probe named inside a def's body, one handed to a def: both are read only by asserts, so both are regions,
+    // whether the asserts are judged, skipped (--no-asserts) or another pose's.
+    const src = 'm = box(1)\nprobe = sphere(0.1) | move(0, 2, 0)\nprobe2 = sphere(0.1) | move(0, 3, 0)\ndef gap() = clearance(probe, m)\ndef gap_to(p) = clearance(p, m)\nassert gap() > 0.5\nassert gap_to(probe2) > 0.5\nassert gap_to(probe2) > 0.5, pose=open\nlid = joint(box(1, 0.1, 1) | move(0, 0.55, 0), "lid", 0, 0.5, 0.5)\npose("open", lid=[-60, 0, 0])\nshow m + lid';
+    const judged = run(src);
+    const open = evaluate(parse(src), { jointPoses: judged.poses[0].joints, poseName: "open" });
+    for (const ev of [judged, evaluate(parse(src), { skipAsserts: true }), open]) {
+      expect(ev.roles.get("probe")).toBe("region");
+      expect(ev.roles.get("probe2")).toBe("region");
+      expect(ev.warnings.filter((w) => /not part of the output/.test(w))).toEqual([]);
+    }
+  });
+  it("says which assert is slow, from an injected clock: named as it starts once they have taken two seconds, timed when one takes over one", () => {
+    let t = 0;
+    const said: string[] = [];
+    const watched: (number | undefined)[] = [];
+    const clock = new AssertClock(() => t, (l) => said.push(l), { watch: (a) => watched.push(a?.line) });
+    // Every reading of the clock is 700 ms later, so each assert takes 700 ms.
+    const tick = (phase: "start" | "end", a: Parameters<AssertClock["hook"]>[1]) => { t += 700; clock.hook(phase, a); };
+    evaluate(parse("m = box(1)\nfor i in range(4) { assert width(m) > i * 0.1 }\nassert pieces(m) == 1"), { onAssert: tick });
+    expect(said).toEqual([
+      "asserts: 2.1 s so far; naming one as it starts each second",
+      "judging assert (line 2): width(m) > i * 0.1",
+      "judging assert (line 3): pieces(m) == 1",
+    ]);
+    expect(watched).toEqual([2, undefined, 2, undefined, 2, undefined, 2, undefined, 3, undefined]);
+    expect(clock.summary()).toBe("asserts took 3.5 s; the slowest: line 2, width(m) > i * 0.1, 2.8 s over 4 judgements; line 3, pieces(m) == 1, 0.7 s");
+    // A slow one is timed when it ends; a fast run says nothing at all.
+    let u = 0;
+    const slow: string[] = [];
+    const one = new AssertClock(() => u, (l) => slow.push(l));
+    evaluate(parse("assert 1 < 2"), { onAssert: (p, a) => { u += p === "end" ? 1500 : 0; one.hook(p, a); } });
+    expect(slow).toEqual(["assert (line 1): 1 < 2 took 1.5 s"]);
+    expect(one.summary()).toBeUndefined();
   });
 });

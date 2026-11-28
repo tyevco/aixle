@@ -115,16 +115,34 @@ A polygon from x, y pairs, either as numbers or one list: polygon(0,0, 2,0, 1,1.
     polygon(points) -> shape2
     polygon(coords...) -> shape2
 
+### curve2
+
+A closed smooth profile through x, y pairs, closed back to the first point, with the exact distance to it, so a revolve or an extrude has no facets at any grid. A point given twice in a row is a sharp corner, and the run between two corners is straight: give a revolve's points on the axis and the edge of a foot twice. The list may end on its first point again, which only closes it. The tangent at a point comes from its two neighbours, each side's handle as long as that side's chord allows (a centripetal Catmull-Rom spline: the curve curve() draws when the points are evenly spaced), so a short piece beside a long one cannot loop; a run meant to be straight still ends in a corner. `wall` > 0 leaves the curve open and makes the profile the band that wide centred on it, ends rounded: a vase's wall drawn as one line, revolved.
+
+    curve2(points, wall=0) -> shape2
+
+- `points`: a flat list [x,y, x,y, ...], at least 3 different points (2 with a wall)
+- `wall`: 0 for the enclosed outline; more for an open band that wide
+
+### bezier2
+
+A closed profile from cubic Bezier anchors and handles, laid out as bezier() takes them: an anchor, then two handles and an anchor for each piece (4, 7, 10, ... x, y pairs). The last anchor should be the first; when it is not, a straight edge runs from it back to the first, which closes an outline drawn from a revolve's axis round to the axis. Handles 0.5523 r along the tangents make a quarter circle of radius r; a corner is two handles that do not line up. Exact distance, like curve2. `wall` > 0 leaves it open: the band that wide along the curve, ends rounded.
+
+    bezier2(points, wall=0) -> shape2
+
+- `points`: a flat list [x,y, x,y, ...]: anchor, handle, handle, anchor, ...
+- `wall`: 0 for the enclosed outline; more for an open band that wide
+
 ### text
 
-Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell.
+Lettering as a 2D profile from a single-stroke font (A-Z, a-z, 0-9, punctuation), laid out from x = 0 on the baseline y = 0; face="serif" adds slab serifs. `size` is the cap height, `weight` the stroke width (the profile's box reaches half the weight past the strokes, so the lettering stands `size` plus `weight` tall, and a line of n characters is about 0.8 × n × size wide, 0.93 with serifs); `align` is "left", "center" or "right". Extrude it for a sign, subtract it for engraving. check warns when the weight is under a grid cell, and for text on an arc prints the radii the lettering spans from the origin (`r 0.255..0.385`), which is what meets a rim.
 
     text(text, size=1, weight=0.15, align="left", spacing=0, arc=0, face="sans") -> shape2
 
 - `size`: cap height
 - `weight`: stroke width
 - `spacing`: extra gap between letters
-- `arc`: bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom
+- `arc`: bend onto a circle of this radius, centred on the origin: positive reads over the top, negative under the bottom, both upright and left to right
 - `face`: "sans" or "serif" (slab serifs on the same letters, set a little wider)
 
 ## 2D to 3D
@@ -293,6 +311,26 @@ Move the shape so the lowest point of its surface rests on y = 0 (the surface, f
 
     ground(shape) -> shape
 
+### rest
+
+Move `part` along `dir` (straight down by default) until it touches `on`, then `sink` further: bowl | rest(plate) sets a bowl on its plate, book | rest(shelf) a book on its shelf, book | rest(prev, dir=[-1, 0, 0]) slides it along the shelf against its neighbour, all without the arithmetic. The contact is found from both surfaces' fields, the small parts of each at their own scale (a bowl's tab lands on a hook's lip 0.05 thick), and tightened on clearance(), so a promise of contact holds by construction: afterwards clearance(part, on) is within a millionth of the part's size of 0 (round 11's 33 books: 1.3e-6 at most) and overlap() reads 0, at any scale (the search runs at the part's own size, so a centimetre part in a model in metres places as a part of 1 does); on a displaced skin, whose field is not a distance, to about a ten-thousandth (round 3's frog on its pad: 3e-4). `on` may be several things joined with +: each is read on its own, so a shelf the part slides along does not pass for the neighbour it slides into. A part that starts inside `on` is first backed out against `dir` to the first place it is clear, so a part built at the origin rests on a shelf above it; one sunk a sliver into something (ground() leaves a turned part up to 5e-5 in the floor) is lifted out of it first; one that never touches `on` along `dir` is an error that says where both are. A face on a face meshes as one piece (pieces() reads 1 at every grid tried), but a corner on a face can mesh as two at some grids (a cube on its corner, at 128 cells): sink=0.02 pushes the part that far on into `on`, for a print or a promise of one piece, and a negative sink stops that far short (a gap between books). Anchors move with the part; check prints how far each call moved it. 10 to 60 ms a call for parts like these, one to two seconds for a frog with displaced skin
+
+    rest(part, on, dir=[0, -1, 0], sink=0) -> shape
+
+- `on`: what it comes to rest on: a shape, or several joined with +
+- `dir`: the direction it moves in, [x, y, z]
+- `sink`: how far to go on past the touch, into `on` (negative: stop that far short)
+
+### lean
+
+Turn `part` about the line through `pivot` along `axis` until it touches `on`: book | lean(prev, pivot="heel", axis=[0, 0, 1]) leans a book standing on its shelf against its neighbour, turned about its bottom edge. The pivot is a point [x, y, z] or the name of one of the part's anchors (a named one, or a free one: bottom, left, ...); a rounded edge stays on what it stands on when the pivot is its rounding's centre (0.02 in from both faces for round=0.02). It turns the right-handed way about `axis`, as rotate() turns about x, y and z: axis=[0, 0, 1] tips +y towards -x, so a book whose heel is its bottom-left edge leans left; axis=[0, 0, -1] turns the other way. Up to 180 degrees: an axis that turns the part away from `on` is an error, or a turn of more than a quarter, which check's line points out. The contact is tightened on clearance() as rest()'s is: clearance(part, on) afterwards is within a millionth of the part's size of 0 (round 11's three leaning books: 1.9e-6 at most, where the hand-worked placement left 0.0065 to 0.0076). A part that starts inside `on` is turned back the other way to the first angle it is clear. Anchors turn with the part; check prints the angle each call turned
+
+    lean(part, on, pivot, axis) -> shape
+
+- `on`: what it leans against
+- `pivot`: the point it turns about: [x, y, z], or the name of one of the part's anchors
+- `axis`: the direction of the line it turns about, [x, y, z]; it turns the right-handed way about it
+
 ### center
 
 Move the shape so its bounding box is centred on the origin; `axes` picks which of x, y, z.
@@ -393,11 +431,20 @@ Copies of a shape at each x, y, z, yaw (degrees about y) in a flat list, optiona
 - `placements`: [x,y,z,yaw, x,y,z,yaw, ...]
 - `fields`: 4 for x,y,z,yaw or 5 to add a scale
 
+### named
+
+A step of its own for a value made in a loop: `books = books + named("book_" + n, bk)` registers the step `book_3` (or whatever the name reads) holding that iteration's value, and returns the value, so each copy has a name for steps.png, the callouts, `set slice` and `--slice`, `--focus`, `camera(focus=)` and the warnings, and can be read by that name below the loop. A name is letters, digits and _, and names one step: naming the same one twice, or a name the program already has, is an error. A name first assigned inside a loop is the loop's own and is no step at all; see the language guide's Statements.
+
+    named(name, value) -> any
+
+- `name`: the step's name, usually built from the loop's index: "book_" + n
+- `value`: the value it holds, returned as it is
+
 ### xform
 
 A joint's pose in one value, for pose(): xform(rotate=[x, y, z] degrees or one angle about the joint's axis, move=[dx, dy, dz] in world units after the turn, scale=s or [sx, sy, sz] about the pivot). pose("hop", body=xform(move=[0, 0.3, 0]), lungs=xform(scale=[1, 1.02, 1])); a plain [x, y, z] in a pose is still just the angles.
 
-    xform(rotate=?, move=?, scale=1) -> transform
+    xform(rotate=[0, 0, 0], move=[0, 0, 0], scale=1) -> transform
 
 - `rotate`: [x, y, z] degrees, or one angle for a joint with axis=
 - `move`: [dx, dy, dz]
@@ -443,7 +490,7 @@ The size of a shape's bounds along y.
 
 ### pieces
 
-How many separate pieces the shape meshes into at `resolution` cells on its longest side, the program's `set grid` when none is given (64 without one): the report's Pieces row at that grid (cavities and specks left out). For assert pieces(model) == 1. Meshes the shape, so it costs a moment; a whole scene wants the report instead.
+How many separate pieces the shape meshes into at `resolution` cells on its longest side: the report's Pieces row at that grid (cavities and specks left out). With none given, the model's own cell: the shown model's longest side over the program's `set grid`, so a part is meshed as the report meshes it and costs no more than the model's mesh, but never under 64 cells across the part nor over the grid itself (64 cells across the part without a `set grid`); pieces(), overhang(), wall(), support(), islands() and stands() share that rule. For assert pieces(model) == 1. Meshes the shape, so it costs a moment (once per shape and resolution in a run: pieces() and overhang() on the same shape share the mesh); a whole scene wants the report instead. A failure names the smallest loose piece: its volume, in mm³ (or the declared unit's cube) with `set units`, else in cubic units, where it is, and the step it is made of.
 
     pieces(shape, resolution=64) -> number
 
@@ -451,33 +498,66 @@ How many separate pieces the shape meshes into at `resolution` cells on its long
 
 ### overhang
 
-The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (the program's `set grid` when none is given): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment.
+The fraction of the shape's surface that faces down more than 45° (the faces resting on the floor left out), 0 to 1, at `resolution` cells on its longest side (by default the model's own cell, as pieces() takes it): the report's Overhangs row. For assert overhang(model) < 0.05 on a part to be printed without support. Meshes the shape, so it costs a moment, the same mesh pieces() reads.
 
     overhang(shape, resolution=64) -> number
 
 - `resolution`: cells on the longest side
 
+### wall
+
+The thinnest wall of the shape: from every vertex of its mesh at `resolution` cells on its longest side (by default the model's own cell, as pieces() takes it), a ray inward through the field to the far side, counted where the far side faces back within 30° (a wall, not the tip of a corner): the report's Thinnest wall row. The number is in model units: with `set units mm`, assert wall(model) > 0.8 promises two lines of a 0.4 mm nozzle; with `set units cm` the same promise is wall(model) > 0.08. Measured through the field, so a wall thinner than a cell is still measured where the mesh has a vertex on it; a part with no surface in the mesh at all (empty, or thinner than a cell everywhere) reads 0, so the promise fails rather than holding of nothing. Meshes the shape, so it costs a moment; a failure says where the thinnest wall is and the innermost steps whose faces bound it on each side, as the report's row does (thinnest at (...) in 'word', through to (...) in 'slot').
+
+    wall(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
+### support
+
+The support volume the shape's overhangs need, in cubic model units (mm³ for a print with `set units mm`): the report's Supports row, from each face that faces down more than 45° above the floor a column straight down to the plate or to the model below, its height times the face's area in plan, leaving out the bridges. A bridge is a level ceiling that spans at most `span` millimetres (16 by default, through `set units`; a unit is a millimetre without it) to solid that stands on something on both sides, laid in one direction for each connected ceiling as a slicer lays it (the direction anchored at both ends over the most of it, whatever the span): a slab between posts or walls, a lettering groove closed at both ends, and a slope closed at both ends along its level, a pitched roof between gables, as PrusaSlicer takes a straight overhanging perimeter that lands on the layer below at both ends. A dome, a cantilever, a slope or a horizontal hole open along its level and a bridge longer than the span need support. span=0 counts every overhang, as a slicer with supports on that supports bridges too fills them (PrusaSlicer's own printer profiles turn its "Don't support bridges" off). A face the mesher bends past 45° at a sharp edge, where the shape itself faces down less, is left out. For assert support(stand) < 50, the support kept small in the unit a printer's user reads, where overhang() is a share of the whole surface that one flat bridge barely moves; a point that hangs lower than all around it needs a column too and is counted by islands(), not here. An upper estimate: a slicer fills support sparsely. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces(), overhang() and wall() read); a failure says where the tallest column is and what it stands on, and how much more lies under bridges.
+
+    support(shape, resolution=64, span=16) -> number
+
+- `resolution`: cells on the longest side
+- `span`: the longest bridge, in millimetres; 0 bridges nothing
+
+### islands
+
+How many islands the shape has: points lower than all the surface around them, off the plate, whose first layer prints in the air whatever the angles of their faces, a cone hanging tip down, a keel whose ends hang free, a part floating free, each needing a column of support that no face asks for (a keel running level into a wall is a line, not a point, and is not counted). For assert islands(part) == 0 beside assert support(part) == 0 on a part to be printed without support: a cone hanging off a wall with its sides at 60° reads no support and one island. The lowest point of every part of the surface that hangs clear of what is lower by more than half a cell before it joins it, facing down with the solid above it, and not already over faces that need support (a ball's underside has support of its own); the mesher's dips on a displaced or lettered surface are a fraction of that. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh support() reads); a failure says where each island is, in which step, and how tall its column is.
+
+    islands(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
+### stands
+
+Whether the shape stands on its own: the margin by which its centre of mass (uniform density), projected on the floor, lies inside its footprint, the hull of what rests within a cell and a half of its lowest point, in units, positive inside and negative outside: the report's Stands row. For assert stands(bookcase) > 0.5. A shape balanced on an edge or a point still has a footprint, the strip of cells along the contact, so it reads a small positive margin that shrinks with the cell (a cube on its edge: 0.025 at 64 cells, 0.008 at 200): promise a margin of several cells, not > 0. A shape with no surface at that cell reads -Infinity. Meshes the shape at `resolution` cells on its longest side (by default the model's own cell, the mesh pieces() reads); a failure says where the centre of mass is and which way the shape tips.
+
+    stands(shape, resolution=64) -> number
+
+- `resolution`: cells on the longest side
+
 ### void
 
-1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught; a failure says where the solid is and in which step.
+1 when `region` holds no solid of `shape` at all, else 0: the cavity of a cup with nothing poking into it (assert void(cavity, mug)), a slot a lid must not fill. The region is a shape of its own, not the cutter: a cutter's volume is empty by construction, so `void(hole, plate)` holds whether or not the hole went through; for "goes through" use a thinner rod reaching past both faces (void(rod, plate)). Sampled on a lattice over the region's box and along the shape's surface, so an intrusion thinner than the lattice is still caught, down to a skin a hundred-thousandth of the region's longest side deep (a 3.6 cable pressed 0.3 into both walls of a 3 slot fails); a failure says where the solid is and in which step.
 
     void(region, shape) -> number
 
 ### overlap
 
-The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled on a lattice over the shared box, 24 cells along its longest side and at least four across its shortest (a rim sunk 0.02 into a base), so measure parts, not a scene; a failure says where.
+The volume two shapes share, in cubic units: zero when they only touch, the sunk-in volume when one is pressed into the other (a frog blended into its pad, a handle reaching into a cup). For assert overlap(frog, pad) < 0.001, or assert overlap(pin, base) > 0.0004 for a pin that is joined, not resting: a volume is small (a pin of radius 0.05 sunk 0.07 shares 0.00055), so take the threshold from the part's size. Sampled on a lattice over the shared box, 24 cells along its longest side and at least four across its shortest (a rim sunk 0.02 into a base) within a budget of 200 thousand samples, whatever the shared box: a corner on a face, or two faces that meet to within floating point (a box ground()ed onto a board whose top came out of arithmetic), read 0 at once. Measure parts, not a scene; a failure says where.
 
     overlap(a, b) -> number
 
 ### inside
 
-The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; a failure says where `a` is outside.
+The fraction of `a`'s volume that lies inside `b`, 0 to 1: assert inside(spring, box) == 1 for a part that must stay in its housing, assert inside(handle, cavity) == 0 for one that must stay out. `b` is the solid volume, not a hollow: a mantle hangs in the air inside a shelled shade, so inside(mantle, shade) is 0; keep the un-shelled shape as a step and test against that. A part built to fill a cavity and grown a cell into the wall is under 1; promise inside(liquid, cavity) > 0.9 then. Sampled at 24 cells along a's longest side; when that reads 0 the surfaces are walked as void() walks them, so a skin thinner than the lattice (a 3.6 cable 0.3 into both walls of a 3 slot) reads a small fraction, never 0. A sliver of `a` outside `b` thinner than the lattice can still read 1. A failure says where `a` is inside `b` and where it is outside.
 
     inside(a, b) -> number
 
 ### clearance
 
-The smallest gap between two shapes' surfaces: negative by how deep they overlap, zero when they touch. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box, then tightened), so measure parts rather than a whole scene.
+The smallest gap between two shapes' surfaces, zero when they touch. Negative when they overlap: minus the depth of the deepest point either surface reaches inside the other, measured to the other's surface, which for a face sunk into a face or a round part pressed into another is how far they must be moved apart to only touch (a book whose top is 0.15 into a 0.2 board reads -0.15, though the board's top is only 0.05 above it); the same either way round, and a part wholly inside another reads how deep its surface lies, less than the move that would free it. For assert clearance(handle, rim) > 0.05. Sampled from the fields (12 points per side of each shape's box and of the box where the two meet, the best walked down each surface, so a rounded edge resting on a plane reads its true gap), so measure parts rather than a whole scene.
 
     clearance(a, b) -> number
 
@@ -532,16 +612,21 @@ Paint only the part of the surface inside `region`, adding no geometry: a pupil 
 
 ### material
 
-A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
+A custom material, from a colour or from a preset with some of its fields changed: material("granite", scale=0.3). Patterns: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots, rust. `scale` is the feature size in units; metal 0..1; rough 0..1; transmit 0..1 for glass; glow 0..2 for a flame or a lamp; bump (a height) and bump_scale (a size) for a surface rougher than the mesh, a hammered or cast or pitted finish; wear 0..1 for edges rubbed lighter (a metal to satin, in scuffs) and dirt in the hollows. The `rust` pattern eats patches of `scale` across into the base, rough and not metal (oxide colour unless color2 is given), over a thin film of the oxide between them, and wear rubs them off the edges. Patterns are laid out in the frame the part is painted in, along `axis` (default y): stripes are bands stacked along it, wood is boards across it with the grain along it, brick courses go round it, tiles and checks lie in the plane across it (floor tiles with the default y). Paint before moving the part, or set axis="x" for stripes running the other way.
 
-    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?, image="", projection="") -> material
+    material(color, pattern="", color2="", scale=?, metal=?, rough=?, seed=?, transmit=?, axis="", glow=?, bump=?, bump_scale=?, wear=?, image="", projection="") -> material
 
 - `color`: a colour, or a preset name to start from
 - `color2`: second colour for two-tone patterns
 - `scale`: feature size in units
+- `metal`: 0 a non-metal .. 1 a metal, whose colour is then its reflectance (F0, as glTF means it): it reads by what it reflects
+- `rough`: 0 a mirror .. 1 matt, the width of the GGX lobe: under 0.12 a mirror that reflects the model, to 0.35 glossy, above 0.55 reflecting only the blurred sky
 - `transmit`: 0 opaque .. 1 clear glass (beauty render only)
 - `axis`: the pattern's axis: stripes stack along it, grain runs along it
 - `glow`: light the surface gives off, 0..2 (unshadowed, for flames and lamps)
+- `bump`: bumps finer than the mesh, this high either way, in units: shaded in the beauty render and baked into the GLB's normal map, no geometry added
+- `bump_scale`: the bumps' feature size in units (default ten times bump)
+- `wear`: 0..1, how used it looks: convex edges lighter and smoother, cavities darker and rougher, read from the shape's curvature; on a metal the edges are rubbed to satin (iron's dark skin to about twice its reflectance, short of bare metal) in scuffs, fewer on a part thinner than about 2.4% of the model's size
 - `image`: a PNG file, relative to the program, painted instead of a pattern: `scale` is its width in units, its height following its shape
 - `projection`: how the picture wraps the part, in the frame it is painted in: planar (flat across `axis`, centred on the origin, one copy), cylindrical (round `axis` by arc length, repeating) or spherical (one copy round the origin)
 
@@ -695,7 +780,7 @@ The world point of a shape's anchor as [x, y, z]: one named with anchor(), or a 
 
 ### attach
 
-Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which a fine grid meshes as two pieces: `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, so the two overlap.
+Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post, "top") is a move with no numbers. Either anchor may be a named one or a free one (top, bottom, ...). Rotate the part first, then attach it; the anchors turn with it. Face on face is a touch, which meshes as one piece at any grid; a corner or an edge on a face touches at a point or a line and may mesh apart. `sink=0.02` pushes the part that far into the target, along the line from its anchor to its own centre, for an overlap a print or a promise needs.
 
     attach(part, anchor, target, targetAnchor, sink=0) -> shape
 
@@ -707,7 +792,7 @@ Move `part` so its anchor lands on the target's anchor: attach(arm, "root", post
 
 ### import
 
-An existing mesh as a shape: `import("part.obj")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so.
+An existing mesh as a shape: `import("part.obj")` or a `.glb`, relative to the program's folder. The mesh is sampled into a distance field over a grid of `resolution` cells on its longest side (default 96), so it can be cut, blended, hollowed and painted like any shape; `size=` scales its longest side to that many units. Closed meshes work; an open mesh has no inside and the report says so. The samples are cached on disk by the file's content, so `check` and `render` sample a file once at each resolution (`--no-cache` samples afresh).
 
     import(path, size=?, resolution=96) -> shape
 
@@ -743,24 +828,28 @@ A glTF animation from poses: `animation("wave", ["rest", "wave", "rest"], second
 
 ## Lights, cameras and environments
 
-The beauty render's lighting and shots, declared in the program. Without a `light()` the render has one key light, placed by `set light_azimuth`, `set light_elevation` and `set light_size`.
+The beauty render's lighting and shots, declared in the program. Without a `light()` the render has one key light: the default from the upper left and the front, at azimuth -40 and about 47 degrees up, turned towards the frame's top left in a shot looking steeply down (turning as the camera's elevation goes from 55 to 75, and turned all the way above that), or where `set light_azimuth`, `set light_elevation` and `set light_size` put it (one angle set alone takes -40 or 55 for the other).
 
 ### light
 
-A light in the beauty render: `light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")` and `light("rim", azimuth=150, elevation=20, power=0.5, color="#cfe0ff")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's apparent size (0.5 a lamp with crisp shadows, 3 a window); `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's. Each light casts its own soft shadow, so three lights cost about half again the time of one (measured on the market scene: 4.1 s to 5.9 s at 512 px). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them. A point light is at a place instead of a direction: `light("fire", position=[0, 0.4, 0], range=2, color="#ff9a3c")` lights what is round it, its strength halving `range` away, shadowed by what stands between; put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through dimmed), since inside a solid every shadow ray hits that solid.
+A light in the beauty render: `light("key", azimuth=-40, elevation=55, size=1.5, color="#fff2e0")` and `light("rim", azimuth=150, elevation=20, power=0.5, color="#cfe0ff")`. Azimuth is degrees about y (0 from the front, +z; 90 from +x), elevation above the floor; `size` is the light's angular radius, size/18 radians (0.5 a lamp with crisp shadows, 1 about 3 degrees, 3 about 10, a window), which softens its shadow, widens its highlight and is the bright disc a mirror shows of it; `color` is a colour name, a hex or a material; `power` is its strength, 1 being the default key light's, which lights a white face turned square to it to near white. Each light's shadow is traced from its disc, eight rays a pixel: soft by the light's size, hardening where a part meets the floor, tinted where the light passes through coloured glass. Three lights cost about a third more than one (one light to three at 384 px, full quality, one thread, best of five: the lantern 2.29 s to 3.03 s, round 4's market 2.70 s to 3.46 s). The first `light()` replaces the default key light; declare as many as the picture needs. The report lists them, `model.glb` carries them as glTF lights, and with two or more `render --beauty` draws `lights.png`. A point light is at a place instead of a direction: `light("fire", position=[0, 0.4, 0], range=2, color="#ff9a3c")` is a small sphere (its radius 2% of `range` per unit of `size`) that lights what is round it, shadowed by what stands between, its shadows reaching the floor. Its strength at a distance d is range² / (range² + d²) of its strength at the light, in linear light as an engine's is: half at `range` (half the model's longest side when not given, so the default suits a model of any size), a fifth at twice it. Half the light shows at about three quarters of the brightness, so its pool looks wider than half suggests; lower `range` to narrow it. Put it in the air just outside the glowing part (inside a glass shade is fine, glass lets its light through tinted), since inside a solid every shadow ray hits that solid.
 
     light(name, azimuth=-40, elevation=55, size=1, color="white", power=1) -> string
-    light(name, position=[x, y, z], range=2, size=1, color="white", power=1) -> string
+    light(name, position=[x, y, z], range=?, size=1, color="white", power=1) -> string
 
 ### camera
 
-A named shot: `camera("hero", azimuth=30, elevation=20, zoom=1.4)` and `camera("detail", focus="nameplate", zoom=2)`. `render --beauty` writes `beauty_<name>.png` for each, framed on `focus=` (a step or object, as `--focus` frames it) when given, with the render's own azimuth, elevation, zoom and dof for whatever a shot leaves out. `set camera hero` makes that shot the sheet's and `beauty.png`'s view too (the command line's `--azimuth`, `--elevation` and `--zoom` still override).
+A named shot: `camera("hero", azimuth=30, elevation=20, zoom=1.4)` and `camera("detail", focus="nameplate", zoom=2)`. `render --beauty` writes `beauty_<name>.png` for each, framed on `focus=` (a step or object, as `--focus` frames it) when given. What a shot leaves out it takes from the render's own view: the command line's `--azimuth`, `--elevation` and `--zoom`, then the `set camera` shot's, then `set azimuth`, `set elevation` and `set zoom`, then the defaults; and `set dof`. So `--camera NAME`, with or without `--beauty-only`, draws exactly the full run's `beauty_NAME.png`, unless an angle is given on the command line too: that overrides the camera's own in `beauty.png`, as it does a `set camera` shot's, where `beauty_NAME.png` keeps the camera's. `set camera hero` makes that shot the sheet's and `beauty.png`'s view too (the command line's `--azimuth`, `--elevation` and `--zoom` still override).
 
     camera(name, azimuth=35, elevation=25, zoom=1, focus="step", dof=0) -> string
 
 ### set environment
 
-The sky the beauty render sits in and the metals reflect: `set environment sunset`. `studio` (the default) is the grey-white backdrop; `overcast` a white sky with soft, even light; `sunset` a warm band at the horizon under a blue sky on warm ground; `night` a dark blue sky and a dark floor, where a `glow` material carries the picture. An environment sets the sky, ground and floor colours and scales the ambient light; the lights are yours.
+The sky the beauty render sits in, takes its ambient light from and the metals reflect: `set environment sunset`. `studio` (the default) is a white sweep with the room round the camera dark and out of shot, in two rigs: the light a surface takes, whose walls still light a shaded side, and a darker room a surface mirrors, with three cards (a fill low on the right, a strip overhead, a rim strip behind) that only reflections see, so chrome reads as a dark mirror with bright cards in it. `overcast` is a white dome with soft, even light, brighter towards the zenith; what a surface mirrors is flagged on the camera's side, as a photographer flags a shot outdoors, a dark band over the horizon and a dark ground, so a metal's faces turned to the camera have form while its faces turned to the sky mirror the white dome (a chrome or silver ball shows a white sky over a dark horizon and ground). `sunset` is a warm band at the horizon under a blue sky on warm ground, with a sun 3 degrees up on the key light's side. `night` is a dark blue sky with stars and a moon on the key's side, over a dark floor, its ambient light 0.4 of the studio's, where a `glow` material carries the picture. An environment sets the backdrop, the sky's light and what the metals reflect, and the floor's colour; the lights are yours.
+
+### set ambient
+
+Scales the sky's light in the beauty render: `set ambient 1.5`. It scales the light a surface takes from the sky and what a metal or a glossy part reflects of it alike, not the lights, the disc a mirror shows of each, or the backdrop: 0.5 is a dark room, 2 a shaded interior lifted, and under `night` (0.4 of the studio's sky) 1.6 is a start. The open floor near the model keeps its colour, short of a scene too dim for any floor to show it: it is solved to show the sky's own floor under the sky and every directional light.
 
 ## Roblox attachments
 
@@ -812,14 +901,14 @@ Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a
 | charcoal | solid |  | #3a3a3e | rough 0.6 |
 | ivory | solid |  | #f4f0e2 | rough 0.6 |
 | coral | solid |  | #e8735a | rough 0.6 |
-| gold | solid |  | #e2b13c | metal, rough 0.3 |
-| silver | solid |  | #d4d6da | metal, rough 0.25 |
-| copper | solid |  | #c67a4a | metal, rough 0.35 |
-| bronze | solid |  | #a5772f | metal, rough 0.4 |
-| steel | solid |  | #8e949c | metal, rough 0.45 |
-| iron | solid |  | #5c5e62 | metal, rough 0.6 |
-| brass | solid |  | #c9a54a | metal, rough 0.35 |
-| chrome | solid |  | #e8eaee | metal, rough 0.1 |
+| gold | solid |  | #ffc95e | metal, rough 0.3 |
+| silver | solid |  | #fcfaf5 | metal, rough 0.25 |
+| copper | solid |  | #f5ab92 | metal, rough 0.35 |
+| bronze | solid |  | #f0bc84 | metal, rough 0.4 |
+| steel | solid |  | #c6c6c8 | metal, rough 0.45 |
+| iron | solid |  | #595959 | metal, rough 0.6 |
+| brass | solid |  | #ebcc75 | metal, rough 0.35 |
+| chrome | solid |  | #c4c5c4 | metal, rough 0.1 |
 | wood | wood | 0.25 units | #b07d4a / #7a4f2a | rough 0.7 |
 | oak | wood | 0.3 units | #c69a63 / #8f6539 | rough 0.7 |
 | walnut | wood | 0.22 units | #6b4327 / #3e2414 | rough 0.6 |
@@ -848,9 +937,10 @@ Use any of these by name in `paint()`. A colour name (`"red"`) or hex (`"#c8342a
 | porcelain | solid |  | #f6f4ee | rough 0.2 |
 | snow | noise | 0.3 units | #f8f9fb / #dfe6ef | rough 0.9 |
 | lava | marble | 0.8 units | #f06a1a / #3a1a10 | rough 0.6 |
+| rust | rust | 0.3 units | #595959 / #8a4422 | metal, rough 0.55 |
 
 A pattern's feature size is in model units: a wood ring every 0.25 units suits a table leg, not a 20-unit floor. Use `material(color, pattern, color2, scale=)` with the two colours from this table for the same look at another size.
 
 ## Patterns
 
-For `material(color, pattern, ...)`: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots.
+For `material(color, pattern, ...)`: solid, checker, stripes, wood, marble, noise, speckle, brick, tiles, dots, rust.

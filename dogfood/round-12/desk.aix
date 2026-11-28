@@ -1,0 +1,102 @@
+# A writing desk at night, drawn in centimetres: a small walnut desk with one
+# drawer, a brass desk lamp at its back left whose bulb is a point light, an
+# open book in the middle and a glazed ceramic mug of coffee on the right,
+# under the night sky with the moon as a second light. Front is +z.
+
+# ---- the desk -------------------------------------------------------------
+desk = {w: 110, d: 55, h: 75, top: 3, leg: 4.5, apron: 9.5}
+top_wood = material("walnut", scale=22, axis="x")
+leg_wood = material("walnut", scale=22)
+
+desktop = box(desk.w, desk.top, desk.d, round=0.6) | paint(top_wood) | move(0, desk.h - desk.top / 2, 0)
+apron = box(desk.w - 10, desk.apron, desk.d - 8) | paint(top_wood) | move(0, desk.h - desk.top - desk.apron / 2 + 0.45, 0)
+leg = box(desk.leg, desk.h - desk.top + 0.5, desk.leg) | paint(leg_wood) | move(0, (desk.h - desk.top + 0.5) / 2, 0)
+legs = leg | move(desk.w / 2 - 5, 0, desk.d / 2 - 4) | mirror("x") | mirror("z")
+drawer_front = box(44, 7, 1.2, round=0.3) | paint(top_wood) | move(0, desk.h - desk.top - desk.apron / 2 + 0.45, (desk.d - 8) / 2 + 0.4)
+knob = sphere(1.1) | paint("brass") | move(0, desk.h - desk.top - desk.apron / 2 + 0.45, (desk.d - 8) / 2 + 1.6)
+desk_frame = desktop + apron + legs + drawer_front + knob
+
+# ---- the lamp, built at its own origin standing on y = 0, arm reaching +x ----
+lamp_base = cylinder(7, 2, round=0.6) | paint("brass") | move(0, 1, 0)
+stem = tube(0.7, [0, 1.5, 0, 0, 24, 0]) | paint("brass")
+arm_path = curve([0, 24, 0, 3, 31, 0, 10, 34.5, 0, 16, 33, 0])
+arm = tube(0.65, arm_path) | paint("brass")
+knuckle = sphere(1.6) | paint("brass") | move(16, 33, 0)
+
+# The head, built pointing down with its socket at the top: a deep hollow cone
+# open below, so the bulb sits well up in it and the light leaves as a cone,
+# and a bulb hanging in it on a short socket.
+shade_h = 14
+shade_outer = cone(8.5, 3, shade_h)
+shade_wall = 0.75
+# The shell keeps a cap across the bottom as thick as the wall; the cutter takes
+# it off, from a cell below the mouth to 0.75 (two cells) past the cap's inner face.
+mouth_cut = cylinder(12, shade_wall + 1.75) | move(0, -shade_h / 2 + (shade_wall + 0.75 - 1) / 2, 0)
+shade = ((shade_outer | shell(shade_wall)) - mouth_cut) | paint("brass")
+bulb_r = 2
+bulb_y = 3
+socket = cylinder(1, 3) | paint("charcoal") | move(0, shade_h / 2 - 1, 0)
+bulb = sphere(bulb_r) | paint(material("#fff3d6", glow=1.5)) | move(0, bulb_y, 0)
+head = (shade + socket + bulb) | anchor("socket", 0, shade_h / 2 + 0.6, 0) | anchor("light", 0, bulb_y - bulb_r - 1.5, 0)
+head_placed = head | rotate(z=30) | attach("socket", knuckle, "centre")
+
+lamp = lamp_base + stem + arm + knuckle + head_placed
+
+# ---- the book: an open hardback, two blocks of pages with lines of ink ----
+cover = box(33, 0.8, 23.5, round=0.3) | paint(material("#6e1f2a", rough=0.7)) | move(0, 0.4, 0)
+page_block = box(15.9, 1.6, 22.5, round=0.35)
+ink_lines = empty()
+for i in range(14) {
+  ink_lines = ink_lines + (box(12.5, 3, 0.22) | move(0, 0, -8.5 + i * 1.3))
+}
+page = decal(page_block | paint("ivory"), ink_lines, "#4a4a52")
+pages = (page | move(-8.15, 1.5, 0)) + (page | move(8.15, 1.5, 0))
+book = (cover + pages) | rotate(y=-8)
+
+# ---- the mug: a glazed cup with coffee in it ----
+mug_r = 4.2
+mug_h = 9.5
+mug_wall = 0.7
+mug_body = cylinder(mug_r, mug_h, round=0.3) | move(0, mug_h / 2, 0)
+mug_cavity = cylinder(mug_r - mug_wall, mug_h) | move(0, mug_h / 2 + 0.8, 0)
+mug_handle = (torus(2.6, 0.6) | rotate(x=90) | move(mug_r + 1.4, 5, 0)) - mug_cavity
+glaze = material("#ece3d3", rough=0.2)
+cup = (mug_body - mug_cavity + mug_handle) | paint(glaze)
+coffee = cylinder(mug_r - mug_wall + 0.1, 6.4) | paint(material("#2b1608", rough=0.15)) | move(0, 0.8 + 3.2, 0)
+mug = (cup + coffee) | rotate(y=-30)
+
+# ---- placing them on the desk ----
+lamp_on = lamp | rotate(y=-28) | move(-40, 90, -14) | rest(desktop)
+book_on = book | move(2, 90, 8) | rest(desktop)
+mug_on = mug | move(28, 90, 0) | rest(desktop)
+
+scene_all = desk_frame + lamp_on + book_on + mug_on
+show scene_all
+
+# ---- lights, camera, sky ----
+set environment night
+set ambient 1.6
+light("moon", azimuth=150, elevation=40, size=1, color="#9fb4ff", power=0.3)
+light("lamp", position=at(lamp_on, "light"), range=22, size=2, color="#ffd9a0", power=4)
+# The shot is framed on the desktop and what stands on it (a region only the camera reads).
+shot_frame = box(88, 36, 48) | move(-6, 90, -2)
+camera("desk", azimuth=25, elevation=20, focus="shot_frame", zoom=1.1)
+set camera desk
+set grid 320
+
+# ---- promises ----
+assert abs(clearance(lamp_on, desktop)) < 0.01, "the lamp stands on the desk"
+assert abs(clearance(book_on, desktop)) < 0.01, "the book lies on the desk"
+assert abs(clearance(mug_on, desktop)) < 0.01, "the mug stands on the desk"
+assert abs(bottom(lamp_on) - top(desktop)) < 0.01, "the lamp's foot is on the desktop, not against its edge"
+assert abs(bottom(book_on) - top(desktop)) < 0.01, "the book's cover is on the desktop"
+assert abs(bottom(mug_on) - top(desktop)) < 0.01, "the mug's foot is on the desktop"
+assert pieces(lamp_on) == 1, "the lamp is one piece: base, stem, arm, knuckle, shade, socket and bulb"
+assert clearance(bulb, shade) > 1, "the shade clears its bulb"
+# A rod down the shade's axis from beside the bulb to past its mouth: the shade is open below.
+shade_mouth = cylinder(0.3, 6) | move(0, -5.5, 0)
+assert void(shade_mouth, shade), "the shade is open at the bottom"
+# The lamp's light is a sphere 2% of its range across per unit of size: it must hang in the air.
+lamp_at = at(lamp_on, "light")
+light_probe = sphere(1) | move(lamp_at[0], lamp_at[1], lamp_at[2])
+assert void(light_probe, scene_all), "the lamp's light hangs in the air under the bulb"

@@ -1,0 +1,515 @@
+import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
+import * as P from "../src/sdf/primitives.js";
+import * as O from "../src/sdf/ops.js";
+import { surfaceNets } from "../src/mesh/surfaceNets.js";
+import { watertightReport } from "../src/mesh/mesh.js";
+import { countPieces, type MeshCache } from "../src/mesh/pieces.js";
+import { bedFit, boxCorners, supportVolume, thinnestWall, wallThickness } from "../src/mesh/print.js";
+import { to3mf } from "../src/export/threemf.js";
+import { unzip, zip } from "../src/export/zip.js";
+import { toStl } from "../src/export/stl.js";
+import { check, run, surfaceGap, watertightNote, type RunOptions } from "../src/pipeline.js";
+import { parse } from "../src/lang/parser.js";
+import { preset } from "../src/sdf/materials.js";
+
+const BARE: RunOptions = { views: [], steps: false, slices: false, turntable: false, callouts: false, glb: false, viewer: false, beauty: false };
+
+describe("wall thickness", () => {
+  it("reads a shell's wall, a solid's full depth, and a cup's wall through the field", () => {
+    const shelled = O.shell(P.box(2, 2, 2), 0.1);
+    const nets = surfaceNets(shelled, { resolution: 48 });
+    const w = wallThickness(shelled, nets.mesh, nets.cellSize);
+    expect(w.thinnest!.thickness).toBeCloseTo(0.1, 2);
+    // A wall under a cell (0.042 here) is still measured: the march is in the field, not the mesh.
+    const thin = O.shell(P.box(2, 2, 2), 0.03);
+    const tn = surfaceNets(thin, { resolution: 48 });
+    expect(wallThickness(thin, tn.mesh, tn.cellSize).thinnest!.thickness).toBeCloseTo(0.03, 2);
+    expect(thinnestWall(P.sphere(0.5), 32).thickness).toBeCloseTo(1, 1);
+    const cup = O.difference(O.move(P.cylinder(1.2, 2.4), 0, 1.2, 0), O.move(P.cylinder(1.06, 2.4), 0, 1.4, 0));
+    expect(thinnestWall(cup, 96).thickness).toBeCloseTo(0.14, 2);
+  });
+  it("leaves the tip of a corner sharper than a right angle out, and keeps a sliver between two cuts", () => {
+    // A cone's apex and a chamfered rim are corners, not walls: the far side leaves at a slant.
+    const cone = O.move(P.cone(0.5, 0, 1), 0, 0.5, 0);
+    expect(thinnestWall(cone, 64).thickness).toBeGreaterThan(0.3);
+    // Two slots cut 0.02 apart leave a web 0.02 thick, which is a wall and is read as one.
+    const plate = O.difference(P.box(1, 0.2, 1), O.union([O.move(P.box(0.2, 0.4, 2), -0.11, 0, 0), O.move(P.box(0.2, 0.4, 2), 0.11, 0, 0)]));
+    const r = thinnestWall(plate, 64);
+    expect(r.thickness).toBeCloseTo(0.02, 2);
+    expect(Math.abs(r.at![0])).toBeLessThan(0.02);
+  });
+  it("reads the evaluation's mesh when pieces() already meshed the shape at that grid, with the same result", () => {
+    // A program promising one piece and a wall meshed the cup twice: 3.0 s for check at grid 160, 2.0 s shared.
+    const build = () => O.difference(O.move(P.cylinder(1.2, 2.4), 0, 1.2, 0), O.move(P.cylinder(1.06, 2.4), 0, 1.4, 0));
+    const cache: MeshCache = new Map();
+    const shared = build();
+    expect(countPieces(shared, 96, cache)).toBe(1);
+    const meshed = cache.get(shared)!.get(96)!.mesh;
+    expect(thinnestWall(shared, 96, cache)).toEqual(thinnestWall(build(), 96));
+    // Nothing was meshed again: the one entry is the mesh pieces() made.
+    expect(cache.get(shared)!.size).toBe(1);
+    expect(cache.get(shared)!.get(96)!.mesh).toBe(meshed);
+  });
+});
+
+describe("supports", () => {
+  it("is the volume under the overhanging faces, down to the plate or the model below", () => {
+    // A table: a 2 × 2 slab on a 0.4 post, the slab's underside 1 above the floor: 3.84 of support from the plate.
+    const table = O.union([O.move(P.box(0.4, 1, 0.4), 0, 0.5, 0), O.move(P.box(2, 0.2, 2), 0, 1.1, 0)]);
+    const nets = surfaceNets(table, { resolution: 64 });
+    const s = supportVolume(table, nets.mesh, nets.cellSize, 0);
+    expect(s.volume).toBeGreaterThan(3.84 * 0.93);
+    expect(s.volume).toBeLessThan(3.84 * 1.07);
+    expect(s.onModel).toBe(0);
+    // A shelf over a block: the columns stand on the block, not the plate.
+    const shelf = O.union([O.move(P.box(1, 1, 1), 0, 0.5, 0), O.move(P.box(0.2, 2, 1), -0.6, 1, 0), O.move(P.box(1.2, 0.1, 1), 0, 1.95, 0)]);
+    const sn = surfaceNets(shelf, { resolution: 64 });
+    const ss = supportVolume(shelf, sn.mesh, sn.cellSize, 0);
+    expect(ss.onModel).toBeGreaterThan(0.8 * 0.9);
+    expect(ss.fromFloor).toBeLessThan(ss.onModel * 0.2);
+  });
+});
+
+describe("bridges (roadmap 20)", () => {
+  const meshed = (s: ReturnType<typeof P.box>, res = 64) => { const n = surfaceNets(s, { resolution: res }); return { n, floor: Math.min(...Array.from(n.mesh.positions).filter((_, i) => i % 3 === 1)) }; };
+  const split = (s: ReturnType<typeof P.box>, span: number, res = 64) => { const { n, floor } = meshed(s, res); return supportVolume(s, n.mesh, n.cellSize, floor, { span }); };
+  // A slab 3 thick between two posts 20 tall, in millimetres.
+  const posts = (gap: number) => O.union([O.move(P.box(10, 20, 10), -(gap / 2 + 5), 10, 0), O.move(P.box(10, 20, 10), gap / 2 + 5, 10, 0), O.move(P.box(gap + 20, 3, 10), 0, 21.5, 0)]);
+  it("leaves a slab between posts out when the gap is within the span, and splits nothing else off", () => {
+    const eight = split(posts(8), 16);
+    expect(eight.volume).toBe(0);
+    // 8 wide, 10 deep and 20 tall under the slab.
+    expect(eight.bridged).toBeGreaterThan(1600 * 0.93);
+    expect(eight.bridged).toBeLessThan(1600 * 1.07);
+    expect(eight.longestBridge).toBeGreaterThan(7.5);
+    expect(eight.longestBridge).toBeLessThan(9);
+    // Past the span it is support again: the same gap at a 5 mm span, and posts 20 apart at 16.
+    expect(split(posts(8), 5).bridged).toBe(0);
+    const twenty = split(posts(20), 16);
+    expect(twenty.bridged).toBe(0);
+    expect(twenty.volume).toBeGreaterThan(4000 * 0.9);
+    // span 0 is the estimate with every overhang supported.
+    const all = split(posts(8), 0);
+    expect(all.bridged).toBe(0);
+    expect(all.volume).toBeCloseTo(eight.bridged, 6);
+  });
+  it("bridges a level ceiling only, to solid that stands: not a cantilever, a dome or a hole's top", () => {
+    const cantilever = O.union([O.move(P.box(10, 20, 10), 0, 10, 0), O.move(P.box(18, 3, 10), 4, 21.5, 0)]);
+    expect(split(cantilever, 16).bridged).toBe(0);
+    // A horizontal hole 8 across: each layer of its top is a ledge on the one below, not a span.
+    const hole = O.difference(O.move(P.box(30, 30, 10), 0, 15, 0), O.move(O.rotate(P.cylinder(4, 12), 90, 0, 0), 0, 15, 0));
+    const h = split(hole, 16, 96);
+    expect(h.bridged).toBe(0);
+    expect(h.volume).toBeGreaterThan(300);
+    // A dome 20 across over a room: the same.
+    const dome = O.difference(O.move(P.box(26, 18, 26), 0, 9, 0), O.union([O.move(P.cylinder(10, 6), 0, 3, 0), O.move(P.sphere(10), 0, 6, 0)]));
+    expect(split(dome, 16, 96).bridged).toBe(0);
+  });
+  it("bridges a slope closed at both ends along its level, as PrusaSlicer's bridging perimeters, and not one open there", () => {
+    // A ceiling falling at 30 degrees (60 past the 45 rule) over a channel 10 wide: each layer of it is a straight line
+    // from side wall to side wall, which PrusaSlicer's remove_bridges_from_contacts takes as a bridge (a straight
+    // overhanging perimeter that lands on the layer below at both ends). Without the side walls the lines land nowhere.
+    const under = O.intersect(O.move(P.box(10, 40, 34), 0, 20, 0), O.rotate(P.box(10, 40, 60), 30, 0, 0));
+    const walled = O.difference(O.move(P.box(14, 30, 30), 0, 15, 0), O.union([O.move(P.box(10, 8, 34), 0, 4, 0), under]));
+    const w = split(walled, 16, 96);
+    expect(w.volume).toBeLessThan(w.bridged * 0.01);
+    expect(w.longestBridge).toBeLessThan(11);
+    const open = O.intersect(walled, O.move(P.box(10, 30, 30), 0, 15, 0)); // the walls cut away: a wedge in the air
+    const o = split(open, 16, 96);
+    expect(o.bridged).toBe(0);
+    expect(o.volume).toBeGreaterThan(1000);
+  });
+  it("lays each ceiling in one direction, as PrusaSlicer's bridge detector does", () => {
+    // An L-shaped room under a flat roof, arms 8 wide and 30 long: the detector, emulated on the roof's layer, picks the
+    // diagonal, whose longest line is 8√2 = 11.3 (along an arm it would be 30). At 16 all of it is bridged on that line.
+    // The slicer picks the direction without knowing the span, so at 10 it still lays the diagonal, 11.3 long: only the
+    // corners at the arms' ends, where the diagonal is cut short, are bridged (12%), where one arm (30 to 60%) would be if
+    // each ceiling took whichever axis spanned the most within the span.
+    const room = O.union([O.move(P.box(30, 12, 8), 15, 6, 4), O.move(P.box(8, 12, 30), 4, 6, 15)]);
+    const L = O.difference(O.move(P.box(34, 14, 34), 15, 7, 15), room);
+    const at16 = split(L, 16, 128);
+    expect(at16.volume).toBe(0);
+    expect(at16.longestBridge).toBeGreaterThan(10.5);
+    expect(at16.longestBridge).toBeLessThan(12.5);
+    const at10 = split(L, 10, 128);
+    expect(at10.bridged / (at10.bridged + at10.volume)).toBeGreaterThan(0.05);
+    expect(at10.bridged / (at10.bridged + at10.volume)).toBeLessThan(0.2);
+    expect(at10.longestBridge).toBeLessThanOrEqual(10);
+    // A ring of roof from radius 3 to 10, between a post and a wall: lines in one direction run as chords up to
+    // 2√(10² - 3²) = 19 past the post, so the share past 16 needs support (the faces 4 mm across, met radially, would not).
+    const ring = O.difference(O.move(P.cylinder(12, 14), 0, 7, 0), O.difference(O.move(P.cylinder(10, 12), 0, 6, 0), O.move(P.cylinder(3, 12), 0, 6, 0)));
+    const r = split(ring, 16, 128);
+    expect(r.bridged).toBeGreaterThan(0);
+    expect(r.volume).toBeGreaterThan(r.bridged * 0.2);
+  });
+  it("takes the direction the slicer would whatever the span: the one anchored over the most, not the most within it", () => {
+    // A bay under a roof, walled on both long sides and the back, open at the front: PrusaSlicer's detector, emulated on
+    // the roof's layer, crosses it the short way (1235 mm of anchored line against 849 on a diagonal, whose lines run
+    // out of the open front). 14 wide, every line is within the span; 18 wide, every line is 18.4 long and none is,
+    // though the diagonals cut short in the back corners are.
+    const bay = (w: number) => O.difference(O.move(P.box(w + 4, 14, 32), 0, 7, -1), O.move(P.box(w, 12, 32), 0, 6, 1));
+    const narrow = split(bay(14), 16, 128);
+    expect(narrow.volume).toBe(0);
+    expect(narrow.longestBridge).toBeLessThan(15);
+    const wide = split(bay(18), 16, 128);
+    expect(wide.bridged).toBe(0);
+    expect(wide.volume).toBeGreaterThan(18 * 30 * 12 * 0.9);
+  });
+});
+
+describe("islands (roadmap 20)", () => {
+  const wall = O.move(P.box(20, 40, 6), 0, 20, -3);
+  const islandsOf = (s: ReturnType<typeof P.box>, res: number) => {
+    const n = surfaceNets(s, { resolution: res });
+    let floor = Infinity;
+    for (let i = 1; i < n.mesh.positions.length; i += 3) floor = Math.min(floor, n.mesh.positions[i]);
+    return supportVolume(s, n.mesh, n.cellSize, floor);
+  };
+  it("finds a cone hanging tip down off a wall, which no face asks support for, at every grid", () => {
+    // Its sides 60 degrees from the horizontal, sunk 1 into the wall; the tip at y = 36 - 8.66.
+    const h = 5 * Math.tan(Math.PI / 3);
+    const cone = O.union([wall, O.move(O.rotate(P.cone(5, 0, h), 180, 0, 0), 0, 36 - h / 2, 4)]);
+    for (const res of [64, 128, 200]) {
+      const s = islandsOf(cone, res);
+      expect(s.volume).toBeLessThan(1);
+      expect(s.islands.length).toBe(1);
+      expect(Math.abs(s.islands[0].at[1] - (36 - h))).toBeLessThan(40 / res);
+      expect(s.islands[0].onModel).toBe(false);
+      expect(s.islands[0].height).toBeGreaterThan(26);
+    }
+  });
+  it("finds a sharp tip whose last few faces the mesher folds, by the faces round them facing down", () => {
+    // Cones at 75 and 80 degrees sunk 1 into the wall: at these grids dual contouring ends the tip on three faces whose
+    // normals sum to face up (+0.10 to +1.0 of their area), though the faces round them face down (-0.23 to -0.35).
+    const tip = (deg: number) => {
+      const h = 5 * Math.tan((deg * Math.PI) / 180);
+      return { shape: O.union([wall, O.move(O.rotate(P.cone(5, 0, h), 180, 0, 0), 0, 36 - h / 2, 4)]), y: 36 - h };
+    };
+    for (const [deg, res] of [[75, 96], [75, 112], [80, 128], [80, 160]]) {
+      const { shape, y } = tip(deg);
+      const s = islandsOf(shape, res);
+      expect(s.islands.length).toBe(1);
+      expect(Math.abs(s.islands[0].at[1] - y)).toBeLessThan(1.5);
+    }
+  });
+  it("finds a keel whose ends hang free, and says nothing of one running level into a wall, a line rather than a point", () => {
+    // A triangular keel, edge down, its faces 60 degrees from the horizontal: under a slab between posts, ends free.
+    const keel = (r: number, len: number) => O.rotate(O.rotate(P.prism(3, r, len), 90, 0, 0), 0, 0, 180);
+    const posts = O.union([O.move(P.box(6, 20, 10), -12, 10, 0), O.move(P.box(6, 20, 10), 12, 10, 0), O.move(P.box(30, 3, 10), 0, 21.5, 0)]);
+    expect(islandsOf(O.union([posts, O.move(O.rotate(keel(3, 12), 0, 90, 0), 0, 20.5, 0)]), 128).islands.length).toBe(1);
+    // Off a wall, level, it joins the wall at its own height: no face past 45 and no point, a known miss. Tilted 5
+    // degrees down away from the wall its far end is the island.
+    const off = O.move(keel(3, 15), 0, 25, 7.5);
+    expect(islandsOf(O.union([wall, off]), 128).islands).toEqual([]);
+    const tilted = islandsOf(O.union([wall, O.rotate(off, 5, 0, 0)]), 128).islands;
+    expect(tilted.length).toBe(1);
+    expect(tilted[0].at[2]).toBeGreaterThan(13);
+  });
+  it("counts no island where faces already stand on support, nor on a shape standing on the plate", () => {
+    // A ball hanging off a wall on an arm: its underside faces down past 45 degrees and has its own columns.
+    expect(islandsOf(O.union([wall, O.move(P.box(2, 2, 10), 0, 30, 5), O.move(P.sphere(4), 0, 26, 10)]), 128).islands).toEqual([]);
+    expect(islandsOf(O.union([O.move(P.cylinder(2, 20), 0, 10, 0), O.move(P.sphere(8), 0, 26, 0)]), 128).islands).toEqual([]);
+    expect(islandsOf(wall, 128).islands).toEqual([]);
+    // A cup on a post: its inner floor is a minimum 10 over the plate, but it faces up, the solid under it.
+    const cup = O.union([O.move(P.cylinder(1.5, 10), 0, 5, 0), O.difference(O.move(P.cylinder(6, 8), 0, 14, 0), O.move(P.cylinder(5, 8), 0, 16, 0))]);
+    expect(islandsOf(cup, 96).islands).toEqual([]);
+  });
+  it("notes a tallest column standing on a sliver at a crease", () => {
+    // Two faces under a cell in plan facing down beside a wall's corner, under a field that faces down there too.
+    const field = { kind: "shape3", dist: (x: number, y: number, z: number) => -(y - 10) * 0.8 + 0.6 * z, hit: () => ({ d: 0 }), bounds: { min: [-1, 0, -1], max: [1, 12, 1] }, cost: 1 } as never;
+    const mesh = {
+      positions: new Float32Array([0, 10, 0, 0.1, 10, 0, 0, 10.06, 0.08, 0.1, 10.06, 0.08, 0, 11, 0]),
+      normals: new Float32Array(15),
+      // The two sliver faces (facing down), then a wall face on their x = 0 edge, facing -x.
+      indices: new Uint32Array([0, 1, 2, 1, 3, 2, 0, 2, 4]),
+    } as never;
+    const r = supportVolume(field, mesh, 0.5, 0, { span: 0 });
+    expect(r.sliver).toEqual({ area: expect.any(Number), faces: 2 });
+  });
+});
+
+describe("the bed", () => {
+  it("fits square, turned on the plate, lying down, or not at all", () => {
+    const plank = boxCorners([-125, 0, -10], [125, 10, 10]);
+    expect(bedFit(plank, 1, [260, 260, 250]).fits).toBe(true);
+    const turned = bedFit(plank, 1, [220, 220, 250]);
+    expect(turned.fits).toBe(false);
+    expect(turned.turned).toBeGreaterThan(20);
+    expect(turned.turned).toBeLessThan(70);
+    // A rod 300 tall lies down on its side and fits turned across the plate.
+    const rod = boxCorners([-5, 0, -5], [5, 300, 5]);
+    const lying = bedFit(rod, 1, [220, 220, 250]);
+    expect(lying.turned).toBeUndefined();
+    expect(lying.lying?.up).toBe("x");
+    expect(bedFit(boxCorners([0, 0, 0], [300, 300, 300]), 1, [220, 220, 250]).lying).toBeUndefined();
+    // Units scale the points: 25 cm is 250 mm.
+    expect(bedFit(boxCorners([0, 0, 0], [25, 1, 1]), 10, [200, 200, 200]).turned).toBeDefined();
+  });
+  it("gives the smallest turn, in the direction rotate(y=) turns, so turning the model by it makes it fit", () => {
+    // A bar 250 long at rotate(y=30) fits a 200 bed across the diagonal: turned on by 8 to 22 degrees, or back by
+    // 68 to 82. The answer was 69, meant the other way: rotate(y=69) as the report said made it 248 deep.
+    const bar = (deg: number) => O.rotate(P.box(250, 10, 10), 0, deg, 0);
+    const fitOf = (deg: number) => bedFit(surfaceNets(bar(deg), { resolution: 96 }).mesh.positions, 1, [200, 200, 200]);
+    const t = fitOf(30).turned!;
+    expect(t).toBeGreaterThan(7);
+    expect(t).toBeLessThan(23);
+    expect(fitOf(30 + t).fits).toBe(true);
+    // The mirror image turns the other way (by as much, to a degree: the mesh is not quite symmetric).
+    const m = fitOf(-30).turned!;
+    expect(Math.abs(m + t)).toBeLessThanOrEqual(1);
+    expect(fitOf(-30 + m).fits).toBe(true);
+  });
+});
+
+describe("3MF and STL", () => {
+  it("zips stored and deflated entries that unzip to the same bytes", () => {
+    const a = Buffer.from("hello");
+    const b = Buffer.from("x".repeat(5000));
+    const z = zip([{ name: "a.txt", data: a }, { name: "dir/b.txt", data: b, deflate: true }]);
+    const back = unzip(z, inflateRawSync);
+    expect(back.get("a.txt")!.equals(a)).toBe(true);
+    expect(back.get("dir/b.txt")!.equals(b)).toBe(true);
+    expect(z.length).toBeLessThan(5000);
+    // Reproducible: the same entries make the same bytes.
+    expect(zip([{ name: "a.txt", data: a }]).equals(zip([{ name: "a.txt", data: a }]))).toBe(true);
+  });
+  it("writes the 3MF core parts: the unit, vertices once each, z up, a colour per triangle", () => {
+    const red = preset("red")!;
+    const blue = preset("blue")!;
+    const shape = O.union([O.paint(O.move(P.box(1, 1, 1), 0, 0.5, 0), red), O.paint(O.move(P.sphere(0.4), 0, 1.2, 0), blue)]);
+    const nets = surfaceNets(shape, { resolution: 32 });
+    const files = unzip(to3mf(nets.mesh, { name: "a & b", unit: "centimeter" }), inflateRawSync);
+    expect([...files.keys()]).toEqual(["[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"]);
+    expect(files.get("[Content_Types].xml")!.toString()).toMatch(/Extension="model" ContentType="application\/vnd.ms-package.3dmanufacturing-3dmodel\+xml"/);
+    expect(files.get("_rels/.rels")!.toString()).toMatch(/Target="\/3D\/3dmodel.model"[^>]*Type="http:\/\/schemas.microsoft.com\/3dmanufacturing\/2013\/01\/3dmodel"/);
+    const model = files.get("3D/3dmodel.model")!.toString();
+    expect(model).toMatch(/<model unit="centimeter" xml:lang="en-US" xmlns="http:\/\/schemas.microsoft.com\/3dmanufacturing\/core\/2015\/02">/);
+    expect(model).toMatch(/<metadata name="Title">a &amp; b<\/metadata>/);
+    expect(model).toMatch(/<basematerials id="1">\n<base name="red" displaycolor="#[0-9A-F]{6}FF"\/>\n<base name="blue" displaycolor="#[0-9A-F]{6}FF"\/>/);
+    const verts = [...model.matchAll(/<vertex x="([-\d.e]+)" y="([-\d.e]+)" z="([-\d.e]+)"\/>/g)].map((m) => [Number(m[1]), Number(m[2]), Number(m[3])]);
+    const tris = [...model.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)" pid="1" p1="(\d)"\/>/g)].map((m) => [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]);
+    expect(tris.length).toBe(model.split("<triangle ").length - 1);
+    expect(tris.length).toBeGreaterThan(500);
+    // z is up: the model stands on z = 0 and reaches the sphere's top at 1.6.
+    expect(Math.min(...verts.map((v) => v[2]))).toBeCloseTo(0, 1);
+    expect(Math.max(...verts.map((v) => v[2]))).toBeCloseTo(1.6, 1);
+    // Both materials are used, by the triangles where each part is.
+    const byMat = [0, 1].map((m) => tris.filter((t) => t[3] === m));
+    expect(byMat[0].length).toBeGreaterThan(50);
+    expect(byMat[1].length).toBeGreaterThan(50);
+    const meanZ = (ts: number[][]) => ts.reduce((s, t) => s + verts[t[0]][2], 0) / ts.length;
+    expect(meanZ(byMat[1])).toBeGreaterThan(meanZ(byMat[0]));
+    // Welded and closed: every edge is used once each way, and no triangle repeats a corner.
+    const edges = new Map<string, number>();
+    for (const [a, b, c] of tris) {
+      expect(a !== b && b !== c && a !== c).toBe(true);
+      for (const [p, q] of [[a, b], [b, c], [c, a]]) edges.set(`${p},${q}`, (edges.get(`${p},${q}`) ?? 0) + 1);
+    }
+    for (const [k, n] of edges) {
+      expect(n).toBe(1);
+      const [p, q] = k.split(",");
+      expect(edges.get(`${q},${p}`)).toBe(1);
+    }
+  });
+  it("writes the STL in millimetres with z up", () => {
+    const nets = surfaceNets(O.move(P.box(1, 2, 0.5), 0, 1, 0), { resolution: 24 });
+    const stl = toStl(nets.mesh, "t", 10);
+    const n = stl.readUInt32LE(80);
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let t = 0; t < n; t++)
+      for (let v = 0; v < 3; v++)
+        for (let k = 0; k < 3; k++) {
+          const x = stl.readFloatLE(84 + t * 50 + 12 + v * 12 + k * 4);
+          lo[k] = Math.min(lo[k], x); hi[k] = Math.max(hi[k], x);
+        }
+    // 1 × 2 × 0.5 units, a unit 10 mm, y up turned to z up: 10 wide, 5 deep, 20 tall from the plate.
+    expect(hi[0] - lo[0]).toBeCloseTo(10, 0);
+    expect(hi[1] - lo[1]).toBeCloseTo(5, 0);
+    expect(lo[2]).toBeCloseTo(0, 1);
+    expect(hi[2]).toBeCloseTo(20, 0);
+  });
+});
+
+describe("set units and set bed", () => {
+  it("parses a unit as a bare word, keyword or not, and a bed as three numbers or a list", () => {
+    expect(check("set units in\nm = box(1)").settings.units).toBe("in");
+    expect(check("set units cm\nm = box(1)").settings.units).toBe("cm");
+    expect(check("set bed 220 220 250\nm = box(1)").settings.bed).toEqual([220, 220, 250]);
+    expect(check("set bed 220, 220, 250\nm = box(1)").settings.bed).toEqual([220, 220, 250]);
+    expect(check("w = 180\nset bed [w, w, 200]\nm = box(1)").settings.bed).toEqual([180, 180, 200]);
+    expect(parse("set grid 200").body[0]).toMatchObject({ type: "set", key: "grid", value: { type: "num", value: 200 } });
+    expect(check("set units yd\nm = box(1)").warnings.join()).toMatch(/set units yd: no such unit; a unit can be mm, cm, dm, m, in, ft/);
+    expect(check("set bed 200 200\nm = box(1)").warnings.join()).toMatch(/set bed 200 200: the bed is the printer's build volume as three numbers/);
+  });
+  it("takes several values for the bed only, and ends a set at the brace of a one-line loop", () => {
+    // A set inside a one-line loop parsed before several values did, and still does.
+    expect(check("for i in [1] { set grid 64 }\nm = box(1)").settings.grid).toBe(64);
+    expect(check("for i in [1] { set bed 220 220 250 }\nm = box(1)").settings.bed).toEqual([220, 220, 250]);
+    // Every other setting is one value: a list there was stored and read as NaN (a grid of NaN meshed nothing).
+    expect(() => check("set grid 64 128\nm = box(1)")).toThrow(/set grid: expected one value, a number or a name \(only set bed takes several\)/);
+    expect(() => check("set size [256]\nm = box(1)")).toThrow(/set size: expected one value/);
+  });
+  it("a render reports the print, warns when it does not fit the bed, and writes the 3MF and a millimetre STL", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      const r = run("set units cm\nset bed 36 36 30\nm = box(4, 2, 1) | move(0, 1, 0)\nassert wall(m) > 0.5", "plank.aix", dir, { ...BARE, grid: 32 });
+      expect(r.files).toContain("model.3mf");
+      expect(r.report).toMatch(/## Print/);
+      expect(r.report).toMatch(/\| Units \| cm: one unit is a centimetre \(10 mm\) \|/);
+      expect(r.report).toMatch(/\| Size \| 40 × 10 × 20 mm/);
+      // 40 mm long on a 36 mm plate: turned across it, it fits, so that is said and not warned.
+      expect(r.report).toMatch(/\| Bed \| does not fit the 36 × 36 × 30 mm bed square \(40 wide for 36\); turned (-?\d+)° about the vertical on the plate \(as rotate\(y=\1\) turns it, counter-clockwise seen from above\), it fits \|/);
+      expect(r.warnings.join()).not.toMatch(/does not fit/);
+      expect(r.report).toMatch(/\| Thinnest wall \| 10 mm \(1 units, [\d.]+ cells\) at /);
+      expect(r.report).toMatch(/\| Supports \| none/);
+      expect(r.report).toMatch(/\| Material \| (7\.9\d|8) cm³ solid/);
+      expect(r.report).toMatch(/\| Summary \| one piece, watertight, fits the bed turned -?\d+° \|/);
+      const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(json.print.units).toBe("cm");
+      expect(json.print.wall.thickness).toBeCloseTo(1, 2);
+      const stl = readFileSync(join(dir, "model.stl"));
+      expect(Math.abs(stl.readFloatLE(84 + 12))).toBeLessThanOrEqual(20.001);
+      const big = run("set units cm\nset bed 30 30 30\nm = box(5, 5, 5) | move(0, 2.5, 0)", "cube.aix", dir, { ...BARE, grid: 24 });
+      expect(big.warnings.join()).toMatch(/The model is 50 × 50 × 50 mm and does not fit the 30 × 30 × 30 mm bed whichever way it lies/);
+      // No units and no bed: not judged as a print, no 3MF unless asked for.
+      const bare = run("m = box(2, 2, 2) | move(0, 1, 0)", "bare.aix", dir, { ...BARE, grid: 24 });
+      expect(bare.files).not.toContain("model.3mf");
+      // --3mf asks for a print's file, so the model is judged as one, a unit taken as a millimetre.
+      const asked = run("m = box(2, 2, 2) | move(0, 1, 0)", "asked.aix", dir, { ...BARE, grid: 24, threemf: true });
+      expect(asked.files).toContain("model.3mf");
+      expect(asked.report).toMatch(/## Print/);
+      expect(asked.report).toMatch(/\| Units \| not set: a slicer reads a unit as a millimetre, so this prints 2 mm tall/);
+      expect(asked.report).toMatch(/\| Summary \| one piece, watertight; units assumed to be millimetres \|/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("judges a model as a print only when the program sets units or a bed, or --3mf asks", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      // A door for a game engine (round 11): a thin plank, no units, no bed. One line, no Print section, no "mm",
+      // no grams of PLA, and the STL still written.
+      const src = "leaf = box(1, 2, 0.01) | move(0, 1, 0)\nframe = box(1.2, 0.1, 0.2) | move(0, 2.05, 0)\nm = leaf + frame";
+      const game = run(src, "door.aix", dir, { ...BARE, grid: 48, obj: true });
+      expect(game.files).toContain("model.stl");
+      expect(game.files).not.toContain("model.3mf");
+      expect(game.report).not.toMatch(/## Print/);
+      expect(game.report).toMatch(/^Not judged as a print: `set units mm` \(or cm, dm, m, in, ft\) or `set bed 220 220 250` judges it as one, as `--3mf` does; model.stl is written all the same, a unit read as a millimetre\.$/m);
+      const rest = game.report.split("\n").filter((l) => !l.startsWith("Not judged as a print"));
+      expect(rest.join("\n")).not.toMatch(/\bmm\b|PLA|slicer's|Summary|check first|printer would need/);
+      const json = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+      expect(json.print).toEqual({ judged: false });
+      // The same model with set units m is a print: the section, its summary and the 3MF.
+      const print = run("set units m\n" + src, "door_print.aix", dir, { ...BARE, grid: 48, obj: true });
+      expect(print.files).toContain("model.3mf");
+      expect(print.report).toMatch(/## Print/);
+      expect(print.report).toMatch(/\| Summary \| /);
+      expect(print.report).toMatch(/\| Units \| m: one unit is a metre \(1000 mm\) \|/);
+      expect(JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).print.judged).toBe(true);
+      // A bed alone is enough.
+      expect(run("set bed 220 220 250\n" + src, "door_bed.aix", dir, { ...BARE, grid: 48 }).report).toMatch(/## Print/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("takes decimetres and feet: the STL in millimetres, the 3MF in feet or in millimetres scaled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    // The 3MF's unit and its vertices' extent, read back from the zip.
+    const read3mf = (file: string) => {
+      const model = unzip(readFileSync(file), inflateRawSync).get("3D/3dmodel.model")!.toString();
+      const verts = [...model.matchAll(/<vertex x="([-\d.e]+)" y="([-\d.e]+)" z="([-\d.e]+)"\/>/g)].map((m) => [Number(m[1]), Number(m[2]), Number(m[3])]);
+      const ext = [0, 1, 2].map((k) => Math.max(...verts.map((v) => v[k])) - Math.min(...verts.map((v) => v[k])));
+      return { unit: model.match(/<model unit="([a-z]+)"/)![1], ext };
+    };
+    const stlExtent = (file: string) => {
+      const stl = readFileSync(file);
+      const n = stl.readUInt32LE(80);
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (let t = 0; t < n; t++) for (let v = 0; v < 3; v++) for (let k = 0; k < 3; k++) { const x = stl.readFloatLE(84 + t * 50 + 12 + v * 12 + k * 4); lo[k] = Math.min(lo[k], x); hi[k] = Math.max(hi[k], x); }
+      return [0, 1, 2].map((k) => hi[k] - lo[k]);
+    };
+    try {
+      // A bowl drawn in decimetres, 2 wide, 1 tall, 1 deep: 200 × 100 × 100 mm.
+      expect(check("set units dm\nm = box(2, 1, 1)").warnings.join()).not.toMatch(/no such unit/);
+      const dm = run("set units dm\nm = box(2, 1, 1) | move(0, 0.5, 0)", "bowl.aix", dir, { ...BARE, grid: 24, obj: true });
+      expect(dm.report).toMatch(/\| Units \| dm: one unit is a decimetre \(100 mm\) \|/);
+      expect(dm.report).toMatch(/\| Size \| 200 × 100 × 100 mm/);
+      expect(dm.report).toMatch(/model\.3mf in millimetres \(3MF has no decimetre: the coordinates are scaled by 100\)/);
+      const a = read3mf(join(dir, "model.3mf"));
+      expect(a.unit).toBe("millimeter");
+      // x 200 wide, y (the plate's depth, from z) 100, z (up, from y) 100.
+      expect(a.ext[0]).toBeCloseTo(200, 0);
+      expect(a.ext[1]).toBeCloseTo(100, 0);
+      expect(a.ext[2]).toBeCloseTo(100, 0);
+      const s = stlExtent(join(dir, "model.stl"));
+      expect(s[0]).toBeCloseTo(200, 0);
+      expect(s[2]).toBeCloseTo(100, 0);
+      // Feet: 3MF has the unit, so the coordinates are written as they are; the STL is 304.8 mm to the foot.
+      const ft = run("set units ft\nm = box(2, 1, 1) | move(0, 0.5, 0)", "shed.aix", dir, { ...BARE, grid: 24, obj: true });
+      expect(ft.report).toMatch(/\| Units \| ft: one unit is a foot \(304\.8 mm\) \|/);
+      const b = read3mf(join(dir, "model.3mf"));
+      expect(b.unit).toBe("foot");
+      expect(b.ext[0]).toBeCloseTo(2, 2);
+      expect(b.ext[2]).toBeCloseTo(1, 2);
+      expect(stlExtent(join(dir, "model.stl"))[0]).toBeCloseTo(609.6, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("wall() is the thinnest wall, and a failed promise says where", () => {
+    const ev = check("cup = cylinder(1, 2) - (cylinder(0.94, 2) | move(0, 0.2, 0))\nassert wall(cup, 64) > 0.1, \"walls a nozzle can lay down\"");
+    const a = ev.asserts[0];
+    expect(a.passed).toBe(false);
+    expect(a.detail).toMatch(/^0\.0[56]\d* > 0\.1$/);
+    expect(a.where).toMatch(/^thinnest at \([-\d., ]+\) in 'cup', through to \([-\d., ]+\) in 'cup'$/);
+  });
+  it("wall() of a part the mesh drops altogether is 0, not a promise kept of nothing", () => {
+    // A 0.05 plate 100 wide meshes to nothing at 64 cells: it was Infinity, so wall(plate) > 0.8 held.
+    const ev = check("set units mm\nplate = box(100, 0.05, 100) | move(0, 0.025, 0)\nassert wall(plate, 64) > 0.8, \"two lines\"");
+    expect(ev.asserts[0].passed).toBe(false);
+    expect(ev.asserts[0].detail).toBe("0 > 0.8");
+    expect(ev.asserts[0].where).toMatch(/^no surface at a cell of 1\.56: the shape is empty or thinner than a cell everywhere/);
+    expect(thinnestWall(O.difference(P.box(1, 1, 1), P.box(2, 2, 2)), 32).thickness).toBe(0);
+    expect(thinnestWall(O.move(P.box(1, 0.4, 1), 0, 0.2, 0), 32).thickness).toBeCloseTo(0.4, 2);
+  });
+});
+
+describe("open edges between two parts", () => {
+  it("clear at a cell and a half between two curved faces, and seam at a cell", () => {
+    // Round 11's door: a leaf 1.35 cells inside its arched opening kept 5 open edges. A round leaf in a round opening
+    // at the gap, over five placements on the lattice: the gap the docs and the watertight row give is clean.
+    const cell = 2 / 64;
+    const at = (c: number, ph: number) => {
+      const g = c * cell;
+      const s = O.move(O.union([P.cylinder(0.45, 0.8), O.difference(P.box(1.6, 0.8, 1.6), P.cylinder(0.45 + g, 1))]), ph * cell, 0, ph * cell * 0.7);
+      const w = watertightReport(surfaceNets(s, { resolution: 64, bounds: { min: [-1, -1, -1], max: [1, 1, 1] } }).mesh);
+      return w.holes + w.nonManifold;
+    };
+    for (const ph of [0, 0.2, 0.4, 0.6, 0.8]) expect(at(1.5, ph)).toBe(0);
+    expect([0, 0.2, 0.4, 0.6, 0.8].every((ph) => at(1.1, ph) > 0)).toBe(true);
+  });
+  it("say how far apart the two surfaces are, or how deep one reaches into the other", () => {
+    const cluster = (at: [number, number, number]) => ({ centre: at, at, box: { min: [at[0] - 0.01, at[1] - 0.1, at[2] - 0.1] as [number, number, number], max: [at[0] + 0.01, at[1] + 0.1, at[2] + 0.1] as [number, number, number] }, count: 6 });
+    const w = (at: [number, number, number]) => ({ ok: false, holes: 6, nonManifold: 0, note: "no: 6 open edges.", where: cluster(at).box, clusters: [cluster(at)] });
+    const apart = check("a = box(1, 1, 1)\nb = box(1, 1, 1) | move(1.01, 0, 0)\nboth = a + b");
+    expect(surfaceGap(apart, "a", "b", [0.505, 0.2, 0.1], 0.05)!.gap).toBeCloseTo(0.01, 3);
+    const note = watertightNote(w([0.505, 0.2, 0.1]), apart, 0.05);
+    expect(note).toMatch(/6 at \(0\.505, 0\.2, 0\.1\) in 'a', 'b', their surfaces 0\.01 apart there \(0\.2 of a cell\)/);
+    expect(note).toMatch(/overlap them by a cell or more, or part them by a cell and a half \(curved faces still seam at 1\.4\)/);
+    const sunk = check("a = box(1, 1, 1)\nb = box(1, 1, 1) | move(0.99, 0, 0)\nboth = a + b");
+    expect(watertightNote(w([0.495, 0.2, 0.1]), sunk, 0.05)).toMatch(/in 'a', 'b', '[ab]' only 0\.01 into '[ab]' there \(0\.2 of a cell\)/);
+    // A cutter's inside is air: pebbles 0.01 inside a recess's wall are 0.01 clear of the dish (round 10's terrarium).
+    const dish = check("base = cylinder(0.7, 0.3) | move(0, 0.15, 0)\nrecess = cylinder(0.5, 0.2) | move(0, 0.3, 0)\ndish = base - recess\npebbles = cylinder(0.49, 0.1) | move(0, 0.24, 0)\nm = dish + pebbles");
+    const g = surfaceGap(dish, "recess", "pebbles", [0.495, 0.26, 0], 0.0124)!;
+    expect(g.gap).toBeCloseTo(0.01, 3);
+    expect(g.into).toBeUndefined();
+    // At the floor the pebbles sink 0.01 past the recess's floor into the dish: the part is named, then the cut.
+    const floor = surfaceGap(dish, "recess", "pebbles", [0.3, 0.2, 0], 0.0124)!;
+    expect(floor.gap).toBeCloseTo(-0.01, 3);
+    expect(floor.into).toEqual(["pebbles", "recess"]);
+  });
+});

@@ -8,20 +8,31 @@ import type { Vec3 } from "../core/vec.js";
 import { COMPARE_OPS, exprText, type Arg, type Expr, type Program, type Stmt } from "./ast.js";
 import { BUILTIN_MAP, CONSTANTS, CURRENT_ANGLES, CURRENT_POSES, toMaterial } from "./builtins.js";
 import { parse } from "./parser.js";
-import { union, scale as scaleShape, allJoints, joint as jointShape, placedUnder } from "../sdf/ops.js";
-import { regionTouches, voidWitness, outsideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
-import { loosePiece } from "../mesh/pieces.js";
+import { union, scale as scaleShape, allJoints, joint as jointShape, isIntersection, placedUnder } from "../sdf/ops.js";
+import { regionTouches, voidWitness, outsideWitness, insideWitness, overlapWitness, clearanceAt } from "../sdf/measure.js";
+import { loosePiece, standing, type MeshCache } from "../mesh/pieces.js";
+import { BRIDGE_MM, supportOf, thinnestWall, UNITS } from "../mesh/print.js";
 import { union2 } from "../sdf/shapes2d.js";
 import { difference, intersect } from "../sdf/ops.js";
 import { difference2, intersect2 } from "../sdf/shapes2d.js";
-import { boundsSize, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
-import { isCurve, isMaterial, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type Overload, type Param, type UserFn, type Value } from "./values.js";
+import { boundsSize, boundsUnion, EMPTY_BOUNDS, isEmpty, REST_POSE, type ImageTexture, type JointPose, type Material, type Shape3 } from "../sdf/types.js";
+import { isCurve, isMaterial, isRecord, isShape2, isShape3, isUserFn, isXform, typeName, type Builtin, type CallContext, type ContactNote, type Overload, type Param, type UserFn, type Value } from "./values.js";
 
 /** Settings whose value is a name: a bare word after `set` is taken as the name itself. */
-const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment"]);
+const NAME_SETTINGS = new Set(["pose", "focus", "camera", "environment", "units", "slice"]);
+/** Settings whose value is several numbers: `set bed 220 220 250` or `set bed [220, 220, 250]`. */
+const LIST_SETTINGS = new Set(["bed"]);
+/** The transforms a mask can pass through and stay the half-space it was: `below | rotate(x=25) | move(0, h, 0)`. */
+const MASK_MOVES = new Set(["move", "rotate", "scale", "mirror", "flip"]);
 /** The beauty render's procedural skies; the renderer has the palettes, this list keeps the language pure. */
 export const ENVIRONMENT_NAMES = ["studio", "overcast", "sunset", "night"];
 const fmt3 = (v: number): string => { const t = v.toFixed(2).replace(/\.?0+$/, ""); return t === "-0" ? "0" : t; };
+/** A way across the floor, [x, z] of unit length, in words: "+x", "-z", or "+x and -z" within 22.5 degrees of between. */
+const compass = (d: [number, number]): string => {
+  const axes = [[d[0], "x"], [d[1], "z"]] as const;
+  const big = axes.filter(([v]) => Math.abs(v) > Math.sin(Math.PI / 8)).map(([v, a]) => `${v < 0 ? "-" : "+"}${a}`);
+  return big.join(" and ");
+};
 const dimsLabel = (b: { min: number[]; max: number[] }): string => [0, 1, 2].map((k) => fmt3(b.max[k] - b.min[k])).join(" × ");
 
 export class RuntimeError extends Error {
@@ -60,7 +71,11 @@ export type StepRole = "part" | "cut" | "mask" | "region";
 export interface Settings {
   grid?: number;
   size?: number;
-  [key: string]: number | string | undefined;
+  /** What one model unit is, for printing: mm, cm, dm, m, in or ft. */
+  units?: string;
+  /** The printer's build volume in millimetres: width (x), depth (z), height (y). */
+  bed?: number[];
+  [key: string]: number | string | number[] | undefined;
 }
 
 export interface EvalOptions {
@@ -74,6 +89,8 @@ export interface EvalOptions {
   resolveModule?: (path: string, from?: string) => { source: string; file: string };
   /** The file this program was read from, passed to resolveModule as `from`. */
   moduleFrom?: string;
+  /** For a library: the path its `use` gave, which its defs carry so a shape they build can say where it came from. */
+  moduleName?: string;
   /** The pose per joint name for this evaluation. Joints not named are at rest. */
   jointPoses?: Record<string, JointPose>;
   /** The name of that pose, so an `assert ..., pose=name` knows whether this is its evaluation. */
@@ -82,6 +99,19 @@ export interface EvalOptions {
   skipAsserts?: boolean;
   /** Load a picture for material(image=) and decal(image=): the file's pixels, or throw with why not. */
   resolveImage?: (path: string) => { width: number; height: number; rgba: Uint8Array };
+  /** The step `--slice` cuts through, which is a region when nothing else reads it, as with `set slice name`. */
+  slice?: string;
+  /**
+   * Called as each assert starts and ends being judged, so a caller with a clock can say which one is slow or hung
+   * (round 11: a check sat silent for twelve minutes on one overlap()); the language itself keeps no time.
+   */
+  onAssert?: (phase: "start" | "end", a: AssertInfo) => void;
+  /**
+   * Steps to draw with the output (`render --show phone_probe,cable`), as `show output, phone_probe` would: added to
+   * the shown names after the program has run, each its own object when the output is a scene. A name that is no
+   * shape step is an error.
+   */
+  show?: string[];
 }
 
 /** A library brought in by `use`: what a program can call from it. */
@@ -103,7 +133,11 @@ export interface Light {
   /** Degrees about y (0 is +z, the front; 90 is +x) and above the floor. */
   azimuth: number;
   elevation: number;
-  /** Apparent size: 0.5 a lamp with crisp shadows, 3 a window. */
+  /**
+   * The light's angular radius, size/18 radians (photometry.ts's lightAngle): 0.5 a lamp with crisp shadows, 1 about
+   * 3 degrees, 3 about 10, a window. The one angle softens its shadow, widens its highlight and is the disc a mirror
+   * shows of it; a point light is a sphere of radius 2% of its range per unit of size.
+   */
   size: number;
   color: [number, number, number];
   /** The colour as written, for the report. */
@@ -112,7 +146,7 @@ export interface Light {
   power: number;
   /** A point light: where it is; azimuth and elevation are then unused. */
   position?: [number, number, number];
-  /** A point light's reach: its strength halves at this distance from it. */
+  /** A point light's reach: its strength halves at this distance from it; undefined, half the model's longest side. */
   range?: number;
   line: number;
 }
@@ -177,10 +211,45 @@ export interface Evaluation {
   defs: UserFn[];
   settings: Settings;
   warnings: string[];
+  /**
+   * The warnings raised while judging the promises at rest (a void() whose region is nowhere near its shape), also in
+   * `warnings`: an evaluation in a pose does not judge those promises again, so a caller showing it takes these from
+   * the rest evaluation.
+   */
+  restAssertWarnings: string[];
   /** Every assert the program ran, in order, passed or not; a used library's come first with its path. */
   asserts: AssertResult[];
   /** The pictures the program painted with, for the report. */
   images: ImageUse[];
+  /**
+   * Where each shape a builtin call made came from: the call, its line, and the def and library file it was in
+   * (round 11: a 0.1 back panel built inside a library's case() was named only as the step that called case()).
+   */
+  origins: WeakMap<object, ShapeOrigin>;
+  /** Every rest() and lean() call the run made, in order: how far each moved or turned its part, for check. */
+  contacts: ContactRecord[];
+}
+
+/** One rest() or lean() call: where it was, what it placed on what (as the program wrote them), and what it did. */
+export interface ContactRecord {
+  callee: "rest" | "lean";
+  line: number;
+  /** The def it ran in and that def's library, as for a shape's origin. */
+  def?: string;
+  file?: string;
+  part: string;
+  on: string;
+  note: ContactNote;
+}
+
+/** The call that made a shape: `box` at line 48, inside def `back_panel` of the library `shelf_lib`. */
+export interface ShapeOrigin {
+  callee: string;
+  line: number;
+  /** The innermost def being run when the call was made. */
+  def?: string;
+  /** The library that def is in, as its `use` gave the path; undefined for the program's own. */
+  file?: string;
 }
 
 /** A picture a material or a decal uses. */
@@ -210,22 +279,122 @@ export interface AssertResult {
   pending?: boolean;
   /** Where a void, inside or overlap query found the offending point, and in which step, for a failure. */
   where?: string;
+  /** For an assert in a def's body, judged on every call: the def and the line of the program's statement that called it. */
+  call?: { fn: string; line: number };
+  /**
+   * For a comparison of two numbers, how far it passed by (negative: how far it failed by): a - b for `>` and `>=`,
+   * b - a for `<` and `<=`, |a - b| for `!=` and -|a - b| for `==`. Of an assert judged many times, the judgement
+   * with the smallest margin is the one nearest to failing.
+   */
+  margin?: number;
+}
+
+/** What an assert is, for whoever times it: its line and test, its library and pose. */
+export interface AssertInfo {
+  line: number;
+  text: string;
+  file?: string;
+  pose?: string;
 }
 
 /** One line for a failed assert, the same in `check`, the render's warnings and the report. */
 export function assertLine(a: AssertResult): string {
-  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.where ? `, ${a.where}` : ""}${a.message ? `: ${a.message}` : ""}`;
+  return `${a.file ? `${a.file}: ` : ""}assert (${assertWhere(a)})${a.pose ? ` in pose ${a.pose}` : ""} fails: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.where ? `, ${a.where}` : ""}${a.message ? `: ${a.message}` : ""}`;
+}
+
+/** `line 12`, or for an assert in a def's body `line 12, in book() called on line 40`. */
+function assertWhere(a: AssertResult): string {
+  return `line ${a.line}${a.call ? `, in ${a.call.fn}() called on line ${a.call.line}` : ""}`;
 }
 
 /** The builtins that move a shape's surface somewhere else: a step read only through one is not where it was built. */
-const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "twist", "bend", "wrap"]);
+const MOVERS = new Set(["move", "rotate", "scale", "array", "grid", "ring", "ground", "center", "place", "attach", "rest", "lean", "twist", "bend", "wrap"]);
+/** The builtins that place a part by contact, which name the parts in their errors and say in check what they did. */
+const CONTACTS = new Set(["rest", "lean"]);
 
+/** The queries that mesh the shape, and so take a resolution: by default the model's own cell (defaultResolution). */
+const MESHED_QUERIES = new Set(["pieces", "overhang", "wall", "support", "islands", "stands"]);
 /** The builtins that measure a shape, so in a pose they read a nested step where the pose put it. */
-const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang"]);
+const POSED_QUERIES = new Set(["height", "top", "bottom", "width", "depth", "tall", "clearance", "void", "overlap", "inside", "at", "surface", "pieces", "overhang", "wall", "support", "islands", "stands"]);
+/** The shape a meshed query measures: its first positional argument, or the one named `shape`. */
+function meshedShape(values: { name?: string; value: Value }[]): Shape3 | undefined {
+  const v = values.find((a) => !a.name) ?? values.find((a) => a.name === "shape");
+  return v && isShape3(v.value) ? v.value : undefined;
+}
 
 /** One line for a passing assert with the numbers it saw, for `check`. */
 export function assertPassLine(a: AssertResult): string {
-  return `${a.file ? `${a.file}: ` : ""}assert (line ${a.line})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+  return `${a.file ? `${a.file}: ` : ""}assert (${assertWhere(a)})${a.pose ? ` in pose ${a.pose}` : ""} holds: ${a.text}${a.detail ? ` is ${a.detail}` : ""}${a.message ? `: ${a.message}` : ""}`;
+}
+
+/**
+ * A comment after code that holds what reads as the line's next step, `| move(...)` with a builtin, a def of the
+ * program or a used library's name: everything after the `#` is ignored, so the step is not applied, and nothing
+ * else would say so (round 11: a comment pasted mid-line left a knocker's eye at the origin, and every promise held).
+ */
+export function commentCodeWarnings(program: Program): string[] {
+  const defs = new Set<string>(), libs = new Set<string>();
+  for (const st of program.body) {
+    if (st.type === "def") defs.add(st.name);
+    if (st.type === "use") libs.add(st.alias ?? st.path.replace(/\.aix$/, "").replace(/^.*\//, ""));
+  }
+  const out: string[] = [];
+  for (const c of program.trailingComments ?? []) {
+    for (const m of c.text.matchAll(/\|\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\(/g)) {
+      const name = m[1], dot = name.indexOf(".");
+      if (!(dot < 0 ? BUILTIN_MAP.has(name) || defs.has(name) : libs.has(name.slice(0, dot)))) continue;
+      const marker = c.text.startsWith("//") ? "//" : "#";
+      out.push(`line ${c.line}: the comment holds code (| ${name}(...)): everything after ${marker} is ignored, so it is not applied; end the comment before the code, or move the comment to the line above`);
+      break;
+    }
+  }
+  return out;
+}
+
+/** A library's own name, kept out of its exports: one that starts with an underscore (`_demo_case`). */
+export const isPrivate = (name: string): boolean => name.startsWith("_");
+
+/**
+ * The asserts as `check` prints them. One judged once is a line of its own, as before. One judged many times from
+ * one line (inside a loop) is one line for its passes, how many times it held and the judgement nearest to failing
+ * (the smallest margin, see AssertResult), with that judgement's message, so a loop's six promises over 33 books are
+ * six lines rather than 198 (round 11). Then every failure in full, in line order, together above the count, where a
+ * few failures among many passes cannot be missed.
+ */
+export function assertReport(all: AssertResult[]): string[] {
+  const groups = new Map<string, AssertResult[]>();
+  for (const a of all) {
+    const key = [a.file ?? "", a.line, a.call ? `${a.call.fn}:${a.call.line}` : "", a.pose ?? "", a.text].join("\u0000");
+    const g = groups.get(key);
+    if (g) g.push(a); else groups.set(key, [a]);
+  }
+  const order = (x: AssertResult, y: AssertResult) => (x.file ?? "").localeCompare(y.file ?? "") || x.line - y.line;
+  const out: string[] = [];
+  for (const g of [...groups.values()].sort((x, y) => order(x[0], y[0]))) {
+    const passed = g.filter((a) => a.passed);
+    if (!passed.length) continue;
+    if (g.length === 1) { out.push(assertPassLine(g[0])); continue; }
+    let near = passed[0];
+    for (const a of passed) if (a.margin !== undefined && (near.margin === undefined || a.margin < near.margin)) near = a;
+    // A promise that came out the same every time (pieces(x) == 1) has no nearest: it is that each time.
+    const same = passed.every((a) => a.detail === near.detail);
+    const detail = near.detail ? (same ? ` is ${near.detail} each time` : `, nearest to failing ${near.detail}`) : "";
+    const times = passed.length === g.length ? `${g.length} times` : `${passed.length} of ${g.length} times`;
+    out.push(`${near.file ? `${near.file}: ` : ""}assert (${assertWhere(near)})${near.pose ? ` in pose ${near.pose}` : ""} holds ${times}: ${near.text}${detail}${near.message ? `: ${near.message}` : ""}`);
+  }
+  for (const a of all.filter((x) => !x.passed).sort(order)) out.push(assertLine(a));
+  return out;
+}
+
+/** How far `a op b` passed by: see AssertResult's margin. */
+function marginOf(op: string, a: number, b: number): number | undefined {
+  switch (op) {
+    case ">": case ">=": return a - b;
+    case "<": case "<=": return b - a;
+    case "!=": return Math.abs(a - b);
+    case "==": return -Math.abs(a - b);
+  }
+  return undefined;
 }
 
 const MAX_LOOP = 20000;
@@ -234,8 +403,12 @@ const MAX_DEPTH = 64;
 class Scope {
   private vars = new Map<string, Value>();
   /** On a root scope: the libraries its program used, so a library's defs reach the library's own uses. */
-  modules?: Map<string, { path: string; exports: Map<string, Value> }>;
+  modules?: Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>;
   constructor(private readonly parent?: Scope) {}
+  /** The scope `name` is found in: a def call's own (a parameter, a block's name), a library's root, or the program's. */
+  owner(name: string): Scope | undefined {
+    return this.vars.has(name) ? this : this.parent?.owner(name);
+  }
   root(): Scope {
     return this.parent ? this.parent.root() : this;
   }
@@ -258,7 +431,14 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const global = new Scope();
   for (const [k, v] of Object.entries(CONSTANTS)) global.set(k, v);
   const steps = new Map<string, Step>();
+  // The names first assigned inside a loop's body: the loop's own, no steps, kept for what they read.
+  const loopSteps = new Map<string, Step>();
   const settings: Settings = {};
+  // One mesh per shape and resolution for this evaluation's pieces() and overhang() (and a failing pieces()'s loose
+  // piece): measured on round 10's hub, check fell from 3.9 s to 2.5 s when the two queries shared the hub's mesh.
+  const meshes: MeshCache = new Map();
+  // Each top-level step's expression, for a warning that reads how a step was built (a turn before a ring).
+  const topAssigns = new Map<string, Expr>();
   // Whether this evaluation is a pose: any joint given a pose that is not rest.
   const posed = Object.values(options.jointPoses ?? {}).some((j) => j.angles.some((v) => v !== 0) || j.move.some((v) => v !== 0) || j.scale.some((v) => v !== 1));
   // Inside an assert's test, where a query in a pose reads a step where the pose put it; geometry built from a
@@ -280,7 +460,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   let witness: string | undefined;
   // The shown shape, set once the program has run; a root for placing a measured step.
   let output: Shape3 | undefined;
-  const warnings: string[] = [...(program.warnings ?? [])];
+  const warnings: string[] = [...(program.warnings ?? []), ...commentCodeWarnings(program)];
+  // Those raised while judging a promise at rest, which an evaluation in a pose does not judge again.
+  const restAssertWarnings: string[] = [];
   const asserts: AssertResult[] = [];
   const shadowed = new Set<string>();
   // "pose:joint" for every pose value given as one number rather than a triple.
@@ -292,6 +474,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const cameras: CameraShot[] = [];
   const images: ImageUse[] = [];
   const imageCache = new Map<string, { width: number; height: number; rgba: Uint8Array }>();
+  // How many distinct materials have taken each name, so the second is named_2.
+  const materialNames = new Map<string, number>();
   /** A picture by path, loaded once per evaluation. */
   const loadImage = (path: string, line: number): { width: number; height: number; rgba: Uint8Array } => {
     if (!options.resolveImage) throw new RuntimeError(`image "${path}": pictures cannot be loaded here`, line);
@@ -304,19 +488,63 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   };
   let lastShape: { name: string } | undefined;
   let depth = 0;
+  const origins = new WeakMap<object, ShapeOrigin>();
+  const contacts: ContactRecord[] = [];
   let loops = 0;
   /** Libraries by prefix: each name maps to a def or a constant from the library's top level. */
-  const modules = new Map<string, { path: string; exports: Map<string, Value> }>();
+  const modules = new Map<string, { path: string; exports: Map<string, Value>; own?: Set<string> }>();
   global.modules = modules;
   const moduleList: UsedModule[] = [];
   /** Names read while evaluating the current top-level statement. */
   let reads: Set<string> | undefined;
+  // Where each name is first assigned or defined at the top level (a loop's body included), so a name read before
+  // its line can say it comes later (round 11: a probe's show above the lines it named read as a typo).
+  const firstAt = new Map<string, { line: number; def: boolean }>();
+  const noteFirst = (body: Stmt[]) => {
+    for (const st of body) {
+      if ((st.type === "assign" || st.type === "def") && !firstAt.has(st.name)) firstAt.set(st.name, { line: st.line, def: st.type === "def" });
+      if (st.type === "for") { if (!firstAt.has(st.name)) firstAt.set(st.name, { line: st.line, def: false }); noteFirst(st.body); }
+    }
+  };
+  noteFirst(program.body);
+  // The top-level statement running, and the defs it is inside (innermost last), for that message and for which def
+  // and library made a shape (origins).
+  let runningLine = 0;
+  const calling: UserFn[] = [];
 
-  function lookup(name: string, line: number): Value {
-    const v = global.get(name);
-    if (v === undefined) throw new RuntimeError(`'${name}' is not defined`, line);
-    return v;
+  /**
+   * Why `name` has no value at `line`: not defined at all, or not yet, when the def's block body or the file assigns
+   * it further down. Only the program's own file is looked in: a library's def does not see the program's names.
+   */
+  function notDefined(name: string, scope: Scope, line: number): string {
+    // A name the block body running assigns below this line.
+    const fn = calling[calling.length - 1];
+    if (fn?.block && scope.root() === ((fn.closure as Scope | undefined) ?? global)) {
+      const later = (body: Stmt[]): number | undefined => {
+        for (const st of body) {
+          if (st.type === "assign" && st.name === name && st.line > line) return st.line;
+          if (st.type === "for") { const l = st.name === name && st.line > line ? st.line : later(st.body); if (l !== undefined) return l; }
+        }
+        return undefined;
+      };
+      const at = later(fn.block);
+      if (at !== undefined) return `'${name}' is not defined yet: it is assigned on line ${at} of ${fn.name}()'s body, after this line; statements run in order, top to bottom`;
+    }
+    const at = firstAt.get(name);
+    if (!at || at.line <= runningLine || scope.root() !== global) return `'${name}' is not defined`;
+    const what = at.def ? `its def is on line ${at.line}` : `it is assigned on line ${at.line}`;
+    const when = calling.length ? `after line ${runningLine}, which calls ${calling[0].name}()` : "after this line";
+    return `'${name}' is not defined yet: ${what}, ${when}; statements run in order, top to bottom`;
   }
+  /** Whether `name` is one the file assigns below the running line, for the messages that would say "unknown". */
+  const comesLater = (name: string, scope: Scope): boolean => scope.root() === global && (firstAt.get(name)?.line ?? 0) > runningLine;
+  /**
+   * Whether `name` (or a dotted name's head) is the program's own, so possibly a step: not a def's parameter or a
+   * block body's name, which are the call's own, and not a library's constant. Only such a name is read, cut,
+   * masked or made a region by what is evaluated (round 11: a block's assert on its parameter b made the program's
+   * unrelated step b a region, and hid that it was unused).
+   */
+  const programName = (name: string, scope: Scope): boolean => scope.owner(name.split(".")[0]) === global;
 
   function evalExpr(e: Expr, scope: Scope): Value {
     switch (e.type) {
@@ -330,16 +558,33 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const target = evalExpr(e.target, scope);
         const i = evalExpr(e.index, scope);
         if (!Array.isArray(target)) throw new RuntimeError(`[...] indexes a list, not a ${typeName(target)}`, e.line);
-        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number`, e.line);
+        if (typeof i !== "number" || !Number.isInteger(i)) throw new RuntimeError(`a list index must be a whole number, not ${typeof i === "number" ? i : `a ${typeName(i)}`}${typeof i === "number" ? "; a comparison (t > 0) is 1 or 0, which picks the second or the first of two" : ""}`, e.line);
         const k = i < 0 ? target.length + i : i;
         if (k < 0 || k >= target.length) throw new RuntimeError(`index ${i} is outside the list, which has ${target.length} item${target.length === 1 ? "" : "s"}`, e.line);
         return target[k];
       }
+      case "record": {
+        // In the order written; `...p` takes p's fields where it stands, and a later entry replaces an earlier one
+        // in place, so {...p, x: 2} keeps p's order with x changed.
+        const fields = new Map<string, Value>();
+        for (const en of e.entries) {
+          const v = evalExpr(en.value, scope);
+          if (en.spread) {
+            if (!isRecord(v)) throw new RuntimeError(`'...${exprText(en.value)}' takes the fields of a record, and ${exprText(en.value)} is a ${typeName(v)}`, e.line);
+            for (const [k, x] of v.fields) fields.set(k, x);
+          } else fields.set(en.key!, v);
+        }
+        return { kind: "record", fields };
+      }
+      case "field":
+        return field(evalExpr(e.target, scope), e.name, exprText(e.target), e.line);
       case "ident": {
-        if (e.name.includes(".")) return fromModule(e.name, e.line, scope);
+        if (e.name.includes(".")) return dottedValue(e.name, e.line, scope);
         const v = scope.get(e.name);
-        if (v === undefined) throw new RuntimeError(`'${e.name}' is not defined`, e.line);
-        reads?.add(e.name);
+        if (v === undefined) throw new RuntimeError(notDefined(e.name, scope, e.line), e.line);
+        // Only the program's own names are steps: a def's parameter or block name, or a library's constant, is not the
+        // step of the same name (round 11: a library def's parameter b made a caller's step b a part of every book).
+        if (programName(e.name, scope)) reads?.add(e.name);
         return v;
       }
       case "unary": {
@@ -350,8 +595,8 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       case "binary": {
         const l = evalExpr(e.left, scope), r = evalExpr(e.right, scope);
         if (currentStep) for (const v of [l, r]) if (isShape3(v)) { const nm = stepOfValue.get(v); if (nm) (currentStep.keptDeps ??= new Set()).add(nm); }
-        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident") noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
-        if (e.op === "&" && isShape3(l) && isShape3(r)) noteMask(l, e.left, r, e.right);
+        if (e.op === "-" && isShape3(r)) { if (e.right.type === "ident" && programName(e.right.name, scope)) noteCut(e.right.name); if (currentStep) currentStep.cuts = true; }
+        if (e.op === "&" && isShape3(l) && isShape3(r)) noteMask(l, e.left, r, e.right, scope);
         return binary(e.op, l, r, e.line);
       }
       case "call":
@@ -522,7 +767,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       return v;
     };
     const azimuth = num("azimuth", -40), elevation = num("elevation", 55), size = num("size", 1), power = num("power", 1);
-    if (size <= 0) throw new RuntimeError(`light("${name}"): size is the light's apparent size, above 0 (0.5 a lamp, 3 a window)`, line);
+    if (size <= 0) throw new RuntimeError(`light("${name}"): size is the light's angular size (its radius is size/18 radians), above 0 (0.5 a lamp, 3 a window)`, line);
     if (power < 0) throw new RuntimeError(`light("${name}"): power is 0 or more (1 is the default key light)`, line);
     if (elevation < -90 || elevation > 90) throw new RuntimeError(`light("${name}"): elevation is degrees above the floor, -90 to 90`, line);
     const colorV = values.find((x) => x.name === "color")?.value ?? "white";
@@ -534,8 +779,10 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (posV !== undefined) {
       if (!Array.isArray(posV) || posV.length !== 3 || !posV.every((v) => typeof v === "number")) throw new RuntimeError(`light("${name}"): position is [x, y, z]`, line);
       position = [posV[0] as number, posV[1] as number, posV[2] as number];
-      range = num("range", 2);
-      if (range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
+      // Without range= the render takes half the model's longest side, so the default is a reach for any size of
+      // model: a fixed 2 units lit a stand drawn in millimetres to a few thousandths at 50 mm.
+      range = values.some((x) => x.name === "range") ? num("range", 2) : undefined;
+      if (range !== undefined && range <= 0) throw new RuntimeError(`light("${name}"): range is the distance at which the light's strength halves, above 0`, line);
       if (values.some((x) => x.name === "azimuth" || x.name === "elevation")) warnings.push(`light("${name}") (line ${line}): a point light is at its position; azimuth and elevation are ignored`);
     } else if (values.some((x) => x.name === "range")) throw new RuntimeError(`light("${name}"): range goes with position=[x, y, z]; a light with no position is a direction`, line);
     const lightDef: Light = { name, azimuth, elevation, size, color, colorName, power, position, range, line };
@@ -629,6 +876,105 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     return jointShape(part as Shape3, name, got.x as number, got.y as number, got.z as number, jp.angles, axis, jp.move, jp.scale);
   }
 
+  /** One field of a record, or an error naming the fields there are. `what` is the record as written, for the message. */
+  function field(v: Value, key: string, what: string, line: number): Value {
+    if (!isRecord(v)) throw new RuntimeError(`'${what}' is a ${typeName(v)}, not a record, so it has no field '${key}'${Array.isArray(v) ? `; a list's items are read by index, ${what}[0]` : ""}`, line);
+    const f = v.fields.get(key);
+    if (f === undefined) throw new RuntimeError(`'${what}' has no field '${key}'; it has ${[...v.fields.keys()].join(", ") || "no fields"}`, line);
+    return f;
+  }
+
+  /**
+   * `p.x.y` or `lib.name.x`: a used library's name first (a library wins over a record of the same name, as `use`
+   * warns), else a record by name, then a field per dot.
+   */
+  function dottedValue(dotted: string, line: number, scope: Scope): Value {
+    const parts = dotted.split(".");
+    const table = scope.root().modules ?? modules;
+    let v: Value, first: number;
+    if (table.has(parts[0])) { v = fromModule(`${parts[0]}.${parts[1]}`, line, scope); first = 2; }
+    else {
+      const head = scope.get(parts[0]);
+      if (head === undefined) {
+        if (comesLater(parts[0], scope)) throw new RuntimeError(notDefined(parts[0], scope, line), line);
+        const known = [...table.keys()];
+        throw new RuntimeError(`'${parts[0]}' is not a used library or a defined record${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${parts[0]}.aix" or use "std/${parts[0]}" first, or define ${parts[0]} = {${parts[1]}: ...}`, line);
+      }
+      v = head;
+      first = 1;
+    }
+    for (let i = first; i < parts.length; i++) v = field(v, parts[i], parts.slice(0, i).join("."), line);
+    // A field holding a step's shape reads that step, so `show parts.lid` uses the lid and not every part the
+    // record holds; anything else reads the record, when the record is the program's own.
+    if (first === 1) { const st = isShape3(v) ? stepOfValue.get(v) : undefined; if (st) reads?.add(st); else if (scope.owner(parts[0]) === global) reads?.add(parts[0]); }
+    return v;
+  }
+
+  /** The step a plain name or a field of a record names (`cfg.cavity` reads cfg), for marking what an assert reads. */
+  function stepNameOf(e: Expr): string | undefined {
+    if (e.type !== "ident") return undefined;
+    return e.name.split(".")[0];
+  }
+
+  /**
+   * The steps a call inside an assert reads as regions: the names given to a builtin, and every name handed to a
+   * def (a probe passed to `def fits(p) = ...` is read by the assert as surely as one passed to clearance()).
+   */
+  function markRegionArgs(args: Arg[], toDef: boolean, scope?: Scope): void {
+    for (const a of args) {
+      const nm = a.name && !toDef ? undefined : stepNameOf(a.value);
+      // Judged inside a def, a name is a region only when it is the program's own, not the def's parameter or local.
+      if (nm && (!scope || programName(nm, scope))) regionNames.add(nm);
+    }
+  }
+
+  /** The defs whose bodies assertRegions has read, once each: a def that calls itself is read once. */
+  const regionDefs = new Set<UserFn>();
+
+  /**
+   * The steps an assert's test reads as regions, found in its text rather than by judging it: the names given to a
+   * builtin's call or a def's, and those the def's own body gives a builtin, as a judged assert marks them. For an
+   * assert skipped here (--no-asserts, another pose's, a promise at rest in a posed evaluation), so its probes are
+   * regions all the same (round 11: a probe read through a def was a region only while the asserts were judged).
+   */
+  function assertRegions(e: Expr): void {
+    switch (e.type) {
+      case "call": {
+        const dotted = e.callee.includes(".");
+        const user = dotted ? undefined : global.get(e.callee);
+        const def = user !== undefined && isUserFn(user) ? user : undefined;
+        if (dotted || def || BUILTIN_MAP.has(e.callee)) markRegionArgs(e.args, dotted || !!def);
+        // A def of this program reads the program's steps in its body, as it does when the assert is judged; a
+        // library's def reads its own.
+        if (def && !regionDefs.has(def)) {
+          regionDefs.add(def);
+          if (def.body) assertRegions(def.body);
+          for (const st of def.block ?? []) stmtRegions(st);
+          for (const p of def.params) if (p.default) assertRegions(p.default);
+        }
+        for (const a of e.args) assertRegions(a.value);
+        return;
+      }
+      case "binary": assertRegions(e.left); assertRegions(e.right); return;
+      case "unary": assertRegions(e.arg); return;
+      case "list": for (const it of e.items) assertRegions(it); return;
+      case "index": assertRegions(e.target); assertRegions(e.index); return;
+      case "field": assertRegions(e.target); return;
+      case "record": for (const en of e.entries) assertRegions(en.value); return;
+      default: return;
+    }
+  }
+
+  /** assertRegions over a statement of a block-bodied def: the expressions it evaluates. */
+  function stmtRegions(st: Stmt): void {
+    switch (st.type) {
+      case "assign": case "expr": case "return": assertRegions(st.value); return;
+      case "assert": assertRegions(st.test); return;
+      case "for": assertRegions(st.iterable); for (const b of st.body) stmtRegions(b); return;
+      default: return;
+    }
+  }
+
   /** `prefix.name` from a used library: its def or constant, with the message naming what the library has. */
   function fromModule(dotted: string, line: number, scope: Scope): Value {
     const dot = dotted.indexOf(".");
@@ -642,6 +988,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       throw new RuntimeError(`'${prefix}' is not a used library${known.length ? ` (used: ${known.join(", ")})` : ""}; add use "${prefix}.aix" or use "std/${prefix}" first`, line);
     }
     const v = mod.exports.get(name);
+    if (v === undefined && mod.own?.has(name)) throw new RuntimeError(`'${mod.path}' keeps '${name}' to itself: a name that starts with _ is a library's own; it offers ${[...mod.exports.keys()].join(", ") || "nothing"}`, line);
     if (v === undefined) throw new RuntimeError(`'${mod.path}' has no '${name}'; it has ${[...mod.exports.keys()].join(", ") || "nothing exported"}`, line);
     reads?.add(dotted);
     return v;
@@ -649,8 +996,9 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   function call(callee: string, args: Arg[], scope: Scope, line: number): Value {
     if (callee.includes(".")) {
-      const v = fromModule(callee, line, scope);
+      const v = dottedValue(callee, line, scope);
       if (!isUserFn(v)) throw new RuntimeError(`'${callee}' is a ${typeName(v)}, not a function`, line);
+      if (assertDepth > 0) markRegionArgs(args, true, scope);
       return callUser(v, args, scope, line);
     }
     if (callee === "import") return callImport(args, scope, line);
@@ -660,7 +1008,12 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     if (callee === "light") return callLight(args, scope, line);
     if (callee === "camera") return callCamera(args, scope, line);
     const user = scope.get(callee);
-    if (user !== undefined && isUserFn(user)) return callUser(user, args, scope, line);
+    if (user !== undefined && isUserFn(user)) {
+      // A step handed to a def inside an assert is read by the assert, as one handed to a builtin is.
+      if (assertDepth > 0) markRegionArgs(args, true, scope);
+      return callUser(user, args, scope, line);
+    }
+    if (callee === "named") return callNamed(args, scope, line);
     const builtin = BUILTIN_MAP.get(callee);
     // A step called `top` and a call to top(...) in the same program read as one thing and are two; the call still
     // reaches the builtin, and the program says so once (round 4 asked; a name alone, never called, is fine).
@@ -670,6 +1023,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     }
     if (!builtin) {
       if (user !== undefined) throw new RuntimeError(`'${callee}' is a ${typeName(user)}, not a function`, line);
+      if (comesLater(callee, scope)) throw new RuntimeError(notDefined(callee, scope, line), line);
       throw new RuntimeError(`unknown function '${callee}'${suggest(callee)}`, line);
     }
     const values = args.map((a) => ({ name: a.name, value: evalExpr(a.value, scope) }));
@@ -698,11 +1052,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         }
       }
     }
-    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") noteCut(args[1].value.name);
-    if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value);
+    if (callee === "difference" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) noteCut(args[1].value.name);
+    if (callee === "intersect" && args.length >= 2 && !args[0].name && !args[1].name && isShape3(values[0].value) && isShape3(values[1].value)) noteMask(values[0].value, args[0].value, values[1].value, args[1].value, scope);
     if (callee === "difference" && currentStep) currentStep.cuts = true;
-    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident") { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
-    if (assertDepth > 0) for (const a of args) if (!a.name && a.value.type === "ident") regionNames.add(a.value.name);
+    if (callee === "decal" && args.length >= 2 && !args[1].name && args[1].value.type === "ident" && programName(args[1].value.name, scope)) { regionNames.add(args[1].value.name); decalRegions.add(args[1].value.name); }
+    if (assertDepth > 0) markRegionArgs(args, false, scope);
     // A picture on a material: material(..., image="label.png", projection="planar") loads the file and paints it
     // in place of a pattern; decal(shape, region, image="logo.png") fits it to the region's box.
     if ((callee === "material" || callee === "decal") && values.some((v) => v.name === "image")) return callWithImage(callee, builtin, values, line);
@@ -713,10 +1067,21 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       const roots = [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()];
       for (const v of values) if (isShape3(v.value)) v.value = placedUnder(roots, v.value);
     }
-    // pieces() counts at the program's grid unless told otherwise, so a promise made at rest and the report's Pieces
-    // row see the same cells (round 8: the default 64 flipped a promise the report at grid 220 did not).
-    if ((callee === "pieces" || callee === "overhang") && values.length === 1 && typeof settings.grid === "number") values.push({ name: "resolution", value: settings.grid });
-    const result = callBuiltin(builtin, values, line);
+    // The meshed queries mesh at the model's own cell unless told otherwise, so a promise made at rest and the report
+    // see the same cells (round 8: the default 64 flipped a pieces() promise the report at grid 220 did not), and a
+    // part costs no more than the model's mesh (round 11: the program's grid laid across a bowl 2.4 wide meshed it at
+    // a 0.012 cell where the whole mixer meshes at 0.019, and one wall(bowl) took 5.3 s of a 6.2 s check).
+    // The shape is the one positional argument or named `shape`, and no resolution is given either way (support's
+    // span may be named beside it).
+    const queried = MESHED_QUERIES.has(callee) ? meshedShape(values) : undefined;
+    if (queried && values.filter((v) => !v.name).length <= 1 && !values.some((v) => v.name === "resolution")) values.push({ name: "resolution", value: defaultResolution(queried) });
+    const result = callBuiltin(builtin, values, line, CONTACTS.has(callee) ? args : undefined);
+    // The first call to make a shape is where it came from; one that hands back its input unchanged keeps the input's.
+    if ((isShape3(result) || isShape2(result)) && !origins.has(result)) {
+      const fn = calling[calling.length - 1];
+      origins.set(result, { callee, line, def: fn?.name, file: fn?.file });
+    }
+    if (callee === "ring" && isShape3(values[0]?.value)) ringTurnedInPlace(args, values, scope, line);
     // A failing clearance says where the two came closest, or overlapped deepest (round 10: a -0.13 with no place).
     if (assertDepth > 0 && callee === "clearance" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const c = clearanceAt(values[0].value, values[1].value);
@@ -725,12 +1090,31 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A failing void, inside or overlap says where (round 9: three agents bisected a bare 0 by hand).
     if (assertDepth > 0 && (callee === "void" || callee === "inside" || callee === "overlap") && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value)) {
       const a = values[0].value, b = values[1].value;
-      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? outsideWitness(a, b) : result === 0 ? undefined : overlapWitness(a, b);
+      const p = callee === "void" ? voidWitness(a, b) : callee === "inside" ? undefined : result === 0 ? undefined : overlapWitness(a, b);
       if (p) {
         const at = `(${p.map(fmt3).join(", ")})`;
-        const first = args[0].value, second = args[1].value;
-        const what = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}` : callee === "inside" ? `${exprText(first)} is outside ${exprText(second)} at ${at}` : `they overlap at ${at}`;
-        witness = what;
+        const first = args[0].value;
+        witness = callee === "void" ? `solid at ${at}${stepAt(p, [a], b)}${regionPart(a, p, exprText(first))}` : `they overlap at ${at}`;
+      }
+      // A failing inside() says where a is outside b, for a promise that it is all in, and where it is inside, for
+      // one that it is all out (round 11: inside(cable, stand) == 0 failing said where the cable was outside).
+      if (callee === "inside" && typeof result === "number") {
+        const pt = (q: Vec3) => `(${q.map(fmt3).join(", ")})`;
+        const out = result < 1 ? outsideWitness(a, b) : undefined, inn = result > 0 ? insideWitness(a, b) : undefined;
+        const A = exprText(args[0].value), B = exprText(args[1].value);
+        const outside = out && `outside ${B} at ${pt(out)}`, inside = inn && `inside ${B} at ${pt(inn)}${stepAt(inn, [], b)}`;
+        const said = (result < 0.5 ? [inside, outside] : [outside, inside]).filter(Boolean) as string[];
+        if (said.length) witness = `${A} is ${said[0]}${said[1] ? `, and ${said[1].replace(` ${B} `, " it ")}` : ""}`;
+      }
+      // An overlap of nothing says whether the two touch, stand apart, or overlap by less than the lattice can see
+      // (round 10: a sign board's back face exactly on the wall read 0 with no place, and a rim sunk 0.02 read 0).
+      if (callee === "overlap" && result === 0 && !isEmpty(a.bounds) && !isEmpty(b.bounds)) {
+        const c = clearanceAt(a, b);
+        const tol = Math.max(...boundsSize(a.bounds), ...boundsSize(b.bounds)) * 1e-4;
+        if (c.at) {
+          const at = `(${c.at.map(fmt3).join(", ")})`;
+          witness = c.d > tol ? `they do not meet: ${Number(c.d.toPrecision(3))} apart, closest at ${at}` : c.d >= -tol ? `they only touch, at ${at}: sink one into the other by a cell or more` : `they overlap by ${Number((-c.d).toPrecision(3))} at ${at}, thinner than the lattice measures over their shared box: promise it on a chunk of the part (part & box(...)) or with clearance(a, b) < 0`;
+        }
       }
       // A void whose region is nowhere near the shape holds for no reason (round 10: a probe in the standing frame
       // against a cutter in the flat frame promised nothing); a region just clear of the shape is a guard, and fine.
@@ -744,14 +1128,99 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     // A pieces() promise that fails names the loose piece, as the report's Pieces row does (round 10: four renders).
     if (assertDepth > 0 && callee === "pieces" && typeof result === "number" && result > 1 && isShape3(values[0].value)) {
       const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
-      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64);
-      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} at (${loose.centre.map(fmt3).join(", ")})`;
+      const loose = loosePiece(values[0].value, typeof res === "number" ? res : 64, meshes);
+      if (loose) witness = `the smallest piece is ${Number(loose.volume.toPrecision(3))} ${cubic()} at (${loose.centre.map(fmt3).join(", ")})${stepAt(loose.inside, [], values[0].value)}`;
+    }
+    // A wall() promise says where the thinnest wall is and in which step, so the line to edit is in the message.
+    if (assertDepth > 0 && callee === "wall" && typeof result === "number" && Number.isFinite(result) && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const w = thinnestWall(values[0].value, typeof res === "number" ? res : 64, meshes);
+      if (w.empty) witness = w.empty.cellSize > 0 ? `no surface at a cell of ${Number(w.empty.cellSize.toPrecision(3))}: the shape is empty or thinner than a cell everywhere, so there is no wall to measure (or to print)` : "the shape is empty: there is no wall to measure";
+      else if (w.at && w.to) {
+        // The innermost steps whose surfaces bound the wall on each side, as the report's Thinnest wall row names them
+        // (round 11: a bowl's wall was blamed on 'bowl', the argument given back, not on 'bowl_wall').
+        const size = boundsSize(values[0].value.bounds), tol = Math.max(...size) / (typeof res === "number" ? res : 64) * 0.25;
+        const near = stepsAtSurface(w.at, values[0].value, tol), far = stepsAtSurface(w.to, values[0].value, tol);
+        const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+        witness = `thinnest at (${w.at.map(fmt3).join(", ")})${named(near)}, through to (${w.to.map(fmt3).join(", ")})${named(far)}`;
+      }
+    }
+    // A support() promise says where the tallest column is and what it stands on (round 11: the support kept small
+    // could only be promised as a share of the surface), and what it left out as bridged; an islands() promise says
+    // where each island is.
+    const supported = callee === "support" || callee === "islands" ? meshedShape(values) : undefined;
+    if (assertDepth > 0 && supported && typeof result === "number") {
+      const arg = (name: string, k: number) => values.find((v) => v.name === name)?.value ?? values.filter((v) => !v.name)[k]?.value;
+      const res = arg("resolution", 1);
+      const r = typeof res === "number" ? res : 64;
+      const spanMm = callee === "support" ? arg("span", 2) : undefined;
+      const unit = declaredUnit(), part = supported;
+      const sup = supportOf(part, r, meshes, (typeof spanMm === "number" ? spanMm : BRIDGE_MM) / (unit ? UNITS[unit] : 1));
+      const tol = Math.max(...boundsSize(part.bounds)) / r * 0.5;
+      const named = (ns: string[]) => (ns.length ? ` in ${ns.map((n) => `'${n}'`).join(", ")}` : "");
+      const fig = (v: number) => Number(v.toPrecision(3));
+      if (callee === "islands") {
+        const list = sup.islands.slice(0, 3).map((i) => `(${i.at.map(fmt3).join(", ")})${named(stepsAtSurface(i.at, part, tol))}, a column ${fig(i.height)} ${linear()} down to ${i.onModel ? "the model" : "the plate"}`);
+        witness = sup.islands.length ? `${sup.islands.length === 1 ? "the island is" : `the lowest ${Math.min(3, sup.islands.length)} of ${sup.islands.length} are`} at ${list.join("; ")}` : "no point hangs lower than all around it";
+      } else if (sup.at && sup.foot) {
+        const on = sup.tallestOnModel ? `on the model at (${sup.foot.map(fmt3).join(", ")})${named(stepsAtSurface(sup.foot, part, tol))}` : `on the plate at y = ${fmt3(sup.foot[1])}`;
+        const sliver = sup.sliver ? `; that column stands on ${sup.sliver.faces} face${sup.sliver.faces === 1 ? "" : "s"} under a cell across: where the shape does not face down there, a cutter's face lies exactly on the part's own, and moving the cutter by half a cell clears it` : "";
+        const bridged = sup.bridged > 0 ? ` (${fig(sup.bridged)} ${cubic()} more under bridges up to ${fig(sup.span)} ${linear()}, left out)` : "";
+        witness = `the tallest column is ${fig(sup.tallest)} ${linear()} under (${sup.at.map(fmt3).join(", ")})${named(stepsAtSurface(sup.at, part, tol))}, standing ${on}, of ${fig(sup.volume)} ${cubic()} under ${fig(sup.area)} ${square()} in plan${bridged}${sliver}`;
+      } else witness = sup.bridged > 0 ? `no overhang needs support: ${fig(sup.bridged)} ${cubic()} lies under bridges up to ${fig(sup.span)} ${linear()}` : "nothing faces down more than 45° above the floor: no support";
+    }
+    // A stands() promise says where the centre of mass is and which way the shape would tip.
+    if (assertDepth > 0 && callee === "stands" && typeof result === "number" && isShape3(values[0].value)) {
+      const res = values.find((v) => v.name === "resolution")?.value ?? values[1]?.value;
+      const st = standing(values[0].value, typeof res === "number" ? res : 64, meshes);
+      const way = st.towards ? compass(st.towards) : "";
+      if (!st.centre) witness = "no surface at that cell: nothing to stand";
+      else if (st.footprint.length < 3) witness = `the centre of mass is at (${st.centre.map(fmt3).join(", ")}), and the shape rests on a point or an edge, with no footprint to stand on`;
+      else witness = `the centre of mass (${st.centre.map(fmt3).join(", ")}) is ${Number(Math.abs(st.margin).toPrecision(3))} ${st.margin < 0 ? `outside the footprint, so it tips towards ${way}` : `inside the footprint, nearest its edge towards ${way}`}`;
     }
     // A decal whose region misses the surface paints nothing, and a picture cannot say why (round 8: a tag region
     // beside the wrong part).
     if (callee === "decal" && values.length >= 2 && isShape3(values[0].value) && isShape3(values[1].value) && !regionTouches(values[0].value, values[1].value))
       warnings.push(`line ${line}: decal(): the region \`${exprText(args[1].value)}\` touches none of the shape's surface, so it paints nothing; the region must cross the surface (a sphere centred on the skin, a box through it)`);
     return result;
+  }
+
+  /**
+   * `named("book_" + n, bk)`: a step of that name holding this value, for a copy a loop makes, so the steps sheet,
+   * the callouts, the slices, a focus and a warning can point at book 9 itself (round 11: the shelf rebuilt one book
+   * as a probe beside the loop to have a name to slice through). The step reads what the value's expression read,
+   * and the statement around the call reads the step.
+   */
+  function callNamed(args: Arg[], scope: Scope, line: number): Value {
+    const builtin = BUILTIN_MAP.get("named")!;
+    const outerReads = reads, outerStep = currentStep;
+    const here: Step = { name: "", value: 0, line, deps: new Set() };
+    reads = here.deps;
+    currentStep = here;
+    let values: { name?: string; value: Value }[];
+    // The step is made of its value; what the name reads (the n of "book_" + n, a counter) is not an ingredient.
+    const nameArg = args.find((a) => a.name === "name") ?? args.find((a) => !a.name);
+    try {
+      values = args.map((a) => {
+        reads = a === nameArg ? new Set() : here.deps;
+        return { name: a.name, value: evalExpr(a.value, scope) };
+      });
+    } finally { reads = outerReads; currentStep = outerStep; }
+    const value = callBuiltin(builtin, values, line);
+    const name = (values.find((v) => v.name === "name") ?? values.find((v) => !v.name))!.value as string;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new RuntimeError(`named(): "${name}" is not a name; a step's name is letters, digits and _, as "book_" + n makes`, line);
+    const prev = steps.get(name);
+    if (prev) throw new RuntimeError(`named("${name}"): '${name}' is already a step (line ${prev.line}); each named() makes a step of its own, so build the name from the loop's index, named("${name}_" + i, ...)`, line);
+    if (BUILTIN_MAP.has(name)) throw new RuntimeError(`named("${name}"): ${name} is a builtin; give the step another name`, line);
+    if (global.has(name) || loopSteps.has(name)) throw new RuntimeError(`named("${name}"): '${name}' is already a name in the program (a def, a constant or a loop's name); give the step another`, line);
+    here.name = name;
+    here.value = value;
+    here.deps.delete(name);
+    steps.set(name, here);
+    global.set(name, value);
+    if (isShape3(value)) { stepOfValue.set(value, name); lastShape = { name }; }
+    reads?.add(name);
+    return value;
   }
 
   function callUser(fn: UserFn, args: Arg[], scope: Scope, line: number): Value {
@@ -769,20 +1238,52 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     });
     for (const a of named) if (!fn.params.some((p) => p.name === a.name)) throw new RuntimeError(`'${fn.name}' has no parameter '${a.name}'`, line);
     depth++;
+    calling.push(fn);
     try {
-      return evalExpr(fn.body, local);
+      if (!fn.block) return evalExpr(fn.body!, local);
+      // A block body: its statements in order in the call's own scope, then the return's value. What they assign
+      // is the def's own, as a parameter is: no step, and gone when the call returns.
+      for (const st of fn.block.slice(0, -1)) exec(st, local, false, fn);
+      const ret = fn.block[fn.block.length - 1];
+      if (ret.type !== "return") throw new RuntimeError(`'${fn.name}' has no return`, fn.block[fn.block.length - 1].line);
+      return evalExpr(ret.value, local);
     } finally {
       depth--;
+      calling.pop();
     }
   }
 
-  function callBuiltin(b: Builtin, args: { name?: string; value: Value }[], line: number): Value {
+  /**
+   * `exprs`, the call's arguments as written, for a builtin that names its parts in a message and says what it did
+   * (rest, lean): the text bound to each parameter, by name or by position among those not named.
+   */
+  function callBuiltin(b: Builtin, args: { name?: string; value: Value }[], line: number, exprs?: Arg[]): Value {
     const failures: string[] = [];
     for (const ov of b.overloads) {
       const bound = bind(ov, args);
       if (typeof bound === "string") { failures.push(bound); continue; }
+      const unit = declaredUnit();
+      const ctx: CallContext = { meshes, mmPerUnit: unit ? UNITS[unit] : 1 };
+      if (exprs) {
+        const text = (param: string): string | undefined => {
+          const byName = exprs.find((a) => a.name === param);
+          if (byName) return exprText(byName.value);
+          const free = ov.params.filter((p) => !exprs.some((a) => a.name === p.name));
+          const k = free.findIndex((p) => p.name === param), positional = exprs.filter((a) => !a.name);
+          return k >= 0 && k < positional.length ? exprText(positional[k].value) : undefined;
+        };
+        const fn = calling[calling.length - 1];
+        // The part as the program wrote it, or, for a pipeline too long to read in a line, the name it is assigned to.
+        const part = (): string => {
+          const t = text("part") ?? "the part";
+          const step = !fn && currentStep?.name;
+          return t.length > 24 && step ? step : t.length > 48 ? `${t.slice(0, 45)}...` : t;
+        };
+        ctx.text = (param) => (param === "part" ? part() : text(param));
+        ctx.placed = (note) => contacts.push({ callee: b.name as ContactRecord["callee"], line, def: fn?.name, file: fn?.file, part: part(), on: text("on") ?? "the target", note });
+      }
       try {
-        return ov.impl(bound.values, bound.rest);
+        return ov.impl(bound.values, bound.rest, ctx);
       } catch (err) {
         const msg = (err as Error).message;
         throw new RuntimeError(msg.startsWith(`${b.name}(): `) ? msg : `${b.name}(): ${msg}`, line);
@@ -886,11 +1387,15 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   /** Of two shapes intersected, the larger by box is the mask: named so for the step being computed. */
-  function noteMask(l: Shape3, le: Expr, r: Shape3, re: Expr): void {
+  function noteMask(l: Shape3, le: Expr, r: Shape3, re: Expr, scope: Scope): void {
     if (!currentStep) return;
     const vol = (s: Shape3) => (isEmpty(s.bounds) ? 0 : boundsSize(s.bounds).reduce((a, b) => a * b, 1));
     const bigger = vol(l) > vol(r) * 1.5 ? le : vol(r) > vol(l) * 1.5 ? re : undefined;
-    if (bigger && bigger.type === "ident") (currentStep.maskDeps ??= new Set()).add(bigger.name);
+    // The mask may be a named half-space turned and moved on the way in (`stone & (below | rotate(x=25) | move(...))`
+    // in a loop of facets, round 10): the name at the head of a chain of rigid transforms is the mask.
+    let e = bigger;
+    while (e && e.type === "call" && e.piped && MASK_MOVES.has(e.callee) && e.args.length && !e.args[0].name) e = e.args[0].value;
+    if (e && e.type === "ident" && programName(e.name, scope)) (currentStep.maskDeps ??= new Set()).add(e.name);
   }
 
   /** A name subtracted from a shape: a cut for the step being computed, and never named as where a void failed. */
@@ -902,12 +1407,112 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   }
 
   /**
-   * The innermost named step of `within` with solid at `p`, as " in 'name'", for a failed void: a step whose value
-   * is in the measured shape's own tree (round 10: a gem's mask cube was named for an engraving's solid, and a
-   * bell for the gnome that poked through it), the shape itself when it is a step; none when no step holds it.
+   * `pocket | rotate(y=30) | ring(6, 0.7)` meant the ring turned half a pitch, but a ring pushes each copy out along +x
+   * first, so the turn only spins each copy in place, which a part round about the axis does not show: the pockets
+   * landed on the holes (round 10). Said when the part given to ring was turned about the ring's own axis just
+   * before, and the turn left its field as it was (sampled over its box).
+   */
+  function ringTurnedInPlace(args: Arg[], values: { name?: string; value: Value }[], scope: Scope, line: number): void {
+    const positional = args.filter((a) => !a.name);
+    let e: Expr | undefined = positional[0]?.value;
+    const from = e?.type === "ident" ? e.name : undefined;
+    // The turn's angle is read where it was written: here for an inline turn, at the top level for a step's.
+    let at = scope;
+    if (e?.type === "ident") {
+      // A def's parameter or a local that shares a step's name is not that step, and was not built by its line.
+      e = global.get(e.name) === values[0].value ? topAssigns.get(e.name) : undefined;
+      at = global;
+    }
+    if (!e || e.type !== "call" || e.callee !== "rotate" || !e.piped) return;
+    const axisValue = values.find((v) => v.name === "axis")?.value ?? values.filter((v) => !v.name)[3]?.value ?? "y";
+    if (axisValue !== "x" && axisValue !== "y" && axisValue !== "z") return;
+    const turns = e.args.filter((a) => a.name === "x" || a.name === "y" || a.name === "z");
+    if (turns.length !== 1 || turns[0].name !== axisValue || e.args.some((a, i) => i > 0 && !a.name)) return;
+    let deg: Value;
+    try { deg = evalExpr(turns[0].value, at); } catch { return; }
+    if (typeof deg !== "number" || Math.abs(deg % 360) < 1e-9) return;
+    const shape = values[0].value as Shape3;
+    if (isEmpty(shape.bounds)) return;
+    const b = shape.bounds, size = boundsSize(b);
+    const tol = Math.max(...size) * 1e-6;
+    const r = (deg * Math.PI) / 180, c = Math.cos(r), sn = Math.sin(r);
+    const k = "xyz".indexOf(axisValue), u = (k + 1) % 3, w = (k + 2) % 3;
+    for (let i = 0; i <= 4; i++)
+      for (let j = 0; j <= 4; j++)
+        for (let l = 0; l <= 4; l++) {
+          const p = [b.min[0] + (size[0] * (i + 0.37)) / 4.5, b.min[1] + (size[1] * (j + 0.37)) / 4.5, b.min[2] + (size[2] * (l + 0.37)) / 4.5];
+          const q = [...p];
+          q[u] = p[u] * c - p[w] * sn;
+          q[w] = p[u] * sn + p[w] * c;
+          if (Math.abs(shape.dist(p[0], p[1], p[2]) - shape.dist(q[0], q[1], q[2])) > tol) return;
+        }
+    warnings.push(`line ${line}: ring(): ${from ? `'${from}' was` : "the part was"} turned about ${axisValue} by ${fmt3(deg)} just before the ring, which leaves it as it was (it is round about that axis), so every copy sits where an unturned one would; ring pushes each copy out along +${axisValue === "x" ? "y" : "x"} before turning it, so to turn the whole ring, rotate after it: ... | ring(...) | rotate(${axisValue}=${fmt3(deg)})`);
+  }
+
+  /** Which copy of a region made of copies (a ring of probe rods) holds a point, or which named part: for a void failure. */
+  function regionPart(region: Shape3, p: Vec3, regionText: string): string {
+    const parts = region.parts;
+    if (!parts || parts.length < 2) return "";
+    const i = parts.findIndex((k) => k.dist(p[0], p[1], p[2]) < 0);
+    if (i < 0) return "";
+    const named = [...steps.values()].find((st) => st.value === parts[i]);
+    return named ? `, in ${regionText}'s part '${named.name}'` : `, in copy ${i + 1} of the ${parts.length} in ${regionText}`;
+  }
+
+  /**
+   * The innermost named step of `within` with solid at `p`, as " in 'name'", for a failed void, inside or pieces: a
+   * step whose value is in the measured shape's own tree (round 10: a gem's mask cube was named for an engraving's
+   * solid, and a bell for the gnome that poked through it) and gives it that solid, reached from it only through
+   * shapes solid at `p` and never through what a difference takes away (stage 5: a pot unioned after its spout was
+   * bored was reported "in 'bore'", the cutter, whose volume held the point where the pot's wall stood); the shape
+   * itself when it is a step; none when no step holds it.
    */
   function stepAt(p: Vec3, exclude: Shape3[], within: Shape3): string {
-    const roots = posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [];
+    const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
+    // Every step in it is solid at the point where the measured shape puts it: a bowl's wall built at the origin and
+    // moved into the bowl is read in the bowl, not at the origin (round 11: it was never found, and the bowl was named).
+    const tree = holdingTree(within, p, (d) => d <= 0, false);
+    let best: string | undefined, bv = Infinity;
+    for (const st of steps.values()) {
+      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
+      const b = placedUnder(roots, st.value).bounds;
+      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
+      if (v < bv) { bv = v; best = st.name; }
+    }
+    return best ? ` in '${best}'` : "";
+  }
+
+  /**
+   * The shapes of `within`'s tree that give it what it has at `p`: walked down from it through unions, wrappers,
+   * placed sets and joints with the point carried into each one's own frame, entering only a shape whose value there
+   * passes `keep` (solid, for a void; on the surface, for a wall's face), and a difference's cutter only when
+   * `cutters` (a cut face is the cutter's surface; the solid a cutter's volume holds is never the shape's). A step
+   * that is solid at the point but subtracted there, or inside a shell's hollow, or under a part a later cut took
+   * away, is not reached. `within` is in it when it passes `keep` itself; the walk goes below it either way.
+   */
+  function holdingTree(within: Shape3, p: Vec3, keep: (d: number) => boolean, cutters: boolean): Set<Shape3> {
+    const held = new Set<Shape3>(keep(within.dist(p[0], p[1], p[2])) ? [within] : []);
+    const seen = new Map<Shape3, Vec3[]>();
+    let budget = 100000;
+    const walk = (s: Shape3, q: Vec3, depth: number) => {
+      const at = seen.get(s);
+      if (at?.some((v) => v[0] === q[0] && v[1] === q[1] && v[2] === q[2]) || depth > 200 || budget-- <= 0) return;
+      if (at) at.push(q); else seen.set(s, [q]);
+      const r = s.unwarp ? s.unwarp(q[0], q[1], q[2]) : q;
+      const kids = s.parts ?? s.inner ?? [];
+      const subtracts = s.cut === true && !isIntersection(s);
+      kids.forEach((k, i) => {
+        if ((subtracts && i > 0 && !cutters) || !keep(k.dist(r[0], r[1], r[2]))) return;
+        held.add(k);
+        walk(k, r, depth + 1);
+      });
+    };
+    walk(within, p, 0);
+    return held;
+  }
+
+  /** Every shape in `within`'s tree, through unions, wrappers, placed sets and joints. */
+  function shapeTree(within: Shape3): Set<Shape3> {
     const tree = new Set<Shape3>();
     const walk = (s: Shape3, depth: number) => {
       if (tree.has(s) || depth > 200) return;
@@ -917,21 +1522,76 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (s.joint) walk(s.joint.child, depth + 1);
     };
     walk(within, 0);
-    let best: string | undefined, bv = Infinity;
-    for (const st of steps.values()) {
-      if (!isShape3(st.value) || exclude.includes(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
-      const s = posed ? placedUnder(roots, st.value) : st.value;
-      const b = s.bounds;
-      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
-      if (s.dist(p[0], p[1], p[2]) > 0) continue;
-      const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
-      if (v < bv) { bv = v; best = st.name; }
-    }
-    return best ? ` in '${best}'` : "";
+    return tree;
   }
 
-  function exec(stmt: Stmt, scope: Scope, topLevel: boolean): void {
+  /**
+   * The innermost named steps of `within` whose surface passes within `tol` of a surface point, at most two, smallest
+   * box first and none that only holds another one found: the steps a wall's face belongs to, a cut's among them;
+   * reached from `within` through shapes whose surface is there too, so a cutter whose face passes through a part it
+   * never cut, or a part buried in another, is not named for a face it does not make.
+   */
+  function stepsAtSurface(p: Vec3, within: Shape3, tol: number): string[] {
+    const roots = [within, ...(posed ? [...(output ? [output] : []), ...[...steps.values()].map((st) => st.value).filter(isShape3).reverse()] : [])];
+    const tree = holdingTree(within, p, (d) => Math.abs(d) <= tol, true);
+    const found: { name: string; value: Shape3; v: number }[] = [];
+    for (const st of steps.values()) {
+      if (!isShape3(st.value) || !tree.has(st.value) || isEmpty(st.value.bounds)) continue;
+      const b = placedUnder(roots, st.value).bounds;
+      found.push({ name: st.name, value: st.value, v: (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]) });
+    }
+    found.sort((x, y) => x.v - y.v);
+    const out: { name: string; value: Shape3 }[] = [];
+    for (const f of found) {
+      if (out.some((o) => o.name === f.name)) continue;
+      const below = shapeTree(f.value);
+      if (out.some((o) => below.has(o.value))) continue;
+      out.push(f);
+      if (out.length === 2) break;
+    }
+    return out.map((o) => o.name);
+  }
+
+  /**
+   * The cells across a part's longest side that give it the model's own cell: the model's longest side over the
+   * program's `set grid`, the model being the shown shape (or, for an assert above the `show`, everything built so
+   * far), and never under 64 cells across the part, so a small part is still measured, nor over the grid itself.
+   * Without `set grid`, 64 cells across the part, as before.
+   */
+  function defaultResolution(part: Shape3): number {
+    const grid = settings.grid;
+    if (typeof grid !== "number" || !(grid > 0)) return 64;
+    let box = EMPTY_BOUNDS;
+    if (shown) for (const s of shown.shapes) box = boundsUnion(box, s.bounds);
+    else for (const st of steps.values()) if (isShape3(st.value) && !isEmpty(st.value.bounds)) box = boundsUnion(box, st.value.bounds);
+    const model = isEmpty(box) ? 0 : Math.max(...boundsSize(box));
+    const side = isEmpty(part.bounds) ? 0 : Math.max(...boundsSize(part.bounds));
+    if (!(model > 0) || !(side > 0)) return grid;
+    return Math.min(grid, Math.max(Math.min(64, grid), Math.ceil((grid * side) / model)));
+  }
+
+  /** "cubic units", or the declared unit's cube when the program sets units (mm³ for a print in millimetres). */
+  function cubic(): string {
+    const u = declaredUnit();
+    return u ? `${u}³` : "cubic units";
+  }
+  function square(): string {
+    const u = declaredUnit();
+    return u ? `${u}²` : "square units";
+  }
+  function linear(): string {
+    return declaredUnit() ?? "units";
+  }
+  function declaredUnit(): string | undefined {
+    return typeof settings.units === "string" && Object.hasOwn(UNITS, settings.units) ? settings.units : undefined;
+  }
+
+  /** One statement; `inDef` is the def whose block body it is in, for an assert's call and a name that is the def's own. */
+  function exec(stmt: Stmt, scope: Scope, topLevel: boolean, inDef?: UserFn): void {
+    if (topLevel) runningLine = stmt.line;
     switch (stmt.type) {
+      case "return":
+        throw new RuntimeError(`return ends a def's block body`, stmt.line);
       case "assign": {
         const collecting = topLevel && reads === undefined;
         if (collecting) reads = new Set();
@@ -947,12 +1607,30 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         const keptDeps = topLevel ? here.keptDeps : undefined;
         const maskDeps = topLevel ? here.maskDeps : undefined;
         // A material made by material(...) takes the name it is assigned to, so the report's materials row and the
-        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked).
-        if (topLevel && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#")) && !steps.has(stmt.name))
-          value = { ...value, name: stmt.name };
+        // exports say "body" rather than "custom" or "#e9b125" (round 4 asked); in a loop every iteration's does, the
+        // second distinct one under the name as body_2, the third body_3 (round 11: a plank per seed took the name
+        // on the first iteration only, and the GLB shipped five called custom).
+        if ((topLevel || inDef) && isMaterial(value) && (value.name === "custom" || value.name.endsWith("*") || value.name.startsWith("#"))) {
+          const k = (materialNames.get(stmt.name) ?? 0) + 1;
+          materialNames.set(stmt.name, k);
+          value = { ...value, name: k === 1 ? stmt.name : `${stmt.name}_${k}` };
+        }
+        // A record named like a used library is never read by field: `hw.x` is the library's (once per name).
+        if (isRecord(value) && (scope.root().modules ?? modules).has(stmt.name) && !shadowed.has(`record:${stmt.name}`)) {
+          shadowed.add(`record:${stmt.name}`);
+          warnings.push(`line ${stmt.line}: '${stmt.name}' is a used library, so ${stmt.name}.${[...value.fields.keys()][0] ?? "x"} reads the library, not this record; give the record another name`);
+        }
         scope.set(stmt.name, value);
         if (topLevel) {
-          const prev = steps.get(stmt.name);
+          // A name first assigned inside a loop's body is the loop's own working name (bk, prev, board): it holds the
+          // last iteration's value, so it is kept off the steps, the callouts, the unused warning and a library's
+          // exports, and kept apart only so the steps it reads are still known to be read (round 11: a shelf's
+          // "8. BK" thumbnail and callout; a stand's loop counter exported). A name assigned before the loop and
+          // updated in it, an accumulator, stays a step; named() gives one iteration's value a step of its own.
+          const loopOwn = loopDepth > 0 && !steps.has(stmt.name);
+          if (!loopOwn) loopSteps.delete(stmt.name);
+          const table = loopOwn ? loopSteps : steps;
+          const prev = table.get(stmt.name);
           const deps = new Set(prev?.deps ?? []);
           for (const r of reads ?? []) if (r !== stmt.name) deps.add(r);
           if (prev) {
@@ -965,15 +1643,22 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
             if (maskDeps) prev.maskDeps = new Set([...(prev.maskDeps ?? []), ...maskDeps]);
             if (loopDepth > 0) prev.inLoop = true;
           } else {
-            steps.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
+            table.set(stmt.name, { name: stmt.name, value, line: stmt.line, deps, cuts: cutHere || undefined, cutDeps, movedDeps, keptDeps, maskDeps, inLoop: loopDepth > 0 || undefined });
           }
-          if (isShape3(value)) { lastShape = { name: stmt.name }; stepOfValue.set(value, stmt.name); }
+          if (isShape3(value)) {
+            // The output of a program with no show is still the last shape assigned, a loop's own name too, as the
+            // guide says: a loop of parts with no show outputs its last copy, not nothing, and a step above the loop
+            // is warned about as not part of it rather than shown in its place.
+            lastShape = { name: stmt.name };
+            // A step's name for a value wins over a loop's own name for the same one (prev = bk after named(..., bk)).
+            if (!loopOwn || !steps.has(stepOfValue.get(value) ?? "")) stepOfValue.set(value, stmt.name);
+          }
         }
         if (collecting) reads = undefined;
         return;
       }
       case "def":
-        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, closure: global });
+        scope.set(stmt.name, { kind: "fn", name: stmt.name, params: stmt.params, body: stmt.body, block: stmt.block, closure: global, file: options.moduleName });
         return;
       case "use": {
         if (!topLevel) throw new RuntimeError(`use belongs at the top of the program, not inside a loop`, stmt.line);
@@ -992,28 +1677,33 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         // scope as their closure, so a library def sees its helpers and constants and nothing of the caller's.
         let lib: Evaluation;
         try {
-          lib = evaluate(parse(resolved.source), { ...options, moduleFrom: resolved.file, jointPoses: options.jointPoses });
+          const onAssert = options.onAssert;
+          lib = evaluate(parse(resolved.source), { ...options, show: undefined, moduleFrom: resolved.file, moduleName: stmt.path, jointPoses: options.jointPoses, onAssert: onAssert && ((phase, a) => onAssert(phase, { ...a, file: a.file ?? stmt.path })) });
         } catch (err) {
           throw new RuntimeError(`use "${stmt.path}" (${resolved.file}): ${(err as Error).message}`, stmt.line);
         }
         for (const [name, v] of Object.entries(options.jointPoses ?? {})) { CURRENT_ANGLES.set(name, v.angles); CURRENT_POSES.set(name, v); }
         const exports = new Map<string, Value>();
-        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) exports.set(st.name, st.value);
-        for (const d of lib.defs) exports.set(d.name, d);
+        // A name that starts with _ is the library's own (its plate's helpers, a def's helper): not exported, not
+        // listed by check's use line or by aixle doc (round 11: demo_case and demo_y were offered to every caller).
+        const own = new Set<string>();
+        for (const st of lib.steps) if (!isShape3(st.value) && !isShape2(st.value)) { if (isPrivate(st.name)) own.add(st.name); else exports.set(st.name, st.value); }
+        // A def's body runs where it is called, so an assert in it says which library's line it is.
+        for (const d of lib.defs) { d.file ??= stmt.path; if (isPrivate(d.name)) own.add(d.name); else exports.set(d.name, d); }
         for (const a of lib.asserts) asserts.push({ ...a, file: a.file ?? stmt.path });
-        modules.set(prefix, { path: stmt.path, exports });
+        modules.set(prefix, { path: stmt.path, exports, own });
         moduleList.push({ prefix, path: stmt.path, names: [...exports.keys()] });
         return;
       }
       case "for": {
         const iterable = evalExpr(stmt.iterable, scope);
-        if (!Array.isArray(iterable)) throw new RuntimeError(`'for' needs a list (use range(n)), got a ${typeName(iterable)}`, stmt.line);
+        if (!Array.isArray(iterable)) throw new RuntimeError(`'for' needs a list (use range(n)), got a ${typeName(iterable)}${isRecord(iterable) ? "; to run over several records, put them in a list: for leg in [front, back]" : ""}`, stmt.line);
         loopDepth++;
         try {
           for (const item of iterable) {
             if (++loops > MAX_LOOP) throw new RuntimeError(`more than ${MAX_LOOP} loop iterations`, stmt.line);
             scope.set(stmt.name, item);
-            for (const s of stmt.body) exec(s, scope, topLevel);
+            for (const s of stmt.body) exec(s, scope, topLevel, inDef);
           }
         } finally {
           loopDepth--;
@@ -1027,9 +1717,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         reads = new Set();
         stmt.values.forEach((e, i) => {
           const v = evalExpr(e, scope);
-          if (!isShape3(v)) throw new RuntimeError(`${stmt.type} needs a 3D shape, got a ${typeName(v)}`, stmt.line);
+          if (!isShape3(v)) throw new RuntimeError(`${stmt.type} needs a 3D shape, got a ${typeName(v)}${isRecord(v) ? ` (fields ${[...v.fields.keys()].join(", ")}); ${stmt.type} its shapes by name, ${stmt.type} ${exprText(e)}.${[...v.fields.keys()][0] ?? "x"}, ...` : ""}`, stmt.line);
           shapes.push(v);
-          names.push(e.type === "ident" ? e.name : stmt.type === "scene" ? `object_${i + 1}` : "model");
+          // A record's field shown by name is called by the step it holds, or as written when it holds no step.
+          const named = e.type === "ident" && e.name.includes(".") ? stepOfValue.get(v) : undefined;
+          names.push(named ?? (e.type === "ident" ? e.name : stmt.type === "scene" ? `object_${i + 1}` : "model"));
         });
         const showReads = reads;
         reads = undefined;
@@ -1038,24 +1730,46 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
         return;
       }
       case "set": {
+        // Several values, or a list, are a list of numbers: `set bed 220 220 250`, `set bed [220, 220, 250]`.
+        const many = stmt.values ? stmt.values.map((e) => evalExpr(e, scope)) : undefined;
         // `set pose reading` and `set focus lid` name things; a bare word there is the name, not a variable read.
-        const v = stmt.value.type === "ident" && NAME_SETTINGS.has(stmt.key) ? stmt.value.name : evalExpr(stmt.value, scope);
+        const v = many ?? (stmt.value.type === "ident" && NAME_SETTINGS.has(stmt.key) ? stmt.value.name : evalExpr(stmt.value, scope));
+        if (Array.isArray(v)) {
+          // Only the bed is several numbers; every other setting is read as one, and a list there would be read as
+          // nothing (`set grid 64 128` meshed at a grid of NaN and found no surface).
+          if (!LIST_SETTINGS.has(stmt.key)) throw new RuntimeError(`set ${stmt.key}: expected one value, a number or a name (only ${[...LIST_SETTINGS].map((k) => `set ${k}`).join(", ")} takes several)`, stmt.line);
+          if (!v.every((x) => typeof x === "number")) throw new RuntimeError(`set ${stmt.key}: expected numbers`, stmt.line);
+          settings[stmt.key] = v as number[];
+          return;
+        }
         if (typeof v !== "number" && typeof v !== "string") throw new RuntimeError(`set ${stmt.key}: expected a number or a string`, stmt.line);
         settings[stmt.key] = v;
         return;
       }
       case "expr": {
         const v = evalExpr(stmt.value, scope);
-        if (isShape3(v) || isShape2(v)) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
+        const kept = stmt.value.type === "call" && stmt.value.callee === "named";
+        if ((isShape3(v) || isShape2(v)) && !kept) warnings.push(`line ${stmt.line}: this shape is computed and thrown away; assign it to a name (name = ...) to keep it`);
         return;
       }
       case "assert": {
-        if (options.skipAsserts) return;
+        // A step only asserts read is a region whether or not the asserts are judged here (round 11: --no-asserts
+        // turned three probes back into "not part of the output" warnings).
+        if (options.skipAsserts) { assertRegions(stmt.test); return; }
         // A promise about a pose is tested in that pose's evaluation and only noted in any other.
-        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true }); return; }
+        // In a def's body the promise is judged on every call, and says which call: the program's line that made it.
+        const call = inDef ? { fn: inDef.name, line: runningLine } : undefined;
+        const file = inDef?.file;
+        if (stmt.pose && stmt.pose !== (options.poseName ?? "rest")) { assertRegions(stmt.test); asserts.push({ line: stmt.line, text: exprText(stmt.test), passed: true, pose: stmt.pose, pending: true, call, file }); return; }
+        // A promise about the model at rest is judged at rest, once: an evaluation in a pose (a pose sheet, a frame of
+        // a strip, a pose's promises) judges only that pose's (round 11: a wall() promise ran again in every pose).
+        if ((!stmt.pose || stmt.pose === "rest") && posed) { assertRegions(stmt.test); return; }
         // A comparison is evaluated side by side, so a failure can say what the two numbers were.
         const t = stmt.test;
-        let value: Value, detail: string | undefined;
+        let value: Value, detail: string | undefined, margin: number | undefined;
+        const info: AssertInfo = { line: stmt.line, text: exprText(t), pose: stmt.pose };
+        const warned = warnings.length;
+        options.onAssert?.("start", info);
         assertDepth++;
         witness = undefined;
         try {
@@ -1064,9 +1778,11 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           value = compare(t.op, a, b, t.line);
           const show = (v: Value) => (typeof v === "number" ? String(Number(v.toPrecision(4))) : typeof v === "string" ? JSON.stringify(v) : typeName(v));
           detail = `${show(a)} ${t.op} ${show(b)}`;
+          if (typeof a === "number" && typeof b === "number") margin = marginOf(t.op, a, b);
         } else value = evalExpr(t, scope);
         } finally {
           assertDepth--;
+          options.onAssert?.("end", info);
         }
         if (typeof value !== "number") throw new RuntimeError(`assert tests a number (a comparison such as width(m) < 5, or 1 and 0), not a ${typeName(value)}`, stmt.line);
         let message: string | undefined;
@@ -1075,15 +1791,38 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
           if (typeof m !== "string") throw new RuntimeError(`assert's message is a string`, stmt.line);
           message = m;
         }
-        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined });
+        asserts.push({ line: stmt.line, text: exprText(t), detail, message, passed: value !== 0, pose: stmt.pose, where: value === 0 ? witness : undefined, call, file, margin });
+        if (!stmt.pose || stmt.pose === "rest") restAssertWarnings.push(...warnings.slice(warned));
         return;
       }
     }
   }
 
   let showDeps: Set<string> = new Set();
+  for (const stmt of program.body) if (stmt.type === "assign") topAssigns.set(stmt.name, stmt.value);
   for (const stmt of program.body) exec(stmt, global, true);
 
+  // `render --show phone_probe,cable`: the named steps drawn with the output, as `show output, phone_probe` would, so
+  // a probe is seen in place without editing the program (round 11: a stand's phone and cable were seen only by
+  // copying the whole program into a probe file with a scene at its end). Asserts have run by now; they do not move.
+  if (options.show?.length) {
+    const shapeNames = [...steps.values()].filter((st) => isShape3(st.value)).map((st) => st.name);
+    for (const name of options.show) {
+      const st = steps.get(name);
+      if (!st || !isShape3(st.value)) throw new Error(`--show ${name}: ${st ? `'${name}' is a ${typeName(st.value)}, not a shape` : "no such step"}; the shapes are ${shapeNames.slice(0, 24).join(", ")}${shapeNames.length > 24 ? ", ..." : ""}`);
+    }
+    if (!shown) {
+      shown = { names: [], shapes: [], scene: false };
+      showDeps = new Set();
+      if (lastShape) { shown.names.push(lastShape.name); shown.shapes.push(steps.get(lastShape.name)!.value as Shape3); showDeps.add(lastShape.name); }
+    }
+    for (const name of options.show) {
+      if (shown.names.includes(name)) continue;
+      shown.names.push(name);
+      shown.shapes.push(steps.get(name)!.value as Shape3);
+      showDeps.add(name);
+    }
+  }
   let outputName = "model";
   let objects: SceneObject[] = [];
   const roots = new Set<string>();
@@ -1093,7 +1832,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
     objects = shown.scene ? shown.names.map((name, i) => ({ name, shape: shown!.shapes[i] })) : [{ name: outputName, shape: output }];
     for (const d of showDeps) roots.add(d);
   } else if (lastShape) {
-    output = steps.get(lastShape.name)!.value as Shape3;
+    output = (steps.get(lastShape.name) ?? loopSteps.get(lastShape.name))!.value as Shape3;
     outputName = lastShape.name;
     objects = [{ name: outputName, shape: output }];
     roots.add(lastShape.name);
@@ -1115,8 +1854,13 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
       if (a.pose && a.pose !== "rest" && !poses.some((p) => p.name === a.pose)) warnings.push(`assert (line ${a.line}) is for pose "${a.pose}", which is not defined${poses.length ? `; poses: ${poses.map((p) => p.name).join(", ")}` : ""}; it is never tested`);
     // "rest" is every joint at zero and needs no pose() of its own; a missing pose is named once per animation.
     // A sky the renderer has, a shot the program declared.
+    // What a unit is and the printer's bed, for the report's Print section and the 3MF.
+    if (settings.units !== undefined && !Object.hasOwn(UNITS, String(settings.units))) warnings.push(`set units ${settings.units}: no such unit; a unit can be ${Object.keys(UNITS).join(", ")} (millimetres are assumed when units are not set)`);
+    if (settings.bed !== undefined && !(Array.isArray(settings.bed) && settings.bed.length === 3 && settings.bed.every((v) => v > 0))) warnings.push(`set bed ${Array.isArray(settings.bed) ? settings.bed.join(" ") : settings.bed}: the bed is the printer's build volume as three numbers in millimetres, width, depth and height (set bed 220 220 250)`);
     if (settings.environment !== undefined && !ENVIRONMENT_NAMES.includes(String(settings.environment))) warnings.push(`set environment ${settings.environment}: no such environment; the skies are ${ENVIRONMENT_NAMES.join(", ")} (studio is the default)`);
     if (typeof settings.camera === "string" && !cameras.some((c) => c.name === settings.camera)) warnings.push(`set camera ${settings.camera}: no such camera${cameras.length ? `; cameras: ${cameras.map((c) => c.name).join(", ")}` : " (declare one with camera(name, ...))"}; the render uses its own view`);
+    // `set slice name` puts the cross-sections through a step: a name that is no step is said here, before a render.
+    if (settings.slice !== undefined && (typeof settings.slice !== "string" || (!steps.has(settings.slice) && !(shown?.names ?? []).includes(settings.slice)))) warnings.push(`set slice ${settings.slice}: ${typeof settings.slice === "string" ? "no such step or object" : "takes a step's name (set slice_x 0.5 moves one plane)"}; the slices cut through the model's centre`);
     for (const c of cameras) if (c.focus && !steps.has(c.focus) && !(shown?.names ?? []).includes(c.focus)) warnings.push(`camera "${c.name}" (line ${c.line}): focus="${c.focus}" names no step or object; the shot frames the whole model`);
     for (const a of animations) {
       // Two keys are both ends: ease_ends=0 leaves nothing eased (round 8: a flick expected to settle ran linear).
@@ -1129,12 +1873,16 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   // Roles: a part is anything the output is built from; below a cut name the subtree is a cut; a name only an
   // assert, a decal or a camera reads is a region. A part stays a part however else it is read.
   for (const c of cameras) if (c.focus) regionNames.add(c.focus);
+  // A step only sliced through (a probe the planes should cross) is a region too, whether `set slice` or `--slice`
+  // named it.
+  for (const sl of [settings.slice, options.slice]) if (typeof sl === "string" && steps.has(sl)) regionNames.add(sl);
   const roles = new Map<string, StepRole>();
   const rank = (r: StepRole | undefined) => (r === "part" ? 4 : r === "cut" ? 3 : r === "mask" ? 2 : r === "region" ? 1 : 0);
   const visit = (nme: string, role: StepRole) => {
     if (rank(roles.get(nme)) >= rank(role)) return;
     roles.set(nme, role);
-    const st = steps.get(nme);
+    // Through a loop's own names too: a part placed only by bk = part | move(...) is still a part.
+    const st = steps.get(nme) ?? loopSteps.get(nme);
     if (st) for (const d of st.deps) visit(d, role === "region" ? role : st.cutDeps?.has(d) ? "cut" : st.maskDeps?.has(d) ? "mask" : decalRegions.has(d) ? "region" : role);
   };
   for (const r of roots) visit(r, "part");
@@ -1143,7 +1891,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
   const stepList = [...steps.values()];
   // A step is displaced when every step that reads it moves it, and nothing shows it as it is.
   const readers = new Map<string, Step[]>();
-  for (const st of stepList) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
+  for (const st of [...stepList, ...loopSteps.values()]) for (const d of st.deps) { const l = readers.get(d) ?? []; l.push(st); readers.set(d, l); }
   const displaced = new Set<string>();
   for (const st of stepList) {
     if (!isShape3(st.value) || roots.has(st.name)) continue;
@@ -1156,7 +1904,7 @@ export function evaluate(program: Program, options: EvalOptions = {}): Evaluatio
 
   const defs: UserFn[] = [];
   for (const st of program.body) if (st.type === "def") { const v = global.get(st.name); if (v !== undefined && isUserFn(v)) defs.push(v); }
-  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, modules: moduleList, defs, asserts, images };
+  return { output, outputName, objects, poses, animations, lights, cameras, used, roles, displaced, steps: stepList, settings, warnings, restAssertWarnings, modules: moduleList, defs, asserts, images, origins, contacts };
 }
 
 export function signature(name: string, ov: Overload): string {
@@ -1164,8 +1912,9 @@ export function signature(name: string, ov: Overload): string {
     const base = p.rest ? `${p.name}...` : p.name;
     if (p.default === undefined || p.rest) return base;
     const d = p.default;
+    // A point or a direction as the program would write it: dir=[0, -1, 0].
     const shown =
-      typeof d === "number" ? (d === -1 || d === -1e9 || Number.isNaN(d) ? undefined : String(d)) : typeof d === "string" ? `"${d}"` : undefined;
+      typeof d === "number" ? (d === -1 || d === -1e9 || Number.isNaN(d) ? undefined : String(d)) : typeof d === "string" ? `"${d}"` : Array.isArray(d) && d.every((x) => typeof x === "number") ? `[${d.join(", ")}]` : undefined;
     return shown === undefined ? `${base}=?` : `${base}=${shown}`;
   });
   return `${name}(${parts.join(", ")}) -> ${ov.returns}`;

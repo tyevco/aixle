@@ -1,4 +1,7 @@
-/** Parse a Wavefront OBJ into triangles: positions and indices only, polygons fanned. */
+/**
+ * Parse a Wavefront OBJ into triangles: positions and indices only, polygons fanned. A change to what it reads from
+ * a file bumps SAMPLER_VERSION in src/mesh/meshSdf.ts, or the import cache serves the samples of the old reading.
+ */
 export interface ImportedMesh {
   positions: Float32Array;
   indices: Uint32Array;

@@ -8,11 +8,14 @@ import { toGlb } from "../src/export/glb.js";
 import { albedo, preset } from "../src/sdf/materials.js";
 import { bakeAtlas } from "../src/export/atlas.js";
 import { analyse, hull2, insideMargin } from "../src/mesh/physics.js";
-import { countPieces } from "../src/mesh/pieces.js";
+import { countPieces, loosePiece, meshedAnalysis, overhangFraction, type MeshCache } from "../src/mesh/pieces.js";
 import { splitCreases } from "../src/mesh/creases.js";
 import { decimate } from "../src/mesh/decimate.js";
 import { weldIndices } from "../src/mesh/mesh.js";
 import { materialFromString } from "../src/sdf/materials.js";
+import * as S from "../src/sdf/sweeps.js";
+import { rect } from "../src/sdf/shapes2d.js";
+import type { Shape3 } from "../src/sdf/types.js";
 
 describe("surface nets", () => {
   const sphere = surfaceNets(P.sphere(1), { resolution: 48 });
@@ -149,6 +152,35 @@ describe("texture atlas", () => {
     // than when the faces sat on sample planes); most must agree.
     expect(agree / checked).toBeGreaterThan(0.8);
   });
+  it("paints a triangle across a material seam from the surface under each texel, not from its nearest corner", () => {
+    // Round 11: once decimation had stretched the triangles round a door's studs, their iron corners painted iron a
+    // stud's width onto the oak. Here one quad, its left corners red and its right blue, lies on a plate whose
+    // surface is red only along its left tenth: the corner rule paints half the quad red, the surface a tenth.
+    const red = materialFromString("#ff0000")!, blue = materialFromString("#0000ff")!;
+    const plate = O.union([O.paint(O.move(P.box(0.2, 0.2, 2), -0.9, -0.1, 0), red), O.paint(O.move(P.box(1.8, 0.2, 2), 0.1, -0.1, 0), blue)]);
+    const positions = new Float32Array([-1, 0, -1, -1, 0, 1, 1, 0, 1, 1, 0, -1]);
+    const quad = {
+      positions, local: new Float32Array(positions), normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
+      materialIndex: new Uint16Array([0, 0, 1, 1]), materials: [red, blue], indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    };
+    const share = (img: { data: Uint8ClampedArray | Uint8Array }) => {
+      let r = 0, b = 0;
+      for (let i = 0; i < img.data.length; i += 4) {
+        if (img.data[i] > 200 && img.data[i + 2] < 60) r++;
+        else if (img.data[i + 2] > 200 && img.data[i] < 60) b++;
+      }
+      return r / (r + b);
+    };
+    const field = [{ range: [0, 2] as [number, number], dist: plate.dist, hit: plate.hit, offset: [0, 0, 0] as [number, number, number] }];
+    const byCorner = bakeAtlas(quad, { size: 128, padding: 2, maps: false });
+    const bySurface = bakeAtlas(quad, { size: 128, padding: 2, maps: false, fields: field, cellSize: 0.05 });
+    expect(share(byCorner.image)).toBeGreaterThan(0.4);
+    expect(share(bySurface.image)).toBeGreaterThan(0.07);
+    expect(share(bySurface.image)).toBeLessThan(0.14);
+    // Every texel of the quad is on the seam's triangles, and most of the left half took the surface's blue.
+    expect(bySurface.seams.texels).toBeGreaterThan(1000);
+    expect(bySurface.seams.differ / bySurface.seams.texels).toBeGreaterThan(0.3);
+  });
   it("writes UVs and the texture into the GLB and OBJ", () => {
     const glb = toGlb(atlas.mesh, "t", { uv: atlas.uv, png: atlas.image.toPng() });
     const jsonLen = glb.readUInt32LE(12);
@@ -231,6 +263,21 @@ describe("pieces", () => {
     expect(countPieces(O.union([P.box(1, 1, 1), O.move(P.box(1, 1, 1), 0.9, 0, 0)]), 32)).toBe(1);
     expect(countPieces(O.shell(P.sphere(1), 0.2), 32)).toBe(1);
     expect(countPieces(P.empty(), 32)).toBe(0);
+  });
+  it("meshes a shape once per resolution for every query that shares a cache (round 10: check meshed a hub twice)", () => {
+    const two = O.union([P.sphere(1), O.move(P.box(1, 1, 1), 3, 0, 0)]);
+    const cache: MeshCache = new Map();
+    expect(countPieces(two, 32, cache)).toBe(countPieces(two, 32));
+    const first = meshedAnalysis(two, 32, cache);
+    expect(overhangFraction(two, 32, cache)).toBe(overhangFraction(two, 32));
+    expect(loosePiece(two, 32, cache)).toEqual(loosePiece(two, 32));
+    // One shape, one resolution: one entry, the same analysis object handed back each time.
+    expect(cache.size).toBe(1);
+    expect(cache.get(two)!.size).toBe(1);
+    expect(meshedAnalysis(two, 32, cache)).toBe(first);
+    countPieces(two, 24, cache);
+    expect(cache.get(two)!.size).toBe(2);
+    expect(meshedAnalysis(P.empty(), 32, cache)).toBeNull();
   });
 });
 
@@ -325,5 +372,87 @@ describe("decimation", () => {
     }
     // Unchanged when already under budget.
     expect(decimate(m, 1e9)).toBe(m);
+  });
+});
+
+describe("the narrow band", () => {
+  // The same mesh to the byte from the band as from the dense lattice, for fewer field calls.
+  const same = (a: ArrayLike<number>, b: ArrayLike<number>): boolean => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  };
+  const both = (s: Shape3, resolution = 48) => {
+    const dense = surfaceNets(s, { resolution, narrow: false });
+    const band = surfaceNets(s, { resolution });
+    return { dense, band };
+  };
+  const expectSame = (s: Shape3, resolution = 48) => {
+    const { dense, band } = both(s, resolution);
+    for (const k of ["positions", "indices", "normals", "local", "materialIndex"] as const) expect(same(dense.mesh[k], band.mesh[k]), k).toBe(true);
+    expect(band.samples).toBe(dense.samples);
+    return { dense, band };
+  };
+  const bar = () => O.move(P.box(0.3, 2, 0.6), 0.2, 1, 0);
+  const cases: [string, () => Shape3][] = [
+    ["a box", () => P.box(1, 0.5, 0.8)],
+    ["spheres apart and touching", () => O.union([P.sphere(0.5), O.move(P.sphere(0.4), 0.9, 0, 0), O.move(P.sphere(0.3), -1.5, 0.4, 0)])],
+    ["a cut and a smooth blend", () => O.difference(O.union([P.box(1, 1, 1), O.move(P.sphere(0.4), 0.6, 0.6, 0)], 0.1), P.cylinder(0.25, 2))],
+    ["a twisted bar", () => O.twist(bar(), 90)],
+    ["a displaced ball, scaled", () => O.scale(O.displace(P.sphere(1), 0.08, 0.3, 2), 1.5, 1, 1)],
+    ["a twisted, tapered sweep", () => S.sweep(rect(0.3, 0.12), S.toPoints(S.helixPath(0.8, 1.5, 2), "path"), 720, 0.5)],
+  ];
+  for (const [what, make] of cases)
+    it(`meshes ${what} as the dense lattice does, sampling less of it`, () => {
+      // At 96 cells, where the band starts to pay; below that most of the lattice is near the surface anyway.
+      const { dense, band } = expectSame(make(), 96);
+      expect(band.resampled).toBe(0);
+      expect(band.evaluated).toBeLessThan(dense.evaluated * 0.8);
+    });
+
+  it("bounds a twist's and a turned sweep's stretch, and every pair of points keeps to it", () => {
+    // Deterministic pairs a cell or so apart through the lattice: the field never changes faster than its factor.
+    const check = (s: Shape3) => {
+      const L = O.fieldBound(s).lipschitz;
+      const b = s.bounds;
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+      let worst = 0;
+      for (let n = 0; n < 4000; n++) {
+        const p = [0, 1, 2].map((k) => b.min[k] - 0.5 + (b.max[k] - b.min[k] + 1) * rnd());
+        const q = p.map((v) => v + (rnd() - 0.5) * 0.2);
+        const dp = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+        worst = Math.max(worst, Math.abs(s.dist(p[0], p[1], p[2]) - s.dist(q[0], q[1], q[2])) / dp);
+      }
+      return { L, worst };
+    };
+    const tw = check(O.twist(bar(), 90));
+    expect(tw.L).toBeGreaterThan(1);
+    expect(tw.worst).toBeLessThanOrEqual(tw.L * 1.0001);
+    const sw = check(S.sweep(rect(0.3, 0.12), S.toPoints(S.helixPath(0.8, 1.5, 2), "path"), 720, 0.5));
+    expect(sw.L).toBeGreaterThan(1);
+    expect(sw.worst).toBeLessThanOrEqual(sw.L * 1.0001);
+    // A plain move, turn or union keeps a distance a distance; a bend has no bound worked out, and is sampled densely.
+    expect(O.fieldBound(O.union([O.rotate(P.box(1, 1, 1), 10, 20, 30), O.move(P.sphere(1), 2, 0, 0)])).lipschitz).toBe(1);
+    const bent = O.bend(bar(), 30);
+    expect(O.fieldBound(bent).lipschitz).toBe(Infinity);
+    const { dense, band } = expectSame(bent);
+    expect(band.evaluated).toBe(dense.evaluated);
+  });
+
+  it("carries displace's slack, scaled by the scales above it", () => {
+    const d = O.displace(P.sphere(1), 0.05, 0.3);
+    expect(O.fieldBound(d).slack).toBeCloseTo(0.1, 12);
+    expect(O.fieldBound(O.scale(d, 2, 2, 2)).slack).toBeCloseTo(0.2, 12);
+    expect(O.fieldBound(O.move(O.scale(d, 3, 1, 1), 1, 0, 0)).slack).toBeCloseTo(0.1, 12);
+  });
+
+  it("samples a skipped block after all when a field reads more than its bound says, and still meshes it right", () => {
+    // A ball whose field reads four times the distance and says nothing of it: blocks with the surface in them are
+    // skipped, and the guard finds each from its neighbours across the surface.
+    const ball = P.sphere(1);
+    const lying = P.primitive((x, y, z) => 4 * ball.dist(x, y, z), ball.bounds);
+    const { band } = expectSame(lying, 64);
+    expect(band.resampled).toBeGreaterThan(0);
   });
 });

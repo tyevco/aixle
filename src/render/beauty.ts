@@ -1,66 +1,45 @@
 /**
- * The beauty render: the distance field itself, ray-marched, with soft
- * shadows, ambient occlusion and a studio floor. The checking views draw
- * the extracted mesh because that is the file you get; this one draws the
- * field because that is the model you meant, at full sharpness.
+ * The beauty render: the distance field itself, ray traced, with glTF PBR shading, traced reflections, soft shadows
+ * from lights with a size, refraction through glass, an environment as light and a floor. The checking views draw the extracted mesh because that is the file you get; this one draws the field because that is
+ * the model you meant, at full sharpness.
  *
- * It is kept affordable by starting each ray where the rasterised mesh says
- * the surface is (a few cells short of it) and marching only that window,
- * so empty space costs nothing. Shadow rays are skipped when they cannot
- * reach the model's bounding box. Edge pixels, found by comparing depth,
- * normal and material with their neighbours, are re-rendered with four
- * samples, so silhouettes are smooth without paying for it everywhere.
+ * This file is the orchestrator. The shading is a kernel (kernel.ts; the one every render uses is pbr.ts), which draws a
+ * picture in rows, two passes and a finish; here the camera is fitted, the mesh rasterised for the depth every
+ * primary ray starts from, the kernel's buffers allocated and its rows run, on this thread or shared out among the
+ * run's worker pool (beauty-pool.ts). Every pixel is a pure function of its position and the scene, so the bytes are
+ * the same on any number of threads.
  */
-import { normalize, type Vec3 } from "../core/vec.js";
-import { albedo } from "../sdf/materials.js";
-import { boundsCenter, boundsDistance, boundsGrow, boundsSize, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
+import type { Vec3 } from "../core/vec.js";
+import { boundsSize, type Bounds, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { perspective, toView, type Camera } from "./camera.js";
-import { Canvas, rgbf, rgbDithered } from "./canvas.js";
-import { drawText } from "./font.js";
+import { perspective, type Camera } from "./camera.js";
+import type { Canvas } from "./canvas.js";
 import { createTarget, renderMesh } from "./raster.js";
-import { INK } from "./views.js";
+import type { BeautyPool } from "./beauty-pool.js";
+import { pbr } from "./pbr.js";
+import type { Environment } from "./environment.js";
+import { allocBuffers, beautyCache, materialIds, materialKey, type BeautyCache, type Kernel, type KernelContext, type KernelResult } from "./kernel.js";
 
-/** One light in the beauty render: a direction, an apparent size, a colour and a power. */
+export { beautyCache, type BeautyCache, type Kernel, type KernelResult } from "./kernel.js";
+
+/** One light in the beauty render: a direction (or a place), a size, a colour and a power. */
 export interface BeautyLight {
   name?: string;
   /** Degrees about y (0 is +z, the front; 90 is +x) and above the floor. */
   azimuth: number;
   elevation: number;
-  /** Apparent size: 0.5 is a small lamp with crisp shadows, 3 a window. */
+  /** Size: the light's angular radius is size/18 radians (photometry.lightAngle), 0.5 a small lamp with crisp shadows,
+   * 3 a window; a point light's sphere is 0.02 x range x size. */
   size: number;
   color: Vec3;
   /** 1 is the default key light's strength. */
   power: number;
-  /** A point light: its place; azimuth and elevation are unused. Its strength halves `range` away from it. */
+  /** A point light: its place; azimuth and elevation are unused. Its strength halves `range` away from it (half the model's longest side when unset). */
   position?: Vec3;
   range?: number;
 }
 
-/** The procedural skies the metals reflect and the floor sits in. */
-export type Environment = "studio" | "overcast" | "sunset" | "night";
-export const ENVIRONMENTS: Environment[] = ["studio", "overcast", "sunset", "night"];
-
-interface Palette {
-  sky: Vec3;
-  /** A band at the horizon between ground and sky; absent, the sky fades straight from the ground colour. */
-  horizon?: Vec3;
-  ground: Vec3;
-  floor: Vec3;
-  /** Multiplier on the sky and ground light. */
-  ambient: number;
-}
-
-const PALETTES: Record<Environment, Palette> = {
-  // The studio: the grey-white backdrop every render has had.
-  studio: { sky: [0.78, 0.83, 0.9], ground: [0.93, 0.92, 0.9], floor: [0.88, 0.87, 0.85], ambient: 1 },
-  // A white sky: soft, even light with little shadow contrast.
-  overcast: { sky: [0.84, 0.86, 0.88], horizon: [0.9, 0.9, 0.9], ground: [0.8, 0.8, 0.8], floor: [0.8, 0.8, 0.79], ambient: 1.25 },
-  // Evening: a warm band at the horizon under a blue sky, warm ground.
-  sunset: { sky: [0.32, 0.36, 0.62], horizon: [0.98, 0.62, 0.36], ground: [0.55, 0.42, 0.36], floor: [0.62, 0.52, 0.45], ambient: 0.9 },
-  // Night: a dark blue sky and a dark floor, so a glow material carries the picture.
-  night: { sky: [0.04, 0.06, 0.14], horizon: [0.1, 0.11, 0.2], ground: [0.07, 0.07, 0.1], floor: [0.14, 0.14, 0.17], ambient: 0.4 },
-};
+export { DEFAULT_LIGHT_DIRECTION, ENVIRONMENTS, environmentPalette, lightDirection, type Environment } from "./environment.js";
 
 export interface BeautyOptions {
   size: number;
@@ -69,11 +48,13 @@ export interface BeautyOptions {
   azimuth?: number;
   elevation?: number;
   label?: string;
-  /** Apparent size of the key light: 0.5 is a small lamp with crisp shadows, 3 a window; default 1. */
+  /** Size of the key light, as for BeautyLight.size: 0.5 is a small lamp with crisp shadows, 3 a window; default 1. */
   lightSize?: number;
   /** Depth of field: 0 off; 1 blurs a plane one model-size away by about 1% of the image. */
   dof?: number;
-  /** Where the key light comes from, in degrees: azimuth about y (0 is +z, the front; 90 is +x) and elevation above the floor. Default -40 and 55. */
+  /** Where the key light comes from, in degrees: azimuth about y (0 is +z, the front; 90 is +x) and elevation above the floor.
+   * Both unset, the key is defaultKey (about -40.2 and 46.6, turned for a steep camera); one set alone takes -40 or 55
+   * for the other. */
   lightAzimuth?: number;
   lightElevation?: number;
   /** Multiplier on the sky and ground light, 1 by default: 2 lifts a shaded interior, 0.5 is a dark room. */
@@ -87,422 +68,81 @@ export interface BeautyOptions {
   fitPoints?: Float32Array;
   /** The whole model's box when `bounds` is a focus frame: the march, the shadows and the floor reach all of it. */
   reachBounds?: Bounds;
+  /** The distance wear reads curvature over (the worn band's width); default `wearProbe` of the model's longest side, as the atlas baker uses. */
+  wearProbe?: number;
+  /** How much a kernel samples: full for beauty.png and the shots, draft for the strips (one reflection bounce, one glossy ray, one glass deep, no contrast pass). */
+  quality?: "draft" | "full";
+  /** Keep what each light brings apart, for lights.png (a kernel without slots ignores it). */
+  splitLights?: boolean;
+  /** The run's worker pool: the rows are shared out among its threads, the bytes the same as on one. */
+  pool?: BeautyPool;
+  /** The run's tables kept between its beauty renders (a BVH per mesh, an environment per sky); absent, a render builds its own. */
+  cache?: BeautyCache;
+  /** The kernel by name, DEFAULT_KERNEL when absent: for tests and benches that compare two. */
+  kernel?: string;
 }
 
-/** The default key light: upper left, from the front. */
-const DEFAULT_LIGHT: Vec3 = normalize([-0.55, 0.9, 0.65]);
-
-/** A light's direction from its azimuth about y (0 is +z, 90 is +x) and elevation, in degrees. */
-export function lightDirection(azimuth: number, elevation: number): Vec3 {
-  const az = (azimuth * Math.PI) / 180, el = (elevation * Math.PI) / 180;
-  return normalize([Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)]);
+/** The kernels by name. The registry is read when a render starts, so a kernel's module may import this one. */
+function kernels(): Record<string, Kernel> {
+  return { pbr: pbr as Kernel };
 }
 
-interface Sample {
-  color: Vec3;
-  depth: number;
-  normal: Vec3;
-  matId: number;
+/** The kernel every render uses unless its options name another. */
+export const DEFAULT_KERNEL = "pbr";
+
+/** A kernel by name (the default when none is given); a worker finds the job's kernel here. */
+export function kernelByName(name: string = DEFAULT_KERNEL): Kernel {
+  const k = kernels()[name];
+  if (!k) throw new Error(`no beauty kernel named ${name}; the kernels are ${Object.keys(kernels()).join(", ")}`);
+  return k;
 }
 
-export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: BeautyOptions): Canvas {
-  const size = opts.size;
-  const pal = PALETTES[opts.environment ?? "studio"];
-  const SKY = pal.sky, GROUND = pal.ground, FLOOR = pal.floor;
-  // The lights: the program's, or the one key light the settings describe (its default direction kept as it was).
-  type Lit = { dir: Vec3; softness: number; color: Vec3; power: number; pos?: Vec3; range: number };
-  const centre = boundsCenter(opts.reachBounds ?? bounds);
-  const lights: Lit[] = (opts.lights && opts.lights.length
-    ? opts.lights.map((l) => ({ dir: l.position ? normalize([l.position[0] - centre[0], l.position[1] - centre[1], l.position[2] - centre[2]]) : lightDirection(l.azimuth, l.elevation), size: l.size, color: l.color, power: l.power, pos: l.position, range: l.range ?? 2 }))
-    : [{ dir: opts.lightAzimuth === undefined && opts.lightElevation === undefined ? DEFAULT_LIGHT : lightDirection(opts.lightAzimuth ?? -40, opts.lightElevation ?? 55), size: opts.lightSize ?? 1, color: [1, 1, 1] as Vec3, power: 1, pos: undefined, range: 2 }]
-  ).map((l) => ({ dir: l.dir, softness: 6 / Math.max(0.1, l.size), color: l.color, power: Math.max(0, l.power), pos: l.pos, range: Math.max(1e-6, l.range) }));
-  const totalPower = Math.max(1e-6, lights.reduce((s, l) => s + l.power, 0));
-  /** A light as seen from p: its direction there and its strength (a point light falls off with distance), and how far it is. */
-  const toward = (l: Lit, p: Vec3): { dir: Vec3; k: number; far: number } => {
-    if (!l.pos) return { dir: l.dir, k: 1, far: Infinity };
-    const dx = l.pos[0] - p[0], dy = l.pos[1] - p[1], dz = l.pos[2] - p[2];
-    const far = Math.hypot(dx, dy, dz) || 1e-9;
-    return { dir: [dx / far, dy / far, dz / far], k: (l.range * l.range) / (l.range * l.range + far * far), far };
-  };
-  const ambient = Math.max(0, opts.ambient ?? 1) * pal.ambient;
-  const cam: Camera = perspective(bounds, size, size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, opts.fitPoints ?? mesh.positions);
-  const cell = Math.max(opts.cellSize, 1e-4);
-  const model = opts.reachBounds ?? bounds;
-  const floorY = Math.min(0, model.min[1]);
-  const shadowBox = boundsGrow(model, cell);
-  const reach = Math.hypot(...boundsSize(model)) * 1.5;
-  const dist = shape.dist;
+/** The render's camera: the frame fitted from the azimuth, elevation and zoom, on the mesh's points (or `fitPoints`). */
+export function beautyCamera(mesh: Mesh, bounds: Bounds, opts: BeautyOptions): Camera {
+  return perspective(bounds, opts.size, opts.size, opts.azimuth ?? 35, opts.elevation ?? 25, 30, opts.zoom ?? 1, opts.fitPoints ?? mesh.positions);
+}
 
-  // Prime with the mesh: view depth per pixel.
+/** The rasterised mesh's view depth per pixel from the camera: where each primary ray starts its short march. */
+export function beautyPrime(mesh: Mesh, camera: Camera, size: number, shared = false): Float32Array {
   const prime = createTarget(size, size, 0);
-  renderMesh(mesh, cam, prime, { background: 0, outline: false, solidGlass: true });
-  const f = size / 2 / Math.tan(((cam.fov ?? 30) * Math.PI) / 360);
+  renderMesh(mesh, camera, prime, { background: 0, outline: false, solidGlass: true });
+  if (!shared) return prime.depth;
+  const out = new Float32Array(new SharedArrayBuffer(size * size * 4));
+  out.set(prime.depth);
+  return out;
+}
 
-  const rayDir = (px: number, py: number): Vec3 => {
-    const x = (px - size / 2) / f, y = -(py - size / 2) / f;
-    return normalize([
-      cam.right[0] * x + cam.up[0] * y + cam.forward[0],
-      cam.right[1] * x + cam.up[1] * y + cam.forward[1],
-      cam.right[2] * x + cam.up[2] * y + cam.forward[2],
-    ]);
-  };
-  const eye = cam.eye;
-  const eps = cell * 0.5;
-  const gradient = (x: number, y: number, z: number): Vec3 =>
-    normalize([dist(x + eps, y, z) - dist(x - eps, y, z), dist(x, y + eps, z) - dist(x, y - eps, z), dist(x, y, z + eps) - dist(x, y, z - eps)]);
-
-  /** 0 = fully shadowed, 1 = lit, towards one light; skipped when the ray cannot reach the model's box. */
-  const shadow = (p: Vec3, LIGHT: Vec3 = lights[0].dir, softness: number = lights[0].softness, limit = Infinity): number => {
-    // Ray-box test against the shadow box; a point light's ray stops at the light.
-    let tmin = 0, tmax = Math.min(reach, limit);
-    for (let a = 0; a < 3; a++) {
-      const inv = 1 / LIGHT[a];
-      let t0 = (shadowBox.min[a] - p[a]) * inv, t1 = (shadowBox.max[a] - p[a]) * inv;
-      if (t0 > t1) [t0, t1] = [t1, t0];
-      tmin = Math.max(tmin, t0);
-      tmax = Math.min(tmax, t1);
-    }
-    if (tmax < tmin) return 1;
-    let res = 1;
-    let t = Math.max(tmin, cell * 1.5);
-    let passes = 0;
-    // The penumbra term counts a surface only while the ray is closing on it (a ray leaving a flat face moves away
-    // from that face, which cannot shadow its own points), only while that surface can lie short of the light (a
-    // bulb just beyond a point light drew rings on the pavement under it, round 10), and not when it is glass,
-    // which dims the ray where it is crossed rather than as it is approached.
-    let prev = Infinity;
-    for (let i = 0; i < 64 && t < tmax; i++) {
-      const x = p[0] + LIGHT[0] * t, y = p[1] + LIGHT[1] * t, z = p[2] + LIGHT[2] * t;
-      const d = dist(x, y, z);
-      if (d < cell * 0.05) {
-        // Glass lets light through, dimmed; step across it and carry on.
-        const tr = shape.hit(x, y, z).mat.transmit;
-        if (tr <= 0 || passes++ > 3) { res = 0; break; }
-        res *= 0.35 + 0.65 * tr * 0.6;
-        let inside = 0;
-        while (inside++ < 200 && t < tmax && dist(p[0] + LIGHT[0] * t, p[1] + LIGHT[1] * t, p[2] + LIGHT[2] * t) < cell * 0.05) t += cell * 2;
-        t += cell;
-        continue;
-      }
-      if (i > 0 && d < prev && t + d < limit && !(d < cell * 2 && shape.hit(x, y, z).mat.transmit > 0)) {
-        // The closest approach between this sample and the last, from the two distances (Quilez), so the
-        // penumbra does not band with where the steps happen to land.
-        const y = (d * d) / (2 * prev);
-        const s = Math.sqrt(Math.max(0, d * d - y * y));
-        res = Math.min(res, (softness * s) / Math.max(1e-9, t - y));
-      }
-      prev = d;
-      t += Math.max(d, cell * 0.5);
-    }
-    return Math.max(0, Math.min(1, res));
-  };
-
-  const occlusion = (p: Vec3, n: Vec3): number => {
-    let occ = 0, w = 1;
-    for (let i = 1; i <= 5; i++) {
-      const h = cell * 1.5 * i * i * 0.4 + cell;
-      const d = dist(p[0] + n[0] * h, p[1] + n[1] * h, p[2] + n[2] * h);
-      occ += w * Math.max(0, h - d);
-      w *= 0.7;
-    }
-    // Never fully black: a concave join still gets bounce light.
-    return Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
-  };
-
-  /** The light on the floor at p: the ambient floor plus each light's share, shadowed, in the light's colour. */
-  const floorLight = (p: Vec3): Vec3 => {
-    const out: Vec3 = [0.62 * pal.ambient, 0.62 * pal.ambient, 0.62 * pal.ambient];
-    for (const l of lights) {
-      const at = toward(l, p);
-      const sh = shadow(p, at.dir, l.softness, at.far);
-      const k = (0.38 * sh * Math.max(0, at.dir[1]) * l.power * at.k) / totalPower;
-      out[0] += k * l.color[0]; out[1] += k * l.color[1]; out[2] += k * l.color[2];
-    }
-    return out;
-  };
-
-  const shadePoint = (p: Vec3, n: Vec3, base: Vec3, metal: number, rough: number, view: Vec3, depth = 0, glow = 0): Vec3 => {
-    const ao = occlusion(p, n);
-    const hemi = 0.5 + 0.5 * n[1];
-    const amb: Vec3 = [
-      (GROUND[0] + (SKY[0] - GROUND[0]) * hemi) * 0.42 * ao * ambient,
-      (GROUND[1] + (SKY[1] - GROUND[1]) * hemi) * 0.42 * ao * ambient,
-      (GROUND[2] + (SKY[2] - GROUND[2]) * hemi) * 0.42 * ao * ambient,
-    ];
-    // Each light adds its diffuse and its Blinn highlight in its own colour, shadowed towards itself.
-    const diff: Vec3 = [0, 0, 0], spec: Vec3 = [0, 0, 0];
-    const gloss = 1 - rough;
-    for (const l of lights) {
-      const at = toward(l, p);
-      const LIGHT = at.dir;
-      const nl = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
-      const sh = nl > 0 ? shadow([p[0] + n[0] * cell, p[1] + n[1] * cell, p[2] + n[2] * cell], LIGHT, l.softness, at.far) : 1;
-      const d = nl * sh * 0.85 * (1 - metal * 0.6) * l.power * at.k;
-      const hx = LIGHT[0] - view[0], hy = LIGHT[1] - view[1], hz = LIGHT[2] - view[2];
-      const hl = Math.hypot(hx, hy, hz) || 1;
-      const nh = Math.max(0, (n[0] * hx + n[1] * hy + n[2] * hz) / hl);
-      const s = Math.pow(nh, 4 + gloss * gloss * 160) * (0.05 + gloss * 0.7) * sh * (0.4 + nl) * l.power * at.k;
-      diff[0] += d * l.color[0]; diff[1] += d * l.color[1]; diff[2] += d * l.color[2];
-      spec[0] += s * l.color[0]; spec[1] += s * l.color[1]; spec[2] += s * l.color[2];
-    }
-    const fres = Math.pow(1 - Math.max(0, -(n[0] * view[0] + n[1] * view[1] + n[2] * view[2])), 4) * 0.08 * ao;
-    const tint = (c: number) => (metal > 0 ? c * (0.3 + 0.7 * metal) + (1 - metal) : 1);
-    // A metal is mostly what it reflects: the environment along the mirrored view ray, tinted by its own colour.
-    // One bounce only (measured: gold and silver read as olive and charcoal without it), and blurred by roughness
-    // towards the plain sky/ground average so a matte metal does not mirror.
-    let refl: Vec3 = [0, 0, 0];
-    if (metal > 0.02 && depth === 0) {
-      const r = reflect(view, n);
-      const seen = seeThrough([p[0] + n[0] * cell * 2, p[1] + n[1] * cell * 2, p[2] + n[2] * cell * 2], r, depth + 1);
-      const soft = backdrop(r);
-      const g = gloss * gloss;
-      const strength = metal * (0.35 + 0.45 * gloss) * ao;
-      refl = [
-        (seen[0] * g + soft[0] * (1 - g)) * strength,
-        (seen[1] * g + soft[1] * (1 - g)) * strength,
-        (seen[2] * g + soft[2] * (1 - g)) * strength,
-      ];
-    }
-    // Glow: light the surface gives off, unshadowed; a flame reads as a flame inside a dark lantern.
-    return [
-      Math.min(1, base[0] * (amb[0] + diff[0] + refl[0] + glow) + spec[0] * tint(base[0]) + fres * SKY[0]),
-      Math.min(1, base[1] * (amb[1] + diff[1] + refl[1] + glow) + spec[1] * tint(base[1]) + fres * SKY[1]),
-      Math.min(1, base[2] * (amb[2] + diff[2] + refl[2] + glow) + spec[2] * tint(base[2]) + fres * SKY[2]),
-    ];
-  };
-
-  /**
-   * March from `from` along `dir` until the field crosses zero (entering if
-   * `entering`), up to `maxT`. An inside march also averages the colour of
-   * the materials it passes through into `tintOut`, so a drink inside a
-   * glass wall tints the light the way it should.
-   */
-  const march = (from: Vec3, dir: Vec3, entering: boolean, maxT: number, tintOut?: Vec3): number => {
-    let t = cell * 0.5;
-    let samples = 0;
-    if (tintOut) { tintOut[0] = 0; tintOut[1] = 0; tintOut[2] = 0; }
-    // Inside a solid the nearest surface is often a wall running alongside
-    // the ray, so steps stay short; the inside march gets more of them and a
-    // larger minimum step.
-    const limit = entering ? 96 : 400;
-    const minStep = entering ? cell * 0.05 : cell * 0.5;
-    for (let i = 0; i < limit && t < maxT; i++) {
-      const x = from[0] + dir[0] * t, y = from[1] + dir[1] * t, z = from[2] + dir[2] * t;
-      let d = dist(x, y, z);
-      if (!entering) d = -d;
-      if (d < cell * 0.05) break;
-      if (tintOut && i % 4 === 0) {
-        const h = shape.hit(x, y, z);
-        const c = h.mat.transmit > 0 ? h.mat.color : [0.2, 0.2, 0.2];
-        tintOut[0] += c[0]; tintOut[1] += c[1]; tintOut[2] += c[2];
-        samples++;
-      }
-      t += Math.max(d * 0.9, minStep);
-    }
-    if (tintOut && samples > 0) { tintOut[0] /= samples; tintOut[1] /= samples; tintOut[2] /= samples; }
-    return t < maxT ? t : -1;
-  };
-  const backdrop = (dir: Vec3): Vec3 => {
-    if (dir[1] < -1e-6) {
-      const fade = 0.6;
-      return [FLOOR[0] * 0.95 + (GROUND[0] - FLOOR[0] * 0.95) * fade, FLOOR[1] * 0.95 + (GROUND[1] - FLOOR[1] * 0.95) * fade, FLOOR[2] * 0.95 + (GROUND[2] - FLOOR[2] * 0.95) * fade];
-    }
-    const k = Math.min(1, Math.max(0, dir[1] * 2.5));
-    if (pal.horizon) {
-      // A band at the horizon: ground to the band low down, the band to the sky above.
-      const H = pal.horizon;
-      if (k < 0.3) { const u = k / 0.3; return [GROUND[0] + (H[0] - GROUND[0]) * u, GROUND[1] + (H[1] - GROUND[1]) * u, GROUND[2] + (H[2] - GROUND[2]) * u]; }
-      const u = (k - 0.3) / 0.7;
-      return [H[0] + (SKY[0] - H[0]) * u, H[1] + (SKY[1] - H[1]) * u, H[2] + (SKY[2] - H[2]) * u];
-    }
-    return [GROUND[0] + (SKY[0] - GROUND[0]) * k, GROUND[1] + (SKY[1] - GROUND[1]) * k, GROUND[2] + (SKY[2] - GROUND[2]) * k];
-  };
-  const refract = (d: Vec3, n: Vec3, eta: number): Vec3 | undefined => {
-    const cosi = -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
-    const k = 1 - eta * eta * (1 - cosi * cosi);
-    if (k < 0) return undefined;
-    const a = eta * cosi - Math.sqrt(k);
-    return normalize([eta * d[0] + a * n[0], eta * d[1] + a * n[1], eta * d[2] + a * n[2]]);
-  };
-  const reflect = (d: Vec3, n: Vec3): Vec3 => {
-    const k = 2 * (d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
-    return [d[0] - k * n[0], d[1] - k * n[1], d[2] - k * n[2]];
-  };
-  /** What a ray sees after leaving a glass surface: another opaque surface (shaded, no further glass), the floor, or the sky. */
-  const seeThrough = (from: Vec3, dir: Vec3, depth = 1): Vec3 => {
-    const t = march(from, dir, true, reach * 2);
-    if (t > 0) {
-      const p: Vec3 = [from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t];
-      const n = gradient(p[0], p[1], p[2]);
-      const h = shape.hit(p[0], p[1], p[2]);
-      const base = albedo(h.mat, h.lx, h.ly, h.lz);
-      if (h.mat.transmit > 0) {
-        // Glass again (a second pane, or the same one at a grazing angle): the backdrop through it, tinted, no more bounces.
-        const bd = backdrop(dir);
-        const tr = h.mat.transmit;
-        return [bd[0] * (base[0] * tr + (1 - tr)), bd[1] * (base[1] * tr + (1 - tr)), bd[2] * (base[2] * tr + (1 - tr))];
-      }
-      return shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir, depth, h.mat.glow);
-    }
-    if (dir[1] < -1e-6) {
-      const tf = (floorY - from[1]) / dir[1];
-      const p: Vec3 = [from[0] + dir[0] * tf, floorY, from[2] + dir[2] * tf];
-      const light = floorLight([p[0], p[1] + cell, p[2]]);
-      return [FLOOR[0] * light[0], FLOOR[1] * light[1], FLOOR[2] * light[2]];
-    }
-    return backdrop(dir);
-  };
-  const shadeGlass = (p: Vec3, n: Vec3, mat: Material, base: Vec3, dir: Vec3): Vec3 => {
-    const cos = Math.max(0, -(n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2]));
-    const fres = 0.04 + 0.96 * Math.pow(1 - cos, 5);
-    // Reflection: the backdrop and the key highlight.
-    const r = reflect(dir, n);
-    const refl = seeThrough([p[0] + n[0] * cell * 2, p[1] + n[1] * cell * 2, p[2] + n[2] * cell * 2], r);
-    const spec = shadePoint(p, n, [0, 0, 0], 0, mat.rough, dir);
-    // Refraction: into the glass, across it, and out.
-    let through: Vec3 = backdrop(dir);
-    const inDir = refract(dir, n, 1 / 1.5);
-    if (inDir) {
-      const entry: Vec3 = [p[0] - n[0] * cell, p[1] - n[1] * cell, p[2] - n[2] * cell];
-      const passed: Vec3 = [base[0], base[1], base[2]];
-      const tExit = march(entry, inDir, false, reach * 2, passed);
-      if (tExit > 0) {
-        const q: Vec3 = [entry[0] + inDir[0] * tExit, entry[1] + inDir[1] * tExit, entry[2] + inDir[2] * tExit];
-        const ng = gradient(q[0], q[1], q[2]);
-        const nOut: Vec3 = [-ng[0], -ng[1], -ng[2]];
-        const outDir = refract(inDir, nOut, 1.5);
-        // Total internal reflection would bounce around inside; settle for the backdrop in the ray's direction.
-        const seen = outDir ? seeThrough([q[0] + ng[0] * cell * 2, q[1] + ng[1] * cell * 2, q[2] + ng[2] * cell * 2], outDir) : backdrop(inDir);
-        // Absorption tints by thickness: the colour of what was passed through is what survives.
-        const k = tExit / Math.max(reach * 0.15, 1e-6);
-        const tint = (c: number) => Math.exp(-k * (1 - c) * 1.5);
-        through = [seen[0] * tint(passed[0]), seen[1] * tint(passed[1]), seen[2] * tint(passed[2])];
-      }
-    }
-    const tr = mat.transmit;
-    const opaque = shadePoint(p, n, base, 0, mat.rough, dir);
-    return [
-      Math.min(1, (through[0] * (1 - fres) + refl[0] * fres) * tr + opaque[0] * (1 - tr) + spec[0] * 0.5),
-      Math.min(1, (through[1] * (1 - fres) + refl[1] * fres) * tr + opaque[1] * (1 - tr) + spec[1] * 0.5),
-      Math.min(1, (through[2] * (1 - fres) + refl[2] * fres) * tr + opaque[2] * (1 - tr) + spec[2] * 0.5),
-    ];
-  };
-
-  const sample = (px: number, py: number, primedDepth: number): Sample => {
-    const dir = rayDir(px, py);
-    const along = dir[0] * cam.forward[0] + dir[1] * cam.forward[1] + dir[2] * cam.forward[2];
-    let hitT = -1;
-    if (Number.isFinite(primedDepth)) {
-      const centre = primedDepth / along;
-      let t = Math.max(0, centre - cell * 3);
-      const tEnd = centre + cell * 3;
-      for (let i = 0; i < 40 && t < tEnd; i++) {
-        const d = dist(eye[0] + dir[0] * t, eye[1] + dir[1] * t, eye[2] + dir[2] * t);
-        if (d < cell * 0.05) { hitT = t; break; }
-        t += Math.max(d * 0.9, cell * 0.02);
-      }
-      if (hitT < 0) hitT = centre; // the mesh knows where the surface is; trust it
-    }
-    if (hitT >= 0) {
-      const p: Vec3 = [eye[0] + dir[0] * hitT, eye[1] + dir[1] * hitT, eye[2] + dir[2] * hitT];
-      const n = gradient(p[0], p[1], p[2]);
-      const h = shape.hit(p[0], p[1], p[2]);
-      const base = albedo(h.mat, h.lx, h.ly, h.lz);
-      const color = h.mat.transmit > 0 ? shadeGlass(p, n, h.mat, base, dir) : shadePoint(p, n, base, h.mat.metal, h.mat.rough, dir, 0, h.mat.glow);
-      return { color, depth: hitT, normal: n, matId: mesh.materials.indexOf(h.mat) };
-    }
-    // Floor or sky.
-    if (dir[1] < -1e-6) {
-      const t = (floorY - eye[1]) / dir[1];
-      const p: Vec3 = [eye[0] + dir[0] * t, floorY, eye[2] + dir[2] * t];
-      const n: Vec3 = [0, 1, 0];
-      // Near the model the floor is lit and shadowed properly; far off a flat estimate stands in. The two are
-      // blended over the last third of the reach, since a hard switch drew a seam across a top-down shot (round 9).
-      const away = boundsDistance(model, p[0], p[1], p[2]);
-      const w = away >= reach ? 0 : away <= reach * 0.66 ? 1 : (reach - away) / (reach * 0.34);
-      // A point light does not reach the far floor.
-      const far: Vec3 = [0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (l.pos ? 0 : (Math.max(0, l.dir[1]) * l.power * l.color[0]) / totalPower), 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (l.pos ? 0 : (Math.max(0, l.dir[1]) * l.power * l.color[1]) / totalPower), 0), 0.62 * pal.ambient + 0.38 * lights.reduce((s, l) => s + (l.pos ? 0 : (Math.max(0, l.dir[1]) * l.power * l.color[2]) / totalPower), 0)];
-      const nearLit: Vec3 = w > 0 ? floorLight([p[0], p[1] + cell, p[2]]) : far;
-      const nearAo = w > 0 ? occlusion(p, n) : 1;
-      const lit: Vec3 = [far[0] + (nearLit[0] * nearAo - far[0]) * w, far[1] + (nearLit[1] * nearAo - far[1]) * w, far[2] + (nearLit[2] * nearAo - far[2]) * w];
-      const ao = 1;
-      const fade = Math.min(1, t / (reach * 4));
-      const c: Vec3 = [FLOOR[0] * lit[0] * ao, FLOOR[1] * lit[1] * ao, FLOOR[2] * lit[2] * ao];
-      return { color: [c[0] + (GROUND[0] - c[0]) * fade, c[1] + (GROUND[1] - c[1]) * fade, c[2] + (GROUND[2] - c[2]) * fade], depth: t, normal: n, matId: -2 };
-    }
-    return { color: backdrop(dir), depth: Infinity, normal: [0, 0, 0], matId: -3 };
-  };
-
-  const canvas = new Canvas(size, size, INK.page);
-  const samples: Sample[] = new Array(size * size);
-  for (let py = 0; py < size; py++)
-    for (let px = 0; px < size; px++) {
-      const s = sample(px + 0.5, py + 0.5, prime.depth[py * size + px]);
-      samples[py * size + px] = s;
-      canvas.set(px, py, rgbDithered(s.color[0], s.color[1], s.color[2], px, py));
-    }
-  // Edge pixels get four samples. The mesh depth primes them with the neighbour that has one.
-  const isEdge = (i: number, j: number): boolean => {
-    const a = samples[i], b = samples[j];
-    if (a.matId !== b.matId) return true;
-    if (Number.isFinite(a.depth) !== Number.isFinite(b.depth)) return true;
-    if (Number.isFinite(a.depth) && Math.abs(a.depth - b.depth) > cell * 4) return true;
-    return a.normal[0] * b.normal[0] + a.normal[1] * b.normal[1] + a.normal[2] * b.normal[2] < 0.6;
-  };
-  for (let py = 0; py < size; py++)
-    for (let px = 0; px < size; px++) {
-      const i = py * size + px;
-      const edge = (px + 1 < size && isEdge(i, i + 1)) || (py + 1 < size && isEdge(i, i + size)) || (px > 0 && isEdge(i, i - 1)) || (py > 0 && isEdge(i, i - size));
-      if (!edge) continue;
-      const nearDepths = [prime.depth[i], px + 1 < size ? prime.depth[i + 1] : Infinity, py + 1 < size ? prime.depth[i + size] : Infinity, px > 0 ? prime.depth[i - 1] : Infinity, py > 0 ? prime.depth[i - size] : Infinity];
-      let r = 0, g = 0, b = 0;
-      const offs = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
-      for (const [ox, oy] of offs) {
-        // Prime with the nearest finite depth among the neighbours; the march window finds the surface if it is there.
-        let d = prime.depth[i];
-        if (!Number.isFinite(d)) d = Math.min(...nearDepths);
-        const s = sample(px + ox, py + oy, d);
-        r += s.color[0]; g += s.color[1]; b += s.color[2];
-      }
-      canvas.set(px, py, rgbDithered(r / 4, g / 4, b / 4, px, py));
-    }
-  if (opts.dof && opts.dof > 0) depthOfField(canvas, samples, size, opts.dof, boundsCenter(bounds), cam);
-  if (opts.label) drawText(canvas, 8, size - 12, opts.label, INK.dim, 1);
-  return canvas;
+/** The beauty render of `shape` (meshed as `mesh`), framed on `bounds`. */
+export function renderBeauty(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: BeautyOptions): Canvas {
+  return renderBeautyResult(shape, mesh, bounds, opts).canvas;
 }
 
 /**
- * Depth of field as a post-process: each pixel is blurred by a circle whose
- * radius grows with its distance from the focus plane through the model's
- * centre. A gather blur with three precomputed levels keeps it cheap.
+ * The beauty render with what the kernel keeps besides the picture (its linear radiance per slot, when it has it).
+ * With `opts.pool` the rows are shared out among the pool's threads; the bytes are the same on any number of threads,
+ * and a pool that fails draws the picture again on this one.
  */
-function depthOfField(canvas: Canvas, samples: Sample[], size: number, strength: number, centre: Vec3, cam: Camera): void {
-  const focus = -toView(cam, centre)[2];
-  const maxRadius = Math.max(1, Math.round(size * 0.012 * strength * 3));
-  const radiusAt = (d: number): number => {
-    if (!Number.isFinite(d)) return maxRadius;
-    return Math.min(maxRadius, (Math.abs(d - focus) / Math.max(focus, 1e-6)) * size * 0.012 * strength * 4);
-  };
-  const src = new Uint8Array(canvas.data);
-  const get = (x: number, y: number, k: number) => src[(y * size + x) * 4 + k];
-  for (let y = 0; y < size; y++)
-    for (let x = 0; x < size; x++) {
-      const r = radiusAt(samples[y * size + x].depth);
-      if (r < 0.75) continue;
-      const ir = Math.ceil(r);
-      let sr = 0, sg = 0, sb = 0, n = 0;
-      const step = ir > 4 ? 2 : 1;
-      for (let dy = -ir; dy <= ir; dy += step)
-        for (let dx = -ir; dx <= ir; dx += step) {
-          if (dx * dx + dy * dy > r * r) continue;
-          const sx = x + dx, sy = y + dy;
-          if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
-          // A sharp foreground pixel should not bleed into a blurred one behind it much: weight by its own blur.
-          const w = 0.3 + 0.7 * Math.min(1, radiusAt(samples[sy * size + sx].depth) / Math.max(r, 1e-6));
-          sr += get(sx, sy, 0) * w; sg += get(sx, sy, 1) * w; sb += get(sx, sy, 2) * w; n += w;
-        }
-      if (n > 0) canvas.set(x, y, ((Math.round(sr / n) & 255) << 16) | ((Math.round(sg / n) & 255) << 8) | (Math.round(sb / n) & 255));
-    }
+export function renderBeautyResult(shape: Shape3, mesh: Mesh, bounds: Bounds, opts: BeautyOptions): KernelResult {
+  const kernel = kernelByName(opts.kernel);
+  const size = opts.size;
+  const model = opts.reachBounds ?? bounds;
+  // The mesh's cell sets every step and offset; a floor of 1e-4 units made them three times the cell of a 4 mm mug
+  // drawn in metres, which lost its contact shadows. Only an unknown cell falls back, to the model's own.
+  const cell = opts.cellSize > 0 ? opts.cellSize : Math.max(...boundsSize(model)) / 128 || 1e-4;
+  const camera = beautyCamera(mesh, bounds, opts);
+  const pool = opts.pool && opts.pool.live ? opts.pool : undefined;
+  const prime = beautyPrime(mesh, camera, size, !!pool);
+  const cache = opts.cache ?? beautyCache();
+  const tables = kernel.prepare ? kernel.prepare({ shape, mesh, bounds, opts, camera, prime, size, cell, cache, shared: !!pool }) : undefined;
+  const layout = kernel.layout(opts, size);
+  const ids = materialIds(mesh.materials.map(materialKey));
+  if (pool) {
+    const done = pool.render(kernel, { shape, mesh, bounds, opts, camera, prime, size, cell, tables, layout, ids });
+    if (done) return done;
+  }
+  const ctx: KernelContext = { shape, mesh, bounds, opts, camera, prime, size, cell, buffers: allocBuffers(layout, size, false), tables, ids };
+  const rows = kernel.rows(ctx);
+  for (let y = 0; y < size; y++) rows.primary(y);
+  for (let y = 0; y < size; y++) rows.edges(y);
+  return kernel.finish(ctx);
 }
-
-

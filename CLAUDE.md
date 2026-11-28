@@ -16,11 +16,11 @@ Layers, each pure and under test:
 | Directory | What |
 | --- | --- |
 | `src/sdf/` | shapes as signed distance fields: primitives, 2D profiles, booleans, transforms, modifiers, paths, anchors, the stroke font, materials |
-| `src/lang/` | the `.aix` language: lexer, parser, interpreter, and the builtin registry that is also the reference |
-| `src/mesh/` | surface nets with dual contouring, mesh measures, a mesh sampled to a field for imports |
-| `src/import/` | OBJ and GLB readers (positions and triangles only) |
-| `src/export/` | the texture atlas baker, the scene node tree (`hierarchy.ts`), OBJ+MTL and GLB writers with animations, the self-contained viewer page |
-| `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-marched beauty render |
+| `src/lang/` | the `.aix` language: lexer, parser, interpreter, the builtin registry that is also the reference, and the formatter (`format.ts`, `aixle fmt`) |
+| `src/mesh/` | surface nets with dual contouring, mesh measures, the print measures (`print.ts`: walls, support, the bed), decimation, a mesh sampled to a field for imports |
+| `src/import/` | OBJ and GLB readers (positions and triangles only), and the on-disk cache of an import's samples (`cache.ts`, injected by the CLI) |
+| `src/export/` | the texture atlas baker (colour, normal, metallic-roughness and emissive maps), the scene node tree (`hierarchy.ts`), OBJ+MTL, GLB, STL and 3MF writers (with a small zip writer), the self-contained viewer page |
+| `src/render/` | canvas, PNG, font, cameras, rasteriser, the sheets (`views.ts`), the ray-traced beauty render (`beauty.ts` over the `pbr.ts` kernel, with `rays.ts`, `bvh.ts`, `environment.ts` and the worker pool) |
 | `src/pipeline.ts`, `src/cli.ts` | one run from source to a folder; the command line over it |
 | `tools/examples.ts`, `tools/dogfood.ts` | render `examples/*.aix` and `dogfood/**/*.aix` into their `renders/` folders (shared code in `tools/render-set.ts`) |
 | `dogfood/` | the dogfooding record: each round's agent-written programs, probes and reports, unchanged; rendered by CI like the examples |
@@ -65,6 +65,7 @@ Layers, each pure and under test:
 npm test              vitest over every layer
 npm run typecheck     tsc, including tools/ and tests/
 npm run aixle -- render examples/mug.aix --beauty     the CLI from source (also: npx aixle ...)
+npm run aixle -- fmt --check examples/mug.aix         a program in the one layout (fmt never changes what a program means)
 npm run docs          regenerate docs/reference.md
 npm run examples      regenerate examples/renders/ (pass names to do a few: npm run examples -- mug vase)
 npm run dogfood       regenerate dogfood/renders/ from the agents' programs

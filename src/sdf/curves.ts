@@ -14,6 +14,7 @@
  */
 import { cross, length2, normalize, type Vec3 } from "../core/vec.js";
 import { primitive } from "./primitives.js";
+import { turnedLipschitz } from "./sweeps.js";
 import { boundsGrow, EMPTY_BOUNDS, isEmpty2, type Bounds, type Shape2, type Shape3 } from "./types.js";
 
 export interface Curve {
@@ -343,6 +344,9 @@ export function tubeCurve(curve: Curve, r: number, taper = 1, cap: "round" | "fl
     }
     return d;
   }, boundsGrow(curve.bounds, reach), curve.segments * COST_PER_SEGMENT);
+  // The search's point is on the curve (Newton's t is clamped to the segment), which lies in its control points' box,
+  // and the radius is never past the reach the box is grown by: at least the box's distance outside it (Shape3.boxFloor).
+  out.boxFloor = true;
   out.feature = 2 * r * Math.min(1, taper);
   // A curve bent tighter than the tube is thick crosses itself on the inside of the bend: a crease no sheet shows
   // and open edges the report can only place "in the step alone" (round 6: a chair's backrest hoop, whose agent
@@ -390,5 +394,6 @@ export function sweepCurve(profile: Shape2, curve: Curve, twist = 0, taper = 1):
   }, boundsGrow(curve.bounds, reach), curve.segments * COST_PER_SEGMENT + profile.cost);
   out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
   out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
+  if (twistRate !== 0 || taperRate !== 0) out.lipschitz = turnedLipschitz(twistRate, taperRate, reach);
   return out;
 }

@@ -231,13 +231,17 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
   }
   if (seg.length === 0) return shape2(() => 1e6, EMPTY_BOUNDS2, 0);
   if (arc !== 0) {
-    // Bend: x along the baseline becomes an angle, y a radius; split each stroke into short pieces first.
+    // Bend: x along the baseline becomes an angle, y a radius; split each stroke into short pieces first. The angle
+    // runs clockwise from the top whatever the side, so x runs rightwards on both: at the top a letter's up is outward
+    // (rr = r + y), at the bottom inward (r - y), and either way it is upright and reads left to right. (The angle
+    // once took the sign as well, which on the bottom put the first letter on the right and mirrored every glyph:
+    // the medal's FOR MACHINES read in a mirror, and a blind reader of its renders said so.)
     const total = cursor - gap * scale - spacing;
     const r = Math.abs(arc), sign = Math.sign(arc);
     const bent: number[] = [];
     bounds = EMPTY_BOUNDS2;
     const map = (x: number, y: number): [number, number] => {
-      const a = ((x - total / 2) / r) * sign;
+      const a = (x - total / 2) / r;
       const rr = r + y * sign;
       return [rr * Math.sin(a), rr * Math.cos(a) * sign];
     };
@@ -254,6 +258,21 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     }
     seg.length = 0;
     seg.push(...bent);
+  }
+  // On an arc the box is not what a reader reasons about: the radii the ink spans are (round 10: an engraving on a
+  // boss's top broke out over its rim, and the box's y said so only to a reader who knew to look).
+  let arcSpan: [number, number] | undefined;
+  if (arc !== 0) {
+    let near = Infinity, far = 0;
+    for (let i = 0; i < seg.length; i += 4) {
+      const ax = seg[i], ay = seg[i + 1], bx = seg[i + 2], by = seg[i + 3];
+      far = Math.max(far, Math.hypot(ax, ay), Math.hypot(bx, by));
+      // The nearest point of the segment to the origin, which a chord can bring inside its two ends.
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+      near = Math.min(near, Math.hypot(ax + dx * t, ay + dy * t));
+    }
+    arcSpan = [Math.max(0, near - half), far + half];
   }
   const s = new Float64Array(seg);
   const n = s.length / 4;
@@ -272,7 +291,11 @@ export function textProfile(text: string, size = 1, weight = 0.15, spacing = 0, 
     }
     return Math.sqrt(best) - half;
   }, bounds, n);
+  // The distance to the strokes, each inside the box of its ends grown by half the weight, so at least the box's
+  // distance outside it (Shape2.boxFloor): an engraving's lettering is a cutter a difference may skip.
+  out.boxFloor = true;
   out.feature = weight;
+  if (arcSpan) out.arcSpan = arcSpan;
   // The narrowest counter: about 2 grid units between stroke centres for a lowercase e or a, 2.8 for capitals and
   // digits, less one stroke. Under half a cell it closes up (measured: "Best in Show" at 0.12 became non-manifold
   // blobs, while capitals at 0.13 with counters of 0.7 of a cell read fine).

@@ -12,12 +12,12 @@
  * atlas: they are merged for baking and split again with their UVs.
  */
 import type { Vec3 } from "../core/vec.js";
-import { allJoints, findJoints, move as moveShape } from "../sdf/ops.js";
-import { boundsSize, isEmpty, type Material, type Shape3 } from "../sdf/types.js";
+import { allJoints, findJoints, move as moveShape, reliefMaterials } from "../sdf/ops.js";
+import { boundsSize, isEmpty, type Bounds, type Material, type Shape3 } from "../sdf/types.js";
 import { surfaceNets } from "../mesh/surfaceNets.js";
-import { decimate } from "../mesh/decimate.js";
+import { decimateMeshes, faceDeviation } from "../mesh/decimate.js";
 import { triangleCount, type Mesh } from "../mesh/mesh.js";
-import { bakeAtlas, type AtlasResult } from "./atlas.js";
+import { bakeAtlas, type AtlasResult, type BakeField, type MaterialMaps, type NormalStats } from "./atlas.js";
 
 export interface SceneNode {
   name: string;
@@ -42,9 +42,36 @@ export interface SceneHierarchy {
   uvs?: Float32Array[];
   atlas?: AtlasResult["image"];
   atlasCharts?: number;
+  /** The maps beside the colour atlas, each present only where it carries something (see atlas.ts), sharing its UVs. */
+  normalMap?: AtlasResult["image"];
+  metalRoughMap?: AtlasResult["image"];
+  emissiveMap?: AtlasResult["image"];
+  /** Per mesh, x, y, z, w per vertex: the tangents the normal map was baked against; with `normalMap`. */
+  tangents?: Float32Array[];
+  /** Per material, which maps it reads. */
+  materialMaps?: Map<Material, MaterialMaps>;
+  /** false when built with `maps: false`: the writer then leaves the materials as the colour atlas alone (no emissive either). */
+  pbr?: boolean;
+  normalStats?: NormalStats;
+  /** With an atlas: the texels on triangles across a material seam, painted from the surface, and how many differ from the nearest corner. */
+  seams?: { texels: number; differ: number };
+  /**
+   * True when the normal map was baked with the field's normal for every material because the decimation went past
+   * the flat faces; false or absent when it was not, which with no atlas (`texture: 0`) or no maps is always.
+   */
+  fieldNormals?: boolean;
   triangles: number;
   /** Things the export could not carry, for the report: a rotation or a scale above a joint. */
   notes: string[];
+  /**
+   * Set when the meshes were decimated to `maxTriangles`: the count before, and the largest |field| at a face
+   * centre of the decimated meshes and of the same meshes before (each read with its own joints hidden, as it was
+   * extracted), so a report can say how far the export strays from the model and how much of that the mesher did;
+   * and per mesh, the node it is for and its count before and after, which says how the cap was shared out.
+   */
+  decimated?: { before: number; deviation: number; fullDeviation: number; where?: string; meshes: { name: string; before: number; after: number }[]; flat: number };
+  /** Per mesh, the name of the node that carries it (an object, a joint, a placed set). */
+  meshNames: string[];
 }
 
 export interface HierarchyOptions {
@@ -57,16 +84,69 @@ export interface HierarchyOptions {
   /** Atlas size in pixels; 0 for none. */
   texture: number;
   maxResolution?: number;
-  /** Decimate the meshes to at most this many triangles in all (a Roblox budget), each taking its share, before the atlas is baked. */
+  /** Decimate the meshes to at most this many triangles in all (a Roblox budget, the web cap) by one queue over all of them, before the atlas is baked. */
   maxTriangles?: number;
+  /** false bakes the colour atlas alone, as before the PBR maps (the Roblox export keeps to that). Default true. */
+  maps?: boolean;
+  /** The distance wear reads curvature over, `wearProbe` of the model's size, so the bake matches the beauty render. */
+  wearProbe?: number;
+  /**
+   * Bake the field's normal into the normal map for every material: by default when the decimation went past the
+   * flat faces into curved ones (the cap is under `decimated.flat`), whose merged faces no longer carry the surface's
+   * normals at their corners.
+   */
+  fieldNormals?: boolean;
+  /**
+   * A mesh already extracted, and what it was extracted with: an object with no joints and no placed sets whose
+   * shape, box, resolution, sharpness and crease are these takes it instead of meshing again, since the mesher is
+   * deterministic and would give the same bytes. Anything that differs (a tightened box, a resolution one more by
+   * rounding) extracts as before. The mesh is only read: the decimation and the atlas make new meshes from it.
+   */
+  known?: KnownMesh;
 }
 
-function extract(shape: Shape3, opts: HierarchyOptions): Mesh {
+/** A mesh and the arguments it was extracted with (see HierarchyOptions.known). */
+export interface KnownMesh {
+  shape: Shape3;
+  mesh: Mesh;
+  resolution: number;
+  bounds: Bounds;
+  sharp?: boolean;
+  crease?: number;
+}
+
+/** The field a mesh was extracted from, and what was hidden to extract it, so the baker can read the same surface. */
+interface MeshSource {
+  shape: Shape3;
+  /** Mesh point plus this is the point in the shape's frame (a joint's mesh is stored relative to its pivot). */
+  offset: Vec3;
+  joints: Shape3[];
+  sets: Shape3[];
+}
+
+/**
+ * A shape meshed over its own bounds at the export's cell. With `known`, only for a shape extracted with nothing
+ * hidden: that mesh when it was made by the very call this would make.
+ */
+function extract(shape: Shape3, opts: HierarchyOptions, known?: KnownMesh): Mesh {
   const s = boundsSize(shape.bounds);
   const longest = Math.max(s[0], s[1], s[2]);
   if (!(longest > 0) || isEmpty(shape.bounds)) return surfaceNets(shape, { resolution: 8 }).mesh;
   const resolution = Math.max(8, Math.min(opts.maxResolution ?? 512, Math.ceil(longest / opts.cellSize)));
+  if (known && sameExtraction(known, shape, resolution, opts)) return known.mesh;
   return surfaceNets(shape, { resolution, sharp: opts.sharp, crease: opts.crease }).mesh;
+}
+
+/** Whether surfaceNets(shape, { resolution, sharp, crease }) over the shape's bounds is the call that made `known`. */
+function sameExtraction(known: KnownMesh, shape: Shape3, resolution: number, opts: HierarchyOptions): boolean {
+  const b = shape.bounds, k = known.bounds;
+  return (
+    known.shape === shape &&
+    known.resolution === resolution &&
+    [0, 1, 2].every((i) => b.min[i] === k.min[i] && b.max[i] === k.max[i]) &&
+    (known.sharp !== false) === (opts.sharp !== false) &&
+    (known.crease ?? 35) === (opts.crease ?? 35)
+  );
 }
 
 function shifted(mesh: Mesh, origin: Vec3): Mesh {
@@ -103,7 +183,22 @@ export function offsetToJoint(root: Shape3, j: Shape3): { offset: Vec3; rigid: b
 
 export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts: HierarchyOptions): SceneHierarchy {
   const meshes: Mesh[] = [];
-  const addMesh = (m: Mesh): number => { meshes.push(m); return meshes.length - 1; };
+  const sources: MeshSource[] = [];
+  const meshNames: string[] = [];
+  const addMesh = (m: Mesh, src: MeshSource, name: string): number => { meshes.push(m); sources.push(src); meshNames.push(name); return meshes.length - 1; };
+  // How far a mesh in a source's place strays from the field it was extracted from: the shape with the same joints
+  // and placed sets hidden as at extraction, the mesh moved back by the node's offset.
+  const stray = (i: number, mm: Mesh): number => {
+    const src = sources[i];
+    for (const n of src.joints) n.joint!.hidden = true;
+    for (const st of src.sets) st.instanced!.hidden = true;
+    try {
+      return faceDeviation(mm, src.shape.dist, src.offset);
+    } finally {
+      for (const n of src.joints) n.joint!.hidden = false;
+      for (const st of src.sets) st.instanced!.hidden = false;
+    }
+  };
   const roots: SceneNode[] = [];
   const notes: string[] = [];
   const names = opts.names ?? new Map<Shape3, string>();
@@ -133,7 +228,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     for (const n of baseJoints) n.joint!.hidden = true;
     const m = extract(base, opts);
     for (const n of baseJoints) n.joint!.hidden = false;
-    const mi = triangleCount(m) ? addMesh(m) : -1;
+    const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }, name) : -1;
     return {
       name,
       mesh: -1,
@@ -168,7 +263,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     const pivot: Vec3 = [st.pivot[0] + offset[0], st.pivot[1] + offset[1], st.pivot[2] + offset[2]];
     const node: SceneNode = {
       name: st.name,
-      mesh: triangleCount(own) ? addMesh(shifted(own, pivot)) : -1,
+      mesh: triangleCount(own) ? addMesh(shifted(own, pivot), { shape: child, offset: pivot, joints: nested, sets }, st.name) : -1,
       translation: [pivot[0] - parentOrigin[0], pivot[1] - parentOrigin[1], pivot[2] - parentOrigin[2]],
       yaw: 0,
       scale: 1,
@@ -187,7 +282,7 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
       for (const n of baseJoints) n.joint!.hidden = true;
       const m = extract(base, opts);
       for (const n of baseJoints) n.joint!.hidden = false;
-      const mi = triangleCount(m) ? addMesh(m) : -1;
+      const mi = triangleCount(m) ? addMesh(m, { shape: base, offset: [0, 0, 0], joints: baseJoints, sets: [] }, obj.name) : -1;
       roots.push({
         name: obj.name,
         mesh: -1,
@@ -211,12 +306,13 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
     const sets = placedIn(obj.shape);
     for (const n of joints) n.joint!.hidden = true;
     for (const s of sets) s.instanced!.hidden = true;
-    const own = extract(obj.shape, opts);
+    // With nothing hidden the object's field is the one the main mesh was cut from, which may serve again.
+    const own = extract(obj.shape, opts, joints.length === 0 && sets.length === 0 ? opts.known : undefined);
     for (const n of joints) n.joint!.hidden = false;
     for (const s of sets) s.instanced!.hidden = false;
     roots.push({
       name: obj.name,
-      mesh: triangleCount(own) ? addMesh(own) : -1,
+      mesh: triangleCount(own) ? addMesh(own, { shape: obj.shape, offset: [0, 0, 0], joints, sets }, obj.name) : -1,
       translation: [0, 0, 0],
       yaw: 0,
       scale: 1,
@@ -238,23 +334,55 @@ export function buildHierarchy(objects: { name: string; shape: Shape3 }[], opts:
 
   let triangles = 0;
   for (const m of meshes) triangles += triangleCount(m);
-  // A budget is for the whole export: each mesh gives up the same share, so a jointed pet's ten bones together
-  // come in under an accessory's four thousand rather than each taking four thousand of its own.
+  // A budget is for the whole export, shared by error: one queue over every mesh takes the flattest collapse
+  // wherever it is, so a jointed pet's ten bones together come in under an accessory's four thousand, and a flat wall
+  // gives up its triangles before the studs on the door beside it give up any (round 11: with the same share each, a
+  // wall kept 35196 of a 54996 cap and the whole torch 1226).
+  let decimated: SceneHierarchy["decimated"];
   if (opts.maxTriangles && triangles > opts.maxTriangles) {
-    const share = opts.maxTriangles / triangles;
-    for (let i = 0; i < meshes.length; i++) meshes[i] = decimate(meshes[i], Math.max(4, Math.floor(triangleCount(meshes[i]) * share)), opts.crease ?? 35);
+    const { meshes: out, flat } = decimateMeshes(meshes, opts.maxTriangles, opts.crease ?? 35);
+    let deviation = 0, fullDeviation = 0, where: string | undefined;
+    const perMesh: { name: string; before: number; after: number }[] = [];
+    for (let i = 0; i < meshes.length; i++) {
+      const d = out[i];
+      perMesh.push({ name: meshNames[i], before: triangleCount(meshes[i]), after: triangleCount(d) });
+      if (d !== meshes[i]) {
+        fullDeviation = Math.max(fullDeviation, stray(i, meshes[i]));
+        const dv = stray(i, d);
+        if (dv > deviation) { deviation = dv; where = meshNames[i]; }
+      }
+      meshes[i] = d;
+    }
+    decimated = { before: triangles, deviation, fullDeviation, ...(where ? { where } : {}), meshes: perMesh, flat };
     triangles = 0;
     for (const m of meshes) triangles += triangleCount(m);
   }
-  const out: SceneHierarchy = { roots, meshes, triangles, notes };
+  const out: SceneHierarchy = { roots, meshes, meshNames, triangles, notes, pbr: opts.maps !== false, ...(decimated ? { decimated } : {}) };
   if (opts.texture > 0 && meshes.length > 0) {
     const { merged, ranges, materials } = mergeMeshes(meshes);
-    const baked = bakeAtlas(merged, { size: opts.texture });
-    const parts = splitBaked(baked.mesh, baked.uv, ranges, materials);
+    // Each mesh's triangles read the field they were extracted from, with the same joints and sets hidden.
+    const hide = (src: MeshSource, on: boolean) => {
+      for (const j of src.joints) j.joint!.hidden = on;
+      for (const st of src.sets) st.instanced!.hidden = on;
+    };
+    const fields: BakeField[] = ranges.map((range, i) => ({ range, dist: sources[i].shape.dist, hit: sources[i].shape.hit, offset: sources[i].offset, enter: () => hide(sources[i], true), leave: () => hide(sources[i], false), relief: reliefMaterials(sources[i].shape) }));
+    const withMaps = opts.maps !== false;
+    // The fields go to the baker either way: a seam's texels are painted from the surface even in the colour atlas alone.
+    const fieldNormals = opts.fieldNormals ?? (!!decimated && triangles < decimated.flat);
+    const baked = bakeAtlas(merged, { size: opts.texture, fields, cellSize: opts.cellSize, wearProbe: opts.wearProbe, maps: withMaps, fieldNormals });
+    const parts = splitBaked(baked.mesh, baked.uv, ranges, materials, baked.tangents);
     out.meshes = parts.map((p) => p.mesh);
     out.uvs = parts.map((p) => p.uv);
     out.atlas = baked.image;
     out.atlasCharts = baked.charts;
+    out.normalMap = baked.normal;
+    out.metalRoughMap = baked.metalRough;
+    out.emissiveMap = baked.emissive;
+    if (baked.tangents) out.tangents = parts.map((p) => p.tangents!);
+    out.materialMaps = new Map(materials.map((m, i) => [m, baked.maps[i]]));
+    out.normalStats = baked.normalStats;
+    out.seams = baked.seams;
+    out.fieldNormals = fieldNormals && withMaps && !!baked.normal;
   }
   return out;
 }
@@ -289,12 +417,12 @@ export function mergeMeshes(meshes: Mesh[]): { merged: Mesh; ranges: [number, nu
   return { merged: { positions, normals, local, materialIndex, materials, indices }, ranges, materials };
 }
 
-/** Cut a baked mesh back into parts by triangle range, compacting each part's vertices. */
-export function splitBaked(mesh: Mesh, uv: Float32Array, ranges: [number, number][], materials: Material[]): { mesh: Mesh; uv: Float32Array }[] {
+/** Cut a baked mesh back into parts by triangle range, compacting each part's vertices (and their tangents, when given). */
+export function splitBaked(mesh: Mesh, uv: Float32Array, ranges: [number, number][], materials: Material[], tangents?: Float32Array): { mesh: Mesh; uv: Float32Array; tangents?: Float32Array }[] {
   return ranges.map(([t0, t1]) => {
     const map = new Map<number, number>();
     const idx = new Uint32Array((t1 - t0) * 3);
-    const pos: number[] = [], nrm: number[] = [], loc: number[] = [], mat: number[] = [], uvs: number[] = [];
+    const pos: number[] = [], nrm: number[] = [], loc: number[] = [], mat: number[] = [], uvs: number[] = [], tan: number[] = [];
     for (let t = t0; t < t1; t++)
       for (let k = 0; k < 3; k++) {
         const v = mesh.indices[t * 3 + k];
@@ -307,12 +435,14 @@ export function splitBaked(mesh: Mesh, uv: Float32Array, ranges: [number, number
           loc.push(mesh.local[v * 3], mesh.local[v * 3 + 1], mesh.local[v * 3 + 2]);
           mat.push(mesh.materialIndex[v]);
           uvs.push(uv[v * 2], uv[v * 2 + 1]);
+          if (tangents) tan.push(tangents[v * 4], tangents[v * 4 + 1], tangents[v * 4 + 2], tangents[v * 4 + 3]);
         }
         idx[(t - t0) * 3 + k] = nv;
       }
     return {
       mesh: { positions: new Float32Array(pos), normals: new Float32Array(nrm), local: new Float32Array(loc), materialIndex: new Uint16Array(mat), materials, indices: idx },
       uv: new Float32Array(uvs),
+      tangents: tangents ? new Float32Array(tan) : undefined,
     };
   });
 }

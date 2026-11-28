@@ -1,0 +1,117 @@
+# A desk stand for a phone, printed in PLA standing on its base.
+# Millimetres, y up, front is +z. The stand is one side profile (a smooth
+# curve2 with corners only where it must be sharp) extruded 70 wide along x.
+# The phone (9 thick, 75 wide) leans back at 65 degrees against the support,
+# its bottom edge in a cradle 11 across with a lip in front. Under the cradle a
+# slot runs down and out the back, and a groove along the base carries the
+# cable from behind to the phone's bottom edge. PERCH is engraved on the
+# leaning front face, where it reads from the front.
+
+set units mm
+set bed 220 220 250
+set grid 200
+
+lean_deg = 65                     # the phone's lean, from the desk
+phone = {w: 75, t: 9, h: 150}
+gap = 2                           # the cradle is this much wider than the phone
+cradle = phone.t + gap            # the floor from the support face to the lip
+thick = 6                         # support, lip and front leg
+base_t = 6                        # base plate
+width_x = 70                      # the extrusion
+q = {z: 8.5, y: 38}               # the cradle's back corner: the phone's back-bottom edge
+sup_len = 85                      # the support face above q, along the lean
+lip_h = 9                         # the lip's inner face above the cradle floor
+back_z = -50                      # the back end of the base
+
+# A point [z, y] in the lean frame: t up the support face (up and back),
+# s across it (forward and up), from q.
+def lean(t, s) = [q.z + s * sin(lean_deg) - t * cos(lean_deg), q.y + s * cos(lean_deg) + t * sin(lean_deg)]
+def w3(p) = [0, p[1], p[0]]       # a profile point as a world point on x = 0
+
+front_s = cradle + thick          # the front face, across the lean
+t_foot = -(q.y + front_s * cos(lean_deg)) / sin(lean_deg)
+t_back = (base_t - q.y + thick * cos(lean_deg)) / sin(lean_deg)   # the back face meets the base top
+heel = lean(t_back, -thick)       # that corner, filleted below
+
+# The rounded ends, as evenly spaced points between two corners (a spline
+# between unevenly spaced points overshoots). The lip and the support end in
+# half circles as wide as they are thick, measured from the face (s) towards the top (t).
+lip_top = []
+sup_top = []
+for i in range(1, 8) {
+  a = i * 22.5
+  lip_top = lip_top + lean(lip_h + thick / 2 * sin(a), front_s - thick / 2 + thick / 2 * cos(a))
+  sup_top = sup_top + lean(sup_len + thick / 2 * sin(a), -thick / 2 + thick / 2 * cos(a))
+}
+# The fillet where the support's back meets the base: tangent 8 along each,
+# turning through the 115 degrees between them.
+fil = {len: 8, r: 8 * tan(32.5)}
+fil_c = [heel[0] - fil.len, base_t + fil.r]
+fillet = []
+for i in range(1, 6) {
+  a = 25 - 115 * i / 6
+  fillet = fillet + [fil_c[0] + fil.r * cos(a), fil_c[1] + fil.r * sin(a)]
+}
+back_end = []
+for i in range(1, 4) {
+  a = 90 + 22.5 * i
+  back_end = back_end + [back_z + 4 + 4 * cos(a), base_t - 4 + 4 * sin(a)]
+}
+
+# The side profile, drawn with its front on the right (profile x is world z).
+# Every straight run ends in a doubled point, a corner, so it stays straight.
+side = curve2(
+  [back_z, 0, back_z, 0]                                    # back foot
+  + lean(t_foot, front_s) + lean(t_foot, front_s)           # front foot; the front face runs straight up
+  + lean(lip_h, front_s) + lean(lip_h, front_s) + lip_top   # the lip's round top
+  + lean(lip_h, cradle) + lean(lip_h, cradle)               # the lip's inner face, straight down
+  + lean(0, cradle) + lean(0, cradle)                       # the cradle floor's front corner
+  + lean(0, 0) + lean(0, 0)                                 # q, the cradle's back corner; the support face runs straight up
+  + lean(sup_len, 0) + lean(sup_len, 0) + sup_top           # the support's round top
+  + lean(sup_len, -thick) + lean(sup_len, -thick)           # its back, straight down
+  + lean(t_back + fil.len, -thick) + lean(t_back + fil.len, -thick) + fillet
+  + [heel[0] - fil.len, base_t, heel[0] - fil.len, base_t]  # the base top, straight back
+  + [back_z + 4, base_t, back_z + 4, base_t] + back_end     # the back end, rounded
+  + [back_z, base_t - 4, back_z, base_t - 4]
+)
+body = extrude(side, width_x, "x") | flip("z") | paint("orange")
+
+# The cable slot: under the cradle floor, down to 1 mm into the base, and out
+# the back under a ceiling falling back at 50 degrees (40 from vertical: no
+# support). The ceiling starts 1.5 up the support face, not on q itself: a
+# cutter corner on the body's corner left a 206 mm3 support estimate there.
+slot_w = 14
+ceil_deg = 50
+floor_y = base_t - 1
+t_low = (floor_y - q.y - cradle * cos(lean_deg)) / sin(lean_deg)
+slot_top = lean(1.5, 0)
+slot_side = polygon(slot_top + lean(4, cradle) + lean(t_low, cradle) + [slot_top[0] - (slot_top[1] - floor_y) / tan(ceil_deg), floor_y])
+slot = extrude(slot_side, slot_w, "x") | flip("z")
+groove = box(slot_w, 2, 45) | move(0, floor_y + 1, back_z - 5 + 22.5)
+
+# PERCH, engraved 1.2 deep on the front face, centred across it.
+face_pt = lean(-22, front_s)
+word = extrude(text("PERCH", 9, weight=1.8, align="center", spacing=2) | move(0, -4.5), 2.4, "z") | rotate(x=lean_deg - 90) | move(0, face_pt[1], face_pt[0])
+
+stand = body - slot - groove - word
+
+# Probes: the phone seated 0.3 off the support and the floor, the same phone
+# slid 3 along the floor, and a 3.6 mm cable from behind to the phone's port.
+seat = lean(0.3, 0.3)
+phone_probe = box(phone.w, phone.h, phone.t) | move(0, phone.h / 2, phone.t / 2) | rotate(x=lean_deg - 90) | move(0, seat[1], seat[0])
+phone_slid = phone_probe | move(0, 3 * cos(lean_deg), 3 * sin(lean_deg))
+cable = tube(1.8, [0, 7, back_z - 10, 0, 7, 22] + w3(lean(-30, 5.5)) + w3(lean(2, 5.5)))
+
+show stand
+
+# The promises.
+assert abs(width(stand) - width_x) < 0.5, "about 70 wide"
+assert abs(bottom(stand)) < 0.01, "the base is on the bed, y = 0"
+assert clearance(phone_probe, stand) > 0.1, "the phone fits the cradle"
+assert clearance(phone_probe, stand) < 0.6, "and rests on the support and the floor, not in the air"
+assert clearance(phone_slid, stand) < 0, "the lip stops it sliding forward along the floor"
+assert void(cable, stand), "a 3.6 mm cable runs from behind, through the slot, to the phone's bottom edge"
+assert clearance(cable, stand) > 0.1, "and clears every wall (void alone passed a 3 mm slot)"
+assert pieces(stand) == 1, "one piece"
+assert wall(stand) > 1.6, "no wall thinner than 1.6 mm"
+assert overhang(stand) < 0.002, "prints standing on its base without support (the word's grooves are the only overhang)"

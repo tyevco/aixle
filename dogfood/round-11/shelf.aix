@@ -1,0 +1,154 @@
+# A bookcase: an oak case 8 wide, 9.95 tall and 3 deep (one unit is 10 cm),
+# three shelves holding 33 books, three leaning, seven lying flat in two
+# stacks, held by two marble bookends. Front is +z: the books' spines face it.
+# The parts come from shelf_lib.aix; the books are a list of records per
+# shelf, placed left to right by one loop that carries a cursor along x.
+use "shelf_lib" as lib
+set grid 200
+
+case = {w: 8, d: 3, t: 0.2, plinth: 0.6, back: 0.1}
+spacing = {count: 3, gap: 2.85}
+gap = 0.06                       # between neighbouring books, a cell and a bit
+lean_gap = 0.002                 # a leaning book's square corner to what it leans on (its rounding adds 0.005)
+spine_in = 0.15                  # the spines stand this far behind the front edge
+inner = case.w / 2 - case.t      # the side panels' inner faces are at x = -inner and +inner
+front = case.d / 2
+
+bookcase = lib.case(case, spacing)
+side_panels = lib.sides(case, spacing)
+
+# The bookends: marble quarter-rounds 0.7 long and 1.7 tall. The left one
+# holds the bottom row from the left panel; the right one is placed after
+# the top row's loop, at its cursor.
+endstop = {w: 0.7, h: 1.7, d: 1.5, mat: material("marble", scale=0.4)}
+endstop_z = front - spine_in - 1.0
+bookend_l = lib.bookend(endstop) | flip("x") | move(-inner + gap + endstop.w, lib.shelf_top(case, spacing, 0), endstop_z)
+
+# The books, a row per shelf. tilt: 0 upright, + leans left onto the book
+# (or panel) before it, - leans right onto the panel after it, 90 lies flat
+# in the row's stack, whose left end is at stack_x. The uprights start at
+# start, or past the stack when the stack is there.
+rows = [
+  {shelf: 0, start: -inner + gap + endstop.w + gap, stack_x: 0, first: bookend_l, books: [
+    {w: 0.42, h: 2.55, d: 2.0, color: "#7b2d26", tilt: 0},
+    {w: 0.30, h: 2.40, d: 1.9, color: "#22395f", tilt: 0},
+    {w: 0.36, h: 2.62, d: 2.1, color: "#2f5d3a", tilt: 0},
+    {w: 0.25, h: 2.30, d: 1.8, color: "#c49a2c", tilt: 0},
+    {w: 0.48, h: 2.50, d: 2.0, color: "#4b2e5a", tilt: 0},
+    {w: 0.33, h: 2.45, d: 1.9, color: "#1d1d22", tilt: 0},
+    {w: 0.28, h: 2.20, d: 1.7, color: "#a4532e", tilt: 0},
+    {w: 0.40, h: 2.35, d: 1.8, color: "#3f7680", tilt: 0},
+    {w: 0.30, h: 2.45, d: 1.9, color: "#d8cdb0", tilt: 0},
+    {w: 0.34, h: 2.50, d: 1.9, color: "#6e1f2a", tilt: 18}]},
+  {shelf: 1, start: -inner + gap, stack_x: -inner + gap, first: side_panels, books: [
+    {w: 0.45, h: 2.40, d: 1.9, color: "#2a2a30", tilt: 90},
+    {w: 0.35, h: 2.20, d: 1.7, color: "#8c3b2a", tilt: 90},
+    {w: 0.40, h: 2.05, d: 1.6, color: "#335b8c", tilt: 90},
+    {w: 0.30, h: 1.80, d: 1.4, color: "#d6b04a", tilt: 90},
+    {w: 0.32, h: 2.10, d: 1.6, color: "#5e7d4a", tilt: 0},
+    {w: 0.38, h: 2.40, d: 1.8, color: "#b8462f", tilt: 0},
+    {w: 0.27, h: 1.95, d: 1.5, color: "#e3d9bf", tilt: 0},
+    {w: 0.44, h: 2.30, d: 1.9, color: "#273c56", tilt: 0},
+    {w: 0.30, h: 2.15, d: 1.6, color: "#7a4d8a", tilt: 0},
+    {w: 0.36, h: 2.45, d: 1.8, color: "#2e6b5e", tilt: 0},
+    {w: 0.35, h: 2.00, d: 1.6, color: "#c27a2c", tilt: 0},
+    {w: 0.29, h: 2.25, d: 1.7, color: "#46302a", tilt: 0},
+    {w: 0.32, h: 2.30, d: 1.7, color: "#9c2f3f", tilt: -15}]},
+  {shelf: 2, start: -inner + gap, stack_x: 1.3, first: side_panels, books: [
+    {w: 0.30, h: 2.10, d: 1.6, color: "#3b5f8f", tilt: 20},
+    {w: 0.36, h: 2.30, d: 1.8, color: "#8a2f22", tilt: 0},
+    {w: 0.30, h: 2.05, d: 1.6, color: "#d1c49c", tilt: 0},
+    {w: 0.42, h: 2.50, d: 2.0, color: "#2d4a33", tilt: 0},
+    {w: 0.28, h: 1.85, d: 1.5, color: "#c58b2e", tilt: 0},
+    {w: 0.33, h: 2.20, d: 1.7, color: "#542a4a", tilt: 0},
+    {w: 0.39, h: 2.35, d: 1.8, color: "#1f2a38", tilt: 0},
+    {w: 0.42, h: 2.00, d: 1.6, color: "#6b2a2a", tilt: 90},
+    {w: 0.30, h: 1.90, d: 1.5, color: "#2f4f6f", tilt: 90},
+    {w: 0.36, h: 1.70, d: 1.4, color: "#bfa76a", tilt: 90}]}
+]
+
+books = empty()
+placed = []        # each book's [x, y, z] as placed, in loop order
+holds = []         # each row's cursor after its last book that is not in a stack
+n = 0
+for r in rows {
+  y = lib.shelf_top(case, spacing, r.shelf)
+  board = lib.shelf_board(case, spacing, r.shelf)
+  above = lib.shelf_board(case, spacing, r.shelf + 1)
+  stack_w = 0
+  for b in r.books {
+    stack_w = max(stack_w, (b.tilt == 90) * b.h)
+  }
+  x = r.start           # the next free x, a gap past the last book's right side
+  prev = r.first        # what the next book leans on or stands beside
+  prev_h = spacing.gap  # how tall that is (a panel reaches the shelf above)
+  stack_y = 0           # how high the stack has grown
+  hold = x              # the cursor after the last book not in the stack
+  for b in r.books {
+    U = b.tilt == 0
+    L = (b.tilt > 0) * (b.tilt < 90)
+    R = b.tilt < 0
+    F = b.tilt == 90
+    s = sin(abs(b.tilt))
+    c = cos(abs(b.tilt))
+    # Where its standing edge goes: upright at the cursor; leaning left, just
+    # far enough right that its left face meets what it leans on; leaning
+    # right, its top just short of the right panel; flat, centred on the stack.
+    px = U * x + L * (x - gap + lean_gap + min(b.h * s, prev_h * s / max(c, 0.01))) + R * (inner - lean_gap - b.h * s) + F * (r.stack_x + (stack_w + b.h) / 2)
+    py = y + F * stack_y
+    pz = front - spine_in - b.d / 2
+    bk = lib.book(b) | move(px, py, pz)
+    # The promises, for every book: it stands on its shelf (or on the book
+    # under it in the stack), not in it and not above it; it does not pass
+    # into what stands before it; it is under the shelf above.
+    assert clearance(bk, board) > -0.002, "book " + n + " is not sunk into its shelf"
+    assert clearance(bk, board) - F * stack_y < 0.005, "book " + n + " is not above its shelf (or its stack)"
+    assert clearance(bk, prev) > -0.002, "book " + n + " does not pass into the one before it"
+    assert clearance(bk, above) > 0.05, "book " + n + " clears the shelf above"
+    assert F * (stack_y > 0) * clearance(bk, prev) < 0.005, "book " + n + " rests on the book under it"
+    assert overlap(bk, books) < 0.0001, "book " + n + " passes through no other book"
+    assert L * clearance(bk, prev) < 0.012, "book " + n + " leans on the book or panel before it"
+    assert R * clearance(bk, side_panels) < 0.012, "book " + n + " leans on the panel after it"
+    books = books + bk
+    placed = placed + [[px, py, pz]]
+    # The cursor moves past an upright or a leaning book, and past the stack
+    # when the stack is where the cursor is.
+    x = U * (x + b.w + gap) + L * (px + b.w * c + gap) + R * x + F * (x + (r.stack_x <= x + 0.001) * max(0, r.stack_x + stack_w + gap - x))
+    hold = F * hold + (1 - F) * x
+    prev = bk
+    prev_h = U * b.h + (1 - U) * prev_h
+    stack_y = stack_y + F * b.w
+    n = n + 1
+  }
+  holds = holds + [hold]
+}
+
+# The right bookend holds the top row, at that row's cursor.
+bookend_r = lib.bookend(endstop) | move(holds[2], lib.shelf_top(case, spacing, 2), endstop_z)
+
+# The leaning book at the end of the bottom row, rebuilt where the loop put
+# it, as a region for the slices to cut through (render --slice lean_probe).
+lean_probe = lib.book(rows[0].books[9]) | move(placed[9][0], placed[9][1], placed[9][2])
+set slice lean_probe
+set slice_x placed[9][0] + 0.05     # the x plane through its bottom-left edge, where it rests
+
+model = bookcase + bookend_l + bookend_r + books
+show model
+
+# The beauty render: a warm key from the front left that reaches into the
+# shelves, a cool fill from the right, a hero shot from a little right of
+# the front, and a close shot on the leaning book where it meets its shelf.
+light("key", azimuth=-30, elevation=35, size=2, color="#fff4e6")
+light("fill", azimuth=45, elevation=15, power=0.45, color="#dfe8ff")
+set ambient 1.3
+camera("hero", azimuth=22, elevation=14, zoom=1.1)
+camera("lean", focus="lean_probe", azimuth=12, elevation=6, zoom=1.3)
+set camera hero
+
+assert n >= 20, "twenty books or more"
+assert pieces(bookcase) == 1, "the case is one piece"
+assert abs(bottom(model)) < 0.001, "the case stands on the floor"
+assert clearance(bookend_r, books) > 0, "the right bookend stands clear of the top row"
+assert clearance(lean_probe, bookcase) < 0.005, "the leaning book touches the bottom shelf"
+assert abs(clearance(bookend_l, bookcase)) < 0.005, "the left bookend stands on the bottom shelf"
+assert abs(clearance(bookend_r, bookcase)) < 0.005, "the right bookend stands on the top shelf"

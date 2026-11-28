@@ -6,8 +6,8 @@
  */
 import { length2, length3, normalize, cross, type Vec3 } from "../core/vec.js";
 import { primitive } from "./primitives.js";
-import { buildSpatialIndex, cellsFor } from "./spatial.js";
-import { boundsFromPoints, boundsGrow, EMPTY_BOUNDS, isEmpty2, type Shape2, type Shape3 } from "./types.js";
+import { buildSpatialIndex, cellsFor, type PieceDist, type SpatialIndex } from "./spatial.js";
+import { boundsFromPoints, boundsGrow, EMPTY_BOUNDS, isEmpty2, type Bounds, type Shape2, type Shape3 } from "./types.js";
 
 /** Split a flat list of numbers into points; throws with a helpful count. */
 export function toPoints(flat: readonly number[], what: string): Vec3[] {
@@ -161,6 +161,8 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
       }
       return best;
     }, bounds, n);
+    // The least of exact capsule distances, in a box grown by the radius (Shape3.boxFloor).
+    straight.boxFloor = true;
     straight.feature = 2 * r;
     return straight;
   }
@@ -196,6 +198,8 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
     }
     return best;
   }, bounds, n * 2);
+  // Quilez's round cone is exact for radii that are not negative, and the box is grown by the larger of them.
+  if (taper >= 0) out.boxFloor = true;
   out.feature = 2 * r * Math.min(1, taper);
   return out;
 }
@@ -216,8 +220,48 @@ export function tube(points: Vec3[], r: number, taper = 1, cap: "round" | "flat"
  * rope and a straight path with a taper is a horn.
  */
 export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Shape3 {
+  const parts = sweepPieces(profile, points, twist, taper);
+  if (!parts) return primitive(() => 1e6, EMPTY_BOUNDS, 0);
+  const { n, piece, bound, boxDist, index, bounds, reach, plain, twistRate, taperRate } = parts;
+  const b = profile.bounds;
+  const out = primitive((x, y, z) => {
+    if (index) return index.minNearest(x, y, z, piece, bound, boxDist, 1e6);
+    let best = 1e6;
+    for (let i = 0; i < n; i++) {
+      const bd = boxDist(i, x, y, z);
+      if (bd > 0 && bd >= best) continue;
+      const lb = bound(i, x, y, z);
+      if (lb > 0 && lb >= best) continue;
+      const d = piece(i, x, y, z);
+      if (d < best) best = d;
+    }
+    return best;
+  }, bounds, n * profile.cost);
+  out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
+  out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
+  if (!plain) out.lipschitz = turnedLipschitz(twistRate, taperRate, reach);
+  return out;
+}
+
+/** A sweep's pieces, one per segment: each piece's field, a lower bound on it, its box and the index over the boxes. */
+export interface SweepPieces {
+  n: number;
+  piece: PieceDist;
+  /** At most the piece's value wherever it is positive (see the proof where it is built). */
+  bound: PieceDist;
+  boxDist: PieceDist;
+  index?: SpatialIndex;
+  bounds: Bounds;
+  reach: number;
+  plain: boolean;
+  twistRate: number;
+  taperRate: number;
+}
+
+/** The pieces sweep() takes the minimum of, apart, so a test can hold each bound against its piece. */
+export function sweepPieces(profile: Shape2, points: Vec3[], twist = 0, taper = 1): SweepPieces | undefined {
   const segs = segments(points);
-  if (segs.length === 0 || isEmpty2(profile.bounds)) return primitive(() => 1e6, EMPTY_BOUNDS, 0);
+  if (segs.length === 0 || isEmpty2(profile.bounds)) return undefined;
   const pd = profile.dist;
   const b = profile.bounds;
   const reach =
@@ -308,20 +352,51 @@ export function sweep(profile: Shape2, points: Vec3[], twist = 0, taper = 1): Sh
       return cap > 0 ? (d2 > 0 ? length2(d2, cap) : cap) : d2;
     }
   };
-  const out = primitive((x, y, z) => {
-    if (index) return index.min(x, y, z, piece, boxDist, 1e6);
-    let best = 1e6;
-    for (let i = 0; i < n; i++) {
-      const bd = boxDist(i, x, y, z);
-      if (bd > 0 && bd >= best) continue;
-      const d = piece(i, x, y, z);
-      if (d < best) best = d;
+  // A lower bound on piece i, for visiting the pieces nearest first (index.minNearest). With rho the point's distance
+  // from the segment's line and cap the piece's own end value (positive past a mitre plane or an end):
+  // - Where cap <= 0 the piece reads the profile at the point's place across the path. A twist turns that place about
+  //   the path and a taper divides it by at most the larger end's scale, which the reach includes, so with rho past
+  //   the reach the place is outside the disc that holds the profile's box. A profile that reads at least its box
+  //   distance there (Shape2.boxFloor: a circle, a rectangle, a polygon and what is built of them by the operations
+  //   that keep it) makes the piece read at least rho - reach; any other (an ellipse, an outline) bounds nothing here.
+  // - Past a plane the piece reads hypot(profile, cap), or cap where the profile is not positive, which only grows
+  //   with the profile's value: at least hypot(max(rho - reach, 0), cap).
+  // The distance to the segment less the reach is no bound: between the mitre planes, past the segment's end and off
+  // the path (the wedge a mitre adds), the piece reads the profile's value alone, under the distance to the segment.
+  // Only a positive bound skips a piece. It is taken a hair low (a millionth of a millionth of itself and of the
+  // sweep's size), so rounding cannot put it over the piece where the two agree, as they do on a square's diagonal.
+  const margin = 1e-12 * (1 + reach + Math.max(...bounds.min.map(Math.abs), ...bounds.max.map(Math.abs)));
+  const floored = profile.boxFloor === true;
+  const bound = (i: number, x: number, y: number, z: number): number => {
+    const s = segs[i];
+    const px = x - s.a[0], py = y - s.a[1], pz = z - s.a[2];
+    let across = -1;
+    if (floored) {
+      const u = px * s.u[0] + py * s.u[1] + pz * s.u[2];
+      const v = px * s.v[0] + py * s.v[1] + pz * s.v[2];
+      across = Math.sqrt(u * u + v * v) - reach;
     }
-    return best;
-  }, bounds, n * profile.cost);
-  out.feature = (profile.feature ?? Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1])) * Math.min(1, taper);
-  out.gap = profile.gap === undefined ? undefined : profile.gap * Math.min(1, taper);
-  return out;
+    let capStart: number, capEnd: number;
+    if (i === 0) capStart = -(px * s.d[0] + py * s.d[1] + pz * s.d[2]) / Math.sqrt(s.len2);
+    else { const m = mitre[i - 1]; capStart = -(px * m[0] + py * m[1] + pz * m[2]); }
+    if (i === n - 1) capEnd = (px * s.d[0] + py * s.d[1] + pz * s.d[2]) / Math.sqrt(s.len2) - Math.sqrt(s.len2);
+    else { const m = mitre[i]; capEnd = (px - s.d[0]) * m[0] + (py - s.d[1]) * m[1] + (pz - s.d[2]) * m[2]; }
+    const cap = Math.max(capStart, capEnd);
+    const b = cap > 0 ? (across > 0 ? Math.sqrt(across * across + cap * cap) : cap) : across;
+    return b - (b > 0 ? b : -b) * 1e-12 - margin;
+  };
+  return { n, piece, bound, boxDist, index, bounds, reach, plain, twistRate, taperRate };
+}
+
+/**
+ * How far a profile turned and scaled along a path can stretch its distance: along the path the turn moves the
+ * profile's nearest point, at most `reach` from the path, by twistRate x reach per unit, and the scale by taperRate
+ * x reach; across the path the profile's field is a distance. The shear that gives is at most
+ * (m + sqrt(m^2 + 4)) / 2 with m the two rates' combined push, as for twist().
+ */
+export function turnedLipschitz(twistRate: number, taperRate: number, reach: number): number {
+  const m = Math.hypot(twistRate, taperRate) * reach;
+  return (m + Math.sqrt(m * m + 4)) / 2;
 }
 
 /** Points of a helix of radius `r`, rising `h` over `turns` turns around y, `perTurn` points each turn. */

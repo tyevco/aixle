@@ -14,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { run } from "../src/pipeline.js";
+import { PROBE } from "./render-set.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -64,7 +65,7 @@ function dogfood(): Model[] {
   const dir = resolve(ROOT, "dogfood");
   const out: Model[] = [];
   for (const round of readdirSync(dir).filter((d) => d.startsWith("round-")).sort()) {
-    for (const f of readdirSync(join(dir, round)).filter((x) => x.endsWith(".aix") && !x.endsWith("_probe.aix")).sort()) {
+    for (const f of readdirSync(join(dir, round)).filter((x) => x.endsWith(".aix") && !PROBE.test(x)).sort()) {
       const name = f.replace(/\.aix$/, "");
       const report = `dogfood/${round}/${name}.report.md`;
       out.push({ name: `${round}_${name}`, program: `dogfood/${round}/${f}`, renders: "dogfood/renders", caption: `${round.replace("-", " ")}: ${caption(join(dir, round, f))}`, report: existsSync(resolve(ROOT, report)) ? report : undefined });

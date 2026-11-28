@@ -4,13 +4,20 @@
  * UVs anywhere in the pipeline: the renderer asks `albedo()` per pixel with
  * the interpolated local point, and the exporters bake the same function into
  * vertex colours, so the OBJ and GLB carry what the render shows.
+ *
+ * `surface()` is the whole of it: the colour, roughness, metalness, glow and
+ * bump height at a point, with the wear a material reads from the field's
+ * curvature. The beauty render and the atlas baker both call it, so the
+ * normal, metallic-roughness and emissive maps in the GLB are the beauty
+ * render's surface; `albedo()` is its colour without the wear, which is what
+ * the checking views draw.
  */
 import { fbm3, noise3, white3 } from "../core/noise.js";
 import type { Vec3 } from "../core/vec.js";
-import type { ImageTexture, Material, PatternKind } from "./types.js";
+import type { DistFn3, ImageTexture, Material, PatternKind } from "./types.js";
 
 export const PATTERNS: readonly PatternKind[] = [
-  "solid", "checker", "stripes", "wood", "marble", "noise", "speckle", "brick", "tiles", "dots",
+  "solid", "checker", "stripes", "wood", "marble", "noise", "speckle", "brick", "tiles", "dots", "rust",
 ];
 
 function parseHex(text: string): Vec3 | undefined {
@@ -53,8 +60,14 @@ function make(name: string, partial: Partial<Material> & { color: Vec3 }): Mater
     seed: partial.seed ?? 0,
     axis: partial.axis ?? "y",
     glow: partial.glow ?? 0,
+    bump: partial.bump ?? 0,
+    bumpScale: partial.bumpScale,
+    wear: partial.wear ?? 0,
   };
 }
+
+/** The colour a `rust` pattern's patches take when no second colour is given: oxide, orange-brown. */
+export const RUST_COLOR: Vec3 = hex("#8a4422");
 
 /** The material every unpainted shape has: a warm neutral that shows form. */
 export const DEFAULT_MATERIAL: Material = make("clay", { color: hex("#c9b8a6"), rough: 0.7 });
@@ -64,14 +77,43 @@ const PRESET_LIST: Material[] = [
   ...Object.entries(NAMED_COLORS)
     .filter(([n]) => n !== "clay" && n !== "grey")
     .map(([n, c]) => make(n, { color: c })),
-  make("gold", { color: hex("#e2b13c"), metal: 1, rough: 0.3 }),
-  make("silver", { color: hex("#d4d6da"), metal: 1, rough: 0.25 }),
-  make("copper", { color: hex("#c67a4a"), metal: 1, rough: 0.35 }),
-  make("bronze", { color: hex("#a5772f"), metal: 1, rough: 0.4 }),
-  make("steel", { color: hex("#8e949c"), metal: 1, rough: 0.45 }),
-  make("iron", { color: hex("#5c5e62"), metal: 1, rough: 0.6 }),
-  make("brass", { color: hex("#c9a54a"), metal: 1, rough: 0.35 }),
-  make("chrome", { color: hex("#e8eaee"), metal: 1, rough: 0.1 }),
+  // A metal's colour is its reflectance at normal incidence (F0), as glTF means it, written in sRGB; the viewer and
+  // any engine read the same colour. Silver and chrome (chromium) are measured F0, Real-Time Rendering 4th ed., table
+  // 9.2 (linear 0.972, 0.960, 0.915 and 0.549, 0.556, 0.554).
+  //
+  // Steel is iron's measured F0 from the same table (0.562, 0.565, 0.578): steel is iron with under 2% carbon and has
+  // its reflectance, a neutral grey. The stainless value it had (0.669, 0.639, 0.598, chromium-nickel alloy) is warm,
+  // and a steel hub, gear and bracket read ivory and ceramic under a warm key.
+  //
+  // Iron is the iron things are made of, wrought, cast or blackened, under its skin of black oxide: magnetite (Fe3O4,
+  // most of mill scale and of a blacking), neutral, linear 0.10. A polished section of magnetite reflects about 20.7%
+  // (ore microscopy's tables, Criddle and Stanley 1993: 20.9, 20.7 and 20.7% at 470, 546 and 650 nm), but a skin of
+  // oxide is not polished: it is grains and pores at every scale, which trap light a single GGX lobe has no term for
+  // (granular magnetite returns 30 to 40% of its Fresnel reflectance, Roush and others, Icarus 2021; cast iron measures
+  // L* 19 off the specular angle, the Physically Based database's 45/0 reading). At the polished 0.20 the lantern's
+  // flat roof took the key's broad highlight at roughness 0.55 (81% of its light: the highlight is GGX's own, and the
+  // studio's prefiltered sky holds what its rig does) as light silver-grey, 150 levels where the old renderer drew 109,
+  // and its bars mirrored the white floor; at half that, as a skin returns, the roof's iron is 100 (89 under the rust's
+  // film) and the bars dark. Bare polished iron (0.56) rendered a bench's arms and a door's hinges as chrome tubing and
+  // a lantern as white enamel; a worn edge (`wear`) rubs the skin to satin, twice its reflectance, in scuffs. The rust
+  // preset is the same iron, rusting.
+  //
+  // Gold, brass, copper and bronze are their measured F0 squared, the colour of the light after two bounces off the
+  // metal: gold is Lagarde's (2011: 1.000, 0.766, 0.336), brass (C260 cartridge brass) and copper are RTR4's table 9.2,
+  // and bronze, which no table measures, the mean of the copper and brass rows, the alloys either side of it (0.933,
+  // 0.708, 0.481). A measured F0 is pale (gold #ffe39d): in a neutral room the trophies' gold read as champagne, the
+  // sign's brass letters as cream and the bottle's bronze collar as pink, however dark the room round them (darker, they
+  // went khaki). Gold reads gold through its own interreflections and warm, dark surroundings; squared, each keeps its
+  // measured hue and the order between them and takes the saturation a picture of the metal has (the medal's face:
+  // 0.73 against 0.46 at F0 and the old renderer's 0.68), in this render and in any glTF viewer.
+  make("gold", { color: hex("#ffc95e"), metal: 1, rough: 0.3 }),
+  make("silver", { color: hex("#fcfaf5"), metal: 1, rough: 0.25 }),
+  make("copper", { color: hex("#f5ab92"), metal: 1, rough: 0.35 }),
+  make("bronze", { color: hex("#f0bc84"), metal: 1, rough: 0.4 }),
+  make("steel", { color: hex("#c6c6c8"), metal: 1, rough: 0.45 }),
+  make("iron", { color: hex("#595959"), metal: 1, rough: 0.6 }),
+  make("brass", { color: hex("#ebcc75"), metal: 1, rough: 0.35 }),
+  make("chrome", { color: hex("#c4c5c4"), metal: 1, rough: 0.1 }),
   make("wood", { color: hex("#b07d4a"), color2: hex("#7a4f2a"), pattern: "wood", scale: 0.25, rough: 0.7 }),
   make("oak", { color: hex("#c69a63"), color2: hex("#8f6539"), pattern: "wood", scale: 0.3, rough: 0.7 }),
   make("walnut", { color: hex("#6b4327"), color2: hex("#3e2414"), pattern: "wood", scale: 0.22, rough: 0.6 }),
@@ -100,6 +142,9 @@ const PRESET_LIST: Material[] = [
   make("porcelain", { color: hex("#f6f4ee"), rough: 0.2 }),
   make("snow", { color: hex("#f8f9fb"), color2: hex("#dfe6ef"), pattern: "noise", scale: 0.3, rough: 0.9 }),
   make("lava", { color: hex("#f06a1a"), color2: hex("#3a1a10"), pattern: "marble", scale: 0.8, rough: 0.6 }),
+  // Iron with patches of rust: the iron preset's own dark iron (a rusty lantern is old iron, not polished), and patches
+  // that are rough and not metal, so it bakes a metallic-roughness map.
+  make("rust", { color: hex("#595959"), color2: RUST_COLOR, pattern: "rust", scale: 0.3, metal: 1, rough: 0.55 }),
 ];
 
 export const PRESETS: ReadonlyMap<string, Material> = new Map(PRESET_LIST.map((m) => [m.name, m]));
@@ -128,11 +173,14 @@ export function customMaterial(opts: {
   seed?: number;
   axis?: "x" | "y" | "z";
   glow?: number;
+  bump?: number;
+  bumpScale?: number;
+  wear?: number;
   name?: string;
 }): Material {
   return make(opts.name ?? "custom", {
     color: opts.color,
-    color2: opts.color2 ?? (opts.pattern && opts.pattern !== "solid" ? darken(opts.color, 0.6) : opts.color),
+    color2: opts.color2 ?? (opts.pattern === "rust" ? RUST_COLOR : opts.pattern && opts.pattern !== "solid" ? darken(opts.color, 0.6) : opts.color),
     pattern: opts.pattern,
     scale: opts.scale,
     metal: opts.metal,
@@ -141,6 +189,9 @@ export function customMaterial(opts: {
     seed: opts.seed,
     axis: opts.axis,
     glow: opts.glow,
+    bump: opts.bump,
+    bumpScale: opts.bumpScale,
+    wear: opts.wear,
   });
 }
 
@@ -227,8 +278,223 @@ export function albedo(m: Material, x: number, y: number, z: number): Vec3 {
       const d = Math.min(fx * fx + fz * fz, fx * fx + fy * fy, fy * fy + fz * fz);
       return d < 0.06 ? m.color2 : m.color;
     }
+    case "rust": {
+      const r = rustAt(m, x, y, z);
+      return lerp3(m.color, r.shade, r.mask);
+    }
   }
 }
+
+/**
+ * How far a `rust` pattern's thin film of oxide goes towards the patches' oxide at their edge, over the metal between
+ * them. Rust grows through a film, not in patches on clean metal: without one the iron between the lantern's patches
+ * was its plain dark iron, which the rim light and the sky turn a cool blue-grey that read as galvanised steel (its
+ * roof's bare iron 97, 100, 106 levels; with the film 92, 88, 90).
+ */
+export const RUST_FILM = 0.15;
+
+/** Where a `rust` pattern has eaten the base (0..1) and the oxide's colour there, mottled finer than the patches. */
+function rustAt(m: Material, x: number, y: number, z: number): { mask: number; shade: Vec3 } {
+  const s = m.scale > 0 ? m.scale : 1;
+  // Patches about a scale across covering a little under half the surface, with soft edges, and between them a thin
+  // film, thickest at their edges, that leaves about a twentieth of the metal bare; a finer noise mottles the oxide
+  // between its own colour and a darker scale.
+  const v = fbm3(x / s, y / s, z / s, m.seed + 5, 4);
+  const patch = smoothstep(0.47, 0.6, v);
+  const mask = patch + (1 - patch) * RUST_FILM * smoothstep(0.35, 0.47, v);
+  const fine = noise3((x / s) * 6, (y / s) * 6, (z / s) * 6, m.seed + 11);
+  return { mask, shade: lerp3(m.color2, darken(m.color2, 0.62), fine) };
+}
+
+const smoothstep = (a: number, b: number, v: number): number => {
+  const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** What a surface is at a point: the inputs of a physically based shader, and the bump's height there. */
+export interface SurfaceSample {
+  color: Vec3;
+  rough: number;
+  metal: number;
+  /** Light given off, multiplying `color`: 0 for none. */
+  glow: number;
+  /** Height above the field's surface from `bump`, in model units; 0 without a bump. */
+  height: number;
+}
+
+/** The material's finish varies over the surface (wear, bumps, rust), so a renderer must ask `surface()` rather than read the fields. */
+export const hasFinish = (m: Material): boolean => (m.wear ?? 0) > 0 || (m.bump ?? 0) > 0 || (m.pattern === "rust" && !m.image);
+/** Roughness or metalness varies over the surface, which a metallic-roughness map can carry and factors cannot. */
+export const variesRoughMetal = (m: Material): boolean => (m.wear ?? 0) > 0 || (m.pattern === "rust" && !m.image);
+/** The colour varies over the surface, so a glow does too and needs a map rather than a factor. */
+export const variesColor = (m: Material): boolean => m.pattern !== "solid" || !!m.image || (m.wear ?? 0) > 0;
+
+/**
+ * The surface at a local point. `curvature` is what `fieldCurvature()` reads
+ * at the world point (+1 a sharp convex edge, -1 a sharp crease, 0 flat), and
+ * matters only to a material with `wear`: a convex edge is rubbed toward bare
+ * metal (on a metal) or a lighter, smoother finish, a cavity collects grime,
+ * darker and rougher, and a `rust` pattern's patches come off the edges. On a
+ * metal the rubbing is satin, not polish, and it is broken into scuffs about
+ * two `probe`s across (the probe `fieldCurvature()` read at), fewer on a part
+ * `thin` (as `fieldCurvature()` reads it) than along a thick part's edge; with
+ * no probe the band is unbroken. A material with no wear, no bump and no rust
+ * returns exactly `albedo()` and its own rough, metal and glow, so a plain
+ * material renders as it did.
+ */
+export function surface(m: Material, x: number, y: number, z: number, curvature = 0, probe = 0, thin = 0): SurfaceSample {
+  const wear = Math.max(0, Math.min(1, m.wear ?? 0));
+  const metallic = m.metal >= 0.5;
+  let edge = 0, cavity = 0;
+  if (wear > 0) {
+    // The threshold falls as the wear rises, so more of the surface counts as an edge, and the effect strengthens.
+    const lo = 0.45 - 0.35 * wear, amount = Math.min(1, 0.35 + wear);
+    const band = smoothstep(lo, lo + 0.3, curvature);
+    edge = band * amount;
+    cavity = smoothstep(lo, lo + 0.3, -curvature) * amount;
+    if (metallic && edge > 0 && probe > 0) edge *= scuffs(m, x, y, z, band, wear, probe, thin);
+  }
+  let color: Vec3;
+  let rough = m.rough, metal = m.metal;
+  if (m.pattern === "rust" && !m.image) {
+    // Rust is rough oxide, not metal; a worn edge is rubbed back through it to the iron.
+    const r = rustAt(m, x, y, z);
+    const k = r.mask * (1 - edge);
+    color = lerp3(m.color, r.shade, k);
+    metal = m.metal * (1 - k);
+    rough = m.rough + (Math.max(m.rough, 0.92) - m.rough) * k;
+  } else color = albedo(m, x, y, z);
+  if (edge > 0) {
+    const under = m.pattern === "rust" && !m.image ? m.color : color;
+    // A metal rubbed by hands and cloth is satin: its dark skin rubbed through in places at a pixel's scale (iron's
+    // 0.10 linear reflectance to 0.20, where bare iron is 0.56) and a quarter of its roughness taken off (iron's 0.6
+    // to 0.45, a blurred sheen). Bare and polished (under * 1.3 + 0.16, roughness less 55%) drew every bar of a rusty
+    // lantern as polished steel. A non-metal's edge goes lighter and smoother.
+    const bare: Vec3 = metallic
+      ? [Math.min(1, under[0] * 1.15 + 0.08), Math.min(1, under[1] * 1.15 + 0.08), Math.min(1, under[2] * 1.15 + 0.08)]
+      : [under[0] + (1 - under[0]) * 0.35, under[1] + (1 - under[1]) * 0.35, under[2] + (1 - under[2]) * 0.35];
+    color = lerp3(color, bare, edge);
+    rough *= 1 - (metallic ? 0.25 : 0.55) * edge;
+    if (metallic) metal += (1 - metal) * edge;
+  }
+  const bump = m.bump ?? 0;
+  const height = bump > 0 ? bumpHeight(m, x, y, z) : 0;
+  // Grime gathers in cavities and, on a bumped surface, in the bumps' hollows.
+  const low = bump > 0 && wear > 0 ? Math.max(0, -height / bump) * wear * 0.5 : 0;
+  const grime = Math.min(1, cavity + low);
+  if (grime > 0) {
+    color = [color[0] * (1 - 0.5 * grime), color[1] * (1 - 0.5 * grime), color[2] * (1 - 0.5 * grime)];
+    rough += (1 - rough) * 0.6 * grime;
+    metal *= 1 - 0.5 * grime;
+  }
+  return { color, rough, metal, glow: m.glow, height };
+}
+
+/**
+ * How much of a worn metal's band is rubbed through at a local point, 0..1:
+ * scuffs and chips, a fractal noise two probes across in the paint frame (so
+ * they move with the part), thresholded to cover a share of the band. The
+ * share grows with the band's strength and the wear: about 60% of a thick
+ * part's sharp edge at wear 0.45, broken along it, and about 30% of a part
+ * thinner than two probes, which reads all edge only because the probe is
+ * wider than it (a line of contact a probe wide is about a fifth of the
+ * lantern's bars round). An edge wholly rubbed through read as a polished
+ * band, and a bar as polished steel. Three calls to `noise3`.
+ */
+function scuffs(m: Material, x: number, y: number, z: number, band: number, wear: number, probe: number, thin: number): number {
+  const f = 1 / (2 * probe);
+  // Three octaves of fractal noise lie between about 0.36 and 0.64 (5% and 95%); spread to 0..1, roughly even.
+  const u = smoothstep(0.36, 0.64, fbm3(x * f, y * f, z * f, m.seed + 43, 3));
+  const share = band * (0.5 + 0.3 * wear - 0.35 * Math.max(0, Math.min(1, thin)));
+  return smoothstep(0.92 - share, 1.08 - share, u);
+}
+
+/**
+ * The bumps' feature size: `bump_scale`, or ten times the height, which tilts the surface about ten degrees on
+ * average (measured: at five times, about twenty, and a candle read as stucco).
+ */
+export const bumpScaleOf = (m: Material): number => (m.bumpScale !== undefined && m.bumpScale > 0 ? m.bumpScale : Math.max(1e-6, (m.bump ?? 0) * 10));
+
+/** The bump's height at a local point: fractal noise of the bump's feature size, `bump` high either way of the surface. */
+export function bumpHeight(m: Material, x: number, y: number, z: number): number {
+  const bump = m.bump ?? 0;
+  if (!(bump > 0)) return 0;
+  const f = 1 / bumpScaleOf(m);
+  return bump * (fbm3(x * f, y * f, z * f, m.seed + 29, 3) * 2 - 1);
+}
+
+/**
+ * The bump's slope along two directions on the surface: `u1` and `u2` are
+ * how far the local point moves per world unit along each (the paint frame's
+ * image of two world tangents). The bumps' height and size are both in the
+ * paint frame, so a part scaled after painting keeps its bumps' look, as it
+ * keeps its pattern's: the slope is taken in the frame's own units, central
+ * differences a tenth of the feature size apart along each direction, and
+ * weighted by how much that direction stretches against the frame's mean,
+ * which is exact for a turn and a uniform scale. A step of a tenth of the
+ * feature in world units instead spanned whole bumps on a part scaled down,
+ * and made a part scaled by s bumpier by 1/s (measured: one ball built at
+ * size, ten times big and scaled down, ten times small and scaled up, read
+ * as three finishes). The beauty render (which finds `u` from two nearby
+ * hits) and the baker (from a triangle's corners) measure the same slope.
+ */
+export function bumpSlope(m: Material, x: number, y: number, z: number, u1: Vec3, u2: Vec3): [number, number] {
+  if (!((m.bump ?? 0) > 0)) return [0, 0];
+  const e = bumpScaleOf(m) * 0.1;
+  const k1 = Math.hypot(u1[0], u1[1], u1[2]), k2 = Math.hypot(u2[0], u2[1], u2[2]);
+  const k = k1 > 0 && k2 > 0 ? Math.sqrt(k1 * k2) : k1 || k2;
+  const along = (u: Vec3, ku: number): number => {
+    if (!(ku > 0)) return 0;
+    const dx = (u[0] / ku) * e, dy = (u[1] / ku) * e, dz = (u[2] / ku) * e;
+    return ((bumpHeight(m, x + dx, y + dy, z + dz) - bumpHeight(m, x - dx, y - dy, z - dz)) / (2 * e)) * (ku / k);
+  };
+  return [along(u1, k1), along(u2, k2)];
+}
+
+/**
+ * How convex the field's surface is near a point, at the scale `h`, from
+ * second differences of the distance: +1 on a sharp convex edge, -1 in a
+ * sharp crease, 0 on a flat face, h/R on a sphere of radius R; a point
+ * within `h` of an edge reads the edge, so `h` is the width of the band
+ * wear brightens. The level set's curvature is the Laplacian less the
+ * second derivative along the normal, over the gradient's length, which is
+ * exact for any field whose sign is right, not only a true distance (a
+ * loft, a smooth blend, a displace): the Laplacian alone counts the field's
+ * own bending off the surface as curvature. Nine calls to `dist`.
+ *
+ * Given `thin`, it also writes there how thin the part is under the point,
+ * for a worn metal's scuffs: 1 where the point two probes in along the
+ * normal is out the other side by a quarter of a probe (a bar, a wire or a
+ * ring's tube under about 1.75 probes across), 0 where it is a quarter probe
+ * inside (over about 2.25), smooth between. A thick part's edge is a wedge
+ * whose inside goes on, so it reads 0 however sharp; a part thinner than two
+ * probes reads all edge, and this is what tells it from one. It is measured
+ * along the normal, so a thin plate's rim, whose normal runs along the
+ * plate, reads as the edge it is. One more call.
+ */
+export function fieldCurvature(dist: DistFn3, x: number, y: number, z: number, h: number, thin?: Float64Array): number {
+  if (thin) thin[0] = 0;
+  const d0 = dist(x, y, z);
+  const xp = dist(x + h, y, z), xm = dist(x - h, y, z);
+  const yp = dist(x, y + h, z), ym = dist(x, y - h, z);
+  const zp = dist(x, y, z + h), zm = dist(x, y, z - h);
+  const gx = xp - xm, gy = yp - ym, gz = zp - zm;
+  const gl = Math.hypot(gx, gy, gz);
+  if (!(gl > 1e-12)) return 0;
+  const nx = gx / gl, ny = gy / gl, nz = gz / gl;
+  const lap = xp + xm + yp + ym + zp + zm - 6 * d0;
+  const dnn = dist(x + nx * h, y + ny * h, z + nz * h) + dist(x - nx * h, y - ny * h, z - nz * h) - 2 * d0;
+  if (thin) thin[0] = smoothstep(-0.25 * h, 0.25 * h, dist(x - nx * 2 * h, y - ny * 2 * h, z - nz * 2 * h));
+  // lap and dnn are h^2 times the derivatives, gl is 2h times the gradient: kappa * h / 2 = (lap - dnn) / gl.
+  const c = (lap - dnn) / gl;
+  return Math.max(-1, Math.min(1, c));
+}
+
+/** Whether `surface()` reads how thin the part is: a worn metal's scuffs do, so its caller pays `fieldCurvature()` one more call. */
+export const readsThin = (m: Material): boolean => (m.wear ?? 0) > 0 && m.metal >= 0.5;
+
+/** The probe `fieldCurvature()` takes for wear: about one and a half cells at the default grid, so the worn band is a look, not a resolution. */
+export const wearProbe = (longestSide: number): number => Math.max(1e-6, longestSide * 0.012);
 
 /** The picture's (u, v) in 0..1 for a local point, or undefined off a planar picture's edge. */
 export function imageUV(img: ImageTexture, x: number, y: number, z: number): [number, number] | undefined {

@@ -56,6 +56,14 @@ A spur gear built as a 2D profile and extruded: a disc, teeth added in a
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/gear.aix) · <a href="/aixle/viewers/gear.html" target="_blank" rel="noopener">viewer</a>
 
+### guitar
+
+An acoustic guitar standing on its end, its top facing +z. The body is one
+
+![guitar, beauty render](../examples/renders/guitar_beauty.png) ![guitar, contact sheet](../examples/renders/guitar.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/guitar.aix) · <a href="/aixle/viewers/guitar.html" target="_blank" rel="noopener">viewer</a>
+
 ### lamp
 
 A desk lamp: a weighted base, an arm that is a tube bent through four
@@ -63,6 +71,14 @@ A desk lamp: a weighted base, an arm that is a tube bent through four
 ![lamp, beauty render](../examples/renders/lamp_beauty.png) ![lamp, contact sheet](../examples/renders/lamp.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/examples/lamp.aix) · <a href="/aixle/viewers/lamp.html" target="_blank" rel="noopener">viewer</a>
+
+### lantern
+
+A worn iron lantern with a candle burning inside: the PBR finish. The iron is the
+
+![lantern, beauty render](../examples/renders/lantern_beauty.png) ![lantern, contact sheet](../examples/renders/lantern.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/examples/lantern.aix) · <a href="/aixle/viewers/lantern.html" target="_blank" rel="noopener">viewer</a>
 
 ### medal
 
@@ -348,14 +364,6 @@ round 10: A bolted wheel hub flange for printing: a thick disc with a raised bos
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub.aix) · <a href="/aixle/viewers/round-10_hub.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/hub.report.md)
 
-### round-10_hub_probe_onebyone
-
-round 10: Probe: the same hub as hub.aix with the cutters subtracted one by one instead of as one union,
-
-![round-10_hub_probe_onebyone, beauty render](../dogfood/renders/round-10_hub_probe_onebyone_beauty.png) ![round-10_hub_probe_onebyone, contact sheet](../dogfood/renders/round-10_hub_probe_onebyone.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/hub_probe_onebyone.aix) · <a href="/aixle/viewers/round-10_hub_probe_onebyone.html" target="_blank" rel="noopener">viewer</a>
-
 ### round-10_ring
 
 round 10: A jewelled ring on a velvet display stand, about 1.5 tall on y = 0.
@@ -371,6 +379,78 @@ round 10: A glass terrarium: a walnut base with a shallow recess, a bell-jar dom
 ![round-10_terrarium, beauty render](../dogfood/renders/round-10_terrarium_beauty.png) ![round-10_terrarium, contact sheet](../dogfood/renders/round-10_terrarium.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-10/terrarium.aix) · <a href="/aixle/viewers/round-10_terrarium.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-10/terrarium.report.md)
+
+### round-11_door
+
+round 11: A dungeon door for a game engine, shipped as a GLB.
+
+![round-11_door, beauty render](../dogfood/renders/round-11_door_beauty.png) ![round-11_door, contact sheet](../dogfood/renders/round-11_door.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/door.aix) · <a href="/aixle/viewers/round-11_door.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/door.report.md)
+
+### round-11_mixer
+
+round 11: A tilt-head kitchen stand mixer. One unit is a decimetre (10 cm).
+
+![round-11_mixer, beauty render](../dogfood/renders/round-11_mixer_beauty.png) ![round-11_mixer, contact sheet](../dogfood/renders/round-11_mixer.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/mixer.aix) · <a href="/aixle/viewers/round-11_mixer.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/mixer.report.md)
+
+### round-11_shelf
+
+round 11: A bookcase: an oak case 8 wide, 9.95 tall and 3 deep (one unit is 10 cm),
+
+![round-11_shelf, beauty render](../dogfood/renders/round-11_shelf_beauty.png) ![round-11_shelf, contact sheet](../dogfood/renders/round-11_shelf.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf.aix) · <a href="/aixle/viewers/round-11_shelf.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/shelf.report.md)
+
+### round-11_shelf_lib
+
+round 11: shelf_lib: a parametric bookcase, the books on it and the bookends that
+
+![round-11_shelf_lib, beauty render](../dogfood/renders/round-11_shelf_lib_beauty.png) ![round-11_shelf_lib, contact sheet](../dogfood/renders/round-11_shelf_lib.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/shelf_lib.aix) · <a href="/aixle/viewers/round-11_shelf_lib.html" target="_blank" rel="noopener">viewer</a>
+
+### round-11_stand
+
+round 11: A desk stand for a phone, printed in PLA standing on its base.
+
+![round-11_stand, beauty render](../dogfood/renders/round-11_stand_beauty.png) ![round-11_stand, contact sheet](../dogfood/renders/round-11_stand.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-11/stand.aix) · <a href="/aixle/viewers/round-11_stand.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-11/stand.report.md)
+
+### round-12_decanter
+
+round 12: A glass decanter on a wooden coaster, half full of a dark amber spirit,
+
+![round-12_decanter, beauty render](../dogfood/renders/round-12_decanter_beauty.png) ![round-12_decanter, contact sheet](../dogfood/renders/round-12_decanter.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/decanter.aix) · <a href="/aixle/viewers/round-12_decanter.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/decanter.report.md)
+
+### round-12_desk
+
+round 12: A writing desk at night, drawn in centimetres: a small walnut desk with one
+
+![round-12_desk, beauty render](../dogfood/renders/round-12_desk_beauty.png) ![round-12_desk, contact sheet](../dogfood/renders/round-12_desk.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/desk.aix) · <a href="/aixle/viewers/round-12_desk.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/desk.report.md)
+
+### round-12_plaque
+
+round 12: A cast brass plaque to be screwed to a park bench, 200 x 80 mm.
+
+![round-12_plaque, beauty render](../dogfood/renders/round-12_plaque_beauty.png) ![round-12_plaque, contact sheet](../dogfood/renders/round-12_plaque.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/plaque.aix) · <a href="/aixle/viewers/round-12_plaque.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/plaque.report.md)
+
+### round-12_plate
+
+round 12: A machined aluminium mounting plate for a NEMA 17 stepper motor, in millimetres.
+
+![round-12_plate, beauty render](../dogfood/renders/round-12_plate_beauty.png) ![round-12_plate, contact sheet](../dogfood/renders/round-12_plate.png)
+
+[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-12/plate.aix) · <a href="/aixle/viewers/round-12_plate.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-12/plate.report.md)
 
 ### round-2_excavator
 
@@ -491,54 +571,6 @@ round 5: A sailing dinghy on a cradle, about 5 units long. Bow is +z. The cradle
 ![round-5_sailboat, beauty render](../dogfood/renders/round-5_sailboat_beauty.png) ![round-5_sailboat, contact sheet](../dogfood/renders/round-5_sailboat.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat.aix) · <a href="/aixle/viewers/round-5_sailboat.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-5/sailboat.report.md)
-
-### round-5_sailboat_probe_dark
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_dark, beauty render](../dogfood/renders/round-5_sailboat_probe_dark_beauty.png) ![round-5_sailboat_probe_dark, contact sheet](../dogfood/renders/round-5_sailboat_probe_dark.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_dark.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_dark.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_decal
-
-round 5: Probe: which decal wins where two regions overlap?
-
-![round-5_sailboat_probe_decal, beauty render](../dogfood/renders/round-5_sailboat_probe_decal_beauty.png) ![round-5_sailboat_probe_decal, contact sheet](../dogfood/renders/round-5_sailboat_probe_decal.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_decal.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_decal.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_main
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_main, beauty render](../dogfood/renders/round-5_sailboat_probe_main_beauty.png) ![round-5_sailboat_probe_main, contact sheet](../dogfood/renders/round-5_sailboat_probe_main.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_main2
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_main2, beauty render](../dogfood/renders/round-5_sailboat_probe_main2_beauty.png) ![round-5_sailboat_probe_main2, contact sheet](../dogfood/renders/round-5_sailboat_probe_main2.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_main2.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_main2.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_sharp
-
-round 5: A sailing dinghy on a cradle. Bow is +z, keel on y = 0 while building,
-
-![round-5_sailboat_probe_sharp, beauty render](../dogfood/renders/round-5_sailboat_probe_sharp_beauty.png) ![round-5_sailboat_probe_sharp, contact sheet](../dogfood/renders/round-5_sailboat_probe_sharp.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_sharp.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_sharp.html" target="_blank" rel="noopener">viewer</a>
-
-### round-5_sailboat_probe_well
-
-round 5: Probe: why does a decal region that contains a well's floor not paint it?
-
-![round-5_sailboat_probe_well, beauty render](../dogfood/renders/round-5_sailboat_probe_well_beauty.png) ![round-5_sailboat_probe_well, contact sheet](../dogfood/renders/round-5_sailboat_probe_well.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-5/sailboat_probe_well.aix) · <a href="/aixle/viewers/round-5_sailboat_probe_well.html" target="_blank" rel="noopener">viewer</a>
 
 ### round-5_treehouse
 
@@ -667,38 +699,6 @@ round 9: A machined L-bracket for a print: a base plate on y = 0, an upright at 
 ![round-9_bracket, beauty render](../dogfood/renders/round-9_bracket_beauty.png) ![round-9_bracket, contact sheet](../dogfood/renders/round-9_bracket.png)
 
 [program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket.aix) · <a href="/aixle/viewers/round-9_bracket.html" target="_blank" rel="noopener">viewer</a> · [the agent's report](../dogfood/round-9/bracket.report.md)
-
-### round-9_bracket_probe_void
-
-round 9: Probe: void() on a blind cut (a counterbore) versus a through cut.
-
-![round-9_bracket_probe_void, beauty render](../dogfood/renders/round-9_bracket_probe_void_beauty.png) ![round-9_bracket_probe_void, contact sheet](../dogfood/renders/round-9_bracket_probe_void.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void.html" target="_blank" rel="noopener">viewer</a>
-
-### round-9_bracket_probe_void2
-
-round 9: Probe 2: which part of the bracket makes void(cbore, model) fail?
-
-![round-9_bracket_probe_void2, beauty render](../dogfood/renders/round-9_bracket_probe_void2_beauty.png) ![round-9_bracket_probe_void2, contact sheet](../dogfood/renders/round-9_bracket_probe_void2.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void2.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void2.html" target="_blank" rel="noopener">viewer</a>
-
-### round-9_bracket_probe_void3
-
-round 9: Probe 3: void() on a counterbore cut as part of a union of cutters.
-
-![round-9_bracket_probe_void3, beauty render](../dogfood/renders/round-9_bracket_probe_void3_beauty.png) ![round-9_bracket_probe_void3, contact sheet](../dogfood/renders/round-9_bracket_probe_void3.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void3.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void3.html" target="_blank" rel="noopener">viewer</a>
-
-### round-9_bracket_probe_void4
-
-round 9: Probe 4: which members of a cutter union does void() misread?
-
-![round-9_bracket_probe_void4, beauty render](../dogfood/renders/round-9_bracket_probe_void4_beauty.png) ![round-9_bracket_probe_void4, contact sheet](../dogfood/renders/round-9_bracket_probe_void4.png)
-
-[program](https://github.com/tyevco/aixle/blob/main/dogfood/round-9/bracket_probe_void4.aix) · <a href="/aixle/viewers/round-9_bracket_probe_void4.html" target="_blank" rel="noopener">viewer</a>
 
 ### round-9_campsite
 

@@ -1,0 +1,18 @@
+# Probe: overlap() of each kind of book (upright, leaning left and right, flat, flat 0.45 up) on the library's board, alone: every one returns at once. The hang needed the board's height to come out of arithmetic (shelf_probe_hang.aix).
+use "shelf_lib" as lib
+case = {w: 8, d: 3, t: 0.2, plinth: 0.6, back: 0.1}
+spacing = {count: 3, gap: 2.85}
+board = lib.shelf_board(case, spacing, 0)
+y = lib.shelf_top(case, spacing, 0)
+up = lib.book({}) | move(-2, y, 0.3)
+assert overlap(up, board) < 0.0001, "upright"
+lean = lib.book({tilt: 18}) | move(-1, y, 0.3)
+right = lib.book({tilt: -15}) | move(0.5, y, 0.3)
+flat = lib.book({tilt: 90}) | move(3, y, 0.3)
+assert overlap(lean, board) < 0.0001, "leaning left"
+assert overlap(right, board) < 0.0001, "leaning right"
+assert overlap(flat, board) < 0.0001, "flat"
+
+above = lib.book({tilt: 90}) | move(3, y + 0.45, 0.3)
+assert overlap(above, board) < 0.0001, "flat, 0.45 above the board"
+show board + up + lean + right + flat + above
