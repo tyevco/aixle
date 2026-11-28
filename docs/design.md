@@ -1629,7 +1629,58 @@ beauty render takes the same time: at 384 pixels on two threads, six
 interleaved runs each on a shared machine, a median of 1.62 s before
 (1.46 to 1.86) and 1.59 s after (1.53 to 1.70); the film is a
 smoothstep and a few multiplications on what the patches already
-computed. It has not yet been read blind.
+computed.
+
+It was read blind, in pairs, as before. In each pair one side was the
+render before the change and the other after; the side was chosen by
+the subject's name, and the reader saw only the images. The pairs were
+the lantern, the door's hero shot, the chest, and the hardware plate,
+whose two sides are the same picture and serve as a control.
+- **Lantern.** Before, the frame's bare metal read as "polished or satin
+  steel, chrome, aluminium or galvanised steel, not as iron", the roof
+  near white, "rust spots painted onto chrome", and the far bars,
+  candlelit, as brass. After, every metal answer was right: dark iron,
+  wrought or cast, heavily rusted, old and well used. The roof's lighter
+  patches read as dull reflections on worn iron, and the far bars as
+  candlelight on metal (with a caution that they could be taken for
+  brass).
+- **Door.** A near tie, with no answer wrong on either side. The reader
+  slightly preferred the old side's sheen, which parts the bare metal
+  from the rust a little more. Both sides hedged the iron knuckles as
+  brass and the walnut torch handle as iron.
+- **Chest.** The reader trusted the old side by a small margin: its
+  mid-grey bands show their faces and edges, while the new near-black
+  bands hide any finish. Against the program the new side is nearer.
+  The old side never named iron (matte steel, zinc or lead); the new one
+  named blackened or forged iron first, though it still hedged painted
+  metal, plastic and rubber. Plain iron with no wear, seen face on under
+  the studio, now mirrors the dark rig and draws almost black. That is
+  how blackened iron looks, but its finish shows only at its edges. It
+  is left open; a satin `wear` is the program's way to show the iron.
+- **Hardware plate.** Read the same on both sides. Both missed that the
+  zinc bolt, nut and washer are a different finish from the steel
+  screw, chain and handle.
+
+No answer about any subject was wrong only for the new side.
+
+The overcast's reflection rig (proposal 28 in the roadmap) was read the
+same way, on round 9's bracket and bottle and round 10's hub. The reader
+trusted the new side in all three pairs, and every plastic or paint
+reading of the old side is gone: the bracket's iron pins had been
+"equally dark grey plastic", the hub "could also pass for light grey
+plastic or paint, with nothing on its vertical faces saying metal", and
+the bottle's brass cap and bronze collar had been gold-anodised aluminium
+or paint and tan plastic. No answer was wrong only for the new side.
+Some misreadings were on both sides and are not the rig's:
+- the bracket's satin steel read as mirror-polished;
+- the hub's steel read as aluminium, its twelve holes were counted as
+  about ten, and its keyway was placed at its reflection;
+- brass read as gold, bronze as copper, and the orange-red liquid as
+  pink.
+
+A steel face turned to the sky still mirrors the white dome (a steel
+ball's top 210 levels, against 186 in the studio). That is the overcast's
+own sky, and the guide points to the studio for darker tops.
 
 ## Minecraft geometry
 

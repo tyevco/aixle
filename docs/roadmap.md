@@ -1240,7 +1240,11 @@ the ring's FOREVER, 50 by 5 pixels at 384, is darker marks but still no
 letters. The first was measured after as the key's broad highlight on
 iron at a polished section's reflectance, and the iron preset is now an
 oxide skin's, half that, with a film of oxide between the rust's
-patches (design.md, the end of "Read blind"). The round tests the fixes.
+patches. Read blind again, the lantern's frame read as old, dark,
+rusting iron, every metal answer right, where before it was "rust spots
+painted onto chrome". One pair, the chest, went the other way by a small
+margin: its plain iron bands, face on, now draw near black and hide their
+finish (design.md, the end of "Read blind"). The round tests the fixes.
 
 **What.** A round of four fresh agents, briefed as `dogfood/README.md`
 describes, each brief chosen to need what the redesign changed:
@@ -1369,9 +1373,11 @@ shaded sides under `overcast` move only by the porcelain's gloss: 167.1
 to 166.3 levels, the teapot's lower body 196.0 to 193.3, the mug's
 157.9 to 156.1, at most 5 levels at any porcelain pixel.
 
-Not done here: the blind check of the pairs, which the review composed
-for the lead's blind reader: three programs, the bracket, the hub and
-the bottle (the hub's probe has no committed renders).
+Read blind after it was merged, on the three programs with committed
+renders: the bracket, the hub and the bottle (the hub's probe has none).
+The reader trusted the new side in all three pairs. Every plastic or
+paint reading of the old side is gone, and no answer was wrong only for
+the new side (design.md, the end of "Read blind").
 
 The proposal, as written before it was built:
 
