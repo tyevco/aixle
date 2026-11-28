@@ -731,8 +731,22 @@ describe("the viewer's scene", () => {
     expect(scene.light.sh).toHaveLength(27);
     // The studio's own lights are the page's calibrated ones.
     expect(script).toContain(`const STUDIO = ${JSON.stringify(STUDIO)};`);
-    // Glass stays out of the GLB and the page: transmission is its own change (roadmap 21).
-    expect(html).not.toMatch(/transmission|KHR_materials_ior|KHR_materials_volume/);
+    // Glass stays out of the page: transmission is its own change (roadmap 21).
+    expect(script).not.toMatch(/transmission|KHR_materials_ior|KHR_materials_volume/);
+  });
+
+  it("keeps glass out of the GLB a run writes, as its own change (roadmap 21)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      run('show (sphere(0.5) | move(0, 0.5, 0) | paint("glass")) + (box(1.4, 0.1, 1.4) | move(0, -0.05, 0) | paint("oak"))', "glass.aix", dir, { grid: 24, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64, beauty: false });
+      const glb = readFileSync(join(dir, "model.glb"));
+      const json = glb.toString("utf8", 20, 20 + glb.readUInt32LE(12));
+      expect(JSON.parse(json).materials.map((m: { name: string }) => m.name)).toContain("glass");
+      expect(json).not.toMatch(/transmission|KHR_materials_ior|KHR_materials_volume/);
+      expect(pageScript(readFileSync(join(dir, "viewer.html"), "utf8"))).not.toMatch(/transmission|\bior\b|thickness/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("lights the scene as beauty.png and the studio as its own, on the tone curve, when the page runs", async () => {
