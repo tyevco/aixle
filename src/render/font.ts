@@ -46,6 +46,8 @@ const GLYPHS: Record<string, readonly string[]> = {
   "9": [" ### ", "#   #", "#   #", " ####", "    #", "   # ", " ##  "],
   " ": ["     ", "     ", "     ", "     ", "     ", "     ", "     "],
   ".": ["     ", "     ", "     ", "     ", "     ", " ##  ", " ##  "],
+  // What a name cut short ends in (the steps sheet, the pose summaries); without it the unknown glyph drew a "?".
+  "…": ["     ", "     ", "     ", "     ", "     ", "# # #", "# # #"],
   ",": ["     ", "     ", "     ", "     ", " ##  ", " ##  ", " #   "],
   "-": ["     ", "     ", "     ", " ### ", "     ", "     ", "     "],
   _: ["     ", "     ", "     ", "     ", "     ", "     ", "#####"],

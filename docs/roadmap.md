@@ -1595,14 +1595,17 @@ occlusion (design.md, "A grid over the pieces").
     the probes. The tag (`cut`, `mask`, `region`, `unused`) is now a
     third line under the size on a sheet that has a tagged step, the
     name is cut to the cell's width, and a size is never cut: where one
-    does not fit (for the rendered programs, only in cells under 126 px,
-    from `--size` under 360, not at the committed 384 or the default
-    512) the sheet drops the spaces round its "×", and where it still
-    does not it widens the cells to the widest size. None is over at
-    cells of 22 to 179 px. The title bar shortens on a sheet of under
-    five steps, which cut it off at "PROGRA", and "too fine for this
-    thumbnail" takes two lines. Fifteen of the 34 examples' steps
-    sheets moved; their thumbnails and name lines are the same pixels.
+    does not fit (for the rendered programs, whose widest size is 125
+    px, only in cells under 125 px, from `--size` 355 down, not at the
+    committed 384 or the default 512) the sheet drops the spaces round
+    its "×", and where it still does not it widens the cells to the
+    widest size. None is over at cells of 22 to 179 px. The title bar
+    shortens where the sheet is too narrow for it (three steps or fewer
+    at the committed size), which cut it off at "PROGRA", and "too fine
+    for this thumbnail" takes two lines. A name cut short ended in "?",
+    the font having no "…": it has one now. Fifteen of the 34 examples'
+    steps sheets moved; their thumbnails and name lines are the same
+    pixels.
   - Done: when `void()` failed it could name the cutter's step for a
     solid point (a pot unioned after its bored spout was reported "in
     'bore'"): the attribution took the smallest box among every step of

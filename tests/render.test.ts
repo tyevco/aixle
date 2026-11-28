@@ -224,6 +224,20 @@ describe("canvas and font", () => {
     expect(end).toBe(textWidth("AB 1"));
     expect(c.get(1, 0)).toBe(0x000000);
   });
+  it("draws the ellipsis a cut name ends in as dots, not as the unknown glyph's question mark", () => {
+    // The steps sheet and the pose summaries end a long name in "…"; the font had no glyph for it, so a cut name read
+    // "1. TRANSPORT_BUCKET_S?", a question the sheet was not asking.
+    const ink = (t: string) => {
+      const c = new Canvas(6, 8, 0xffffff);
+      drawText(c, 0, 0, t, 0x000000);
+      const rows: string[] = [];
+      for (let y = 0; y < 7; y++) { let r = ""; for (let x = 0; x < 5; x++) r += c.get(x, y) === 0 ? "#" : " "; rows.push(r); }
+      return rows;
+    };
+    expect(ink("…")).not.toEqual(ink("?"));
+    // Three dots two pixels tall, like "."'s, so they sit apart from an underscore before them ("WITH_…").
+    expect(ink("…")).toEqual(["     ", "     ", "     ", "     ", "     ", "# # #", "# # #"]);
+  });
 });
 
 describe("what a light adds", () => {
