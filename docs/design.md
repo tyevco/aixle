@@ -653,16 +653,54 @@ shaded side is 103 levels (the old renderer 90), the mug's 82 (89) and
 the rope's grooves 18 (19). The light's rig reaches its darkness right
 at the horizon, because a shaded side takes 70% of its sky light from
 the ground on its own side and the camera's, and a bright band either
-side of the horizon lit shaded sides and almost no reflection. The
-darker reflections are the studio's alone: under the overcast sky silver
-and steel's upward faces still read near white, and that is the sky a
-mirror metal reads white in.
+side of the horizon lit shaded sides and almost no reflection.
+
+The overcast has the same split. Its light is the bare dome; what a
+surface mirrors is flagged on the camera's side, as a photographer flags
+a shot outdoors (`OVERCAST.reflect`, read by FILTERED, REFLECT and
+MIRROR as the studio's is): a dark band from the horizon up to about 20
+degrees, gone by 44, reaching round past the sides, and a dark ground
+there, lifted on the key's side as the studio's flag is. The dome above
+stays white. With no rig for its reflections a metal mirrored white sky
+all round and read pale and even, its form gone. Measured on a plate of
+the metal presets beside clay (a tile and a ball of each, the default
+camera) and on the round 9 and 10 programs that take the overcast, the
+studio's figures in brackets: a ball's face turned to the camera, which
+mirrors the ground behind the camera, went from 142 levels to 96 in
+steel (111), from 181 to 114 in silver (122) and from 81 to 59 in chrome
+(55), and the whole steel ball from 173 to 150 (151), so a chrome or
+silver ball shows a white sky over a dark horizon and ground, as one
+does outdoors. The hub's rim, flat at 145 levels across, shades from
+129 on the key's side to 99 (the studio's 150 to 90), and over the hub
+its luma against the studio render's went from 12.9 levels brighter on
+average to 0.5, the mean absolute difference from 16.9 to 11.1 and the
+correlation from 0.927 to 0.972. Without the lift on the key's side the
+bottle's brass cap mirrored the flag where it faces the camera and the
+key and read olive (101 levels at a saturation of 0.85); with it, 174
+(the old 180).
+
+A face turned to the sky still mirrors the dome: steel's faces turned
+up (normals within 41 degrees of the zenith) stay at 210 levels, a
+saturation of 0.04 (the studio's 186, 0.05), silver's at 236 (189), and
+the hub's top at 190 (177). That is what a metal outdoors shows, and no
+flag on the camera's side reaches it: walls up to the zenith there
+brought steel's to 199 and silver's to 231. Taking the zenith's
+brightening out of the reflections brought them to 190 and 217 and the
+hub's top to 178, and turned the white sky in a chrome ball grey, so the
+dome stays. The light a surface takes is the same bytes as before (the
+sky's SH do not depend on the camera or the key), so the teapot's and
+the mug's shaded sides under the overcast move only by their porcelain's
+gloss, which mirrors the flags too: the teapot's from 167.1 levels to
+166.3 and its lower body from 196.0 to 193.3, the mug's from 157.9 to
+156.1, at most 5 levels at any porcelain pixel (the teapot's gold knob,
+a metal, darkens up to 69 where it faces the camera).
 
 The other skies: the overcast is a white dome, brighter towards the
-zenith; the sunset a blue sky over a warm band with a sun 3 degrees up
-(`SUN_ELEVATION`) at the key's azimuth, with its glow; the night a dark
-blue sky, a moon at the key's azimuth and its elevation held between 25
-and 60 degrees (`MOON_ELEVATION`), and stars. The sun and the moon stand
+zenith, flagged for reflections as above; the sunset a blue sky over a
+warm band with a sun 3 degrees up (`SUN_ELEVATION`) at the key's
+azimuth, with its glow; the night a dark blue sky, a moon at the key's
+azimuth and its elevation held between 25 and 60 degrees
+(`MOON_ELEVATION`), and stars. The sun and the moon stand
 where the key comes from, so every frame of a run shares one sky (but
 for a steep shot's turned key, below). The stars sit on a grid of equal
 angles (rings 0.008 radians high, 4% of the cells holding a star of
@@ -704,9 +742,10 @@ levels of the prototype's in all four).
 
 The tables are built once per run per sky, on the main thread, in 50 to
 100 ms, and kept in the run's cache (kernel.ts, `BeautyCache`) keyed by
-exactly what each sky depends on: the overcast on nothing, the sunset
-and the night on the key, the studio on the camera's azimuth and the key
-(the model's shadow on its floor). beauty.png, each camera's shot and
+exactly what each sky depends on: the sunset and the night on the key,
+the studio and the overcast on the camera's azimuth and the key (the
+rigs stand on the camera's side; the studio's shadow on its floor and
+both flags' lift follow the key). beauty.png, each camera's shot and
 the strips share them, the viewer page builds its sky into the same
 cache, and the pool's workers read them on SharedArrayBuffers. A hit and
 a miss give the same bytes, which a test checks for all four skies.
@@ -2507,7 +2546,8 @@ expects.
 The Scene mode is the program's, what beauty.png shows drawn from the
 export (round 11: a night scene lit by a torch was shown in a daylight
 studio). Its environment is the beauty render's own sky, the
-reflections' map (FILTERED, with the studio's dark side and its cards)
+reflections' map (FILTERED, with the studio's dark side and its cards,
+or the overcast's flags)
 as a 128 × 64 lat-long of linear half floats, 64 KB of the page, through
 three.js's prefilter at the render's intensity E. Diffuse surfaces are
 lit from the sky's spherical harmonics, as the beauty render lights

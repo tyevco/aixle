@@ -9,13 +9,15 @@
  *   the floor away from the key, and three cards that only reflections see (a fill card right and low, an overhead
  *   strip across the frame, a rim strip behind on the left). A metal facing the camera reflects the dark and the
  *   cards, so its form reads; a model's shaded side faces the dark, so it is modelled.
- * - **overcast**: a white dome, brighter towards the zenith.
+ * - **overcast**: a white dome, brighter towards the zenith, lighting a surface from all round; what a surface mirrors
+ *   is flagged on the camera's side as a photographer flags a shot outdoors, a dark band low over the horizon and a
+ *   dark ground, so a metal facing the camera has something to show.
  * - **sunset**: a blue sky over a warm band, and a sun 3° up where the key light comes from, with its glow.
  * - **night**: a dark blue sky, a moon where the key light comes from, and stars.
  *
  * The gradient is the old backdrop's: its display colours are interpolated as the old renderer did and run through
  * the tone curve's inverse, so the backdrop the camera sees is the one every render had. The structure (walls,
- * ceiling, flag, the overcast dome) is the studio's rigging out of shot: lighting and reflections see it, the
+ * ceiling, flag, the overcast dome and its flags) is rigging out of shot: lighting and reflections see it, the
  * backdrop does not.
  *
  * A sky is looked at in one of five modes:
@@ -216,6 +218,22 @@ export const STUDIO = {
 } as const;
 /** The overcast dome: the gradient at the zenith, as a share of the sky colour. */
 export const OVERCAST_ZENITH = 1.9;
+/**
+ * The overcast's rig for what a surface mirrors (FILTERED, REFLECT, MIRROR), read as the studio's `reflect` is; the
+ * light a surface takes (DIFFUSE) is the bare dome, so a shaded side's light does not move. As a photographer flags a
+ * shot outdoors: flags on stands on the camera's side, a dark band from the horizon up to `wallsTop` (full to the
+ * first dy, gone by the second, about 20° and 44° up) reaching round past the sides, and a dark ground there, lifted on
+ * the key's side as the studio's flag is (the floor the key lights is bright; without the lift a brass cap turned to
+ * the camera and the key mirrored the flag and read olive). The dome above stays white: a face turned to the sky
+ * mirrors it, as it would outdoors.
+ *
+ * Without it a metal mirrored a white sky all round and read pale and even, its form gone: a steel ball's face turned
+ * to the camera at 142 levels (the studio's 111), silver's at 181 (122), the hub's rim flat at 145 where the studio
+ * shades it from 150 to 90. With it they are 96, 114, and the rim 129 to 99 (tools/environment-maps.ts draws it).
+ */
+export const OVERCAST = {
+  reflect: { walls: 0.85, wallsAcross: [-0.5, 0.2], wallsTop: [0.35, 0.7], flag: 0.85, flagAcross: [-0.4, 0.15], flagKey: 1, flagKeyTo: 0.6 },
+} as const;
 /** Below the horizon, the lighting modes go from the horizon's colour to the ground's over this much of −dy, as the far floor fades into the horizon: no seam in a reflection. */
 const HORIZON_BLEND = 0.05;
 /** The sun: its angular radius and how high it stands. */
@@ -265,6 +283,8 @@ export interface SkyTables {
   wallsRise: number;
   wallsAcross0: number;
   wallsAcross1: number;
+  wallsTop0: number;
+  wallsTop1: number;
   /** The ground's darkening opposite the key (the model's shadow), its profile, and the key's horizontal way, away from it. */
   shadow: number;
   shadowFrom: number;
@@ -297,11 +317,14 @@ export interface SkyTables {
   levels: Float32Array[];
 }
 
-/** The studio's rig as one kind of look sees it: the walls, the ceiling and the flag (see STUDIO). */
+/** A sky's rig as one kind of look sees it: the walls, the ceiling and the flag (see STUDIO and OVERCAST). */
 export interface Rig {
   walls: number;
   wallsAcross0: number;
   wallsAcross1: number;
+  /** The walls end above the horizon, from full at the first dy to none at the second (the overcast's); at 2, they reach the zenith. */
+  wallsTop0: number;
+  wallsTop1: number;
   zenith: number;
   flag: number;
   flagAcross0: number;
@@ -366,12 +389,12 @@ function card(out: number[], dir: Vec3, ha: number, hb: number, soft: number, L:
 // ---------------------------------------------------------------------------------------------------------------
 // Building a sky.
 
-/** What a sky depends on, normalised: the overcast on nothing, sunset and night only on the key, the studio on the camera's azimuth and the key (the model's shadow on the floor). */
+/** What a sky depends on, normalised: the overcast on the camera's azimuth (its reflections' flag), sunset and night only on the key, the studio on the camera's azimuth and the key (the model's shadow on the floor). */
 function skyInputs(env: Environment, cameraAzimuth: number, key: Vec3): { az: number; key: Vec3 } {
   // A unit key; + 0 turns −0 into 0, so a key's bytes do not depend on the sign of a zero.
   const k = normalize(key);
   if (env === "studio") return { az: cameraAzimuth + 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
-  if (env === "overcast") return { az: 0, key: [...DEFAULT_LIGHT_DIRECTION] };
+  if (env === "overcast") return { az: cameraAzimuth + 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
   return { az: 0, key: [k[0] + 0, k[1] + 0, k[2] + 0] };
 }
 
@@ -383,7 +406,7 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   const rig = (v: readonly number[]): Vec3 => [v[0] * rx + v[2] * fx, v[1], v[0] * rz + v[2] * fz];
   const cards: number[] = [];
   let walls = 0, zenith = 1, flag = 0, stars = 0, shadow = 0;
-  let reflect: Rig = { walls: 0, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], zenith: 1, flag: 0, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo };
+  let reflect: Rig = { walls: 0, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], wallsTop0: 2, wallsTop1: 2, zenith: 1, flag: 0, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo };
   const kh = Math.hypot(key[0], key[2]);
   const sx = kh > 1e-9 ? -key[0] / kh : 0, sz = kh > 1e-9 ? -key[2] / kh : 0;
   const disc: number[] = [];
@@ -391,11 +414,12 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   if (env === "studio") {
     walls = STUDIO.walls; zenith = STUDIO.zenith; flag = STUDIO.flag; shadow = STUDIO.shadow.strength;
     const R = STUDIO.reflect;
-    reflect = { walls: R.walls, wallsAcross0: R.wallsAcross[0], wallsAcross1: R.wallsAcross[1], zenith: R.zenith, flag: R.flag, flagAcross0: R.flagAcross[0], flagAcross1: R.flagAcross[1], flagKey: R.flagKey, flagKeyTo: R.flagKeyTo };
+    reflect = { walls: R.walls, wallsAcross0: R.wallsAcross[0], wallsAcross1: R.wallsAcross[1], wallsTop0: 2, wallsTop1: 2, zenith: R.zenith, flag: R.flag, flagAcross0: R.flagAcross[0], flagAcross1: R.flagAcross[1], flagKey: R.flagKey, flagKeyTo: R.flagKeyTo };
     for (const c of STUDIO.cards) card(cards, rig(c.at), c.half[0], c.half[1], c.soft, c.radiance);
   } else if (env === "overcast") {
     zenith = OVERCAST_ZENITH;
-    reflect = { ...reflect, zenith };
+    const R = OVERCAST.reflect;
+    reflect = { walls: R.walls, wallsAcross0: R.wallsAcross[0], wallsAcross1: R.wallsAcross[1], wallsTop0: R.wallsTop[0], wallsTop1: R.wallsTop[1], zenith, flag: R.flag, flagAcross0: R.flagAcross[0], flagAcross1: R.flagAcross[1], flagKey: R.flagKey, flagKeyTo: R.flagKeyTo };
   } else if (env === "sunset") {
     const e = (SUN_ELEVATION * Math.PI) / 180;
     disc.push(Math.sin(keyAz) * Math.cos(e), Math.sin(e), Math.cos(keyAz) * Math.cos(e), Math.cos(SUN_RADIUS), 40, 22, 9, 2.4, 1.1, 0.35, 0.012, 0.7, 0.3, 0.1, 0.25);
@@ -428,7 +452,7 @@ function skyFrame(env: Environment, az: number, key: Vec3, shared: boolean): Sky
   cardArr.set(cards);
   const discArr = f64(disc.length, shared);
   discArr.set(disc);
-  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], reflect, grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
+  return { env, ambient: pal.ambient, cameraAzimuth: az, key, fx, fz, walls, wallsRise: STUDIO.wallsRise, shadow, shadowFrom: STUDIO.shadow.from, shadowTo: STUDIO.shadow.to, shadowRise: STUDIO.shadow.rise, sx, sz, zenith, flag, flagRise: STUDIO.flagRise, flagAcross0: STUDIO.flagAcross[0], flagAcross1: STUDIO.flagAcross[1], flagKey: STUDIO.flagKey, flagKeyTo: STUDIO.flagKeyTo, wallsAcross0: STUDIO.wallsAcross[0], wallsAcross1: STUDIO.wallsAcross[1], wallsTop0: 2, wallsTop1: 2, reflect, grad, below, cards: cardArr, disc: discArr, stars, sh: f64(27, shared), levels: [] };
 }
 
 /** Each light's softbox: direction, the squared chord (2 − 2cos) where its edge starts and ends, and its radiance. */
@@ -705,7 +729,11 @@ export function skyAt(s: SkyTables | EnvironmentState, dx: number, dy: number, d
     if (lit) {
       let m = 1;
       if (rg.zenith !== 1 && dy > 0.4) m += (rg.zenith - 1) * ((dy - 0.4) / 0.6);
-      if (rg.walls > 0) m *= 1 - rg.walls * smooth(rg.wallsAcross0, rg.wallsAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
+      if (rg.walls > 0) {
+        let k = rg.walls * smooth(rg.wallsAcross0, rg.wallsAcross1, dx * s.fx + dz * s.fz) * smooth(0, s.wallsRise, dy);
+        if (rg.wallsTop0 < 1) k *= 1 - smooth(rg.wallsTop0, rg.wallsTop1, dy);
+        m *= 1 - k;
+      }
       r *= m; g *= m; b *= m;
     }
   } else if (!lit) {

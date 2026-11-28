@@ -470,6 +470,56 @@ describe("environments: the studio's structure", () => {
   });
 });
 
+describe("environments: the overcast's flags", () => {
+  // The camera at 35 and the default key at about −40: the camera's side away from the key is round 35 to 120.
+  const camAz = 35;
+  const mirrorModes = [FILTERED, REFLECT, MIRROR] as SkyMode[];
+
+  it("darkens what a surface mirrors on the camera's side, the ground and a band over the horizon, in every reflection mode", () => {
+    const s = buildSky("overcast", camAz, DEFAULT_LIGHT_DIRECTION);
+    // The band over the horizon (dy under OVERCAST.reflect.wallsTop's first) and the ground away from the key (the
+    // ground straight behind the camera is half lifted, the key being 75° round from it).
+    for (const d of [dirOf(camAz, 3), dirOf(camAz, 15), dirOf(camAz + 70, 10), dirOf(camAz + 30, -20), dirOf(camAz + 60, -45)])
+      for (const mode of mirrorModes) expect(look(s, d, mode)[1], `mode ${mode} at ${d}`).toBeLessThan(look(s, d, DIFFUSE)[1] * 0.3);
+    // The flags stand on the camera's side only: half way round, and on the far side, a mirror sees the bare dome.
+    for (const d of [dirOf(camAz + 180, 10), dirOf(camAz + 180, -20), dirOf(camAz + 150, 3)])
+      for (const mode of mirrorModes) expect(look(s, d, mode), `mode ${mode} at ${d}`).toEqual(look(s, d, DIFFUSE));
+  });
+
+  it("leaves the dome above the flags white, and the light a surface takes and the backdrop as they were", () => {
+    const s = buildSky("overcast", camAz, DEFAULT_LIGHT_DIRECTION);
+    // The flags end below the dome: over them a face turned to the sky mirrors the dome, brighter towards the zenith,
+    // as it would outdoors, where a face turned to the camera mirrors the dark band under it.
+    for (const d of [dirOf(camAz, 50), dirOf(camAz + 90, 60), [0, 1, 0] as Vec3])
+      for (const mode of mirrorModes) expect(look(s, d, mode), `mode ${mode} at ${d}`).toEqual(look(s, d, DIFFUSE));
+    expect(look(s, dirOf(camAz, 12), FILTERED)[1]).toBeLessThan(look(s, dirOf(camAz, 50), FILTERED)[1] * 0.25);
+    expect(look(s, [0, 1, 0], FILTERED)[1]).toBeGreaterThan(look(s, dirOf(camAz + 180, 30), FILTERED)[1] * 1.5);
+    // The light a surface takes is the bare dome whatever the camera and the key: its SH are the same bytes, so a
+    // shaded side's light does not move (the flags are the reflections' alone, as the studio's darker set is).
+    const t = buildSky("overcast", camAz + 120, lightDirection(100, 30));
+    expect(Array.from(t.sh)).toEqual(Array.from(s.sh));
+    const bare: SkyTables = { ...s, reflect: { ...s.reflect, walls: 0, flag: 0 } };
+    for (let i = 0; i < 40; i++) {
+      const d = dirOf(i * 37, -80 + i * 4.1);
+      expect(look(bare, d, DIFFUSE), `DIFFUSE reads the reflections' rig at ${d}`).toEqual(look(s, d, DIFFUSE));
+      expect(look(bare, d, BACKDROP), `BACKDROP reads the reflections' rig at ${d}`).toEqual(look(s, d, BACKDROP));
+    }
+  });
+
+  it("lifts the flag on the key's side, where the key lights the floor, and turns with the camera and the key", () => {
+    const s = buildSky("overcast", camAz, DEFAULT_LIGHT_DIRECTION);
+    // The ground towards the key on the camera's side is lit and a brass cap turned to the camera and the key mirrors
+    // it (without the lift it mirrored the flag and read olive); away from the key on the same side it is flagged.
+    const towardKey = dirOf(KEY_AZ, -20), awayFromKey = dirOf(camAz + 60, -20);
+    expect(look(s, towardKey, FILTERED)[1]).toBeCloseTo(look(s, towardKey, DIFFUSE)[1], 9);
+    expect(look(s, awayFromKey, FILTERED)[1]).toBeLessThan(look(s, awayFromKey, DIFFUSE)[1] * 0.3);
+    // The rig turns with the camera, and the lift with the key.
+    const t = buildSky("overcast", camAz + 90, lightDirection(KEY_AZ + 90, 40));
+    for (const [az, el] of [[camAz, 10], [camAz + 60, -20], [KEY_AZ, -20], [camAz - 40, -30]])
+      expect(look(t, dirOf(az + 90, el), FILTERED)[1], `${az}, ${el}`).toBeCloseTo(look(s, dirOf(az, el), FILTERED)[1], 9);
+  });
+});
+
 describe("environments: image-based light", () => {
   const L: Vec3 = [0.7, 0.35, 1.3];
   const constant: SkySampler = (_x, _y, _z, out) => { out[0] = L[0]; out[1] = L[1]; out[2] = L[2]; };
@@ -622,23 +672,27 @@ describe("environments: building and caching", () => {
       expect(shared.levels[0].buffer).toBeInstanceOf(SharedArrayBuffer);
       expect(shared.boxes.buffer).toBeInstanceOf(SharedArrayBuffer);
       expect(cache.env.size).toBe(1);
-      // A sky depends only on what it uses: sunset and night not on the camera, studio and overcast not on the key.
+      // A sky depends only on what it uses: sunset and night on the key, not the camera (another camera finds the
+      // same tables); the studio and the overcast on both (their rigs stand on the camera's side, their flags lifted
+      // on the key's).
+      buildEnvironment(env, { cameraAzimuth: 80, lights, cache });
+      expect(cache.env.size, env).toBe(env === "sunset" || env === "night" ? 1 : 2);
       buildEnvironment(env, { cameraAzimuth: 80, key: lightDirection(-10, 30), lights, cache });
-      expect(cache.env.size, env).toBe(env === "overcast" ? 1 : 2);
+      expect(cache.env.size, env).toBe(env === "sunset" || env === "night" ? 2 : 3);
     }
   });
 
   it("keys the cache at full precision: a camera or a key a hair apart is a different sky, never a near one's tables", () => {
     const k = lightDirection(30, 50);
     const nudged: Vec3 = [k[0] + 1e-9, k[1], k[2]];
-    for (const env of ["studio", "sunset", "night"] as Environment[]) {
+    for (const env of ENVIRONMENTS) {
       const cache = { env: new Map<string, unknown>() };
       const a = buildEnvironment(env, { cameraAzimuth: 35, key: k, cache });
       const b = buildEnvironment(env, { cameraAzimuth: 35, key: nudged, cache });
       expect(cache.env.size, env).toBe(2);
       expect(b.sh, env).not.toBe(a.sh);
       expect(b.key, env).not.toEqual(a.key);
-      if (env === "studio") {
+      if (env === "studio" || env === "overcast") {
         buildEnvironment(env, { cameraAzimuth: 35 + 1e-12, key: k, cache });
         expect(cache.env.size).toBe(3);
       }
@@ -721,5 +775,18 @@ describe("environments: the viewer's map", () => {
     expect(sunset.backdrop.disc?.radius).toBeCloseTo(0.022, 9);
     expect(azimuthOf(sunset.backdrop.disc!.dir)).toBeCloseTo(KEY_AZ, 6);
     expect(environmentLatLong(buildSky("night", 35, DEFAULT_LIGHT_DIRECTION)).backdrop.stars).toBe(true);
+  });
+
+  it("carries the overcast's flags to the viewer's Scene mode, and lights its diffuse surfaces from the bare dome", () => {
+    // The page reflects this map, built for beauty.png's camera, so a metal there mirrors the flags on that camera's
+    // side as beauty.png's does; its SH, which light diffuse surfaces, are the dome's alone.
+    const s = buildSky("overcast", 35, DEFAULT_LIGHT_DIRECTION);
+    const m = environmentLatLong(s);
+    const texel = (d: Vec3): number => {
+      const u = Math.atan2(d[2], d[0]) / (2 * Math.PI) + 0.5, v = Math.asin(d[1]) / Math.PI + 0.5;
+      return m.data[(Math.min(63, Math.floor(v * 64)) * 128 + Math.min(127, Math.floor(u * 128))) * 3 + 1];
+    };
+    for (const el of [-30, 10]) expect(texel(dirOf(95, el)), `${el}`).toBeLessThan(texel(dirOf(215, el)) * 0.3);
+    expect(Array.from(m.diffuseSH)).toEqual(Array.from(environmentLatLong(buildSky("overcast", 200, lightDirection(60, 40))).diffuseSH));
   });
 });
