@@ -769,6 +769,9 @@ describe("the viewer's scene", () => {
     expect(toHalf(0.5)).toBe(0x3800);
     expect(toHalf(65504)).toBe(0x7bff);
     expect(toHalf(1e6)).toBe(0x7bff);
+    // A number IEEE rounding takes past the largest half, to infinity, is the largest half too.
+    expect(toHalf(65530)).toBe(0x7bff);
+    expect(toHalf(-65535)).toBe(0xfbff);
     expect(toHalf(0)).toBe(0);
     expect(toHalf(2 ** -24)).toBe(1);
     expect(toHalf(1 + 1 / 2048)).toBe(0x3c00); // a tie, to even

@@ -104,7 +104,8 @@ export function toHalf(v: number): number {
   let h = sign | (e << 10) | (m >>> 13);
   const rest = m & 0x1fff;
   if (rest > 0x1000 || (rest === 0x1000 && h & 1)) h++;
-  return h;
+  // Rounded up out of the largest exponent: that is infinity, so the largest half instead.
+  return (h & 0x7fff) === 0x7c00 ? sign | 0x7bff : h;
 }
 
 /** Numbers as half floats, little-endian, in base64: how the page carries the sky's radiance. */
