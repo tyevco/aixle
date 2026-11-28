@@ -1234,9 +1234,12 @@ lettering under an arc, is fixed. The worn metal and the faint engraving
 were answered before this round and read blind again (design.md, the end
 of "Read blind"): worn studs, rings and bars now read as old rusty iron,
 and a polished engraving's lips no longer glint. Two things stayed open:
-the lantern's flat iron faces still read as light, silvery metal under
-the studio's overhead strip, and the ring's FOREVER, 50 by 5 pixels at
-384, is darker marks but still no letters. The round tests the fixes.
+the lantern's flat iron faces still read as light, silvery metal, and
+the ring's FOREVER, 50 by 5 pixels at 384, is darker marks but still no
+letters. The first was measured after as the key's broad highlight on
+iron at a polished section's reflectance, and the iron preset is now an
+oxide skin's, half that, with a film of oxide between the rust's
+patches (design.md, the end of "Read blind"). The round tests the fixes.
 
 **What.** A round of four fresh agents, briefed as `dogfood/README.md`
 describes, each brief chosen to need what the redesign changed:

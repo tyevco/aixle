@@ -930,12 +930,16 @@ taken from measured reflectances rather than chosen as a paint:
 - `steel` #c6c6c8 is iron's measured F0 from the same table, a neutral
   grey: steel is iron with under 2% carbon. The warm stainless value it
   had read as ivory under a warm key on a hub, a gear and a bracket.
-- `iron` #7c7c7c is blackened or cast iron under its skin of black
-  oxide, magnetite, which reflects about 20% across the visible spectrum
-  (ore microscopy's reflectance tables give 20 to 21% from 470 to 650
-  nm). Bare polished iron, 56%, drew a bench's arms and a door's hinges
-  as chrome tubing; `wear` rubs an edge to satin, about halfway to that
-  bare iron. `rust` is the same dark iron with rust eating into it.
+- `iron` #595959 is blackened or cast iron under its skin of black
+  oxide, magnetite. A polished section of magnetite reflects about 20%
+  (ore microscopy's tables give 20.7 to 20.9% from 470 to 650 nm), but
+  a skin of oxide is grains and pores, not a polished section, and
+  returns about half that: at 20% a lantern's flat iron roof took the
+  key's broad highlight as light silver-grey. Bare polished iron, 56%,
+  drew a bench's arms and a door's hinges as chrome tubing; `wear` rubs
+  an edge to satin, twice the skin's reflectance. `rust` is the same
+  dark iron with rust eating into it in patches, over a thin film of
+  oxide between them.
 - `gold` #ffc95e, `brass` #ebcc75, `copper` #f5ab92 and `bronze`
   #f0bc84 are their measured F0 squared, the colour of light after two
   bounces off the metal (gold from Lagarde's 2011 table, brass and
@@ -980,10 +984,11 @@ key's highlight on the grooves' lips and corners made the ring's letters
 sparkle gold on gold. In the
 studio a mirror metal turned square to the camera mirrors the dark room
 round the camera and reads near black; a rougher one blurs in more of
-the room and keeps a mid-tone. Measured on flat tiles turned square to
-a camera 25 degrees up, `chrome` came to 5, 13 and 21 levels, `silver`
-to 148, `steel` to 167 and `iron` to 99; the same four standing
-upright, which mirror the floor instead, came to 155, 223, 158 and 77.
+the room and keeps a mid-tone. Measured on four tiles a unit square,
+side by side and turned square to the default camera 25 degrees up (the
+middle of each at 384 pixels), `chrome` came to 5, 13 and 21 levels,
+`silver` to 64, `steel` to 101 and `iron` to 30; the same four standing
+upright, which mirror the floor instead, came to 156, 162, 102 and 15.
 So a convex metal takes its contrast from that room, and a flat metal
 label takes one tone, set by the way it faces, however that tone sits
 against what is behind it. The patterns plate's labels, iron letters
@@ -1004,14 +1009,15 @@ flame = material("#ffd27a", "noise", color2="#ff8a2a", scale=0.04, glow=1.6)
 `wear` (0 new, 1 worn hard) reads the shape's curvature: convex edges go
 lighter and smoother, creases and hollows darker and rougher. The band
 it lightens is about 1.2% of the model's longest side, the same at any
-grid. On a metal the band is rubbed to satin, not polish (iron goes
-about halfway to bare iron, with a quarter of its roughness off at
-most), and in scuffs and chips about two bands across rather than a
-solid line: about three fifths of a sharp edge at wear 0.45, more as the
-wear rises. A part thinner than about two bands (a thin rod, a ring's
-tube) is all edge to the curvature, so it gets fewer scuffs, about a
-third of it: rubbed patches along the metal, not a bright bar. A
-non-metal's edge is lightened along the whole band. A smooth blend
+grid. On a metal the band is rubbed to satin, not polish (iron's skin
+to twice its reflectance, still well short of bare iron, with a quarter
+of its roughness off at most), and in scuffs and chips about two bands
+across rather than a solid line: about three fifths of a sharp edge at
+wear 0.45, more as the wear rises. A part thinner than about two bands
+(a thin rod, a ring's tube) is all edge to the curvature, so it gets
+fewer scuffs, about a third of it: rubbed patches along the metal, not
+a bright bar. A non-metal's edge is lightened along the whole band. A
+smooth blend
 (`union(..., k=)`) is a gentle hollow and gathers little grime, where a
 hard crease gathers a lot. `bump` is the height of a fractal
 noise in model units, either way of the surface, and `bump_scale` its
@@ -1022,8 +1028,10 @@ they move, turn and scale with it: a bumped part scaled after painting
 keeps its finish, as a pattern does. The
 `rust` pattern (and the `rust` preset, iron with rust on it) eats
 patches about `scale` across into the base colour, in the oxide colour
-unless `color2` is given; the patches are rough and not metal, and wear
-rubs them off the edges. A material with `glow` keeps glowing in the GLB:
+unless `color2` is given, over a thin film of the oxide between them
+(rust grows through a film, and clean metal between the patches read as
+galvanised steel); the patches are rough and not metal, and wear rubs
+them off the edges. A material with `glow` keeps glowing in the GLB:
 a constant colour as the material's emissive colour, a pattern as an
 emissive map, a glow above 1 at that strength.
 
@@ -1164,7 +1172,7 @@ and what a metal reflects; the lights are the program's own:
   A rougher finish does not help, since it blurs the same white: at the
   centre of a ball, silver at a roughness of 0.6 came to 238 levels,
   against 216 at its own 0.25. Give a mirror metal the studio, a sunset
-  or a night, or use a darker or a coloured metal (`iron` came to 118
+  or a night, or use a darker or a coloured metal (`iron` came to 58
   there, and `brass` stays yellow).
 - `sunset` is a blue sky over a warm band at the horizon, with a sun 3
   degrees up on the key light's side and its glow round it. Only a
