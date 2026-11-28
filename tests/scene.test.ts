@@ -668,7 +668,9 @@ async function runPage(html: string, model: { traverse(f: (o: unknown) => void):
       construct: () => stub(),
     }) as unknown as Stub;
   };
-  const THREE = stub({ ShaderChunk: { ...THREE_CHUNKS } });
+  // Vectors are kept for real, so what the page puts in its uniforms can be read back.
+  class Vector3 { constructor(public x = 0, public y = 0, public z = 0) {} set(x: number, y: number, z: number) { Object.assign(this, { x, y, z }); return this; } }
+  const THREE = stub({ ShaderChunk: { ...THREE_CHUNKS }, Vector3 });
   class GLTFLoader { parse(_b: unknown, _p: string, onLoad: (g: unknown) => void) { setTimeout(() => onLoad({ scene: model, animations: [] }), 0); } }
   const modules: Record<string, unknown> = { three: THREE, "three/addons/loaders/GLTFLoader.js": { GLTFLoader }, "three/addons/controls/OrbitControls.js": { OrbitControls: THREE.OrbitControls }, "three/addons/environments/RoomEnvironment.js": { RoomEnvironment: THREE.RoomEnvironment } };
   const element = () => ({ style: {}, dataset: {} as Record<string, string>, classList: { toggle() {}, remove() {} }, addEventListener() {}, appendChild() {}, textContent: "", value: "1", checked: true });
@@ -762,6 +764,36 @@ describe("the viewer's scene", () => {
     expect(bulb.emissiveIntensity).toBe(1);
     viewer.setMode("scene");
     expect(bulb.emissiveIntensity).toBeCloseTo(GLOW, 9);
+  });
+
+  it("lights a diffuse surface in the scene with the irradiance the beauty render takes, by the page's own SH", async () => {
+    // Computed rather than rendered: the page's GLSL for the sky's diffuse light, run on the uniforms it fills from
+    // SCENE, against environment.ts's irradiance(), for a sky that is not symmetric (the sunset's sun at azimuth 60).
+    const sky = buildSky("sunset", 35, lightDirection(60, 20));
+    const map = environmentLatLong(sky);
+    const mat: Record<string, any> = { emissive: { r: 0, g: 0, b: 0 }, map: {} };
+    const sc = sceneFor({ environment: "sunset", light: { width: map.width, height: map.height, data: map.data, sh: Array.from(map.diffuseSH, (v) => Number(v.toPrecision(6))) } });
+    await runPage(viewerHtml(Buffer.from("glb"), "m", { min: [0, 0, 0], max: [1, 1, 1] }, 12, [], sc), { traverse: (f) => f({ isMesh: true, material: mat }) });
+    const shader = { uniforms: {} as Record<string, { value: any }>, fragmentShader: "#include <envmap_physical_pars_fragment>\n#include <lights_pars_begin>" };
+    mat.onBeforeCompile(shader);
+    const glsl = /vec3 aixleShIrradiance\( const in vec3 n \) \{\n([\s\S]*?)\n\}/.exec(shader.fragmentShader)![1];
+    // GLSL to JS, one channel at a time: the function is plain arithmetic on vec3s and floats.
+    type Vec3Like = { x: number; y: number; z: number };
+    const channel = new Function("aixleSh", "n", glsl.replace("vec3 r", "let r")) as (sh: number[], n: Vec3Like) => number;
+    const sh = shader.uniforms.aixleSh.value as Vec3Like[];
+    let worst = 0;
+    for (let i = 0; i < 64; i++) {
+      const y = ((i + 0.5) / 64) * 2 - 1, r = Math.sqrt(1 - y * y), a = i * 2.39996;
+      const n = { x: r * Math.cos(a), y, z: r * Math.sin(a) };
+      const want = [0, 0, 0];
+      irradiance(sky, n.x, n.y, n.z, want, 0);
+      (["x", "y", "z"] as const).forEach((c, k) => {
+        // three.js's Lambert takes irradiance over π: the page's SH gives irradiance, the kernel's irradiance over π.
+        const page = Math.max(0, channel(sh.map((v) => v[c]), n)) / Math.PI;
+        worst = Math.max(worst, Math.abs(page - want[k]) / Math.max(1e-3, want[k]));
+      });
+    }
+    expect(worst).toBeLessThan(1e-4);
   });
 
   it("writes half floats rounded to nearest, clamped to the largest half", () => {
