@@ -4,11 +4,11 @@ import { readFileSync } from "node:fs";
 import * as P from "../src/sdf/primitives.js";
 import * as O from "../src/sdf/ops.js";
 import { customMaterial, materialFromString } from "../src/sdf/materials.js";
-import type { Material, Shape3 } from "../src/sdf/types.js";
+import type { DistFn3, Material, Shape3 } from "../src/sdf/types.js";
 import { surfaceNets } from "../src/mesh/surfaceNets.js";
 import { beautyCamera, beautyPrime, renderBeauty, renderBeautyResult, type BeautyLight, type BeautyOptions } from "../src/render/beauty.js";
 import { allocBuffers, beautyCache, materialIds, materialKey, type Buffers } from "../src/render/kernel.js";
-import { pbr, sceneLights, type PbrTables } from "../src/render/pbr.js";
+import { boundDistance, occlusionAt, pbr, sceneLights, type PbrTables } from "../src/render/pbr.js";
 import { perspective, project, toView, type Camera } from "../src/render/camera.js";
 import { buildEnvironment, DEFAULT_LIGHT_DIRECTION, defaultKey, ENVIRONMENTS, environmentPalette, lightDirection, prefilterLevels, projectSh, skyAt, STEEP, type EnvironmentState } from "../src/render/environment.js";
 import { encode, FLAG_EDGE, KEY, KIND_FLOOR, KIND_MASK, KIND_MODEL } from "../src/render/photometry.js";
@@ -594,5 +594,124 @@ describe("shading: an engraving in polished metal", () => {
     }
     expect(n).toBeGreaterThan(40);
     expect(worst).toBeLessThan(1e-4);
+  });
+});
+
+describe("shading: the field's occlusion on a field that is a bound", () => {
+  // A field that is a bound reads less than its distance in open air, and its taps along the normal read as a hollow:
+  // the Roblox wings' scaled-sphere boss had a cavity term of 0.53 to 0.64 in the open, its reflections dimmed to K
+  // cubed. The occlusion reads each tap that falls short as the distance its slope says it bounds (boundDistance).
+  const cell = 0.04;
+  const AOK = new Float64Array(2);
+  /** The least occlusion and cavity term over 200 points spread over a surface, from `at(u)` a point and its normal for a unit direction u. */
+  const leastOver = (dist: DistFn3, at: (u: number[]) => { p: number[]; n: number[] }): [number, number] => {
+    let ao = 1, k = 1;
+    for (let i = 0; i < 200; i++) {
+      const y = 1 - (2 * (i + 0.5)) / 200, r = Math.sqrt(1 - y * y), phi = i * 2.399963;
+      const { p, n } = at([r * Math.cos(phi), y, r * Math.sin(phi)]);
+      occlusionAt(dist, cell, p[0], p[1], p[2], n[0], n[1], n[2], AOK);
+      ao = Math.min(ao, AOK[0]); k = Math.min(k, AOK[1]);
+    }
+    return [ao, k];
+  };
+
+  it("reads a scaled sphere in open air as open: its occlusion and cavity term near 1, as the sphere's own", () => {
+    const sphere = P.sphere(1);
+    // A sphere's own field reads 1 and 1 everywhere: nothing is near.
+    for (const v of leastOver(sphere.dist, (u) => ({ p: u, n: u }))) expect(v).toBeCloseTo(1, 9);
+    // The same sphere with its field read at 0.6 of its distance, a bound scaled uniformly: before, every tap read 0.4
+    // of its height of occlusion, and the sphere read 0.3 and 0.43 (its reflections at 8%).
+    const [ao, k] = leastOver((x, y, z) => 0.6 * sphere.dist(x, y, z), (u) => ({ p: u, n: u }));
+    expect(ao).toBeGreaterThan(0.97);
+    expect(k).toBeGreaterThan(0.98);
+    // The wings' boss, a sphere scaled 1 by 1.2 by 0.7, whose field's slope is 0.58 at its long axis' tips and 1 at
+    // its short axis': it read 0.3 and 0.41.
+    const boss = O.scale(sphere, 1, 1.2, 0.7);
+    const [bao, bk] = leastOver(boss.dist, (u) => {
+      const n = [u[0], u[1] / 1.2, u[2] / 0.7], l = Math.hypot(n[0], n[1], n[2]);
+      return { p: [u[0], u[1] * 1.2, u[2] * 0.7], n: n.map((v) => v / l) };
+    });
+    expect(bao).toBeGreaterThan(0.8);
+    expect(bk).toBeGreaterThan(0.9);
+  });
+
+  it("draws a sphere whose field is a bound as it draws the sphere: in a constant sky, the same light within 2%", () => {
+    // Before, the bound's sky light was dimmed by its occlusion to the power 1.5 and its reflection by its cavity term
+    // cubed: the white matt sphere came out at 0.16 of the sphere and the polished metal one at 0.014.
+    for (const [rough, metal] of [[1, 0], [0.2, 1]]) {
+      const ball = O.paint(O.move(P.sphere(1), 0, 6, 0), white(rough, metal));
+      const bound: Shape3 = { ...ball, dist: (x, y, z) => 0.6 * ball.dist(x, y, z) };
+      const mean = (s: Shape3) => {
+        const r = shade(s, { size: 48, lights: [dark] }, 32, constantSky(0.8));
+        const { flags } = r.buffers as { flags: Uint8Array };
+        return meanOver(r.hdr, (i) => (flags[i] & KIND_MASK) === KIND_MODEL && !(flags[i] & FLAG_EDGE), 48 * 48);
+      };
+      const exact = mean(ball), scaled = mean(bound);
+      expect(Math.abs(scaled - exact) / exact, `rough ${rough} metal ${metal}: ${scaled} against ${exact}`).toBeLessThan(0.02);
+    }
+  });
+
+  it("keeps a groove in a scaled plate dark: it reads as the same groove in an unscaled plate, and the plate's face as open", () => {
+    // A groove 2.5 cells wide and deep in a plate. Scaled 0.6 along the groove, the field reads 0.6 of its distance
+    // all along it, the groove's walls and the face alike: before, the face read 0.3 and 0.43 and the groove 0.3 and
+    // 0.3, against the unscaled plate's 1 and 1 and 0.3 and 0.38 (now 0.3 and 0.44: above the groove's mouth a
+    // difference's field is a bound too).
+    const plate = O.difference(P.box(2, 0.4, 2), O.move(P.box(0.1, 0.2, 3), 0, 0.2, 0));
+    const at = (dist: DistFn3, x: number, y: number): number[] => (occlusionAt(dist, cell, x, y, 0, 0, 1, 0, AOK), [AOK[0], AOK[1]]);
+    const along = O.scale(plate, 1, 1, 0.6);
+    const [gao, gk] = at(plate.dist, 0, 0.1), [sao, sk] = at(along.dist, 0, 0.1);
+    expect(gk).toBeLessThan(0.5);
+    expect(gao).toBeLessThan(0.35);
+    expect(Math.abs(sk - gk)).toBeLessThan(0.02);
+    expect(Math.abs(sao - gao)).toBeLessThan(0.02);
+    for (const v of at(along.dist, 0.6, 0.2)) expect(v).toBeCloseTo(1, 9);
+    // Scaled 0.6 in its height, the plate is a bound whose slope is 0.6 across the groove and 1 up from its floor: it
+    // reads as the same groove cut in a plate 0.24 thick (0.4 and 0.57), where it read 0.3 and 0.47.
+    const squat = O.scale(plate, 1, 0.6, 1);
+    const thin = O.difference(P.box(2, 0.24, 2), O.move(P.box(0.1, 0.12, 3), 0, 0.12, 0));
+    const [tao, tk] = at(thin.dist, 0, 0.06), [qao, qk] = at(squat.dist, 0, 0.06);
+    expect(tk).toBeLessThan(0.65);
+    expect(Math.abs(qk - tk)).toBeLessThan(0.02);
+    expect(Math.abs(qao - tao)).toBeLessThan(0.02);
+  });
+
+  it("stops asking once the occlusion reads its floor of 0.3, and returns what all five taps return", () => {
+    // A tap only adds occlusion, so once the sum reads 0.3 the later taps cannot move either term. A slot a cell wide
+    // and eight deep in a plate scaled 0.7 along it (a bound, so every short tap takes its slope's seven samples): its
+    // floor reads 0.3 after three taps.
+    const slab = O.scale(O.difference(P.box(2, 0.6, 2), O.move(P.box(0.04, 0.64, 3), 0, 0.3, 0)), 1, 1, 0.7);
+    let calls = 0;
+    const counted: DistFn3 = (x, y, z) => (calls++, slab.dist(x, y, z));
+    const five = (px: number, py: number, pz: number, nx: number, ny: number, nz: number): [number, number] => {
+      let occ = 0, w = 1, k = 1;
+      for (let i = 1; i <= 5; i++) {
+        const h = cell * 1.5 * i * i * 0.4 + cell;
+        occ += w * Math.max(0, h - boundDistance(slab.dist, cell * 0.5, px + nx * h, py + ny * h, pz + nz * h, h, nx, ny, nz));
+        w *= 0.7;
+        if (i === 3) k = Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4)));
+      }
+      return [Math.max(0.3, Math.min(1, 1 - (0.8 * occ) / (cell * 4))), k];
+    };
+    // The slot's floor and walls, the plate's face beside it and its edge, every value the same to the bit.
+    const points: number[][] = [];
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20;
+      points.push([0, -0.02 + 0.001 * i, 0.3 * t - 0.15, 0, 1, 0], [0.02, -0.02 + 0.016 * i, 0.1, -1, 0, 0], [0.03 + 0.05 * t, 0.3, 0, 0, 1, 0], [1, 0.3 * t, 0, Math.SQRT1_2, Math.SQRT1_2, 0]);
+    }
+    let floorCalls = 0;
+    for (const [px, py, pz, nx, ny, nz] of points) {
+      calls = 0;
+      occlusionAt(counted, cell, px, py, pz, nx, ny, nz, AOK);
+      const [ao, k] = five(px, py, pz, nx, ny, nz);
+      expect(AOK[0]).toBe(ao);
+      expect(AOK[1]).toBe(k);
+      if (py === -0.02 && ny === 1) floorCalls = calls;
+    }
+    // The slot's floor reads 0.3 and 0.3 from three taps' samples, where all five took 35.
+    occlusionAt(slab.dist, cell, 0, -0.02, 0, 0, 1, 0, AOK);
+    expect(AOK[0]).toBe(0.3);
+    expect(AOK[1]).toBe(0.3);
+    expect(floorCalls).toBeGreaterThan(0);
+    expect(floorCalls).toBeLessThanOrEqual(3 * 7);
   });
 });
