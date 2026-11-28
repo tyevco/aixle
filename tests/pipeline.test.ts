@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BEAUTY_ONLY, beautyQuality, cameraSight, cellFor, check, clampBounds, cutWarnings, diff, foldThinWarnings, geometrySteps, glassWarnings, nearlyThin, paintWarnings, QUICK, run, thinWarnings, tightBounds, watertightNote } from "../src/pipeline.js";
@@ -811,5 +811,37 @@ describe("strips: the quality, lights.png from one render, and one shot framed a
     const report = readFileSync(join(one, "report.md"), "utf8");
     expect(report).toMatch(/`lights\.png`: [^\n]*from one half-size draft render[^\n]*exactly what that light adds/);
     expect(report).toMatch(/`environments\.png`: [^\n]*each a half-size draft render/);
+  });
+});
+
+describe("render sets", () => {
+  it("run each program in a folder of their own, removed afterwards, and leave another run's folder alone", () => {
+    // Every worktree's render set wrote into tmpdir()/aixle-<label>-<name> and emptied it first, so two sets at once
+    // (two worktrees, or CI beside a local run) deleted or copied each other's pictures.
+    const scratch = mkdtempSync(join(tmpdir(), "aixle-sets-")), set = join(scratch, "set"), out = join(scratch, "out"), temp = join(scratch, "tmp");
+    for (const d of [set, out, temp]) mkdirSync(d);
+    writeFileSync(join(set, "q.aix"), "set grid 16\nshow box(1) | paint(\"red\")");
+    // Another run of the same program, under the name every run used.
+    const other = join(temp, "aixle-example-q");
+    mkdirSync(other);
+    writeFileSync(join(other, "beauty.png"), "another run's picture");
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = temp;
+    const quiet = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(tmpdir()).toBe(temp);
+      renderSet(set, out, "example", { only: ["q"], sheetAndBeautyOnly: true });
+      expect(readFileSync(join(other, "beauty.png"), "utf8")).toBe("another run's picture");
+      expect(readdirSync(temp)).toEqual(["aixle-example-q"]);
+      expect(readdirSync(out).sort()).toEqual(["q.png", "q_beauty.png"]);
+      // A program whose run fails leaves no folder behind either.
+      writeFileSync(join(set, "bad.aix"), "show nothing_here");
+      expect(() => renderSet(set, out, "example", { only: ["bad"], sheetAndBeautyOnly: true })).toThrow();
+      expect(readdirSync(temp)).toEqual(["aixle-example-q"]);
+    } finally {
+      quiet.mockRestore();
+      if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
