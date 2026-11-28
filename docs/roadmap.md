@@ -24,9 +24,10 @@ roughness, metalness, glow and a bump height at a point, with the wear
 a material reads from the field's curvature; the beauty render and the
 atlas baker both call it. `material()` takes `bump=` (a height),
 `bump_scale=` (a size, ten times the height if not given) and `wear=`
-(0..1: convex edges lighter and smoother, bare metal on a metal,
-cavities darker and rougher), and a `rust` pattern (and preset) eats
-rough, non-metal oxide into the base, which wear rubs off the edges.
+(0..1: convex edges lighter and smoother, a metal's rubbed to satin
+in scuffs, cavities darker and rougher), and a `rust` pattern (and
+preset) eats rough, non-metal oxide into the base, which wear rubs off
+the edges.
 The baker writes up to three maps beside the colour atlas, each only
 where it carries something: a tangent-space normal map from the field's
 gradient under each texel against the mesh's interpolated normal, for

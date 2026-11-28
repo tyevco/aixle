@@ -88,8 +88,8 @@ const PRESET_LIST: Material[] = [
   // Iron is the iron things are made of, wrought, cast or blackened, under its skin of black oxide: magnetite (Fe3O4,
   // most of mill scale and of a blacking), which reflects about 20% across the visible spectrum (ore microscopy's
   // reflectance tables: 20 to 21% at 470 to 650 nm), neutral, linear 0.20. Bare polished iron (0.56) rendered a bench's
-  // arms and a door's hinges as chrome tubing and a lantern as white enamel; a worn edge (`wear`) still rubs through to
-  // about that bare iron. The rust preset is the same iron, rusting.
+  // arms and a door's hinges as chrome tubing and a lantern as white enamel; a worn edge (`wear`) rubs it to satin,
+  // halfway to that bare iron, in scuffs. The rust preset is the same iron, rusting.
   //
   // Gold, brass, copper and bronze are their measured F0 squared, the colour of the light after two bounces off the
   // metal: gold is Lagarde's (2011: 1.000, 0.766, 0.336), brass (C260 cartridge brass) and copper are RTR4's table 9.2,
@@ -317,18 +317,25 @@ export const variesColor = (m: Material): boolean => m.pattern !== "solid" || !!
  * at the world point (+1 a sharp convex edge, -1 a sharp crease, 0 flat), and
  * matters only to a material with `wear`: a convex edge is rubbed toward bare
  * metal (on a metal) or a lighter, smoother finish, a cavity collects grime,
- * darker and rougher, and a `rust` pattern's patches come off the edges. A
- * material with no wear, no bump and no rust returns exactly `albedo()` and
- * its own rough, metal and glow, so a plain material renders as it did.
+ * darker and rougher, and a `rust` pattern's patches come off the edges. On a
+ * metal the rubbing is satin, not polish, and it is broken into scuffs about
+ * two `probe`s across (the probe `fieldCurvature()` read at), fewer on a part
+ * `thin` (as `fieldCurvature()` reads it) than along a thick part's edge; with
+ * no probe the band is unbroken. A material with no wear, no bump and no rust
+ * returns exactly `albedo()` and its own rough, metal and glow, so a plain
+ * material renders as it did.
  */
-export function surface(m: Material, x: number, y: number, z: number, curvature = 0): SurfaceSample {
+export function surface(m: Material, x: number, y: number, z: number, curvature = 0, probe = 0, thin = 0): SurfaceSample {
   const wear = Math.max(0, Math.min(1, m.wear ?? 0));
+  const metallic = m.metal >= 0.5;
   let edge = 0, cavity = 0;
   if (wear > 0) {
     // The threshold falls as the wear rises, so more of the surface counts as an edge, and the effect strengthens.
     const lo = 0.45 - 0.35 * wear, amount = Math.min(1, 0.35 + wear);
-    edge = smoothstep(lo, lo + 0.3, curvature) * amount;
+    const band = smoothstep(lo, lo + 0.3, curvature);
+    edge = band * amount;
     cavity = smoothstep(lo, lo + 0.3, -curvature) * amount;
+    if (metallic && edge > 0 && probe > 0) edge *= scuffs(m, x, y, z, band, wear, probe, thin);
   }
   let color: Vec3;
   let rough = m.rough, metal = m.metal;
@@ -342,12 +349,16 @@ export function surface(m: Material, x: number, y: number, z: number, curvature 
   } else color = albedo(m, x, y, z);
   if (edge > 0) {
     const under = m.pattern === "rust" && !m.image ? m.color : color;
-    const bare: Vec3 = m.metal >= 0.5
-      ? [Math.min(1, under[0] * 1.3 + 0.16), Math.min(1, under[1] * 1.3 + 0.16), Math.min(1, under[2] * 1.3 + 0.16)]
+    // A metal rubbed by hands and cloth is satin: about half its dark skin rubbed through at a pixel's scale (iron's
+    // 0.20 linear reflectance to 0.37, where bare iron is 0.56) and a quarter of its roughness taken off (iron's 0.6
+    // to 0.45, a blurred sheen). Bare and polished (under * 1.3 + 0.16, roughness less 55%) drew every bar of a rusty
+    // lantern as polished steel. A non-metal's edge goes lighter and smoother.
+    const bare: Vec3 = metallic
+      ? [Math.min(1, under[0] * 1.15 + 0.08), Math.min(1, under[1] * 1.15 + 0.08), Math.min(1, under[2] * 1.15 + 0.08)]
       : [under[0] + (1 - under[0]) * 0.35, under[1] + (1 - under[1]) * 0.35, under[2] + (1 - under[2]) * 0.35];
     color = lerp3(color, bare, edge);
-    rough *= 1 - 0.55 * edge;
-    if (m.metal >= 0.5) metal += (1 - metal) * edge;
+    rough *= 1 - (metallic ? 0.25 : 0.55) * edge;
+    if (metallic) metal += (1 - metal) * edge;
   }
   const bump = m.bump ?? 0;
   const height = bump > 0 ? bumpHeight(m, x, y, z) : 0;
@@ -360,6 +371,25 @@ export function surface(m: Material, x: number, y: number, z: number, curvature 
     metal *= 1 - 0.5 * grime;
   }
   return { color, rough, metal, glow: m.glow, height };
+}
+
+/**
+ * How much of a worn metal's band is rubbed through at a local point, 0..1:
+ * scuffs and chips, a fractal noise two probes across in the paint frame (so
+ * they move with the part), thresholded to cover a share of the band. The
+ * share grows with the band's strength and the wear: about 60% of a thick
+ * part's sharp edge at wear 0.45, broken along it, and about 30% of a part
+ * thinner than two probes, which reads all edge only because the probe is
+ * wider than it (a line of contact a probe wide is about a fifth of the
+ * lantern's bars round). An edge wholly rubbed through read as a polished
+ * band, and a bar as polished steel. Three calls to `noise3`.
+ */
+function scuffs(m: Material, x: number, y: number, z: number, band: number, wear: number, probe: number, thin: number): number {
+  const f = 1 / (2 * probe);
+  // Three octaves of fractal noise lie between about 0.36 and 0.64 (5% and 95%); spread to 0..1, roughly even.
+  const u = smoothstep(0.36, 0.64, fbm3(x * f, y * f, z * f, m.seed + 43, 3));
+  const share = band * (0.5 + 0.3 * wear - 0.35 * Math.max(0, Math.min(1, thin)));
+  return smoothstep(0.92 - share, 1.08 - share, u);
 }
 
 /**
@@ -414,8 +444,19 @@ export function bumpSlope(m: Material, x: number, y: number, z: number, u1: Vec3
  * exact for any field whose sign is right, not only a true distance (a
  * loft, a smooth blend, a displace): the Laplacian alone counts the field's
  * own bending off the surface as curvature. Nine calls to `dist`.
+ *
+ * Given `thin`, it also writes there how thin the part is under the point,
+ * for a worn metal's scuffs: 1 where the point two probes in along the
+ * normal is out the other side by a quarter of a probe (a bar, a wire or a
+ * ring's tube under about 1.75 probes across), 0 where it is a quarter probe
+ * inside (over about 2.25), smooth between. A thick part's edge is a wedge
+ * whose inside goes on, so it reads 0 however sharp; a part thinner than two
+ * probes reads all edge, and this is what tells it from one. It is measured
+ * along the normal, so a thin plate's rim, whose normal runs along the
+ * plate, reads as the edge it is. One more call.
  */
-export function fieldCurvature(dist: DistFn3, x: number, y: number, z: number, h: number): number {
+export function fieldCurvature(dist: DistFn3, x: number, y: number, z: number, h: number, thin?: Float64Array): number {
+  if (thin) thin[0] = 0;
   const d0 = dist(x, y, z);
   const xp = dist(x + h, y, z), xm = dist(x - h, y, z);
   const yp = dist(x, y + h, z), ym = dist(x, y - h, z);
@@ -426,10 +467,14 @@ export function fieldCurvature(dist: DistFn3, x: number, y: number, z: number, h
   const nx = gx / gl, ny = gy / gl, nz = gz / gl;
   const lap = xp + xm + yp + ym + zp + zm - 6 * d0;
   const dnn = dist(x + nx * h, y + ny * h, z + nz * h) + dist(x - nx * h, y - ny * h, z - nz * h) - 2 * d0;
+  if (thin) thin[0] = smoothstep(-0.25 * h, 0.25 * h, dist(x - nx * 2 * h, y - ny * 2 * h, z - nz * 2 * h));
   // lap and dnn are h^2 times the derivatives, gl is 2h times the gradient: kappa * h / 2 = (lap - dnn) / gl.
   const c = (lap - dnn) / gl;
   return Math.max(-1, Math.min(1, c));
 }
+
+/** Whether `surface()` reads how thin the part is: a worn metal's scuffs do, so its caller pays `fieldCurvature()` one more call. */
+export const readsThin = (m: Material): boolean => (m.wear ?? 0) > 0 && m.metal >= 0.5;
 
 /** The probe `fieldCurvature()` takes for wear: about one and a half cells at the default grid, so the worn band is a look, not a resolution. */
 export const wearProbe = (longestSide: number): number => Math.max(1e-6, longestSide * 0.012);

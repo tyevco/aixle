@@ -91,8 +91,8 @@ export interface Material {
   bumpScale?: number;
   /**
    * 0..1: how used the surface looks, read from the field's curvature.
-   * Convex edges go lighter (bare metal on a metal) and smoother, cavities
-   * darker and rougher. 0 (or absent) for new.
+   * Convex edges go lighter and smoother (a metal's rubbed to satin, in
+   * scuffs), cavities darker and rougher. 0 (or absent) for new.
    */
   wear?: number;
 }

@@ -926,8 +926,8 @@ taken from measured reflectances rather than chosen as a paint:
   oxide, magnetite, which reflects about 20% across the visible spectrum
   (ore microscopy's reflectance tables give 20 to 21% from 470 to 650
   nm). Bare polished iron, 56%, drew a bench's arms and a door's hinges
-  as chrome tubing; `wear` rubs an edge through to about that bare iron.
-  `rust` is the same dark iron with rust eating into it.
+  as chrome tubing; `wear` rubs an edge to satin, about halfway to that
+  bare iron. `rust` is the same dark iron with rust eating into it.
 - `gold` #ffc95e, `brass` #ebcc75, `copper` #f5ab92 and `bronze`
   #f0bc84 are their measured F0 squared, the colour of light after two
   bounces off the metal (gold from Lagarde's 2011 table, brass and
@@ -985,18 +985,24 @@ the beauty render and the GLB, not on the sheet (the sheet draws the
 pattern, so it stays a check of the mesh):
 
 ```
-iron = material("rust", wear=0.45, bump=0.003, bump_scale=0.05)   # rusty, edges worn bright, hammered
+iron = material("rust", wear=0.45, bump=0.003, bump_scale=0.05)   # rusty, edges rubbed, hammered
 wax = material("#efe2c4", rough=0.5, bump=0.003, bump_scale=0.04)
 flame = material("#ffd27a", "noise", color2="#ff8a2a", scale=0.04, glow=1.6)
 ```
 
 `wear` (0 new, 1 worn hard) reads the shape's curvature: convex edges go
-lighter and smoother (bare metal on a metal), creases and hollows darker
-and rougher. The band it brightens is about 1.2% of the model's longest
-side, the same at any grid; a part thinner than about two bands (a thin
-rod, a ring) is all edge and rubbed bright along its length; a smooth
-blend (`union(..., k=)`) is a gentle hollow and gathers little grime,
-where a hard crease gathers a lot. `bump` is the height of a fractal
+lighter and smoother, creases and hollows darker and rougher. The band
+it lightens is about 1.2% of the model's longest side, the same at any
+grid. On a metal the band is rubbed to satin, not polish (iron goes
+about halfway to bare iron, with a quarter of its roughness off at
+most), and in scuffs and chips about two bands across rather than a
+solid line: about three fifths of a sharp edge at wear 0.45, more as the
+wear rises. A part thinner than about two bands (a thin rod, a ring's
+tube) is all edge to the curvature, so it gets fewer scuffs, about a
+third of it: rubbed patches along the metal, not a bright bar. A
+non-metal's edge is lightened along the whole band. A smooth blend
+(`union(..., k=)`) is a gentle hollow and gathers little grime, where a
+hard crease gathers a lot. `bump` is the height of a fractal
 noise in model units, either way of the surface, and `bump_scale` its
 feature size (ten times the height when not given, which tilts the
 surface about ten degrees; a fifth of it reads as stucco). The bumps are
@@ -2171,8 +2177,12 @@ the shapes.
   the material exactly. Judge fine patterns in the beauty render. `wear`
   and `bump` are not on the sheet at all: judge them in `--beauty`.
 - Wear's band is a share of the whole model's size, so in a big scene a
-  small part reads more of its surface as edge; a lantern in a market
-  wears wider than the same lantern alone.
+  small part reads more of its surface as edge, and a metal's scuffs are
+  larger; a lantern in a market wears wider than the same lantern alone.
+  The scuffs are laid out in the frame the part is painted in, at that
+  size, so a worn metal scaled after painting scales its scuffs but not
+  its band (finer chips scaled down, longer unbroken rubs scaled up):
+  paint a worn metal at the size it is shown.
 - Only `model.glb` carries the normal, metallic-roughness and emissive
   maps. The OBJ's MTL names `model.png`, the colour with wear in it; the
   Roblox GLB and the Bedrock texture take the pattern's colour alone, no

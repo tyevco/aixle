@@ -134,7 +134,7 @@ pose("reach", elbow=[0, 0, 40], hand=xform(move=[0, 0.2, 0], scale=1.1))   anima
 set light_size 2   set light_azimuth -40   set ambient 1.5   set dof 1   paint("glass")   # beauty render
 set units mm   set bed 220 220 250   assert wall(model) > 0.8                           # a print: the report's Print section
 decal(shape, region, "black")   material("#fc6", glow=1)   material("red", "stripes", axis="x")  # surface paint
-material("rust", wear=0.4, bump=0.003)   # a finish: edges worn bright, creases dark, rust, bumps (beauty and GLB)
+material("rust", wear=0.4, bump=0.003)   # a finish: edges rubbed, creases dark, rust, bumps (beauty and GLB)
 
 a + b   a - b   a & b            # union, difference, intersection (also union(a, b, c, k=0.3) for smooth)
 a | move(x, y, z) | rotate(y=45) | scale(2) | mirror("x")

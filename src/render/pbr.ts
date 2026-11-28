@@ -36,7 +36,7 @@
  * and dithers. Every pixel is a function of its position and the scene: no random numbers, no clock.
  */
 import { normalize, type Vec3 } from "../core/vec.js";
-import { albedo, bumpScaleOf, bumpSlope, fieldCurvature, hasFinish, surface, wearProbe } from "../sdf/materials.js";
+import { albedo, bumpScaleOf, bumpSlope, fieldCurvature, hasFinish, readsThin, surface, wearProbe } from "../sdf/materials.js";
 import { boundsCenter, boundsDistance, boundsSize, type Bounds, type Hit, type Shape3 } from "../sdf/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { toView, type Camera } from "./camera.js";
@@ -195,6 +195,8 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
   const reach = modelSize * 1.5;
   const dist = shape.dist;
   const probe = opts.wearProbe ?? wearProbe(Math.max(...boundsSize(model)));
+  /** How thin a worn metal is under a hit, which fieldCurvature() writes for surface(). */
+  const THIN = new Float64Array(1);
   const rays = createRays(shape, ctx.mesh as Mesh, ctx.tables.bvh, cell, model, reach, { glass: ctx.tables.glass });
   const eps = cell * 0.5;
 
@@ -324,8 +326,9 @@ function pbrRows(ctx: KernelContext<PbrTables>): KernelRows {
     let base: Vec3, metal = m.metal, rough = m.rough, glow = m.glow;
     if (!hasFinish(m)) base = albedo(m, h.lx, h.ly, h.lz);
     else {
-      const c = (m.wear ?? 0) > 0 ? fieldCurvature(dist, px, py, pz, probe) : 0;
-      const sf = surface(m, h.lx, h.ly, h.lz, c);
+      const thin = readsThin(m) ? THIN : undefined;
+      const c = (m.wear ?? 0) > 0 ? fieldCurvature(dist, px, py, pz, probe, thin) : 0;
+      const sf = surface(m, h.lx, h.ly, h.lz, c, probe, thin ? thin[0] : 0);
       base = sf.color; metal = sf.metal; rough = sf.rough; glow = sf.glow;
       if ((m.bump ?? 0) > 0) {
         // Two tangents, and how far the paint frame's point moves along each per world unit (from two nearby hits),
