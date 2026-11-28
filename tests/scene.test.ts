@@ -870,6 +870,20 @@ describe("the GLB's light intensities against the beauty render", () => {
     // Without the cutoff the two laws converge: the ratio is (range² + d²) / d².
     expect((lamp.intensity / (10 * R) ** 2 / Math.PI) / beauty(10 * R)).toBeCloseTo(1.01, 3);
   });
+
+  it("give a point light with no range the beauty render's, half the model's longest side, in the GLB a run writes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aixle-"));
+    try {
+      run('light("lamp", position=[0, 1.5, 1], power=2)\nshow box(3, 1, 1) | move(0, 0.5, 0) | paint("red")', "lamp.aix", dir, { grid: 24, size: 64, views: [] as never[], steps: false, slices: false, turntable: false, callouts: false, texture: 64, beauty: false });
+      const glb = readFileSync(join(dir, "model.glb"));
+      const [lamp] = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12))).extensions.KHR_lights_punctual.lights;
+      // The box is 3 long, so the beauty render's range is 1.5 (not glbLights' own default of 2).
+      expect(lamp.range).toBeCloseTo(1.5 * GLB_RANGE_CUTOFF, 1);
+      expect(lamp.intensity).toBeCloseTo(Math.PI * KEY * 2 * (lamp.range / GLB_RANGE_CUTOFF) ** 2, 3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the report's material rows", () => {
