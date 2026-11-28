@@ -133,7 +133,11 @@ export interface Light {
   /** Degrees about y (0 is +z, the front; 90 is +x) and above the floor. */
   azimuth: number;
   elevation: number;
-  /** Apparent size: 0.5 a lamp with crisp shadows, 3 a window. */
+  /**
+   * The light's angular radius, size/18 radians (photometry.ts's lightAngle): 0.5 a lamp with crisp shadows, 1 about
+   * 3 degrees, 3 about 10, a window. The one angle softens its shadow, widens its highlight and is the disc a mirror
+   * shows of it; a point light is a sphere of radius 2% of its range per unit of size.
+   */
   size: number;
   color: [number, number, number];
   /** The colour as written, for the report. */
