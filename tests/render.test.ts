@@ -308,6 +308,45 @@ describe("what a light adds", () => {
     expect(moved).toBeLessThan(10);
   });
 
+  it("draws each frame of a lit study as a render under that frame's lights alone draws its picture, silhouettes included", () => {
+    // Both lights lit, so every frame's silhouettes differ from the picture's, and both point lights: a point light's
+    // power reaches neither the floor's albedo (solved from the directional lights) nor the sky (only a directional
+    // light has a softbox), so the render with the other lights at no power is the frame's exact answer. Composed from
+    // the slots' linear means the frames differed from it in 216 to 267 edge pixels, by up to 63 levels at the glow's
+    // edge, and the bloom spread up to 6 round it; edges taken from the picture under all the lights differ as well.
+    const matte = O.union([O.move(P.box(1, 1, 1), 0, 0.5, 0), O.move(P.sphere(0.4), 0.9, 0.4, 0.3)]);
+    const ember = O.union([matte, O.paint(O.move(P.sphere(0.25), -0.2, 1.25, 0.2), customMaterial({ color: [1, 0.7, 0.3], glow: 3 }))]);
+    const e = surfaceNets(ember, { resolution: 32 });
+    const points = (a: number, b: number): BeautyLight[] => [
+      { name: "a", azimuth: 0, elevation: 0, size: 1, color: [1, 1, 1], power: a, position: [-1.2, 2, 1.5], range: 3 },
+      { name: "b", azimuth: 0, elevation: 0, size: 1, color: [1, 0.8, 0.6], power: b, position: [1.4, 1.6, 1.2], range: 3 },
+    ];
+    const render = (a: number, b: number) => renderBeautyResult(ember, e.mesh, ember.bounds, { size: 80, cellSize: e.cellSize, lights: points(a, b), quality: "draft", splitLights: true });
+    const lit = render(1, 1);
+    const f = lightFrames(lit);
+    let edges = 0;
+    for (let i = 0; i < 80 * 80; i++) if (lit.flags![i] & FLAG_EDGE) edges++;
+    expect(edges).toBeGreaterThan(300);
+    for (const [name, frame, a, b] of [["none", f.none, 0, 0], ["a alone", f.alone[0], 1, 0], ["b alone", f.alone[1], 0, 1]] as const) {
+      const want = render(a, b);
+      // The same pixels are edges whatever the lights' power, in draft.
+      expect(Buffer.from(want.flags!).equals(Buffer.from(lit.flags!)), name).toBe(true);
+      let moved = 0, most = 0, fromAll = 0;
+      for (let i = 0; i < 80 * 80; i++)
+        for (let c = 0; c < 3; c++) {
+          const d = Math.abs(frame.data[i * 4 + c] - want.canvas.data[i * 4 + c]);
+          if (d) moved++;
+          most = Math.max(most, d);
+          if (lit.flags![i] & FLAG_EDGE && Math.abs(want.canvas.data[i * 4 + c] - lit.canvas.data[i * 4 + c]) > 8) fromAll++;
+        }
+      // Off the edges a frame's slots are each rounded to a float before they are summed, which may move a level.
+      expect(most, name).toBeLessThanOrEqual(1);
+      expect(moved, name).toBeLessThan(10);
+      // And the frame is not the picture under all the lights: its edges are its own.
+      expect(fromAll, name).toBeGreaterThan(50);
+    }
+  });
+
   it("brightens a light's share until most of what it reaches shows near white, 1 to 32 times", () => {
     // 990 pixels at 0.1 and five saturated sparks: the sparks do not set the gain, the 99th percentile does.
     const slot = (n: number, v: number, sparks = 0) => {
